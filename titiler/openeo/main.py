@@ -1,18 +1,20 @@
 """titiler-openeo app."""
 
-import re
-
 import jinja2
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
 from starlette.templating import Jinja2Templates
 from starlette_cramjam.middleware import CompressionMiddleware
 
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
+from titiler.openeo import models
+from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.settings import ApiSettings
+
+STAC_VERSION = "1.0.0"
 
 jinja2_env = jinja2.Environment(
     loader=jinja2.ChoiceLoader([jinja2.PackageLoader(__package__, "templates")])
@@ -74,91 +76,79 @@ app.add_middleware(
 
 
 @app.get(
-    "/healthz",
-    description="Health Check.",
-    summary="Health Check.",
-    operation_id="healthCheck",
-    tags=["Health Check"],
+    "/",
+    response_class=JSONResponse,
+    summary="Information about the back-end",
+    response_model=models.Capabilities,
+    response_model_exclude_none=True,
+    operation_id="capabilities",
+    responses={
+        200: {
+            "content": {
+                "application/json": {},
+            },
+        },
+    },
+    tags=["Capabilities"],
 )
-def ping():
-    """Health check."""
-    return {"ping": "pong!"}
+def openeo_root(request: Request):
+    """Lists general information about the back-end, including which version
+    and endpoints of the openEO API are supported. May also include billing
+    information.
 
-
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-def landing(request: Request):
-    """TiTiler-OpenEO landing page."""
-    data = {
-        "title": "titiler",
+    """
+    return {
+        "api_version": OPENEO_VERSION,
+        "backend_version": titiler_version,
+        "stac_version": STAC_VERSION,
+        "id": "titiler-openeo",
+        "title": "TiTiler for OpenEO",
+        "description": "TiTiler OpenEO by [DevelopmentSeed](https://developmentseed.org)",
+        "endpoints": [
+            # /collections
+            # /collections/{collection_id}
+            # /processes
+        ],
         "links": [
             {
-                "title": "Landing page",
-                "href": str(request.url_for("landing")),
-                "type": "text/html",
-                "rel": "self",
-            },
-            {
-                "title": "the API definition (JSON)",
-                "href": str(request.url_for("openapi")),
-                "type": "application/vnd.oai.openapi+json;version=3.0",
-                "rel": "service-desc",
-            },
-            {
-                "title": "the API documentation",
-                "href": str(request.url_for("swagger_ui_html")),
-                "type": "text/html",
-                "rel": "service-doc",
-            },
-            {
-                "title": "TiTiler-OpenEO Documentation (external link)",
-                "href": "https://developmentseed.org/titiler-openeo/",
-                "type": "text/html",
-                "rel": "doc",
-            },
-            {
-                "title": "TiTiler-OpenEO source code (external link)",
-                "href": "https://github.com/developmentseed/titiler-openeo",
-                "type": "text/html",
-                "rel": "doc",
-            },
-            {
-                "title": "OpenEO Documentation (external link)",
-                "href": "https://openeo.org",
-                "type": "text/html",
-                "rel": "doc",
-            },
+                "href": str(request.url_for("openeo_well_known")),
+                "rel": "version-history",
+                "type": "application/json",
+                "title": "List of supported openEO version",
+            }
+        ],
+        "conformsTo": [
+            "https://api.openeo.org/1.2.0",
         ],
     }
 
-    urlpath = request.url.path
-    if root_path := request.app.root_path:
-        urlpath = re.sub(r"^" + root_path, "", urlpath)
-    crumbs = []
-    baseurl = str(request.base_url).rstrip("/")
 
-    crumbpath = str(baseurl)
-    for crumb in urlpath.split("/"):
-        crumbpath = crumbpath.rstrip("/")
-        part = crumb
-        if part is None or part == "":
-            part = "Home"
-        crumbpath += f"/{crumb}"
-        crumbs.append({"url": crumbpath.rstrip("/"), "part": part.capitalize()})
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "response": data,
-            "template": {
-                "api_root": baseurl,
-                "params": request.query_params,
-                "title": "TiTiler",
+@app.get(
+    "/.well-known/openeo",
+    response_class=JSONResponse,
+    summary="Supported openEO versions",
+    response_model=models.openEOVersions,
+    response_model_exclude_none=True,
+    operation_id="connect",
+    responses={
+        200: {
+            "content": {
+                "application/json": {},
             },
-            "crumbs": crumbs,
-            "url": str(request.url),
-            "baseurl": baseurl,
-            "urlpath": str(request.url.path),
-            "urlparams": str(request.url.query),
         },
-    )
+    },
+    tags=["Capabilities"],
+)
+def openeo_well_known(request: Request):
+    """Lists all implemented openEO versions supported by the service provider.
+    This endpoint is the Well-Known URI (see RFC 5785) for openEO.
+
+    """
+    return {
+        "versions": [
+            {
+                "url": str(request.url_for("openeo_root")),
+                "api_version": OPENEO_VERSION,
+            },
+        ]
+    }
