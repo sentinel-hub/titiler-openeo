@@ -1,2 +1,3 @@
 # titiler-openeo
-TiTiler for openEO Visualization
+
+TiTiler backend for openEO
