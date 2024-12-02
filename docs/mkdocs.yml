@@ -1,0 +1,118 @@
+site_name: TiTiler-OpenEO
+site_description: TiTiler backend for openEO
+
+docs_dir: 'src'
+site_dir: 'build'
+
+repo_name: "developmentseed/titiler-openeo"
+repo_url: "https://github.com/developmentseed/titiler-openeo"
+edit_uri: "blob/main/docs/src/"
+site_url: "https://developmentseed.org/titiler-openeo/"
+
+extra:
+  analytics:
+    provider: plausible
+    domain: developmentseed.org/titiler-openeo
+
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: good
+          note: Thanks for your feedback!
+
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: bad
+          note: Thanks for your feedback!
+  social:
+    - icon: "fontawesome/brands/github"
+      link: "https://github.com/developmentseed"
+    - icon: "fontawesome/brands/medium"
+      link: "https://medium.com/devseed"
+
+nav:
+  - TiTiler-OpenEO: "index.md"
+  - Development - Contributing: "contributing.md"
+  - Release Notes: "release-notes.md"
+
+plugins:
+  - search
+  - social
+  - mkdocs-jupyter:
+      include_source: true
+      ignore: ["**/.ipynb_checkpoints/*.ipynb"]
+  - mkdocstrings:
+      enable_inventory: true
+      handlers:
+        python:
+          paths: [src]
+          options:
+            filters:
+            - "!^__post_init__"
+            docstring_section_style: list
+            docstring_style: google
+            line_length: 100
+            separate_signature: true
+            show_root_heading: true
+            show_signature_annotations: true
+            show_source: false
+            show_symbol_type_toc: true
+            signature_crossrefs: true
+            extensions:
+              - griffe_inherited_docstrings
+          import:
+            - https://docs.python.org/3/objects.inv
+            - https://numpy.org/doc/stable/objects.inv
+            - https://rasterio.readthedocs.io/en/stable/objects.inv
+            - https://docs.pydantic.dev/latest/objects.inv
+            - https://fastapi.tiangolo.com/objects.inv
+            - https://cogeotiff.github.io/rio-tiler/objects.inv
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    scheme: default
+  custom_dir: 'src/overrides'
+  favicon: img/favicon.png
+
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.indexes
+    - navigation.instant
+    - navigation.tracking
+    - search.suggest
+    - search.share
+
+# https://github.com/kylebarron/cogeo-mosaic/blob/mkdocs/mkdocs.yml#L50-L75
+markdown_extensions:
+  - admonition
+  - attr_list
+  - codehilite:
+      guess_lang: false
+  - def_list
+  - footnotes
+  - pymdownx.arithmatex
+  - pymdownx.betterem
+  - pymdownx.caret:
+      insert: false
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.escapeall:
+      hardbreak: true
+      nbsp: true
+  - pymdownx.magiclink:
+      hide_protocol: true
+      repo_url_shortener: true
+  - pymdownx.smartsymbols
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - toc:
+      permalink: true
