@@ -1,3 +1,3 @@
-"""titiler.application"""
+"""titiler.openeo"""
 
-__version__ = "0.19.2"
+__version__ = "0.1.0"
