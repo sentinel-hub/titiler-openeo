@@ -1,4 +1,4 @@
-"""Test titiler.application.main.app."""
+"""Test titiler.openeo.main.app."""
 
 
 def test_health(app):
