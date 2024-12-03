@@ -21,19 +21,26 @@ class pgStacBackend(BaseBackend):
     # Connection POOL to the database
     pool: ConnectionPool = field(init=False)
 
-    def get_collections(self) -> List[Dict]:
+    def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
         with self.pool.connection() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute("SELECT * FROM pgstac.all_collections();")
                 r = cursor.fetchone()
-                cols = r.get("all_collections", [])
 
-        return cols
+        return r.get("all_collections", [])
 
-    def get_collection(self, collection_id: str) -> Dict:
+    def get_collection(self, collection_id: str, **kwargs) -> Dict:
         """Return STAC Collection"""
-        return {}
+        with self.pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    "SELECT * FROM get_collection(%s);",
+                    (collection_id,),
+                )
+                r = cursor.fetchone()
+
+        return r.get("get_collection") or {}
 
     def get_items(self, collection_id: str, **kwargs) -> List[Dict]:
         """Return List of STAC Items."""

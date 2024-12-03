@@ -21,16 +21,17 @@ class stacApiBackend(BaseBackend):
 
     client: Client = field(init=False)
 
-    def get_collections(self) -> List[Dict]:
+    def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
         collections = [
             collection.to_dict() for collection in self.client.get_collections()
         ]
         return collections
 
-    def get_collection(self, collection_id: str) -> Dict:
+    def get_collection(self, collection_id: str, **kwargs) -> Dict:
         """Return STAC Collection"""
-        return {}
+        col = self.client.get_collection(collection_id)
+        return col.to_dict()
 
     def get_items(self, collection_id: str, **kwargs) -> List[Dict]:
         """Return List of STAC Items."""

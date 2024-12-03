@@ -1,11 +1,11 @@
 """titiler.openeo endpoint Factory."""
 
-from typing import Type
-
 from attrs import define
+from fastapi import Path
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from starlette.requests import Request
+from typing_extensions import Annotated
 
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
@@ -20,7 +20,7 @@ STAC_VERSION = "1.0.0"
 class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
-    stac_backend: Type[BaseBackend]
+    stac_backend: BaseBackend
 
     def register_routes(self):
         """Register Routes."""
@@ -206,9 +206,13 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_collections(request: Request):
             """Lists available collections with at least the required information."""
-            # TODO: get collections from stac-api (pystac-client?)
+            collections = self.stac_backend.get_collections()
+            for collection in collections:
+                # TODO: add links
+                collection["links"] = []
+
             return {
-                "collections": self.stac_backend.get_collections(),  # type: ignore
+                "collections": collections,
                 "links": [],
             }
 
@@ -230,9 +234,20 @@ class EndpointsFactory(BaseFactory):
             },
             tags=["EO Data Discovery"],
         )
-        def openeo_collection(request: Request):
+        def openeo_collection(
+            request: Request,
+            collection_id: Annotated[
+                str,
+                Path(description="STAC Collection Identifier"),
+            ],
+        ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            ...
+            collection = self.stac_backend.get_collection(collection_id)
+
+            # TODO: add links
+            collection["links"] = []
+
+            return collection
 
         #############################################################################################
         # L3 - Advanced https://openeo.org/documentation/1.0/developers/profiles/api.html#l3-advanced

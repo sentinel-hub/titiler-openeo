@@ -11,12 +11,12 @@ class BaseBackend(metaclass=abc.ABCMeta):
     """ABC Class defining STAC Backends."""
 
     @abc.abstractmethod
-    def get_collections(self) -> List[Dict]:
+    def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
         ...
 
     @abc.abstractmethod
-    def get_collection(self, collection_id: str) -> Dict:
+    def get_collection(self, collection_id: str, **kwargs) -> Dict:
         """Return STAC Collection"""
         ...
 
