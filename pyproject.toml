@@ -30,6 +30,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# PgSTAC backend dependencies
+# https://www.psycopg.org/psycopg3/docs/api/pq.html#pq-module-implementations
+psycopg = [  # pure python implementation
+    "psycopg[pool]"
+]
+psycopg-c = [  # C implementation of the libpq wrapper
+    "psycopg[c,pool]"
+]
+psycopg-binary = [  # pre-compiled C implementation
+    "psycopg[binary,pool]"
+]
+
+# STAC-API Backend
+pystac = [
+    "pystac-client",
+]
+
 test = [
     "pytest",
     "pytest-cov",

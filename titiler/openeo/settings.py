@@ -1,7 +1,10 @@
 """Titiler-openEO API settings."""
 
-from pydantic import field_validator
+from typing import Optional
+
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing_extensions import Annotated
 
 
 class ApiSettings(BaseSettings):
@@ -28,3 +31,73 @@ class ApiSettings(BaseSettings):
     def parse_cors_allow_methods(cls, v):
         """Parse CORS allowed methods."""
         return [method.strip().upper() for method in v.split(",")]
+
+
+class STACSettings(BaseSettings):
+    """STAC settings."""
+
+    ###########################################################################
+    # STAC API Settings
+    api_url: Optional[str] = None
+
+    ###########################################################################
+    # PgSTAC Settings
+    pgstac_url: Optional[PostgresDsn] = None
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_STAC_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    @model_validator(mode="after")
+    def check_urls(self):
+        """Check at least one backend URL is Set."""
+        if not self.api_url and not self.pgstac_url:
+            raise ValueError(
+                "At least One of `TITILER_OPENEO_STAC_API_URL` or `TITILER_OPENEO_STAC_PGSTAC_URL` need to be set"
+            )
+
+        return self
+
+
+class PySTACSettings(BaseSettings):
+    """Settings for PySTAC Client"""
+
+    # Total number of retries to allow.
+    retry: Annotated[int, Field(ge=0)] = 3
+
+    # A backoff factor to apply between attempts after the second try
+    retry_factor: Annotated[float, Field(ge=0.0)] = 0.0
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_PYSTAC_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
+class PgSTACSettings(BaseSettings):
+    """Settings for PgSTAC Client"""
+
+    # see https://www.psycopg.org/psycopg3/docs/api/pool.html#the-connectionpool-class for options
+    # The minimum number of connection the pool will hold
+    db_min_conn_size: int = 1
+
+    # The maximum number of connections the pool will hold
+    db_max_conn_size: int = 10
+
+    # Maximum number of requests that can be queued to the pool
+    db_max_queries: int = 50000
+
+    # Maximum time, in seconds, that a connection can stay unused in the pool before being closed, and the pool shrunk.
+    db_max_idle: float = 300
+
+    # Number of background worker threads used to maintain the pool state
+    db_num_workers: int = 3
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_PGSTAC_",
+        env_file=".env",
+        extra="ignore",
+    )

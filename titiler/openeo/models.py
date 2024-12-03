@@ -1003,7 +1003,7 @@ class IntervalItem(RootModel):
     Code generated using https://github.com/koxudaxi/datamodel-code-generator/
     """
 
-    root: List[datetime] = Field(
+    root: List[Optional[datetime]] = Field(
         ...,
         json_schema_extra={
             "description": "Begin and end times of the time interval. The coordinate\nreference system is the Gregorian calendar.\n\nThe value `null` is supported and indicates an open time\ninterval.",
