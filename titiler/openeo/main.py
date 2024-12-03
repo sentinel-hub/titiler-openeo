@@ -284,7 +284,7 @@ def openeo_collections(request: Request):
             },
         },
     },
-    tags=["Capabilities"],
+    tags=["EO Data Discovery"],
 )
 def openeo_collection(request: Request):
     """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
