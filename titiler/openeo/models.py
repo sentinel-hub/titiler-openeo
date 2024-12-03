@@ -7,9 +7,11 @@ filename:  https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import AnyUrl, BaseModel, Field
+from pydantic import AnyUrl, BaseModel, Field, RootModel
+from typing_extensions import Self
 
 OPENEO_VERSION = "1.2.0"
 
@@ -206,3 +208,782 @@ class Capabilities(BaseModel):
         ...,
         description="Links related to this service, e.g. the homepage of the service provider or the terms of service.",
     )
+
+
+JsonSchemaType = Literal["array", "boolean", "integer", "null", "object", "string"]
+
+
+class JsonSchema(BaseModel):
+    """JsonSchema model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    field_schema: Optional[AnyUrl] = Field(
+        "http://json-schema.org/draft-07/schema#",
+        alias="$schema",
+        description="The JSON Schema version. If not given in the context of openEO,\ndefaults to `draft-07`.\n\nYou may need to add the default value for `$schema` property explicitly to the JSON Schema\nobject before passing it to a JSON Schema validator.",
+    )
+    field_id: Optional[AnyUrl] = Field(
+        None, alias="$id", description="ID of your JSON Schema."
+    )
+    type: Optional[Union[JsonSchemaType, List[JsonSchemaType]]] = Field(
+        None,
+        description="The allowed basic data type(s) for a value.\n\nIf this property is not present, all data types are allowed.",
+    )
+    pattern: Optional[str] = Field(
+        None, description="The regular expression a string value must match against."
+    )
+    enum: Optional[List] = Field(
+        None, description="An exclusive list of allowed values."
+    )
+    minimum: Optional[float] = Field(
+        None, description="The minimum value (inclusive) allowed for a numerical value."
+    )
+    maximum: Optional[float] = Field(
+        None, description="The maximum value (inclusive) allowed for a numerical value."
+    )
+    minItems: Optional[float] = Field(
+        0, ge=0.0, description="The minimum number of items required in an array."
+    )
+    maxItems: Optional[float] = Field(
+        None, ge=0.0, description="The maximum number of items required in an array."
+    )
+    items: Optional[Union[List[Self], Self]] = Field(
+        None, description="Specifies schemas for the items in an array."
+    )
+
+
+class ProcessJsonSchema(JsonSchema):
+    """ProcessJsonSchema model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    subtype: Optional[str] = Field(
+        None,
+        description="The allowed sub data type for a value. See the chapter on [subtypes](#section/Processes/Defining-Processes) for more information.",
+    )
+    deprecated: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is deprecated with the potential\nto be removed in any of the next versions. It should be transitioned out\nof usage as soon as possible and users should refrain from using it in\nnew implementations.",
+    )
+
+
+class ResourceParameter(ProcessJsonSchema):
+    """ResourceParameter model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    description: str = Field(
+        ...,
+        description="A brief description of the parameter according to [JSON Schema draft-07](https://json-schema.org/draft-07/json-schema-validation.html#rfc.section.10.1).",
+    )
+    required: Optional[bool] = Field(
+        False, description="Determines whether this parameter is mandatory."
+    )
+    experimental: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is experimental, which means that it is likely to change or may produce unpredictable behaviour. Users should refrain from using it in production, but still feel encouraged to try it out and give feedback.",
+    )
+    default: Optional[Any] = Field(
+        None,
+        description='The default value represents what would be assumed by the consumer of the input as the value of the parameter if none is provided. The value MUST conform to the defined type for the parameter defined at the same level. For example, if type is string, then default can be "foo" but cannot be 1. See [JSON Schema draft-07](https://json-schema.org/draft-07/json-schema-validation.html#rfc.section.10.2).',
+    )
+
+
+class FileFormat(BaseModel):
+    """FileFormat model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    title: Optional[str] = Field(
+        None,
+        description="A human-readable short title to be displayed to users **in addition** to the names specified in the keys. This property is only for better user experience so that users can understand the names better. Example titles could be `GeoTiff` for the key `GTiff` (for file formats) or `OGC Web Map Service` for the key `WMS` (for service types). The title MUST NOT be used in communication (e.g. in process graphs), although clients MAY translate the titles into the corresponding names.",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation.",
+    )
+    gis_data_types: List[
+        Literal["raster", "vector", "table", "pointcloud", "other"]
+    ] = Field(
+        ...,
+        description="Specifies the supported GIS spatial data types for this format.\nIt is RECOMMENDED to specify at least one of the data types, which will likely become a requirement in a future API version.",
+    )
+    deprecated: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is deprecated with the potential\nto be removed in any of the next versions. It should be transitioned out\nof usage as soon as possible and users should refrain from using it in\nnew implementations.",
+    )
+    experimental: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is experimental, which means that it is likely to change or may produce unpredictable behaviour. Users should refrain from using it in production, but still feel encouraged to try it out and give feedback.",
+    )
+    parameters: Dict[str, ResourceParameter] = Field(
+        ...,
+        description="Specifies the supported parameters for this file format.",
+        title="File Format Parameters",
+    )
+    links: Optional[List[Link]] = Field(
+        None,
+        description="Links related to this file format, e.g. external documentation.\n\nFor relation types see the lists of\n[common relation types in openEO](#section/API-Principles/Web-Linking).",
+    )
+
+
+class FileFormats(BaseModel):
+    input: Dict[str, FileFormat] = Field(
+        description="""Map of supported input file formats, i.e. file formats a
+        back-end can **read** from. The property keys are the file
+        format names that are used by clients and users, for
+        example in process graphs."""
+    )
+    output: Dict[str, FileFormat] = Field(
+        description="""Map of supported output file formats, i.e. file formats a
+        back-end can **write** to. The property keys are the file
+        format names that are used by clients and users, for
+        example in process graphs."""
+    )
+
+
+class Conformance(BaseModel):
+    conformsTo: List[AnyUrl] = Field(
+        ...,
+        description="Lists all conformance classes specified in various standards that the\nimplementation conforms to. Conformance classes are commonly used in\nall OGC APIs and the STAC API specification.\n\nThe general openEO conformance class is `https://api.openeo.org/1.2.0`.\nSee the individual openEO API extensions for their conformance classes.\n\nThis property is REQUIRED for STAC API versions 1.0.0-beta.1 and later.",
+        example=[
+            "https://api.openeo.org/1.2.0",
+            "https://api.openeo.org/extensions/commercial-data/0.1.0",
+            "https://api.openeo.org/extensions/federation/0.1.0",
+            "https://api.stacspec.org/v1.0.0/collections",
+        ],
+    )
+
+
+class ProcessReturnValue(BaseModel):
+    """ProcessReturnValue model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    description: Optional[str] = Field(
+        None,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation. In addition to the CommonMark syntax, clients can convert process IDs that are formatted as in the following example into links instead of code blocks: `process_id()`",
+    )
+    schema_: Union[ProcessJsonSchema, List[ProcessJsonSchema]] = Field(
+        ...,
+        alias="schema",
+        description="Either a single data type or a list of data types for process parameter or process return values.",
+        title="Process Data types",
+    )
+
+
+class ProcessExceptions(BaseModel):
+    """ProcessExceptions model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    description: Optional[str] = Field(
+        None,
+        description="Detailed description to explain the error to client\nusers and back-end developers. This should not be shown in the\nclients directly, but MAY be linked to in the errors `url`\nproperty.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used\nfor rich text representation.",
+    )
+    message: str = Field(
+        ...,
+        description='Explains the reason the server is rejecting the request. This message is intended to be displayed to the client user. For "4xx" error codes the message SHOULD explain shortly how the client needs to modify the request.\n\nThe message MAY contain variables, which are enclosed by curly brackets. Example: `{variable_name}`',
+        example="The value specified for the process argument '{argument}' in process '{process}' is invalid: {reason}",
+    )
+    http: Optional[int] = Field(
+        400,
+        description="HTTP Status Code, following the [error handling conventions in openEO](#section/API-Principles/Error-Handling). Defaults to `400`.",
+    )
+
+
+class BaseParameter(BaseModel):
+    name: str = Field(
+        ...,
+        pattern=r"^\w+$",
+        description="A unique name for the parameter. \n\nIt is RECOMMENDED to use [snake case](https://en.wikipedia.org/wiki/Snake_case) (e.g. `window_size` or `scale_factor`).",
+    )
+    description: str = Field(
+        ...,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation. In addition to the CommonMark syntax, clients can convert process IDs that are formatted as in the following example into links instead of code blocks: ``` ``process_id()`` ```",
+    )
+    optional: Optional[bool] = Field(
+        False,
+        description="Determines whether this parameter is optional to be specified even when no default is specified.\nClients SHOULD automatically set this parameter to `true`, if a default value is specified. Back-ends SHOULD NOT fail, if a default value is specified and this flag is missing.",
+    )
+    deprecated: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is deprecated with the potential\nto be removed in any of the next versions. It should be transitioned out\nof usage as soon as possible and users should refrain from using it in\nnew implementations.",
+    )
+    experimental: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is experimental, which means that it is likely to change or may produce unpredictable behaviour. Users should refrain from using it in production, but still feel encouraged to try it out and give feedback.",
+    )
+    default: Optional[Any] = Field(
+        None,
+        description="The default value for this parameter. Required parameters SHOULD NOT specify a default value. Optional parameters SHOULD always specify a default value.",
+    )
+
+
+class ProcessParameter(BaseParameter):
+    """Process model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    schema_: Union[ProcessJsonSchema, List[ProcessJsonSchema]] = Field(
+        ...,
+        alias="schema",
+        description="Either a single data type or a list of data types for process parameter or process return values.",
+        title="Process Data types",
+    )
+
+
+class Process(BaseModel):
+    """Process model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    id: str = Field(
+        ...,
+        pattern=r"^\w+$",
+        description="The identifier for the process. It MUST be unique across its namespace\n(e.g. predefined processes or user-defined processes).\n\nClients SHOULD warn the user if a user-defined process is added with the \nsame identifier as one of the predefined process.",
+        example="ndvi",
+    )
+    summary: Optional[str] = Field(
+        None, description="A short summary of what the process does."
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation. In addition to the CommonMark syntax, clients can convert process IDs that are formatted as in the following example into links instead of code blocks: `process_id()`",
+    )
+    categories: Optional[str] = Field(None, description="A list of categories.")
+    parameters: Optional[List[ProcessParameter]] = Field(
+        None,
+        description="A list of parameters.\n\nThe order in the array corresponds to the parameter order to\nbe used in clients that don't support named parameters.\n\n**Note:** Specifying an empty array is different from (if allowed)\n`null` or the property being absent.\nAn empty array means the process has no parameters.\n`null` / property absent means that the parameters are unknown as\nthe user has not specified them. There could still be parameters in the\nprocess graph, if one is specified.",
+    )
+    returns: Optional[ProcessReturnValue] = Field(
+        None, description="A short summary of what the process does."
+    )
+    deprecated: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is deprecated with the potential\nto be removed in any of the next versions. It should be transitioned out\nof usage as soon as possible and users should refrain from using it in\nnew implementations.",
+    )
+    experimental: Optional[bool] = Field(
+        None,
+        description="Declares that the specified entity is experimental, which means that it is likely to change or may produce unpredictable behaviour. Users should refrain from using it in production, but still feel encouraged to try it out and give feedback.",
+    )
+    exceptions: Optional[Dict[str, ProcessExceptions]] = Field(
+        None, description="Process Exceptions."
+    )
+    examples: Optional[List[Example]] = Field(
+        None, description="Examples, may be used for unit tests."
+    )
+    links: Optional[List[Link]] = Field(
+        None,
+        description="Links related to this process, e.g. additional external documentation.\n\nIt is RECOMMENDED to provide links with the following `rel` (relation) types:\n\n1. `latest-version`: If a process has been marked as deprecated, a link SHOULD\npoint to the preferred version of the process. The relation types `predecessor-version`\n(link to older version) and `successor-version` (link to newer version) can also be used\nto show the relation between versions.\n\n2. `example`: Links to examples of other processes that use this process.\n\n3. `cite-as`: For all DOIs associated with the process, the respective DOI\nlinks SHOULD be added.\n\nFor additional relation types see also the lists of\n[common relation types in openEO](#section/API-Principles/Web-Linking).",
+    )
+    process_graph: Optional[Dict[str, ProcessGraph]] = Field(
+        None, description="Process Node"
+    )
+
+
+class ProcessArgumentValue1(BaseModel):
+    """ProcessArgumentValue1 model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    from_parameter: Optional[Any] = None
+    from_node: Optional[Any] = None
+    process_graph: Optional[Any] = None
+
+
+class ProcessArgumentValue2(BaseModel, extra="forbid"):
+    """ProcessArgumentValue2 model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    from_node: str = Field(
+        ..., description="The ID of the node that data is expected to come from."
+    )
+
+
+class ProcessArgumentValue3(BaseModel, extra="forbid"):
+    """ProcessArgumentValue3 model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    from_parameter: str = Field(
+        ..., description="The name of the parameter that data is expected to come from."
+    )
+
+
+class ProcessArgumentValue(RootModel):
+    """ProcessArgumentValue model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: Optional[
+        Union[
+            ProcessArgumentValue1,
+            str,
+            float,
+            bool,
+            List[Self],
+            ProcessGraphWithMetadata,
+            ProcessArgumentValue2,
+            ProcessArgumentValue3,
+        ]
+    ] = Field(
+        None,
+        description="Arguments for a process. See the API documentation for more information.",
+        title="Process Argument Value",
+    )
+
+
+class ProcessGraph(BaseModel):
+    """ProcessGraph model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    process_id: str = Field(
+        ...,
+        pattern=r"^\w+$",
+        description="The identifier for the process. It MUST be unique across its namespace\n(e.g. predefined processes or user-defined processes).\n\nClients SHOULD warn the user if a user-defined process is added with the \nsame identifier as one of the predefined process.",
+        example="ndvi",
+    )
+    namespace: Optional[str] = Field(
+        None,
+        description="The namespace the `process_id` is valid for.\n\nThe following options are predefined by the openEO API, but additional\nnamespaces may be introduced by back-ends or in a future version of the API.\n\n* `null` (default): Checks both user-defined and predefined processes,\n   but prefers user-defined processes if both are available.\n   This allows users to add missing predefined processes for portability,\n   e.g. common processes from [processes.openeo.org](https://processes.openeo.org)\n   that have a process graph included.\n   It is RECOMMENDED to log the namespace selected by the back-end for debugging purposes.\n* `backend`: Uses exclusively the predefined processes listed at `GET /processes`.\n* `user`: Uses exclusively the user-defined processes listed at `GET /process_graphs`.\n\nIf multiple processes with the same identifier exist, Clients SHOULD\ninform the user that it's recommended to select a namespace.",
+    )
+    result: Optional[bool] = Field(
+        False,
+        description="Used to specify which node is the last in the chain and returns the result to return to the requesting context. This flag MUST only be set once in each list of process nodes.",
+    )
+    description: Optional[str] = Field(
+        None, description="Optional description about the process and its arguments."
+    )
+    arguments: Optional[Dict[str, ProcessArgumentValue]] = None
+
+
+class ProcessGraphWithMetadata(Process):
+    """ProcessGraphWithMetadata model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    id: Optional[str] = None  # type: ignore
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    parameters: Optional[List] = None
+    returns: Optional[Dict[str, Any]] = None  # type: ignore
+    process_graph: Optional[Dict[str, ProcessGraph]] = Field(None, title="Process Node")
+
+
+class Example(BaseModel):
+    """Example model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    title: Optional[str] = Field(None, description="A title for the example.")
+    description: Optional[str] = Field(
+        None,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation. In addition to the CommonMark syntax, clients can convert process IDs that are formatted as in the following example into links instead of code blocks: `process_id()`",
+    )
+    arguments: Optional[Dict[str, ProcessArgumentValue]] = None
+    returns: Optional[Any] = Field(
+        None, description="The return value which can by of any data type."
+    )
+
+
+class Processes(BaseModel):
+    processes: List[Process]
+    links: List[Link] = Field(
+        ...,
+        description="Links related to this list of resources, for example links for pagination\nor alternative formats such as a human-readable HTML version.\nThe links array MUST NOT be paginated.\n\nIf pagination is implemented, the following `rel` (relation) types apply:\n\n1. `next` (REQUIRED): A link to the next page, except on the last page.\n\n2. `prev` (OPTIONAL): A link to the previous page, except on the first page.\n\n3. `first` (OPTIONAL): A link to the first page, except on the first page.\n\n4. `last` (OPTIONAL): A link to the last page, except on the last page.\n\nFor additional relation types see also the lists of\n[common relation types in openEO](#section/API-Principles/Web-Linking).",
+    )
+
+
+class StacVersion(RootModel):
+    """StacVersion model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: str = Field(
+        ...,
+        pattern=r"^(0\.9.\d+|1\.\d+.\d+)",
+        description="The [version of the STAC specification](https://github.com/radiantearth/stac-spec/releases), which MAY not be equal to the [STAC API version](#tag/EO-Data-Discovery/STAC). Supports versions 0.9.x and 1.x.x.",
+        example="1.0.0",
+    )
+
+
+class StacExtensions(RootModel):
+    """StacExtensions model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: List[Union[AnyUrl, str]] = Field(
+        ...,
+        description="A list of implemented STAC extensions. The list contains URLs to the JSON Schema files it can be validated against. For STAC < 1.0.0-rc.1  shortcuts such as `sar` can be used instead of the schema URL.",
+    )
+
+
+class CollectionId(RootModel):
+    """CollectionId model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: str = Field(
+        ...,
+        pattern=r"^[\w\-\.~\/]+$",
+        description="A unique identifier for the collection, which MUST match the specified pattern.",
+        example="Sentinel-2A",
+    )
+
+
+class StacLicense(RootModel):
+    """StacLicense model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: str = Field(
+        ...,
+        description="License(s) of the data as a SPDX [License identifier](https://spdx.org/licenses/).\nAlternatively, use `proprietary` if the license is not on the SPDX\nlicense list or `various` if multiple licenses apply. In these two cases\nlinks to the license texts SHOULD be added, see the `license` link\nrelation type.\n\nNon-SPDX licenses SHOULD add a link to the license text with the\n`license` relation in the links section. The license text MUST NOT be\nprovided as a value of this field. If there is no public license URL\navailable, it is RECOMMENDED to host the license text and link to it.",
+        example="Apache-2.0",
+    )
+
+
+Role = Literal["producer", "licensor", "processor", "host"]
+
+
+class StacProvider(BaseModel):
+    """StacProvider model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    name: str = Field(
+        ...,
+        description="The name of the organization or the individual.",
+        example="Example Cloud Corp.",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Multi-line description to add further provider information such as processing details for processors and producers, hosting details for hosts or basic contact information.\n\nCommonMark 0.29 syntax MAY be used for rich text representation.",
+        example="No further processing applied.",
+    )
+    roles: Optional[List[Role]] = Field(
+        None,
+        description="Roles of the provider.\n\nThe provider's role(s) can be one or more of the following\nelements:\n* `licensor`: The organization that is licensing the dataset under\nthe license specified in the collection's license field.\n* `producer`: The producer of the data is the provider that\ninitially captured and processed the source data, e.g. ESA for\nSentinel-2 data.\n* `processor`: A processor is any provider who processed data to a\nderived product.\n* `host`: The host is the actual provider offering the data on their\nstorage. There SHOULD be no more than one host, specified as last\nelement of the list.",
+        example=["producer", "licensor", "host"],
+    )
+    url: Optional[AnyUrl] = Field(
+        None,
+        description="Homepage on which the provider describes the dataset and publishes contact information.",
+        example="https://cloud.example",
+    )
+
+
+class StacProviders(RootModel):
+    """StacProviders model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: List[StacProvider] = Field(
+        ...,
+        description="A list of providers, which MAY include all organizations capturing or processing the data or the hosting provider. Providers SHOULD be listed in chronological order with the most recent provider being the last element of the list.",
+    )
+
+
+class Description(RootModel):
+    root: str = Field(
+        ...,
+        description="Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation.",
+    )
+
+
+class Bbox(RootModel):
+    """Bbox model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: List[float] = Field(
+        ...,
+        description="Each bounding box is provided as four or six numbers,\ndepending on whether the coordinate reference system\nincludes a vertical axis (height or depth):\n\n* West (lower left corner, coordinate axis 1)\n* South (lower left corner, coordinate axis 2)\n* Base (optional, minimum value, coordinate axis 3)\n* East (upper right corner, coordinate axis 1)\n* North (upper right corner, coordinate axis 2)\n* Height (optional, maximum value, coordinate axis 3)\n\nThe coordinate reference system of the values is WGS 84\nlongitude/latitude (http://www.opengis.net/def/crs/OGC/1.3/CRS84).\n\nFor WGS 84 longitude/latitude the values are in most cases\nthe sequence of minimum longitude, minimum latitude, maximum\nlongitude and maximum latitude.\n\nHowever, in cases where the box spans the antimeridian the\nfirst value (west-most box edge) is larger than the third value\n(east-most box edge).\n\nIf the vertical axis is included, the third and the sixth\nnumber are the bottom and the top of the 3-dimensional bounding box.",
+        example=[-180, -90, 180, 90],
+    )
+
+
+class Spatial(BaseModel):
+    """Spatial model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    bbox: Optional[List[Bbox]] = Field(
+        None,
+        description="One or more bounding boxes that describe the spatial extent\nof the dataset.\n\nThe first bounding box describes the overall spatial extent\nof the data. All subsequent bounding boxes describe more\nprecise bounding boxes, e.g. to identify clusters of data.\nClients only interested in the overall spatial extent will\nonly need to access the first item in each array.",
+        min_items=1,
+    )
+
+
+class IntervalItem(RootModel):
+    """IntervalItem model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: List[datetime] = Field(
+        ...,
+        description="Begin and end times of the time interval. The coordinate\nreference system is the Gregorian calendar.\n\nThe value `null` is supported and indicates an open time\ninterval.",
+        example=["2011-11-11T12:22:11Z", None],
+    )
+
+
+class Temporal(BaseModel):
+    """Temporal model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    interval: Optional[List[IntervalItem]] = Field(
+        None,
+        description="One or more time intervals that describe the temporal extent\nof the dataset.\n\nThe first time interval describes the overall temporal extent\nof the data. All subsequent time intervals describe more\nprecise time intervals, e.g. to identify clusters of data.\nClients only interested in the overall extent will only need\nto access the first item in each array.",
+        min_items=1,
+    )
+
+
+class Extent(BaseModel):
+    """Extent model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    spatial: Spatial = Field(
+        ...,
+        description="The *potential* spatial extents of the features in the collection.",
+        title="Collection Spatial Extent",
+    )
+    temporal: Temporal = Field(
+        ...,
+        description="The *potential* temporal extents of the features in the collection.",
+        title="Collection Temporal Extent",
+    )
+
+
+class Dimension(BaseModel):
+    """Dimension model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    type: Literal["spatial", "temportal", "bands", "geometry", "other"] = Field(
+        ..., description="Type of the dimension."
+    )
+    description: Optional[Description] = None
+
+
+class CollectionSummaryStats(BaseModel):
+    """CollectionSummaryStats model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    minimum: Union[str, float] = Field(
+        ..., description="The minimum value (inclusive)."
+    )
+    maximum: Union[str, float] = Field(
+        ..., description="The maximum value (inclusive)."
+    )
+
+
+class Asset(BaseModel):
+    """Asset model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    href: str = Field(
+        ...,
+        description="URL to the downloadable asset.\nThe URLs SHOULD be available without authentication so that external clients can download them easily. If the data is confidential, signed URLs SHOULD be used to protect against unauthorized access from third parties.",
+        title="Asset location",
+    )
+    title: Optional[str] = Field(
+        None, description="The displayed title for clients and users."
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Multi-line description to explain the asset.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich\ntext representation.",
+    )
+    type: Optional[str] = Field(
+        None,
+        description="Media type of the asset.",
+        example="image/tiff; application=geotiff",
+        title="Media Type",
+    )
+    roles: Optional[List[str]] = Field(
+        None,
+        description="Purposes of the asset. Can be any value, but commonly used values are:\n\n* `thumbnail`: A visualization of the data, usually a lower-resolution true color image in JPEG or PNG format.\n* `reproducibility`: Information how the data was produced and/or can be reproduced, e.g. the process graph used to compute the data in JSON format.\n* `data`: The computed data in the format specified by the user in the process graph (applicable in `GET /jobs/{job_id}/results` only).\n* `metadata`: Additional metadata available for the computed data.",
+        example=["data"],
+    )
+
+
+class StacAssets(RootModel):
+    """StacAssets model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    root: Optional[Dict[str, Asset]] = None
+
+
+class Collection(BaseModel):
+    """Collection model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+
+    Code generated using https://github.com/koxudaxi/datamodel-code-generator/
+    """
+
+    stac_version: StacVersion
+    stac_extensions: Optional[StacExtensions] = None
+    type: Optional[Literal["Collection"]] = Field(
+        None, description="For STAC versions >= 1.0.0-rc.1 this field is required."
+    )
+    id: CollectionId
+    title: Optional[str] = Field(
+        None, description="A short descriptive one-line title for the collection."
+    )
+    description: str = Field(
+        ...,
+        description="Detailed multi-line description to explain the collection.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation.",
+    )
+    keywords: Optional[List[str]] = Field(
+        None, description="List of keywords describing the collection."
+    )
+    version: Optional[str] = Field(
+        None,
+        description="Version of the collection.\n\nThis property REQUIRES to add `version` (STAC < 1.0.0-rc.1) or\n`https://stac-extensions.github.io/version/v1.2.0/schema.json` (STAC >= 1.0.0-rc.1)\nto the list of `stac_extensions`.",
+    )
+    deprecated: Optional[bool] = Field(
+        False,
+        description="Specifies that the collection is deprecated with the potential to\nbe removed. It should be transitioned out of usage as soon as\npossible and users should refrain from using it in new projects.\n\nA link with relation type `latest-version` SHOULD be added to the\nlinks and MUST refer to the collection that can be used instead.\n\nThis property REQUIRES to add `version` (STAC < 1.0.0-rc.1) or\n`https://stac-extensions.github.io/version/v1.2.0/schema.json` (STAC >= 1.0.0-rc.1)\nto the list of `stac_extensions`.",
+    )
+    license: StacLicense
+    providers: Optional[StacProviders] = None
+    extent: Extent = Field(
+        ...,
+        description="The extent of the data in the collection. Additional members MAY\nbe added to represent other extents, for example, thermal or\npressure ranges.\n\nThe first item in the array always describes the overall extent of\nthe data. All subsequent items describe more preciseextents,\ne.g. to identify clusters of data.\nClients only interested in the overall extent will only need to\naccess the first item in each array.",
+        title="Collection Extent",
+    )
+    links: List[Link] = Field(
+        ...,
+        description="Links related to this collection.\nCould reference to licensing information, other meta data formats with\nadditional information or a preview image.\n\nIt is RECOMMENDED to provide links with the following\n`rel` (relation) types:\n\n1. `root` and `parent`: URL to the data discovery endpoint at `/collections`.\n\n2. `license`: A link to the license(s) SHOULD be specified if the `license`\nfield is set to `proprietary` or `various`.\n\n3. `example`: Links to examples of processes that use this collection.\n\n4. `latest-version`: If a collection has been marked as deprecated, a link SHOULD\npoint to the latest version of the collection. The relation types `predecessor-version`\n(link to older version) and `successor-version` (link to newer version) can also be used\nto show the relation between versions.\n\n5. `alternate`: An alternative representation of the collection.\nFor example, this could be the collection available through another\ncatalog service such as OGC CSW, a human-readable HTML version or a\nmetadata document following another standard such as ISO 19115 or DCAT.\n\n6. `http://www.opengis.net/def/rel/ogc/1.0/queryables`: URL to the\nqueryables endpoint at `/collections/{collection_id}/queryables`.\nFor JSON Schema documents, the `type` field must be set to `application/schema+json`.\n\nFor additional relation types see also the lists of\n[common relation types in openEO](#section/API-Principles/Web-Linking)\nand the STAC specification for Collections.",
+    )
+    cube_dimensions: Optional[Dict[str, Dimension]] = Field(
+        None,
+        alias="cube:dimensions",
+        description="The named default dimensions of the data cube.\nNames must be unique per collection.\n\nThe keys of the object are the dimension names. For\ninteroperability, it is RECOMMENDED to use the\nfollowing dimension names if there is only a single\ndimension with the specified criteria:\n\n* `x` for the dimension of type `spatial` with the axis set to `x`\n* `y` for the dimension of type `spatial` with the axis set to `y`\n* `z` for the dimension of type `spatial` with the axis set to `z`\n* `t` for the dimension of type `temporal`\n* `bands` for dimensions of type `bands`\n* `geometry` for dimensions of type `geometry`\n\nThis property REQUIRES to add a version of the data cube extension to the list\nof `stac_extensions`, e.g. `https://stac-extensions.github.io/datacube/v2.2.0/schema.json`.",
+        title="STAC Collection Cube Dimensions",
+    )
+    summaries: Optional[
+        Dict[str, Union[List[Any], CollectionSummaryStats, JsonSchema]]
+    ] = Field(
+        None,
+        description="Collection properties from STAC extensions (e.g. EO,\nSAR, Satellite or Scientific) or even custom extensions.\n\nSummaries are either a unique set of all available\nvalues, statistics *or* a JSON Schema. Statistics only\nspecify the range (minimum and maximum values) by default,\nbut can optionally be accompanied by additional\nstatistical values. The range can specify the\npotential range of values, but it is recommended to be\nas precise as possible. The set of values MUST contain\nat least one element and it is strongly RECOMMENDED to\nlist all values. It is recommended to list as many\nproperties as reasonable so that consumers get a full\noverview of the Collection. Properties that are\ncovered by the Collection specification (e.g.\n`providers` and `license`) SHOULD NOT be repeated in the\nsummaries.\n\nPotential fields for the summaries can be found here:\n\n* **[STAC Common Metadata](https://github.com/radiantearth/stac-spec/blob/v1.0.0/item-spec/common-metadata.md)**:\n  A list of commonly used fields throughout all domains\n* **[Content Extensions](https://github.com/radiantearth/stac-spec/blob/v1.0.0/extensions/README.md#list-of-content-extensions)**:\n  Domain-specific fields for domains such as EO, SAR and point clouds.\n* **Custom Properties**:\n  It is generally allowed to add custom fields.",
+        title="STAC Summaries (Collection Properties)",
+    )
+    assets: Optional[StacAssets] = Field(
+        None,
+        description="Dictionary of asset objects for data that can be downloaded,\neach with a unique key.\nThe keys MAY be used by clients as file names.\n\nImplementing this property REQUIRES to add `collection-assets`\nto the list of `stac_extensions` in STAC < 1.0.0-rc.1.",
+    )
+
+
+class Collections(BaseModel):
+    """Lists of collections and related links."""
+
+    collections: List[Collection]
+    links: List[Link] = Field(
+        ...,
+        description="Links related to this list of resources, for example links for pagination\nor alternative formats such as a human-readable HTML version.\nThe links array MUST NOT be paginated.\n\nIf pagination is implemented, the following `rel` (relation) types apply:\n\n1. `next` (REQUIRED): A link to the next page, except on the last page.\n\n2. `prev` (OPTIONAL): A link to the previous page, except on the first page.\n\n3. `first` (OPTIONAL): A link to the first page, except on the first page.\n\n4. `last` (OPTIONAL): A link to the last page, except on the last page.\n\nFor additional relation types see also the lists of\n[common relation types in openEO](#section/API-Principles/Web-Linking).",
+    )
+
+
+JsonSchema.update_forward_refs()
+ProcessArgumentValue.update_forward_refs()
+ProcessGraphWithMetadata.update_forward_refs()
