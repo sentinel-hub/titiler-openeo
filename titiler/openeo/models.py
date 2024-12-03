@@ -280,7 +280,7 @@ class JsonSchema(BaseModel):
     """
 
     field_schema: Optional[AnyUrl] = Field(
-        "http://json-schema.org/draft-07/schema#",
+        AnyUrl("http://json-schema.org/draft-07/schema#"),
         alias="$schema",
         json_schema_extra={
             "description": "The JSON Schema version. If not given in the context of openEO,\ndefaults to `draft-07`.\n\nYou may need to add the default value for `$schema` property explicitly to the JSON Schema\nobject before passing it to a JSON Schema validator."
