@@ -85,7 +85,7 @@ source = "file"
 path = "titiler/openeo/__init__.py"
 
 [tool.pdm.build]
-includes = ["titiler/application"]
+includes = ["titiler/openeo"]
 excludes = ["tests/", "**/.mypy_cache", "**/.DS_Store"]
 
 [tool.coverage.run]

@@ -55,7 +55,7 @@ class STACSettings(BaseSettings):
         """Check at least one backend URL is Set."""
         if not self.api_url and not self.pgstac_url:
             raise ValueError(
-                "At least One of `TITILER_OPENEO_STAC_API_URL` or `TITILER_OPENEO_STAC_PGSTAC_URL` need to be set"
+                "At least One of `TITILER_OPENEO_STAC_API_URL` or `TITILER_OPENEO_STAC_PGSTAC_URL` MUST to be set"
             )
 
         return self
