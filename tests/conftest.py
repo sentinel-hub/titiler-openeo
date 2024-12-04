@@ -12,7 +12,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 def app(monkeypatch) -> TestClient:
     """Create App."""
     monkeypatch.setenv(
-        "TITILER_STACAPI_STAC_API_URL", "https://stac.dataspace.copernicus.eu/v1"
+        "TITILER_OPENEO_STAC_API_URL", "https://stac.dataspace.copernicus.eu/v1"
     )
 
     from titiler.openeo.main import app
