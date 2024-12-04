@@ -10,8 +10,8 @@ from typing_extensions import Annotated
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
-from titiler.openeo.backends import BaseBackend
 from titiler.openeo.models import OPENEO_VERSION
+from titiler.openeo.stac import STACBackend
 
 STAC_VERSION = "1.0.0"
 
@@ -20,7 +20,7 @@ STAC_VERSION = "1.0.0"
 class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
-    stac_backend: BaseBackend
+    stac_backend: STACBackend
 
     def register_routes(self):
         """Register Routes."""

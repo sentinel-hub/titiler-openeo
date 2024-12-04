@@ -6,9 +6,9 @@ from starlette_cramjam.middleware import CompressionMiddleware
 
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
-from titiler.openeo.backends import get_stac_backend
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.settings import ApiSettings, STACSettings
+from titiler.openeo.stac import get_stac_backend
 
 STAC_VERSION = "1.0.0"
 

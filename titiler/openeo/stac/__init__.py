@@ -2,7 +2,7 @@
 
 from urllib.parse import urlparse
 
-from .base import BaseBackend  # noqa
+from .base import STACBackend  # noqa
 
 
 def get_stac_backend(url: str, **kwargs):

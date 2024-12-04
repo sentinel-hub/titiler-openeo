@@ -9,11 +9,11 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from ..settings import PgSTACSettings
-from .base import BaseBackend
+from .base import STACBackend
 
 
 @define
-class pgStacBackend(BaseBackend):
+class pgStacBackend(STACBackend):
     """PgSTAC Backend."""
 
     url: str = field()

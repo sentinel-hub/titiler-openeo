@@ -10,11 +10,11 @@ from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
 
 from ..settings import PySTACSettings
-from .base import BaseBackend
+from .base import STACBackend
 
 
 @define
-class stacApiBackend(BaseBackend):
+class stacApiBackend(STACBackend):
     """PySTAC-Client Backend."""
 
     url: str = field()
