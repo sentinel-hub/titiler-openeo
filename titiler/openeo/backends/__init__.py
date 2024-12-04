@@ -1,19 +1,22 @@
 """titiler openeo STAC Backend."""
 
-from ..settings import STACSettings
+from urllib.parse import urlparse
+
 from .base import BaseBackend  # noqa
 
 
-def create_backend(settings: STACSettings):
-    """Create STAC Backend from STAC URL."""
-    if settings.api_url:
+def get_stac_backend(url: str, **kwargs):
+    """Return STAC Backend from STAC URL."""
+    parsed = urlparse(url)
+    if parsed.scheme in ["https", "http"]:
         from .stacapi import stacApiBackend  # noqa
 
-        return stacApiBackend(settings.api_url)  # type: ignore
+        return stacApiBackend(url, **kwargs)  # type: ignore
 
-    elif settings.pgstac_url:
+    elif parsed.scheme.startswith("postgres"):
         from .pgstac import pgStacBackend  # noqa
 
-        return pgStacBackend(settings.pgstac_url)  # type: ignore
+        return pgStacBackend(url, **kwargs)  # type: ignore
 
-    raise ValueError("No VALID backend URL provided")
+    else:
+        raise ValueError(f"Unsupported STAC backend: {url}")

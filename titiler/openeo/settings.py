@@ -1,8 +1,8 @@
 """Titiler-openEO API settings."""
 
-from typing import Optional
+from typing import Union
 
-from pydantic import Field, PostgresDsn, field_validator, model_validator
+from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Annotated
 
@@ -36,29 +36,13 @@ class ApiSettings(BaseSettings):
 class STACSettings(BaseSettings):
     """STAC settings."""
 
-    ###########################################################################
-    # STAC API Settings
-    api_url: Optional[str] = None
-
-    ###########################################################################
-    # PgSTAC Settings
-    pgstac_url: Optional[PostgresDsn] = None
+    api_url: Union[AnyHttpUrl, PostgresDsn]
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_STAC_",
         env_file=".env",
         extra="ignore",
     )
-
-    @model_validator(mode="after")
-    def check_urls(self):
-        """Check at least one backend URL is Set."""
-        if not self.api_url and not self.pgstac_url:
-            raise ValueError(
-                "At least One of `TITILER_OPENEO_STAC_API_URL` or `TITILER_OPENEO_STAC_PGSTAC_URL` MUST to be set"
-            )
-
-        return self
 
 
 class PySTACSettings(BaseSettings):

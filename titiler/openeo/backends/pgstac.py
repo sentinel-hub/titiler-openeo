@@ -16,7 +16,7 @@ from .base import BaseBackend
 class pgStacBackend(BaseBackend):
     """PgSTAC Backend."""
 
-    url: str = field(converter=str)
+    url: str = field()
 
     # Connection POOL to the database
     pool: ConnectionPool = field(init=False)

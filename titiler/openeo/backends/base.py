@@ -3,12 +3,14 @@
 import abc
 from typing import Dict, List
 
-from attrs import define
+from attrs import define, field
 
 
 @define(kw_only=True)
 class BaseBackend(metaclass=abc.ABCMeta):
     """ABC Class defining STAC Backends."""
+
+    url: str = field()
 
     @abc.abstractmethod
     def get_collections(self, **kwargs) -> List[Dict]:

@@ -6,7 +6,7 @@ from starlette_cramjam.middleware import CompressionMiddleware
 
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
-from titiler.openeo.backends import create_backend
+from titiler.openeo.backends import get_stac_backend
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.settings import ApiSettings, STACSettings
 
@@ -15,7 +15,7 @@ STAC_VERSION = "1.0.0"
 api_settings = ApiSettings()
 stac_settings = STACSettings()
 
-backend = create_backend(stac_settings)
+stac_backend = get_stac_backend(str(stac_settings.api_url))
 
 
 ###############################################################################
@@ -36,7 +36,7 @@ app = FastAPI(
     """,
     version=titiler_version,
     root_path=api_settings.root_path,
-    lifespan=backend.get_lifespan(),
+    lifespan=stac_backend.get_lifespan(),
 )
 
 # Set all CORS enabled origins
@@ -65,9 +65,8 @@ app.add_middleware(
 app.add_middleware(
     CacheControlMiddleware,
     cachecontrol=api_settings.cachecontrol,
-    exclude_path={r"/healthz"},
 )
 
 # Register OpenEO endpoints
-endpoints = EndpointsFactory(stac_backend=backend)
+endpoints = EndpointsFactory(stac_backend=stac_backend)
 app.include_router(endpoints.router)
