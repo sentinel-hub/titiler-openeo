@@ -33,7 +33,7 @@ class stacApiBackend(STACBackend):
         col = self.client.get_collection(collection_id)
         return col.to_dict()
 
-    def get_items(self, collection_id: str, **kwargs) -> List[Dict]:
+    def get_items(self, **kwargs) -> List[Dict]:
         """Return List of STAC Items."""
         return []
 

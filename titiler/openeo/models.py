@@ -268,7 +268,9 @@ class Capabilities(BaseModel):
     )
 
 
-JsonSchemaType = Literal["array", "boolean", "integer", "null", "object", "string"]
+JsonSchemaType = Literal[
+    "array", "boolean", "integer", "null", "number", "object", "string"
+]
 
 
 class JsonSchema(BaseModel):
@@ -620,7 +622,7 @@ class Process(BaseModel):
             "description": "Detailed description to explain the entity.\n\n[CommonMark 0.29](http://commonmark.org/) syntax MAY be used for rich text representation. In addition to the CommonMark syntax, clients can convert process IDs that are formatted as in the following example into links instead of code blocks: `process_id()`"
         },
     )
-    categories: Optional[str] = Field(
+    categories: Optional[List[str]] = Field(
         None, json_schema_extra={"description": "A list of categories."}
     )
     parameters: Optional[List[ProcessParameter]] = Field(

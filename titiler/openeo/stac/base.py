@@ -23,7 +23,7 @@ class STACBackend(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def get_items(self, collection_id: str, **kwargs) -> List[Dict]:
+    def get_items(self, **kwargs) -> List[Dict]:
         """Return List of STAC Items."""
         ...
 

@@ -2,7 +2,7 @@
 
 from typing import Union
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator
+from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Annotated
 
@@ -85,3 +85,31 @@ class PgSTACSettings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+
+class CacheSettings(BaseSettings):
+    """Cache settings"""
+
+    # TTL of the cache in seconds
+    ttl: int = 300
+
+    # Maximum size of the cache in Number of element
+    maxsize: int = 512
+
+    # Whether or not caching is enabled
+    disable: bool = False
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_CACHE_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    @model_validator(mode="after")
+    def check_enable(self):
+        """Check if cache is disabled."""
+        if self.disable:
+            self.ttl = 0
+            self.maxsize = 0
+
+        return self

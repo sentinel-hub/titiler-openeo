@@ -11,6 +11,7 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.models import OPENEO_VERSION
+from titiler.openeo.processes import processes
 from titiler.openeo.stac import STACBackend
 
 STAC_VERSION = "1.0.0"
@@ -70,7 +71,13 @@ class EndpointsFactory(BaseFactory):
                         "rel": "version-history",
                         "type": "application/json",
                         "title": "List of supported openEO version",
-                    }
+                    },
+                    {
+                        "href": self.url_for(request, "openeo_collections"),
+                        "rel": "data",
+                        "title": "List of Datasets",
+                        "type": "application/json",
+                    },
                 ],
                 "conformsTo": [
                     "https://api.openeo.org/1.2.0",
@@ -182,7 +189,7 @@ class EndpointsFactory(BaseFactory):
         def openeo_processes(request: Request):
             """Lists all predefined processes and returns detailed process descriptions, including parameters and return values."""
             return {
-                "processes": [],
+                "processes": [p for _, p in processes.data.items()],
                 "links": [],
             }
 
