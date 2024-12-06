@@ -42,4 +42,4 @@ class Processes:
         return Processes({**self.data, **processes})  # type: ignore
 
 
-processes = Processes(copy(DEFAULT_PROCESSES))  # type: ignore
+ProcessesStore = Processes(copy(DEFAULT_PROCESSES))  # type: ignore

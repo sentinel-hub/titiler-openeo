@@ -7,6 +7,7 @@ from starlette_cramjam.middleware import CompressionMiddleware
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.factory import EndpointsFactory
+from titiler.openeo.services.local import LocalStore
 from titiler.openeo.settings import ApiSettings, STACSettings
 from titiler.openeo.stac import get_stac_backend
 
@@ -68,5 +69,8 @@ app.add_middleware(
 )
 
 # Register OpenEO endpoints
-endpoints = EndpointsFactory(stac_backend=stac_backend)
+endpoints = EndpointsFactory(
+    stac_backend=stac_backend,
+    services_store=LocalStore(),
+)
 app.include_router(endpoints.router)
