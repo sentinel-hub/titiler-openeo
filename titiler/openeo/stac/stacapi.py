@@ -59,7 +59,7 @@ class stacApiBackend(STACBackend):
 
         return collection
 
-    def getdimensions(self, collection: Collection) -> dict[str, dc.Dimension]:
+    def getdimensions(self, collection: Collection) -> Dict[str, dc.Dimension]:
         """Get dimensions from collection"""
         dims = {}
         """ Sptial extent """
