@@ -1,5 +1,10 @@
 """Stac API backend."""
 
+import sys
+
+if sys.version_info < (3, 9):
+    from typing import Dict as dict
+
 from contextlib import asynccontextmanager
 from typing import Dict, List
 
