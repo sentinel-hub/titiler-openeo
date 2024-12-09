@@ -1084,6 +1084,7 @@ class SpatialDimension(Dimension):
         },
     )
 
+
 class CollectionSummaryStats(BaseModel):
     """CollectionSummaryStats model.
 

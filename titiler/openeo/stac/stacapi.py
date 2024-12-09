@@ -8,16 +8,15 @@ if sys.version_info < (3, 9):
 from contextlib import asynccontextmanager
 from typing import Dict, List
 
+import pystac.extensions.datacube as dc
+import pystac.extensions.eo as eo
+import pystac.extensions.item_assets as ia
 from attrs import define, field
 from fastapi import FastAPI
 from pystac import Collection
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
-
-import pystac.extensions.datacube as dc
-import pystac.extensions.eo as eo
-import pystac.extensions.item_assets as ia
 
 from ..settings import PySTACSettings
 from .base import STACBackend
@@ -66,31 +65,43 @@ class stacApiBackend(STACBackend):
         """ Sptial extent """
         if collection.extent.spatial.bboxes:
             dims["x"] = dc.Dimension.from_dict(
-                        {
-                            "type": "spatial",
-                            "axis": "x",
-                            "extent": [collection.extent.spatial.bboxes[0][0], collection.extent.spatial.bboxes[0][2]],
-                        }
-                    )
+                {
+                    "type": "spatial",
+                    "axis": "x",
+                    "extent": [
+                        collection.extent.spatial.bboxes[0][0],
+                        collection.extent.spatial.bboxes[0][2],
+                    ],
+                }
+            )
             dims["y"] = dc.Dimension.from_dict(
-                        {
-                            "type": "spatial",
-                            "axis": "y",
-                            "extent": [collection.extent.spatial.bboxes[0][1], collection.extent.spatial.bboxes[0][3]],
-                        }
-                    )
+                {
+                    "type": "spatial",
+                    "axis": "y",
+                    "extent": [
+                        collection.extent.spatial.bboxes[0][1],
+                        collection.extent.spatial.bboxes[0][3],
+                    ],
+                }
+            )
         """ Temporal extent """
         if collection.extent.temporal.intervals:
             dims["t"] = dc.Dimension.from_dict(
-                        {
-                            "type": "temporal",
-                            "extent": [collection.extent.temporal.intervals[0][0], collection.extent.temporal.intervals[0][1]],
-                        }
-                    )
+                {
+                    "type": "temporal",
+                    "extent": [
+                        collection.extent.temporal.intervals[0][0],
+                        collection.extent.temporal.intervals[0][1],
+                    ],
+                }
+            )
 
         """ Add spectral bands """
         # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
-        if eo.EOExtension.has_extension(collection) and "item_assets" in collection.extra_fields:
+        if (
+            eo.EOExtension.has_extension(collection)
+            and "item_assets" in collection.extra_fields
+        ):
             ia.ItemAssetsExtension.add_to(collection)
             item_assets = collection.ext.item_assets.values()
             bands_name = set()
