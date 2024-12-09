@@ -28,6 +28,7 @@ dependencies = [
     "titiler.mosaic==0.19.2",
     "starlette-cramjam>=0.4,<0.5",
     "pydantic-settings~=2.0",
+    "pystac-client~=0.8.5",
 ]
 
 [project.optional-dependencies]
