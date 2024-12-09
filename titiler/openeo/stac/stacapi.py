@@ -1,19 +1,14 @@
 """Stac API backend."""
 
-import sys
-
-if sys.version_info < (3, 9):
-    from typing import Dict as dict
-
 from contextlib import asynccontextmanager
 from typing import Dict, List
 
-import pystac.extensions.datacube as dc
-import pystac.extensions.eo as eo
-import pystac.extensions.item_assets as ia
 from attrs import define, field
 from fastapi import FastAPI
 from pystac import Collection
+from pystac.extensions import datacube as dc
+from pystac.extensions import eo
+from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
