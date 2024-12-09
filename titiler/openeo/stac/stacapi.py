@@ -117,7 +117,7 @@ class stacApiBackend(STACBackend):
 
         return dims
 
-    def getvariables(self, collection: Collection) -> dict[str, dc.Variable]:
+    def getvariables(self, collection: Collection) -> Dict[str, dc.Variable]:
         """Get variables from collection"""
         variables = {}
         if eo.EOExtension.has_extension(collection):
