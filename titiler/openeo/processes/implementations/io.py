@@ -12,8 +12,9 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks, filter_tasks
 from rio_tiler.types import BBox
 
-from ...stac import stac_backend
+from ...stacapi import stac_backend
 from .data_model import RasterStack
+from .errors import NoDataAvailable, TemporalExtentEmpty
 from .reader import SimpleSTACReader
 from .utils import to_rasterio_crs
 
@@ -24,7 +25,6 @@ def get_items(
     collection_id: str,
     spatial_extent: Optional[BoundingBox] = None,
     temporal_extent: Optional[TemporalInterval] = None,
-    bands: Optional[list[str]] = None,
     properties: Optional[dict] = None,
     fields: Optional[List[str]] = None,
 ) -> List[Dict]:
@@ -59,6 +59,11 @@ def get_items(
         if temporal_extent[1] is not None:
             end_date = str(temporal_extent[1].to_numpy())
 
+        if not end_date and not start_date:
+            raise TemporalExtentEmpty(
+                "The temporal extent is empty. The second instant in time must always be greater/later than the first instant in time."
+            )
+
         query_params["datetime"] = [start_date, end_date]
 
     if properties is not None:
@@ -90,9 +95,10 @@ def load_collection(
         collection_id,
         spatial_extent=spatial_extent,
         temporal_extent=temporal_extent,
-        bands=bands,
         properties=properties,
     )
+    if not items:
+        raise NoDataAvailable("There is no data available for the given extents.")
 
     if spatial_extent:
 
@@ -109,6 +115,7 @@ def load_collection(
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
         crs = to_rasterio_crs(projcrs)
 
+        # TODO: convert `bands` into assets
         tasks = create_tasks(
             _reader,
             items,
@@ -144,9 +151,10 @@ def load_collection_and_reduce(
         collection_id,
         spatial_extent=spatial_extent,
         temporal_extent=temporal_extent,
-        bands=bands,
         properties=properties,
     )
+    if not items:
+        raise NoDataAvailable("There is no data available for the given extents.")
 
     if spatial_extent:
 
@@ -163,6 +171,7 @@ def load_collection_and_reduce(
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
         crs = to_rasterio_crs(projcrs)
 
+        # TODO: convert `bands` into assets
         img, _ = mosaic_reader(
             items,
             _reader,

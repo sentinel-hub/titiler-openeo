@@ -28,27 +28,11 @@ dependencies = [
     "titiler.mosaic==0.19.2",
     "starlette-cramjam>=0.4,<0.5",
     "openeo-pg-parser-networkx",
+    "pystac-client",
     "pydantic-settings~=2.0",
 ]
 
 [project.optional-dependencies]
-# PgSTAC backend dependencies
-# https://www.psycopg.org/psycopg3/docs/api/pq.html#pq-module-implementations
-psycopg = [  # pure python implementation
-    "psycopg[pool]"
-]
-psycopg-c = [  # C implementation of the libpq wrapper
-    "psycopg[c,pool]"
-]
-psycopg-binary = [  # pre-compiled C implementation
-    "psycopg[binary,pool]"
-]
-
-# STAC-API Backend
-pystac = [
-    "pystac-client",
-]
-
 test = [
     "pytest",
     "pytest-cov",

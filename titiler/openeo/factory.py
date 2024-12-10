@@ -17,7 +17,7 @@ from titiler.openeo import models
 from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.processes import process_registry
 from titiler.openeo.services import ServicesStore
-from titiler.openeo.stac import stac_backend
+from titiler.openeo.stacapi import stac_backend
 
 STAC_VERSION = "1.0.0"
 

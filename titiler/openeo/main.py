@@ -9,7 +9,6 @@ from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.services.local import LocalStore
 from titiler.openeo.settings import ApiSettings
-from titiler.openeo.stac import stac_backend
 
 STAC_VERSION = "1.0.0"
 
@@ -34,7 +33,6 @@ app = FastAPI(
     """,
     version=titiler_version,
     root_path=api_settings.root_path,
-    lifespan=stac_backend.get_lifespan(),
 )
 
 # Set all CORS enabled origins

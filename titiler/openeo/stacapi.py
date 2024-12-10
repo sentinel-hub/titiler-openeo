@@ -1,10 +1,8 @@
 """Stac API backend."""
 
-from contextlib import asynccontextmanager
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence, Union
 
 from attrs import define, field
-from fastapi import FastAPI
 from pystac import Collection
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
@@ -13,17 +11,29 @@ from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from urllib3 import Retry
 
-from ..settings import PySTACSettings
-from .base import STACBackend
+from .settings import PySTACSettings, STACSettings
+
+stac_settings = STACSettings()
+pystac_settings = PySTACSettings()
 
 
 @define
-class stacApiBackend(STACBackend):
+class stacApiBackend:
     """PySTAC-Client Backend."""
 
     url: str = field()
-
     client: Client = field(init=False)
+
+    def __attrs_post_init__(self) -> None:
+        """Create Client."""
+        stac_api_io = StacApiIO(
+            max_retries=Retry(
+                total=pystac_settings.retry,
+                backoff_factor=pystac_settings.retry_factor,
+            ),
+        )
+
+        self.client = Client.open(self.url, stac_io=stac_api_io)
 
     def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
@@ -136,27 +146,41 @@ class stacApiBackend(STACBackend):
         col = self.add_data_cubes_if_missing(col)
         return col.to_dict()
 
-    def get_items(self, **kwargs) -> List[Dict]:
+    def get_items(
+        self,
+        collections: List[str],
+        ids: Optional[List[str]] = None,
+        bbox: Optional[Sequence[float]] = None,
+        intersects: Optional[Dict] = None,
+        datetime: Optional[Union[str, Sequence[str]]] = None,
+        query: Optional[Union[List, Dict]] = None,
+        filter: Optional[Dict] = None,
+        filter_lang: str = "cql2-json",
+        sortby: Optional[Union[str, List[str]]] = None,
+        fields: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        max_items: Optional[int] = None,
+        **kwargs,
+    ) -> List[Dict]:
         """Return List of STAC Items."""
-        return []
+        limit = limit or 100
+        max_items = max_items or 100
 
-    def get_lifespan(self):
-        """pystac lifespan function."""
+        items = self.client.search(
+            collections=collections,
+            ids=ids,
+            bbox=bbox,
+            intersects=intersects,
+            datetime=datetime,
+            query=query,
+            filter=filter,
+            filter_lang=filter_lang,
+            sortby=sortby,
+            fields=fields,
+            limit=limit,
+            max_items=max_items,
+        )
+        return list(items.items_as_dicts())
 
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            """init PySTAC Client."""
-            settings = PySTACSettings()
 
-            stac_api_io = StacApiIO(
-                max_retries=Retry(
-                    total=settings.retry,
-                    backoff_factor=settings.retry_factor,
-                ),
-            )
-
-            self.client = Client.open(self.url, stac_io=stac_api_io)
-            yield
-            self.client = None
-
-        return lifespan
+stac_backend = stacApiBackend(str(stac_settings.api_url))  # type: ignore
