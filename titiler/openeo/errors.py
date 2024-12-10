@@ -1,4 +1,4 @@
-"""titiler.openeo processes implementation errors."""
+"""titiler.openeo errors."""
 
 
 class OpenEOException(Exception):

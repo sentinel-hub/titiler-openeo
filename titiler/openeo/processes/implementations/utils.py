@@ -1,5 +1,7 @@
 """utils."""
 
+from typing import Dict
+
 from pyproj.crs import CRS as projCRS
 from pyproj.enums import WktVersion
 from rasterio.crs import CRS as rioCRS
@@ -12,3 +14,12 @@ def to_rasterio_crs(crs: projCRS) -> rioCRS:
         return rioCRS.from_wkt(crs.to_wkt(WktVersion.WKT1_GDAL))
     else:
         return rioCRS.from_wkt(crs.to_wkt())
+
+
+def _props_to_datename(props: Dict) -> str:
+    if d := props["datetime"]:
+        return d
+
+    start_date = props["start_datetime"]
+    end_date = props["end_datetime"]
+    return start_date if start_date else end_date

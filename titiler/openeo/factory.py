@@ -5,6 +5,7 @@ from attrs import define
 from fastapi import Path
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from starlette.requests import Request
@@ -15,9 +16,8 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.models import OPENEO_VERSION
-from titiler.openeo.processes import process_registry
 from titiler.openeo.services import ServicesStore
-from titiler.openeo.stacapi import stac_backend
+from titiler.openeo.stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
@@ -27,6 +27,8 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
+    stac_client: stacApiBackend
+    process_registry: ProcessRegistry
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -193,7 +195,9 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_processes(request: Request):
             """Lists all predefined processes and returns detailed process descriptions, including parameters and return values."""
-            processes = [process.spec for process in process_registry[None].values()]
+            processes = [
+                process.spec for process in self.process_registry[None].values()
+            ]
             return {"processes": processes, "links": []}
 
         # Collections
@@ -216,7 +220,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_collections(request: Request):
             """Lists available collections with at least the required information."""
-            collections = stac_backend.get_collections()
+            collections = self.stac_client.get_collections()
             for collection in collections:
                 # TODO: add links
                 collection["links"] = []
@@ -252,7 +256,7 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            collection = stac_backend.get_collection(collection_id)
+            collection = self.stac_client.get_collection(collection_id)
 
             # TODO: add links
             collection["links"] = []
@@ -505,5 +509,7 @@ class EndpointsFactory(BaseFactory):
                     break
 
             parsed_graph = OpenEOProcessGraph(pg_data=process_graph)
-            pg_callable = parsed_graph.to_callable(process_registry=process_registry)
+            pg_callable = parsed_graph.to_callable(
+                process_registry=self.process_registry
+            )
             return pg_callable()

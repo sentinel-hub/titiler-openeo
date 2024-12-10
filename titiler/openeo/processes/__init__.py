@@ -6,11 +6,9 @@ from pathlib import Path
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.process_registry import Process
 
-from .implementations import (  # apply_pixel_selection,
+from .implementations import (
     clip,
     linear_scale_range,
-    load_collection,
-    load_collection_and_reduce,
     normalized_difference,
     save_result,
 )
@@ -18,38 +16,26 @@ from .implementations.core import process
 
 json_path = Path(__file__).parent / "specs"
 process_json_paths = [pg_path for pg_path in (json_path).glob("*.json")]  #  noqa: C416
-DEFAULT_PROCESSES = {f.stem: json.load(open(f)) for f in process_json_paths}
+PROCESS_SPECIFICATIONS = {f.stem: json.load(open(f)) for f in process_json_paths}
 
 # `process` is wrapped around each registered implementation
 process_registry = ProcessRegistry(wrap_funcs=[process])
 process_registry["normalized_difference"] = Process(
-    spec=DEFAULT_PROCESSES["normalized_difference"],
+    spec=PROCESS_SPECIFICATIONS["normalized_difference"],
     implementation=normalized_difference,
 )
 process_registry["clip"] = process_registry["clip"] = Process(
-    spec=DEFAULT_PROCESSES["clip"], implementation=clip
+    spec=PROCESS_SPECIFICATIONS["clip"], implementation=clip
 )
 process_registry["linear_scale_range"] = process_registry["linear_scale_range"] = (
     Process(
-        spec=DEFAULT_PROCESSES["linear_scale_range"], implementation=linear_scale_range
+        spec=PROCESS_SPECIFICATIONS["linear_scale_range"],
+        implementation=linear_scale_range,
     )
 )
-process_registry["load_collection"] = process_registry["load_collection"] = Process(
-    spec=DEFAULT_PROCESSES["load_collection"], implementation=load_collection
-)
-process_registry["load_collection_and_reduce"] = process_registry[
-    "load_collection_and_reduce"
-] = Process(
-    spec=DEFAULT_PROCESSES["load_collection_and_reduce"],
-    implementation=load_collection_and_reduce,
-)
-# process_registry["apply_pixel_selection"] = process_registry["apply_pixel_selection"] = Process(
-#     spec=DEFAULT_PROCESSES["apply_pixel_selection"], implementation=apply_pixel_selection
-# )
 process_registry["save_result"] = process_registry["save_result"] = Process(
-    spec=DEFAULT_PROCESSES["save_result"], implementation=save_result
+    spec=PROCESS_SPECIFICATIONS["save_result"], implementation=save_result
 )
-
 
 #  Import these pre-defined processes from openeo_processes_dask and register them into registry
 # processes_from_module = [

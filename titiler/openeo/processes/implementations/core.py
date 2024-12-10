@@ -198,7 +198,7 @@ from typing import Optional
 
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
 
-from .errors import ProcessParameterMissing
+from ...errors import ProcessParameterMissing
 
 logger = logging.getLogger(__name__)
 
