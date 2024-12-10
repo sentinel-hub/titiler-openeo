@@ -8,15 +8,12 @@ from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.services.local import LocalStore
-from titiler.openeo.settings import ApiSettings, STACSettings
-from titiler.openeo.stac import get_stac_backend
+from titiler.openeo.settings import ApiSettings
+from titiler.openeo.stac import stac_backend
 
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
-stac_settings = STACSettings()
-
-stac_backend = get_stac_backend(str(stac_settings.api_url))
 
 
 ###############################################################################
@@ -69,8 +66,5 @@ app.add_middleware(
 )
 
 # Register OpenEO endpoints
-endpoints = EndpointsFactory(
-    stac_backend=stac_backend,
-    services_store=LocalStore(),
-)
+endpoints = EndpointsFactory(services_store=LocalStore())
 app.include_router(endpoints.router)

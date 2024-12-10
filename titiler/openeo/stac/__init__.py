@@ -2,7 +2,10 @@
 
 from urllib.parse import urlparse
 
+from ..settings import STACSettings
 from .base import STACBackend  # noqa
+
+stac_settings = STACSettings()
 
 
 def get_stac_backend(url: str, **kwargs):
@@ -20,3 +23,6 @@ def get_stac_backend(url: str, **kwargs):
 
     else:
         raise ValueError(f"Unsupported STAC backend: {url}")
+
+
+stac_backend = get_stac_backend(str(stac_settings.api_url))

@@ -27,6 +27,7 @@ dependencies = [
     "titiler.core==0.19.2",
     "titiler.mosaic==0.19.2",
     "starlette-cramjam>=0.4,<0.5",
+    "openeo-pg-parser-networkx",
     "pydantic-settings~=2.0",
 ]
 

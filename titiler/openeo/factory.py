@@ -1,9 +1,12 @@
 """titiler.openeo endpoint Factory."""
 
+import morecantile
 from attrs import define
 from fastapi import Path
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
@@ -12,9 +15,9 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.models import OPENEO_VERSION
-from titiler.openeo.processes import ProcessesStore
+from titiler.openeo.processes import process_registry
 from titiler.openeo.services import ServicesStore
-from titiler.openeo.stac import STACBackend
+from titiler.openeo.stac import stac_backend
 
 STAC_VERSION = "1.0.0"
 
@@ -23,10 +26,9 @@ STAC_VERSION = "1.0.0"
 class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
-    stac_backend: STACBackend
     services_store: ServicesStore
 
-    def register_routes(self):
+    def register_routes(self):  # noqa: C901
         """Register Routes."""
 
         ###########################################################################################
@@ -191,10 +193,8 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_processes(request: Request):
             """Lists all predefined processes and returns detailed process descriptions, including parameters and return values."""
-            return {
-                "processes": [p for _, p in ProcessesStore.data.items()],
-                "links": [],
-            }
+            processes = [process.spec for process in process_registry[None].values()]
+            return {"processes": processes, "links": []}
 
         # Collections
         # Ref: https://openeo.org/documentation/1.0/developers/profiles/api.html#collections
@@ -216,7 +216,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_collections(request: Request):
             """Lists available collections with at least the required information."""
-            collections = self.stac_backend.get_collections()
+            collections = stac_backend.get_collections()
             for collection in collections:
                 # TODO: add links
                 collection["links"] = []
@@ -252,7 +252,7 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            collection = self.stac_backend.get_collection(collection_id)
+            collection = stac_backend.get_collection(collection_id)
 
             # TODO: add links
             collection["links"] = []
@@ -483,11 +483,27 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Create map tile."""
-            _ = self.services_store.get_service(service_id)
+            process_graph = self.services_store.get_service(service_id)
 
-            # TODO:
-            # 1. parse service graph
-            # 2. construct STAC query from load_collection process
-            # 3. construct output/image process options
-            # 4. return image
-            pass
+            tms = morecantile.tms.get("WebMercatorQuad")
+
+            # Overwrite spatial extent for `load_collection`
+            for _, node in process_graph.items():
+                if node["process_id"] in [
+                    "load_collection",
+                    "load_collection_and_reduce",
+                ]:
+                    spatial_extent = BoundingBox(
+                        *tms.xy_bounds(x, y, z),
+                        crs=tms.crs.to_epsg(),
+                    )
+                    node["arguments"]["spatial_extent"] = (
+                        spatial_extent.model_json_dumps(exclude_none=True)
+                    )
+                    node["arguments"]["width"] = 256
+                    node["arguments"]["height"] = 256
+                    break
+
+            parsed_graph = OpenEOProcessGraph(pg_data=process_graph)
+            pg_callable = parsed_graph.to_callable(process_registry=process_registry)
+            return pg_callable()
