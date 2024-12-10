@@ -1,58 +1,40 @@
 """titiler.openeo.processes."""
 
+import builtins
+import importlib
+import inspect
 import json
+import keyword
 from pathlib import Path
 
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.process_registry import Process
 
-from .implementations import (
-    clip,
-    linear_scale_range,
-    normalized_difference,
-    save_result,
-)
 from .implementations.core import process
 
-json_path = Path(__file__).parent / "specs"
-process_json_paths = [pg_path for pg_path in (json_path).glob("*.json")]  #  noqa: C416
-PROCESS_SPECIFICATIONS = {f.stem: json.load(open(f)) for f in process_json_paths}
+json_path = Path(__file__).parent / "data"
+PROCESS_SPECIFICATIONS = {}
+for f in (json_path).glob("*.json"):
+    spec_json = json.load(open(f))
+    process_name = spec_json["id"]
+    # Make sure we don't overwrite any builtins (e.g min -> _min)
+    if spec_json["id"] in dir(builtins) or keyword.iskeyword(spec_json["id"]):
+        process_name = "_" + spec_json["id"]
 
-# `process` is wrapped around each registered implementation
-process_registry = ProcessRegistry(wrap_funcs=[process])
-process_registry["normalized_difference"] = Process(
-    spec=PROCESS_SPECIFICATIONS["normalized_difference"],
-    implementation=normalized_difference,
-)
-process_registry["clip"] = process_registry["clip"] = Process(
-    spec=PROCESS_SPECIFICATIONS["clip"], implementation=clip
-)
-process_registry["linear_scale_range"] = process_registry["linear_scale_range"] = (
-    Process(
-        spec=PROCESS_SPECIFICATIONS["linear_scale_range"],
-        implementation=linear_scale_range,
+    PROCESS_SPECIFICATIONS[process_name] = spec_json
+
+PROCESS_IMPLEMENTATIONS = [
+    func
+    for _, func in inspect.getmembers(
+        importlib.import_module("titiler.openeo.processes.implementations"),
+        inspect.isfunction,
     )
-)
-process_registry["save_result"] = process_registry["save_result"] = Process(
-    spec=PROCESS_SPECIFICATIONS["save_result"], implementation=save_result
-)
+]
 
-#  Import these pre-defined processes from openeo_processes_dask and register them into registry
-# processes_from_module = [
-#     func
-#     for _, func in inspect.getmembers(
-#         importlib.import_module("openeo_processes_dask.process_implementations"),
-#         inspect.isfunction,
-#     )
-# ]
+# Create Processes Registry
+process_registry = ProcessRegistry(wrap_funcs=[process])
 
-# specs_module = importlib.import_module("openeo_processes_dask.specs")
-# specs = {
-#     func.__name__: getattr(specs_module, func.__name__)
-#     for func in processes_from_module
-# }
-
-# for func in processes_from_module:
-#     process_registry[func.__name__] = Process(
-#         spec=specs[func.__name__], implementation=func
-#     )
+for func in PROCESS_IMPLEMENTATIONS:
+    process_registry[func.__name__] = Process(
+        spec=PROCESS_SPECIFICATIONS[func.__name__], implementation=func
+    )

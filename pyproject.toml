@@ -106,13 +106,12 @@ select = [
     "B",  # flake8-bugbear
 ]
 ignore = [
+    "D103",
+    "D101",
     "E501",  # line too long, handled by black
     "B008",  # do not perform function calls in argument defaults
     "B905",  # ignore zip() without an explicit strict= parameter, only support with python >3.10
 ]
-
-[tool.ruff.lint.extend-per-file-ignores]
-"models.py" = ["D101"]
 
 [tool.mypy]
 no_implicit_optional = true

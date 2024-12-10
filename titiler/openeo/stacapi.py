@@ -275,6 +275,9 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # If Not BANDS, we use the assets list from the first Item
+        bands = bands or list(items[0]["assets"])
+
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
@@ -290,12 +293,12 @@ class LoadCollection:
             projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
             crs = to_rasterio_crs(projcrs)
 
-            # TODO: convert `bands` into assets
             tasks = create_tasks(
                 _reader,
                 items,
                 MAX_THREADS,
                 bbox,
+                assets=bands,
                 bounds_crs=crs,
                 dst_crs=crs,
                 width=width,
@@ -331,6 +334,9 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # If Not BANDS, we use the assets list from the first Item
+        bands = bands or list(items[0]["assets"])
+
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
@@ -351,6 +357,7 @@ class LoadCollection:
                 items,
                 _reader,
                 bbox,
+                assets=bands,
                 bounds_crs=crs,
                 dst_crs=crs,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
