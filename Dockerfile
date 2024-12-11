@@ -1,5 +1,5 @@
 # Dockerfile for running titiler application with uvicorn server
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.11
 
 FROM python:${PYTHON_VERSION}-slim
 
