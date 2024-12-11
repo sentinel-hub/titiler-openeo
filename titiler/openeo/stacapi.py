@@ -352,7 +352,6 @@ class LoadCollection:
             projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
             crs = to_rasterio_crs(projcrs)
 
-            # TODO: convert `bands` into assets
             img, _ = mosaic_reader(
                 items,
                 _reader,
