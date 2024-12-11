@@ -1,7 +1,7 @@
 {
-    "id": "load_collection",
-    "summary": "Load a collection",
-    "description": "Loads a collection from the current back-end by its id and returns it as a processable data cube. The data that is added to the data cube can be restricted with the parameters `spatial_extent`, `temporal_extent`, `bands` and `properties`. If no data is available for the given extents, a `NoDataAvailable` exception is thrown.\n\n**Remarks:**\n\n* The bands (and all dimensions that specify nominal dimension labels) are expected to be ordered as specified in the metadata if the `bands` parameter is set to `null`.\n* If no additional parameter is specified this would imply that the whole data set is expected to be loaded. Due to the large size of many data sets, this is not recommended and may be optimized by back-ends to only load the data that is actually required after evaluating subsequent processes such as filters. This means that the values in the data cube should be processed only after the data has been limited to the required extent and as a consequence also to a manageable size.",
+    "id": "load_collection_and_reduce",
+    "summary": "Load a collection and return an imagedata object",
+    "description": "Loads a collection from the current back-end by its id and returns it as a ImageData Object.",
     "categories": [
         "cubes",
         "import"
@@ -197,13 +197,32 @@
             ],
             "default": null,
             "optional": true
+        },
+        {
+            "name": "pixel_selection",
+            "description": "Pixel Selection method.",
+            "schema": {
+                "type": "string",
+                "enum": [
+                    "first",
+                    "highest",
+                    "lowest",
+                    "mean",
+                    "median",
+                    "stdev",
+                    "lastbandlow",
+                    "lastbandhight",
+                    "count"
+                ]
+            },
+            "default": "first"
         }
     ],
     "returns": {
         "description": "A data cube for further processing. The dimensions and dimension properties (name, type, labels, reference system and resolution) correspond to the collection's metadata, but the dimension labels are restricted as specified in the parameters.",
         "schema": {
             "type": "object",
-            "subtype": "datacube"
+            "subtype": "imagedata"
         }
     },
     "exceptions": {

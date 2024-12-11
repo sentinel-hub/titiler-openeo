@@ -61,32 +61,6 @@ class PySTACSettings(BaseSettings):
     )
 
 
-class PgSTACSettings(BaseSettings):
-    """Settings for PgSTAC Client"""
-
-    # see https://www.psycopg.org/psycopg3/docs/api/pool.html#the-connectionpool-class for options
-    # The minimum number of connection the pool will hold
-    db_min_conn_size: int = 1
-
-    # The maximum number of connections the pool will hold
-    db_max_conn_size: int = 10
-
-    # Maximum number of requests that can be queued to the pool
-    db_max_queries: int = 50000
-
-    # Maximum time, in seconds, that a connection can stay unused in the pool before being closed, and the pool shrunk.
-    db_max_idle: float = 300
-
-    # Number of background worker threads used to maintain the pool state
-    db_num_workers: int = 3
-
-    model_config = SettingsConfigDict(
-        env_prefix="TITILER_OPENEO_PGSTAC_",
-        env_file=".env",
-        extra="ignore",
-    )
-
-
 class CacheSettings(BaseSettings):
     """Cache settings"""
 
