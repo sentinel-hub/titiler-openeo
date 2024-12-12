@@ -536,6 +536,8 @@ class EndpointsFactory(BaseFactory):
                         north=bounds[3],
                         crs=tms.crs.to_epsg(),
                     )
+                    # TODO: Check intersection with spatial_extent
+
                     node["arguments"]["spatial_extent"] = spatial_extent.model_dump(
                         exclude_none=True
                     )

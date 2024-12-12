@@ -3,7 +3,7 @@
         "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
         "service": {
             "id": "31cbbbc1-9095-42f8-b4a5-fd36a653adaa",
-            "title": "New Zealand After",
+            "title": "New Zealand Floods 2023 (After) - RGB",
             "type": "XYZ",
             "enabled": true,
             "process": {
@@ -49,7 +49,7 @@
         "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
         "service": {
             "id": "aa1f8f0f-8ec5-4d08-b271-b2ae85a52285",
-            "title": "New Zealand Before",
+            "title": "New Zealand Floods 2023 (Before) - RGB",
             "type": "XYZ",
             "enabled": true,
             "process": {
@@ -88,6 +88,177 @@
                         "result": true
                     }
                 }
+            }
+        }
+    },
+    "a1ac985d-14e8-4430-8b4b-094fb26759eb": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "a1ac985d-14e8-4430-8b4b-094fb26759eb",
+            "title": "Maui Fire 2023 (After) - RGB",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "parameters": [],
+                "process_graph": {
+                    "1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "visual"
+                            ],
+                            "id": "MAXAR_Maui_Hawaii_fires_Aug_23",
+                            "spatial_extent": {
+                                "west": -156.7541149008616,
+                                "south": 20.61864421171153,
+                                "east": -156.23880228630824,
+                                "north": 21.03020549865336
+                            },
+                            "temporal_extent": [
+                                "2023-08-10T00:00:00Z",
+                                "2023-08-31T00:00:00Z"
+                            ]
+                        }
+                    },
+                    "2": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "result": true
+                    }
+                }
+            }
+        }
+    },
+    "a657b83e-4455-4ba4-9754-48f7111e448d": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "a657b83e-4455-4ba4-9754-48f7111e448d",
+            "title": "Maui Fire 2023 (Active) - RGB",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "parameters": [],
+                "process_graph": {
+                    "1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "visual"
+                            ],
+                            "id": "MAXAR_Maui_Hawaii_fires_Aug_23",
+                            "spatial_extent": {
+                                "west": -156.7541149008616,
+                                "south": 20.61864421171153,
+                                "east": -156.23880228630824,
+                                "north": 21.03020549865336
+                            },
+                            "temporal_extent": [
+                                "2023-08-01T00:00:00Z",
+                                "2023-08-10T00:00:00Z"
+                            ]
+                        }
+                    },
+                    "2": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "result": true
+                    }
+                }
+            }
+        }
+    },
+    "998b16dc-303d-436d-bd3d-df71cfa29839": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "998b16dc-303d-436d-bd3d-df71cfa29839",
+            "title": "Georgia Shovi Landslide 2023 - RGB",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_shovi_georgia_landslide_8Aug23",
+                      "spatial_extent": {
+                        "west": 43.093246706359785,
+                        "east": 44.52570426122524,
+                        "south": 42.25149461995011,
+                        "north": 43.28406884410177
+                      },
+                      "temporal_extent": [
+                        "2023-08-01T00:00:00Z",
+                        "2023-08-31T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "image2": {
+                    "process_id": "image_indexes",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "indexes": [
+                        5,
+                        4,
+                        3
+                      ]
+                    }
+                  },
+                  "apply4": {
+                    "process_id": "apply",
+                    "arguments": {
+                      "data": {
+                        "from_node": "image2"
+                      },
+                      "process": {
+                        "process_graph": {
+                          "linear1": {
+                            "process_id": "linear_scale_range",
+                            "arguments": {
+                              "inputMin": 0,
+                              "inputMax": 1000,
+                              "outputMax": 255,
+                              "x": {"from_parameter": "x"}
+                            },
+                            "result": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "apply4"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
             }
         }
     }

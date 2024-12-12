@@ -5,8 +5,10 @@ from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
+from titiler.core.errors import add_exception_handlers
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
+from titiler.openeo.errors import DEFAULT_STATUS_CODES
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
@@ -90,3 +92,5 @@ endpoints = EndpointsFactory(
     process_registry=process_registry,
 )
 app.include_router(endpoints.router)
+
+add_exception_handlers(app, DEFAULT_STATUS_CODES)

@@ -210,12 +210,14 @@ def clip(data, in_min, in_max):
 
 
 def linear_scale_range(
-    data,
-    in_min: float,
-    in_max: float,
-    out_min: float = 0.0,
-    out_max: float = 1.0,
+    x,
+    inputMin: float,
+    inputMax: float,
+    outputMin: float = 0.0,
+    outputMax: float = 1.0,
 ):
-    minv, maxv = min(in_min, in_max), max(in_min, in_max)
-    data = clip(data, minv, maxv)
-    return ((data - in_min) / (in_max - in_min)) * (out_max - out_min) + out_min
+    minv, maxv = min(inputMin, inputMax), max(inputMin, inputMax)
+    x = clip(x, minv, maxv)
+    return ((x - inputMin) / (inputMax - inputMin)) * (
+        outputMax - outputMin
+    ) + outputMin
