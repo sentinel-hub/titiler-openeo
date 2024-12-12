@@ -33,13 +33,14 @@ class ApiSettings(BaseSettings):
         return [method.strip().upper() for method in v.split(",")]
 
 
-class STACSettings(BaseSettings):
-    """STAC settings."""
+class BackendSettings(BaseSettings):
+    """OpenEO Backend settings."""
 
-    api_url: Union[AnyHttpUrl, PostgresDsn]
+    stac_api_url: Union[AnyHttpUrl, PostgresDsn]
+    service_store_url: Union[AnyHttpUrl, str]
 
     model_config = SettingsConfigDict(
-        env_prefix="TITILER_OPENEO_STAC_",
+        env_prefix="TITILER_OPENEO_",
         env_file=".env",
         extra="ignore",
     )

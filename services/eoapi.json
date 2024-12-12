@@ -1,0 +1,94 @@
+{
+    "31cbbbc1-9095-42f8-b4a5-fd36a653adaa": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "31cbbbc1-9095-42f8-b4a5-fd36a653adaa",
+            "title": "New Zealand After",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "parameters": [],
+                "process_graph": {
+                    "1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "visual"
+                            ],
+                            "id": "MAXAR_New_Zealand_Flooding23",
+                            "spatial_extent": {
+                                "west": 174.0,
+                                "south": -37.0,
+                                "east": 175.0,
+                                "north": -35.0
+                            },
+                            "temporal_extent": [
+                                "2023-01-01T00:00:00Z",
+                                "2023-12-31T23:59:59Z"
+                            ]
+                        }
+                    },
+                    "2": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "result": true
+                    }
+                }
+            }
+        }
+    },
+    "aa1f8f0f-8ec5-4d08-b271-b2ae85a52285": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "aa1f8f0f-8ec5-4d08-b271-b2ae85a52285",
+            "title": "New Zealand Before",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "parameters": [],
+                "process_graph": {
+                    "1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "visual"
+                            ],
+                            "id": "MAXAR_New_Zealand_Flooding23",
+                            "spatial_extent": {
+                                "west": 174.0,
+                                "south": -37.0,
+                                "east": 175.0,
+                                "north": -35.0
+                            },
+                            "temporal_extent": [
+                                "2010-01-01T00:00:00Z",
+                                "2022-12-31T23:59:59Z"
+                            ]
+                        }
+                    },
+                    "2": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "result": true
+                    }
+                }
+            }
+        }
+    }
+}

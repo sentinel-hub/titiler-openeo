@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from attrs import define, field
 
 
-@define(kw_only=True)
+@define()
 class ServicesStore(metaclass=abc.ABCMeta):
     """ABC Class defining STAC Backends."""
 

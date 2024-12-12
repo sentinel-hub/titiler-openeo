@@ -1,0 +1,175 @@
+{
+    "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
+            "type": "XYZ",
+            "title": "simple_3-bands_rgb_dynamic_bbox",
+            "enabled": true,
+            "process": {
+                "parameters": [
+                    {
+                        "description": "",
+                        "name": "spatial_extent_east",
+                        "schema": {}
+                    },
+                    {
+                        "description": "",
+                        "name": "spatial_extent_north",
+                        "schema": {}
+                    },
+                    {
+                        "description": "",
+                        "name": "spatial_extent_south",
+                        "schema": {}
+                    },
+                    {
+                        "description": "",
+                        "name": "spatial_extent_west",
+                        "schema": {}
+                    }
+                ],
+                "process_graph": {
+                    "1": {
+                        "arguments": {
+                            "bands": [
+                                "B04",
+                                "B03",
+                                "B02"
+                            ],
+                            "id": "sentinel-2-global-mosaics",
+                            "spatial_extent": {
+                                "east": {
+                                    "from_parameter": "spatial_extent_east"
+                                },
+                                "north": {
+                                    "from_parameter": "spatial_extent_north"
+                                },
+                                "south": {
+                                    "from_parameter": "spatial_extent_south"
+                                },
+                                "west": {
+                                    "from_parameter": "spatial_extent_west"
+                                }
+                            },
+                            "temporal_extent": [
+                                "2024-06-01T00:00:00Z",
+                                "2024-07-30T23:59:59Z"
+                            ]
+                        },
+                        "process_id": "load_collection_and_reduce"
+                    },
+                    "2": {
+                        "arguments": {
+                            "data": {
+                                "from_node": "3"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "process_id": "save_result",
+                        "result": true
+                    },
+                    "3": {
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "process": {
+                                "process_graph": {
+                                    "1": {
+                                        "arguments": {
+                                            "inputMax": 0.4,
+                                            "inputMin": 0,
+                                            "outputMax": 255,
+                                            "x": {
+                                                "from_parameter": "x"
+                                            }
+                                        },
+                                        "process_id": "linear_scale_range",
+                                        "result": true
+                                    }
+                                }
+                            }
+                        },
+                        "process_id": "apply"
+                    }
+                }
+            }
+        }
+    },
+    "31cbbbc1-9095-42f8-b4a5-fd36a653adaa": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "31cbbbc1-9095-42f8-b4a5-fd36a653adaa",
+            "title": "simple_3-bands_rgb",
+            "type": "XYZ",
+            "enabled": true,
+            "process": {
+                "parameters": [],
+                "process_graph": {
+                    "1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "B04",
+                                "B03",
+                                "B02"
+                            ],
+                            "id": "sentinel-2-global-mosaics",
+                            "spatial_extent": {
+                                "west": 14.503132250376241,
+                                "south": 45.98989222284457,
+                                "east": 14.578437275398317,
+                                "north": 46.04381770188389
+                            },
+                            "temporal_extent": [
+                                "2024-06-01T00:00:00Z",
+                                "2024-07-30T23:59:59Z"
+                            ]
+                        }
+                    },
+                    "2": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "3"
+                            },
+                            "format": "PNG",
+                            "options": {
+                                "datatype": "byte"
+                            }
+                        },
+                        "result": true
+                    },
+                    "3": {
+                        "process_id": "apply",
+                        "arguments": {
+                            "data": {
+                                "from_node": "1"
+                            },
+                            "process": {
+                                "process_graph": {
+                                    "1": {
+                                        "process_id": "linear_scale_range",
+                                        "arguments": {
+                                            "inputMax": 0.4,
+                                            "inputMin": 0,
+                                            "outputMax": 255,
+                                            "x": {
+                                                "from_parameter": "x"
+                                            }
+                                        },
+                                        "result": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
