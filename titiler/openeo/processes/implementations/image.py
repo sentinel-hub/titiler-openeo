@@ -12,12 +12,15 @@ def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
     if not all(v > 0 for v in indexes):
         raise IndexError(f"Indexes value must be >= 1, {indexes}")
 
+    if not all(v <= data.count + 1 for v in indexes):
+        raise IndexError(f"Indexes value must be =< {data.count + 1}, {indexes}")
+
     stats = None
     if stats := data.dataset_statistics:
         stats = [stats[ix - 1] for ix in indexes]
 
     return ImageData(
-        data.array[indexes],
+        data.array[[idx - 1 for idx in indexes]],
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,

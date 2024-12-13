@@ -465,7 +465,13 @@ class EndpointsFactory(BaseFactory):
             """Lists supported secondary web service protocols."""
             return {
                 "XYZ": {
-                    "configuration": {},
+                    "configuration": {
+                        "tile_size": {
+                            "default": 256,
+                            "description": "Tile size in pixels.",
+                            "type": "number",
+                        }
+                    },
                     "process_parameters": [],
                     "title": "XYZ tiled web map",
                 }
@@ -516,6 +522,7 @@ class EndpointsFactory(BaseFactory):
         ):
             """Create map tile."""
             service = self.services_store.get_service(service_id)
+            tile_size = service.get("configuration", {}).get("tile_size", 256)
             process = deepcopy(service["process"])
 
             tms = morecantile.tms.get("WebMercatorQuad")
@@ -541,8 +548,8 @@ class EndpointsFactory(BaseFactory):
                     node["arguments"]["spatial_extent"] = spatial_extent.model_dump(
                         exclude_none=True
                     )
-                    node["arguments"]["width"] = 256
-                    node["arguments"]["height"] = 256
+                    node["arguments"]["width"] = int(tile_size)
+                    node["arguments"]["height"] = int(tile_size)
                     break
 
             for _, node in process["process_graph"].items():

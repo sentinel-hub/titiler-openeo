@@ -17,7 +17,7 @@ def apply(
 
     def _process_img(img: ImageData):
         return ImageData(
-            process(img.array, **context),  # type: ignore
+            process(x=img.array, **context),  # type: ignore
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,

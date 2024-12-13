@@ -171,42 +171,42 @@ def power(base, p):
     return base**p
 
 
-def _min(data, axis=None, keepdims=False):
-    return numpy.min(data, axis=axis, keepdims=keepdims)
+def _min(x, axis=None, keepdims=False):
+    return numpy.min(x, axis=axis, keepdims=keepdims)
 
 
-def _max(data, axis=None, keepdims=False):
-    return numpy.max(data, axis=axis, keepdims=keepdims)
+def _max(x, axis=None, keepdims=False):
+    return numpy.max(x, axis=axis, keepdims=keepdims)
 
 
-def median(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
-        return numpy.ma.median(data, axis=axis, keepdims=keepdims)
+def median(x, axis=None, keepdims=False):
+    if isinstance(x, numpy.ma.MaskedArray):
+        return numpy.ma.median(x, axis=axis, keepdims=keepdims)
 
-    return numpy.median(data, axis=axis, keepdims=keepdims)
-
-
-def mean(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
-        return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
-
-    return numpy.mean(data, axis=axis, keepdims=keepdims)
+    return numpy.median(x, axis=axis, keepdims=keepdims)
 
 
-def sd(data, axis=None, keepdims=False):
-    return numpy.std(data, axis=axis, keepdims=keepdims, ddof=1)
+def mean(x, axis=None, keepdims=False):
+    if isinstance(x, numpy.ma.MaskedArray):
+        return numpy.ma.mean(x, axis=axis, keepdims=keepdims)
+
+    return numpy.mean(x, axis=axis, keepdims=keepdims)
 
 
-def variance(data, axis=None, keepdims=False):
-    return numpy.var(data, axis=axis, keepdims=keepdims, ddof=1)
+def sd(x, axis=None, keepdims=False):
+    return numpy.std(x, axis=axis, keepdims=keepdims, ddof=1)
+
+
+def variance(x, axis=None, keepdims=False):
+    return numpy.var(x, axis=axis, keepdims=keepdims, ddof=1)
 
 
 def normalized_difference(x, y):
     return (x - y) / (x + y)
 
 
-def clip(data, in_min, in_max):
-    return numpy.clip(data, in_min, in_max)
+def clip(x, in_min, in_max):
+    return numpy.clip(x, in_min, in_max)
 
 
 def linear_scale_range(

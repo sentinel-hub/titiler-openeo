@@ -189,6 +189,9 @@
             "id": "998b16dc-303d-436d-bd3d-df71cfa29839",
             "title": "Georgia Shovi Landslide 2023 - RGB",
             "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
             "enabled": true,
             "process": {
                 "process_graph": {
@@ -219,8 +222,8 @@
                         "from_node": "load1"
                       },
                       "indexes": [
-                        5,
-                        4,
+                        1,
+                        2,
                         3
                       ]
                     }
@@ -228,18 +231,176 @@
                   "apply4": {
                     "process_id": "apply",
                     "arguments": {
-                      "data": {
-                        "from_node": "image2"
-                      },
+                      "data": {"from_node": "image2"},
                       "process": {
                         "process_graph": {
                           "linear1": {
                             "process_id": "linear_scale_range",
                             "arguments": {
-                              "inputMin": 0,
-                              "inputMax": 1000,
-                              "outputMax": 255,
-                              "x": {"from_parameter": "x"}
+                                "x": {"from_parameter": "x"},
+                                "inputMin": 0,
+                                "inputMax": 5000,
+                                "outputMin": 0,
+                                "outputMax": 255
+                            },
+                            "result": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "apply4"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
+    },
+    "af971b7c-004a-47df-833d-10408b4a6aa7": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "af971b7c-004a-47df-833d-10408b4a6aa7",
+            "title": "South-Africa Flooding 2022 - NRG",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "west": 29.987132801982625,
+                        "east": 31.587422555628876,
+                        "south": -30.8587632892144,
+                        "north": -28.886191362214085
+                      },
+                      "temporal_extent": [
+                        "2022-04-21T00:00:00Z",
+                        "2022-05-01T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "image2": {
+                    "process_id": "image_indexes",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "indexes": [
+                        8,
+                        1,
+                        2
+                      ]
+                    }
+                  },
+                  "apply4": {
+                    "process_id": "apply",
+                    "arguments": {
+                      "data": {"from_node": "image2"},
+                      "process": {
+                        "process_graph": {
+                          "linear1": {
+                            "process_id": "linear_scale_range",
+                            "arguments": {
+                                "x": {"from_parameter": "x"},
+                                "inputMin": 0,
+                                "inputMax": 5000,
+                                "outputMin": 0,
+                                "outputMax": 255
+                            },
+                            "result": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "apply4"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
+    },
+    "30222d15-9ef1-4cb4-bab1-3e5b61afabca": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "30222d15-9ef1-4cb4-bab1-3e5b61afabca",
+            "title": "South-Africa Flooding 2022 - NDVI",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "west": 29.987132801982625,
+                        "east": 31.587422555628876,
+                        "south": -30.8587632892144,
+                        "north": -28.886191362214085
+                      },
+                      "temporal_extent": [
+                        "2022-04-21T00:00:00Z",
+                        "2022-05-01T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "ndvi": {
+                    "process_id": "ndvi",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "nir": 8,
+                      "red": 1
+                    }
+                  },
+                  "apply4": {
+                    "process_id": "apply",
+                    "arguments": {
+                      "data": {"from_node": "ndvi"},
+                      "process": {
+                        "process_graph": {
+                          "linear1": {
+                            "process_id": "linear_scale_range",
+                            "arguments": {
+                                "x": {"from_parameter": "x"},
+                                "inputMin": -1,
+                                "inputMax": 1,
+                                "outputMin": 0,
+                                "outputMax": 255
                             },
                             "result": true
                           }
