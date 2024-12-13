@@ -79,7 +79,8 @@ class stacApiBackend:
     def getdimensions(self, collection: Collection) -> Dict[str, dc.Dimension]:
         """Get dimensions from collection"""
         dims = {}
-        """ Sptial extent """
+
+        # Spatial extent
         if collection.extent.spatial.bboxes:
             dims["x"] = dc.Dimension.from_dict(
                 {
@@ -101,7 +102,8 @@ class stacApiBackend:
                     ],
                 }
             )
-        """ Temporal extent """
+
+        # Temporal extent
         if collection.extent.temporal.intervals:
             dims["t"] = dc.Dimension.from_dict(
                 {
@@ -113,7 +115,7 @@ class stacApiBackend:
                 }
             )
 
-        """ Add spectral bands """
+        # Spectral bands
         # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
         if (
             eo.EOExtension.has_extension(collection)
