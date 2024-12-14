@@ -1,6 +1,7 @@
 """titiler.openeo.processes."""
 
 from .apply import *  # noqa
+from .arrays import *  # noqa
 from .data_model import RasterStack  # noqa
 from .image import *  # noqa
 from .indices import *  # noqa

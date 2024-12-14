@@ -2,9 +2,11 @@
 
 from typing import Sequence
 
+import numpy
+
 from .data_model import ImageData
 
-__all__ = ["image_indexes"]
+__all__ = ["image_indexes", "to_array"]
 
 
 def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
@@ -29,3 +31,8 @@ def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
         dataset_statistics=stats,
         cutline_mask=data.cutline_mask,
     )
+
+
+def to_array(data: ImageData) -> numpy.ma.MaskedArray:
+    """Convert ImageData to array."""
+    return data.array
