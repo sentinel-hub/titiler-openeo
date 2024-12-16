@@ -6,7 +6,7 @@ import numpy
 
 from .data_model import ImageData
 
-__all__ = ["image_indexes", "to_array"]
+__all__ = ["image_indexes", "to_array", "color_formula"]
 
 
 def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
@@ -36,3 +36,8 @@ def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
 def to_array(data: ImageData) -> numpy.ma.MaskedArray:
     """Convert ImageData to array."""
     return data.array
+
+
+def color_formula(data: ImageData, formula: str) -> ImageData:
+    """Apply color formula to ImageData."""
+    return data.apply_color_formula(formula)

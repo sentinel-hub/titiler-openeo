@@ -587,7 +587,14 @@ class EndpointsFactory(BaseFactory):
                     tile_bounds = tms.xy_bounds(x, y, z)
 
                     # Check if the tile is out of bounds
-                    if extent := node["arguments"].get("spatial_extent"):
+                    extent = node["arguments"].get("spatial_extent")
+                    if (
+                        extent
+                        and isinstance(extent.get("west"), (int, float))
+                        and isinstance(extent.get("south"), (int, float))
+                        and isinstance(extent.get("east"), (int, float))
+                        and isinstance(extent.get("north"), (int, float))
+                    ):
                         collection_bbox = [
                             extent["west"],
                             extent["south"],

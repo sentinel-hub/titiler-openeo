@@ -4,7 +4,7 @@
         "service": {
             "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
             "type": "XYZ",
-            "title": "simple_3-bands_rgb_dynamic_bbox",
+            "title": "sentinel-2 global mosaics 3 bands RGB",
             "enabled": true,
             "process": {
                 "parameters": [
@@ -62,7 +62,7 @@
                     "2": {
                         "arguments": {
                             "data": {
-                                "from_node": "3"
+                                "from_node": "color"
                             },
                             "format": "PNG",
                             "options": {
@@ -71,6 +71,15 @@
                         },
                         "process_id": "save_result",
                         "result": true
+                    },
+                    "color": {
+                        "arguments": {
+                            "data": {
+                                "from_node": "3"
+                            },
+                            "formula": "Gamma RGB 1.5 Sigmoidal RGB 10 0.3 Saturation 1"
+                        },
+                        "process_id": "color_formula"
                     },
                     "3": {
                         "arguments": {
@@ -81,14 +90,22 @@
                                 "process_graph": {
                                     "1": {
                                         "arguments": {
-                                            "inputMax": 3000,
+                                            "inputMax": 10000,
                                             "inputMin": 0,
                                             "outputMax": 255,
                                             "x": {
                                                 "from_parameter": "x"
                                             }
                                         },
-                                        "process_id": "linear_scale_range",
+                                        "process_id": "linear_scale_range"
+                                    },
+                                    "2": {
+                                        "process_id": "trunc",
+                                        "arguments": {
+                                            "x": {
+                                                "from_node": "1"
+                                            }
+                                        },
                                         "result": true
                                     }
                                 }

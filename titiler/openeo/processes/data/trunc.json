@@ -1,14 +1,14 @@
 {
-    "id": "ceil",
-    "summary": "Round fractions up",
-    "description": "The least integer greater than or equal to the number `x`.\n\nThe no-data value `null` is passed through and therefore gets propagated.",
+    "id": "trunc",
+    "summary": "Truncate fractions",
+    "description": "The integer part of the number `x`.\n\nThe no-data value `null` is passed through and therefore gets propagated.",
     "categories": [
         "math > rounding"
     ],
     "parameters": [
         {
             "name": "x",
-            "description": "A number to round up.",
+            "description": "A number to truncate.",
             "schema": {
                 "type": [
                     "number",
@@ -18,7 +18,7 @@
         }
     ],
     "returns": {
-        "description": "The number rounded up.",
+        "description": "The number truncated.",
         "schema": {
             "type": [
                 "integer",
@@ -37,19 +37,19 @@
             "arguments": {
                 "x": 3.5
             },
-            "returns": 4.0
+            "returns": 4
         },
         {
             "arguments": {
                 "x": -0.4
             },
-            "returns": 0.0
+            "returns": 0
         },
         {
             "arguments": {
                 "x": -3.5
             },
-            "returns": -3.0
+            "returns": -3
         }
     ],
     "links": [
