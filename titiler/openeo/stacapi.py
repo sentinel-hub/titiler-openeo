@@ -350,7 +350,7 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # TODO:
+        # TODO #18:
         # - Get PROJ information about the Items
         # - Estimate output size in Pixel and raise issue if too big
 
