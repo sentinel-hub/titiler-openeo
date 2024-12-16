@@ -37,10 +37,13 @@ services:
       # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       # TiTiler STAC API Config
       - TITILER_OPENEO_API_DEBUG=TRUE
-      # - TITILER_OPENEO_API_STAC_API_URL=${TITILER_OPENEO_API_STAC_API_URL}
+      - TITILER_OPENEO_STAC_API_URL=${TITILER_OPENEO_STAC_API_URL}
+      - TITILER_OPENEO_SERVICE_STORE_URL=${TITILER_OPENEO_SERVICE_STORE_URL}
     env_file:
       - path: .env
         required: false
+    volumes:
+      - ./services:/tmp/services
 
   openeo:
     platform: linux/amd64
