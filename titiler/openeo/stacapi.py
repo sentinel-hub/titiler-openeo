@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
 from attrs import define, field
+from cachetools import TTLCache, cached
+from cachetools.keys import hashkey
 from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Collection
 from pystac.extensions import datacube as dc
@@ -24,9 +26,10 @@ from .errors import NoDataAvailable, TemporalExtentEmpty
 from .processes.implementations.data_model import RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import SimpleSTACReader
-from .settings import PySTACSettings
+from .settings import CacheSettings, PySTACSettings
 
 pystac_settings = PySTACSettings()
+cache_config = CacheSettings()
 
 
 @define
@@ -47,6 +50,10 @@ class stacApiBackend:
             )
             self.client = Client.open(self.url, stac_io=stac_api_io)
 
+    @cached(  # type: ignore
+        TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),
+        key=lambda self, **kwargs: hashkey(self.url, **kwargs),
+    )
     def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
         collections = []
@@ -153,6 +160,12 @@ class stacApiBackend:
                     )
         return variables
 
+    @cached(  # type: ignore
+        TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),
+        key=lambda self, collection_id, **kwargs: hashkey(
+            self.url, collection_id, **kwargs
+        ),
+    )
     def get_collection(self, collection_id: str, **kwargs) -> Dict:
         """Return STAC Collection"""
         col = self.client.get_collection(collection_id)
