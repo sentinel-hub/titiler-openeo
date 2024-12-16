@@ -2,9 +2,13 @@
 
 ## Context
 
-openEO is an abstraction layer for Earth Observation (EO) processing and has steadily gained ground in the community. Several generally available data hubs provide openEO as a service, particularly the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/analyse/openeo), [Terrascope](https://terrascope.be), and [EODC](https://openeo.cloud/). Also, [EOEPCA+](https://eoepca.readthedocs.io/projects/processing/en/latest/design/processing-engine/openeo/) with its processing building block proliferates the deployment of openEO.
-To increase the value of openEO as an abstraction of core services like STAC based data collections, data processing methods, visualization services, and compute infrastructure, more commonly used raster processing and visualization services need to offer an openEO interface. For example, the [openEO Sentinel Hub driver](https://github.com/Open-EO/openeo-sentinelhub-python-driver) allows users to interact with Sentinel Hub features through an openEO interface.
-With [TiTiler](https://github.com/developmentseed/titiler), [Development Seed](https://github.com/developmentseed) provides dynamic tiling of STAC raster datasets and OGC Features as a core component of eoAPI, Development Seed’s open source, interoperable EO data services stack.
+openEO serves as an abstraction layer for Earth Observation (EO) processing and has gained significant traction within the community. Several data hubs now offer openEO as a service, notably the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/analyse/openeo), [Terrascope](https://terrascope.be), and [EODC](https://openeo.cloud/). Additionally, [EOEPCA+](https://eoepca.readthedocs.io/projects/processing/en/latest/design/processing-engine/openeo/), with its processing building block, is furthering the deployment of openEO.
+
+To enhance the value of openEO as an abstraction for essential services like STAC-based data collections, data processing methods, visualization services, and compute infrastructure, it is necessary for more commonly used raster processing and visualization services to provide an openEO interface. For instance, the [openEO Sentinel Hub driver](https://github.com/Open-EO/openeo-sentinelhub-python-driver) allows users to interact with Sentinel Hub features via an openEO interface. 
+
+Moreover, [TiTiler](https://github.com/developmentseed/titiler) facilitates dynamic tiling of STAC raster datasets and OGC Features, serving as a core component of eoAPI, Development Seed's open-source, interoperable EO data services stack.
+
+In this context, [Development Seed](https://developmentseed.org/) presents its own implementation of openEO, featuring a fast and lightweight solution to efficiently manage raster-based processes.
 
 ## Overview
 
