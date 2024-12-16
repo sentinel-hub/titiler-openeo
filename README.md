@@ -29,7 +29,7 @@ To install [`titiler-openeo`](titiler/openeo/main.py ), clone the repository and
 ```bash
 git clone https://github.com/developmentseed/titiler-openeo.git
 cd titiler-openeo
-python -m pip install -e ".[pystac]"
+python -m pip install -e .
 ```
 
 ## Usage
@@ -37,7 +37,7 @@ python -m pip install -e ".[pystac]"
 To run the application, use the following command:
 
 ```bash
-uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 80
+uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 ```
 
 ## Configuration
@@ -48,7 +48,7 @@ Configuration settings can be provided via environment variables or a .env file.
 
 Example `.env` file:
 
-TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
+TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
 
 ## Development
 
