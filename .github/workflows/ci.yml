@@ -62,13 +62,13 @@ jobs:
           python-version: '3.11'
 
       - name: Build api image
-        run: docker compose build -d api
+        run: docker compose build api
 
       - name: Launch api
         run: docker compose up -d api
         env:
-          TITILER_OPENEO_STAC_API_URL=https://stac.eoapi.dev
-          TITILER_OPENEO_SERVICE_STORE_URL=services/eoapi.json
+          TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
+          TITILER_OPENEO_SERVICE_STORE_URL: services/eoapi.json
 
       - name: Sleep for 10 seconds
         run: sleep 10s
@@ -89,9 +89,12 @@ jobs:
           cd openeo-test-suite
           python -m pytest src/openeo_test_suite/tests/collections --openeo-backend-url=http://0.0.0.0:8081
         env:
-          OPENEO_AUTH_METHOD=basic
-          OPENEO_AUTH_BASIC_USERNAME=anonymous
-          OPENEO_AUTH_BASIC_PASSWORD=password
+          OPENEO_AUTH_METHOD: basic
+          OPENEO_AUTH_BASIC_USERNAME: anonymous
+          OPENEO_AUTH_BASIC_PASSWORD: password
+
+      - name: Stop services
+        run: docker compose stop
 
   # publish:
   #   needs: [tests]
