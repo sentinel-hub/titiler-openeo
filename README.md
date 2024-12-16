@@ -19,7 +19,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 
 - STAC API integration with external STAC services
 - Synchronous processing
-- Various output formats (e.g., JPEG, PNG, COG)
+- Various output formats (e.g., JPEG, PNG)
 - Multiple supported processes
 - Dynamic tiling services
 - FastAPI-based application
@@ -109,7 +109,7 @@ Then, open the editor in your browser at http://localhost:8081.
 In the editor, set the openEO backend URL to http://localhost:8080.
 Login with the following credentials:
 
-- Username: `anynymous`
+- Username: `anonymous`
 - Password: `test`
 
 ## License
