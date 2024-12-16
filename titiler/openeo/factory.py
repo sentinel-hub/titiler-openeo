@@ -25,7 +25,6 @@ from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
 
 
-
 STAC_VERSION = "1.0.0"
 
 
@@ -549,15 +548,31 @@ class EndpointsFactory(BaseFactory):
                     )
                     # Check if the tile is out of bounds
                     existing_extent = node["arguments"].get("spatial_extent")
-                    if existing_extent:
+                    if (
+                        existing_extent
+                        and isinstance(existing_extent.get("west"), (int, float))
+                        and isinstance(existing_extent.get("south"), (int, float))
+                        and isinstance(existing_extent.get("east"), (int, float))
+                        and isinstance(existing_extent.get("north"), (int, float))
+                    ):
                         existing_extent = BoundingBox(**existing_extent)
                         if existing_extent.crs != spatial_extent.crs:
-                            transformer = Transformer.from_crs(existing_extent.crs, spatial_extent.crs, always_xy=True)
+                            transformer = Transformer.from_crs(
+                                existing_extent.crs, spatial_extent.crs, always_xy=True
+                            )
                             existing_extent = BoundingBox(
-                                west=transformer.transform(existing_extent.west, existing_extent.south)[0],
-                                south=transformer.transform(existing_extent.west, existing_extent.south)[1],
-                                east=transformer.transform(existing_extent.east, existing_extent.north)[0],
-                                north=transformer.transform(existing_extent.east, existing_extent.north)[1],
+                                west=transformer.transform(
+                                    existing_extent.west, existing_extent.south
+                                )[0],
+                                south=transformer.transform(
+                                    existing_extent.west, existing_extent.south
+                                )[1],
+                                east=transformer.transform(
+                                    existing_extent.east, existing_extent.north
+                                )[0],
+                                north=transformer.transform(
+                                    existing_extent.east, existing_extent.north
+                                )[1],
                                 crs=spatial_extent.crs,
                             )
                         existing_polygon = Polygon(
