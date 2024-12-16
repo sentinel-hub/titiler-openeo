@@ -109,7 +109,7 @@ Then, open the editor in your browser at http://localhost:8081.
 In the editor, set the openEO backend URL to http://localhost:8080.
 Login with the following credentials:
 
-- Username: `anynymous`
+- Username: `anonymous`
 - Password: `test`
 
 ## License
