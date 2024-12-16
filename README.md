@@ -97,7 +97,7 @@ python -m pytest
 
 ### Use the openEO editor
 
-To use the openEO editor, start the server as described in #usage section.
+To use the openEO editor, start the server as described in [usage](#usage) section.
 Then, run the following command:
 
 ```bash
