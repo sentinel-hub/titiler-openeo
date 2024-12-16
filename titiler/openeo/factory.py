@@ -479,6 +479,54 @@ class EndpointsFactory(BaseFactory):
                 }
             }
 
+        @self.router.post(
+            "/result",
+            response_class=Response,
+            summary="Process and download data synchronously",
+            response_model=models.Service,
+            response_model_exclude_none=True,
+            operation_id="compute-result",
+            responses={
+                200: {
+                    "content": {
+                        "image/png": {},
+                        "image/jpeg": {},
+                        "image/jpg": {},
+                    },
+                    "description": "Return an image.",
+                }
+            },
+            tags=["Data Processing"],
+        )
+        def openeo_result(
+            request: Request,
+            body: models.ResultRequest,
+            user=Depends(self.auth.validate),
+        ):
+            """Executes a user-defined process directly (synchronously) and the result will be
+            downloaded in the format specified in the process graph.
+
+            """
+            process = body.process.model_dump()
+
+            media_type = "image/png"
+            for _, node in process["process_graph"].items():
+                if node["process_id"] == "save_result":
+                    media_type = (
+                        "image/png"
+                        if node["arguments"]["format"] == "png"
+                        else "image/jpeg"
+                    )
+                    break
+
+            parsed_graph = OpenEOProcessGraph(pg_data=process)
+            pg_callable = parsed_graph.to_callable(
+                process_registry=self.process_registry
+            )
+            img = pg_callable()
+
+            return Response(img, media_type=media_type)
+
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
             responses={

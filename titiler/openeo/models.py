@@ -717,18 +717,17 @@ class ProcessArgumentValue(RootModel):
     Code generated using https://github.com/koxudaxi/datamodel-code-generator/
     """
 
-    root: Optional[
-        Union[
-            ProcessArgumentValue1,
-            str,
-            float,
-            bool,
-            List[Self],
-            ProcessGraphWithMetadata,
-            ProcessArgumentValue2,
-            ProcessArgumentValue3,
-        ]
-    ] = Field(
+    # Union[
+    #     ProcessArgumentValue1,
+    #     str,
+    #     float,
+    #     bool,
+    #     List[Self],
+    #     ProcessGraphWithMetadata,
+    #     ProcessArgumentValue2,
+    #     ProcessArgumentValue3,
+    # ]
+    root: Any = Field(
         None,
         json_schema_extra={
             "description": "Arguments for a process. See the API documentation for more information.",
@@ -787,8 +786,8 @@ class ProcessGraphWithMetadata(Process):
     description: Optional[str] = None
     parameters: Optional[List] = None
     returns: Optional[Dict[str, Any]] = None  # type: ignore
-    process_graph: Optional[Dict[str, ProcessGraph]] = Field(
-        None, json_schema_extra={"title": "Process Node"}
+    process_graph: Dict[str, ProcessGraph] = Field(
+        json_schema_extra={"title": "Process Node"}
     )
 
 
@@ -1540,6 +1539,15 @@ class ServiceTypes(RootModel):
     root: Dict[str, ServiceTypeMetadata] = Field(
         json_schema_extra={"description": "Map of supported secondary web services."},
     )
+
+
+class ResultRequest(BaseModel):
+    """Synchronous Result Request"""
+
+    process: ProcessGraphWithMetadata
+    budget: Optional[Budget] = None
+    plan: Optional[BillingPlan] = None
+    log_level: Optional[MinLogLevelDefault] = "info"
 
 
 JsonSchema.model_rebuild()
