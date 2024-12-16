@@ -1,0 +1,44 @@
+{
+    "id": "image_indexes",
+    "summary": "Select indexes from an ImageData.",
+    "description": "Return Image data with only selected indexes.",
+    "categories": [
+        "images",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An image.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        },
+        {
+            "name": "indexes",
+            "description": "The 1-based index of the image to retrieve.",
+            "schema":  {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        }
+    ],
+    "returns": {
+        "description": "The image with the selected indexes.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {
+        "IndexError": {
+            "message": "The indexes value is invalid and must be >= 1."
+        }
+    },
+    "examples": []
+}

@@ -13,11 +13,16 @@ def apply(
     context: Optional[Dict] = None,
 ) -> Union[RasterStack, ImageData]:
     """Apply process on Data."""
-    context = context or {}
+    positional_parameters = {"x": 0}
+    named_parameters = {"context": context}
 
     def _process_img(img: ImageData):
         return ImageData(
-            process(img.array, **context),  # type: ignore
+            process(
+                img.array,
+                positional_parameters=positional_parameters,
+                named_parameters=named_parameters,
+            ),
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,

@@ -1,0 +1,28 @@
+{
+  "id": "to_array",
+  "summary": "Convert ImageData to array.",
+  "description": "Gives the element with the specified index from the array.",
+  "categories": [
+    "images",
+    "arrays",
+    "reducer"
+  ],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "An ImageData object.",
+      "schema": {
+        "type": "object",
+        "subtype": "imagedata"
+      }
+    }
+  ],
+  "returns": {
+    "description": "The array from the ImageData object.",
+    "schema": {
+      "type": "array"
+    }
+  },
+  "exceptions": {},
+  "examples": []
+}

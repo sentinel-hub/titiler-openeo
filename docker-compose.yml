@@ -50,5 +50,3 @@ services:
     env_file:
       - path: .env
         required: false
-    depends_on:
-      - api

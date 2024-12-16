@@ -192,6 +192,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import inspect
 import logging
 from functools import wraps
 from typing import Optional
@@ -258,17 +259,16 @@ def process(f):
             else:
                 resolved_kwargs[k] = arg
 
-        # special_args = [
-        #     "axis",
-        #     "keepdims",
-        #     "source_transposed_axis",
-        #     "context",
-        #     "dim_labels",
-        # ]
-        # # Remove 'axis' and keepdims parameter if not expected in function signature.
-        # for arg in special_args:
-        #     if arg not in inspect.signature(f).parameters:
-        #         resolved_kwargs.pop(arg, None)
+        special_args = [
+            "axis",
+            "keepdims",
+            "context",
+            "dim_labels",
+        ]
+        # Remove 'axis' and keepdims parameter if not expected in function signature.
+        for arg in special_args:
+            if arg not in inspect.signature(f).parameters:
+                resolved_kwargs.pop(arg, None)
 
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
         if hasattr(f, "__name__"):

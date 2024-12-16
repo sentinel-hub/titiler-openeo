@@ -9,10 +9,15 @@
         {
             "name": "data",
             "description": "The data to deliver in the given file format.",
-            "schema": {
-                "type": "object",
-                "subtype": "imagedata"
-            }
+            "schema": [
+                {
+                    "type": "object",
+                    "subtype": "imagedata"
+                },
+                {
+                    "type": "array"
+                }
+            ]
         },
         {
             "name": "format",

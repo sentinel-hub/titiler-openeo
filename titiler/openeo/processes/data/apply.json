@@ -17,6 +17,9 @@
                 {
                     "type": "object",
                     "subtype": "imagedata"
+                },
+                {
+                    "type": "array"
                 }
             ]
         },
@@ -72,6 +75,9 @@
             {
                 "type": "object",
                 "subtype": "imagedata"
+            },
+            {
+                "type": "array"
             }
         ]
     },
