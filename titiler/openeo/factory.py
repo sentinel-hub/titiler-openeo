@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.errors import TileOutsideBounds
 from starlette.requests import Request
 from starlette.responses import Response
@@ -589,14 +588,13 @@ class EndpointsFactory(BaseFactory):
 
                     # Check if the tile is out of bounds
                     if extent := node["arguments"].get("spatial_extent"):
-                        spatial_extent = BoundingBox(**extent)
                         collection_bbox = [
-                            spatial_extent.west,
-                            spatial_extent.south,
-                            spatial_extent.east,
-                            spatial_extent.north,
+                            extent["west"],
+                            extent["south"],
+                            extent["east"],
+                            extent["north"],
                         ]
-                        crs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+                        crs = pyproj.crs.CRS(extent.get("crs") or "epsg:4326")
                         if not crs.equals(tms.crs._pyproj_crs):
                             trans = pyproj.Transformer.from_crs(
                                 crs,
@@ -604,7 +602,8 @@ class EndpointsFactory(BaseFactory):
                                 always_xy=True,
                             )
                             collection_bbox = trans.transform_bounds(
-                                *collection_bbox, densify_pts=21
+                                *collection_bbox,
+                                densify_pts=21,
                             )
 
                         if not (
