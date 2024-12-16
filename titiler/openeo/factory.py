@@ -12,7 +12,6 @@ from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pyproj import Transformer
 from rio_tiler.errors import TileOutsideBounds
-from shapely.geometry import Polygon
 from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
@@ -576,23 +575,7 @@ class EndpointsFactory(BaseFactory):
                                 )[1],
                                 crs=spatial_extent.crs,
                             )
-                        existing_polygon = Polygon(
-                            [
-                                [existing_extent.west, existing_extent.south],
-                                [existing_extent.east, existing_extent.south],
-                                [existing_extent.east, existing_extent.north],
-                                [existing_extent.west, existing_extent.north],
-                            ]
-                        )
-                        query_polygon = Polygon(
-                            [
-                                [spatial_extent.west, spatial_extent.south],
-                                [spatial_extent.east, spatial_extent.south],
-                                [spatial_extent.east, spatial_extent.north],
-                                [spatial_extent.west, spatial_extent.north],
-                            ]
-                        )
-                        intersection = existing_polygon.intersection(query_polygon)
+                        intersection = existing_extent.polygon.intersection(spatial_extent.polygon)
                         if intersection.is_empty:
                             raise TileOutsideBounds(
                                 f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the process graph."
