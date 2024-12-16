@@ -63,6 +63,13 @@ In this repository, 2 examples of a `.env` file are provided
   - AWS_S3_ENDPOINT: S3 endpoint URL (e.g., https://eodata.dataspace.copernicus.eu/)
   - AWS_ACCESS_KEY_ID : S3 access key
   - AWS_SECRET_ACCESS_KEY : S3 secret key
+  - AWS_VIRTUAL_HOSTING=FALSE : Disable virtual hosting
+  - GDAL_HTTP_MULTIPLEX=TRUE
+  - VSI_CACHE_SIZE=5000000
+  - VSI_CACHE=TRUE
+  - GDAL_CACHEMAX=500
+  - GDAL_INGESTED_BYTES_AT_OPEN=50000
+  - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
 
 visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
 
