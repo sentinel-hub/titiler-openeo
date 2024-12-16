@@ -9,7 +9,7 @@
   ],
   "parameters": [
     {
-      "name": "image",
+      "name": "data",
       "description": "An ImageData object.",
       "schema": {
         "type": "object",
