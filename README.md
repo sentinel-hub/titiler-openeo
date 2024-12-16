@@ -11,7 +11,7 @@ TiTiler backend for openEO
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
 This simplicity comes with some specific implementation choice like the type of data managed by the backend.
 It is focused on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
-A concept note is available [here](docs/src/CONCEPTS.md) to describe in more detail the implementation choices.
+A concept note is available [here](docs/src/concepts.md) to describe in more detail the implementation choices.
 
 The application provides with a minimal [openEO API (L1A and L1C)](https://openeo.org/documentation/1.0/developers/profiles/api.html#api-profiles).
 
