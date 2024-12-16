@@ -2,6 +2,8 @@
 
 TiTiler backend for openEO
 
+![alt text](image.png)
+
 ## Overview
 
 [`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO.
@@ -46,10 +48,18 @@ uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 Configuration settings can be provided via environment variables or a .env file. The following settings are available:
 
 - TITILER_OPENEO_STAC_API_URL: URL of the STAC API with the collections to be used
+- AWS_S3_ENDPOINT: S3 endpoint URL
+- AWS_ACCESS_KEY_ID : S3 access key
+- AWS_SECRET_ACCESS_KEY : S3 secret key
 
-Example `.env` file:
+Example `.env` file using the Copernicus STAC API (visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for more information):
 
+```bash
 TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
+AWS_S3_ENDPOINT=https://eodata.dataspace.copernicus.eu/
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+```
 
 ## Development
 
