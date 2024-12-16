@@ -1055,7 +1055,7 @@ class Extent(BaseModel):
     )
 
 
-class Dimension(BaseModel):
+class Dimension(BaseModel, extra="allow"):
     """Dimension model.
 
     Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
@@ -1063,10 +1063,26 @@ class Dimension(BaseModel):
     Code generated using https://github.com/koxudaxi/datamodel-code-generator/
     """
 
-    type: Literal["spatial", "temportal", "bands", "geometry", "other"] = Field(
+    type: Literal["spatial", "temporal", "bands", "geometry", "other"] = Field(
         ..., json_schema_extra={"description": "Type of the dimension."}
     )
     description: Optional[Description] = None
+
+
+class SpatialDimension(Dimension):
+    """SpatialDimension model.
+
+    Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
+    """
+
+    type: Literal["spatial"] = Field("spatial")
+    axis: Literal["x", "y", "z"] = Field(
+        ...,
+        json_schema_extra={
+            "description": "The axis of the spatial dimension.",
+            "example": "x",
+        },
+    )
 
 
 class CollectionSummaryStats(BaseModel):

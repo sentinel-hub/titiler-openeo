@@ -1,23 +1,23 @@
 """titiler-openeo app."""
 
 from fastapi import FastAPI
+from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.factory import EndpointsFactory
+from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services.local import LocalStore
 from titiler.openeo.settings import ApiSettings, STACSettings
-from titiler.openeo.stac import get_stac_backend
+from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
-stac_settings = STACSettings()
 
-stac_backend = get_stac_backend(str(stac_settings.api_url))
-
+stac_client = stacApiBackend(str(STACSettings().api_url))  # type: ignore
 
 ###############################################################################
 
@@ -37,7 +37,6 @@ app = FastAPI(
     """,
     version=titiler_version,
     root_path=api_settings.root_path,
-    lifespan=stac_backend.get_lifespan(),
 )
 
 # Set all CORS enabled origins
@@ -68,9 +67,24 @@ app.add_middleware(
     cachecontrol=api_settings.cachecontrol,
 )
 
+# Register backend specific load_collection methods
+loaders = LoadCollection(stac_client)  # type: ignore
+process_registry["load_collection"] = process_registry["load_collection"] = Process(
+    spec=PROCESS_SPECIFICATIONS["load_collection"],
+    implementation=loaders.load_collection,
+)
+process_registry["load_collection_and_reduce"] = process_registry[
+    "load_collection_and_reduce"
+] = Process(
+    spec=PROCESS_SPECIFICATIONS["load_collection_and_reduce"],
+    implementation=loaders.load_collection_and_reduce,
+)
+
+
 # Register OpenEO endpoints
 endpoints = EndpointsFactory(
-    stac_backend=stac_backend,
     services_store=LocalStore(),
+    stac_client=stac_client,
+    process_registry=process_registry,
 )
 app.include_router(endpoints.router)

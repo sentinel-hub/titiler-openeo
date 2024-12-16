@@ -1,45 +1,40 @@
 """titiler.openeo.processes."""
 
+import builtins
+import importlib
+import inspect
 import json
-from copy import copy
+import keyword
 from pathlib import Path
-from typing import Dict, List
 
-from attr import define, field
+from openeo_pg_parser_networkx import ProcessRegistry
+from openeo_pg_parser_networkx.process_registry import Process
+
+from .implementations.core import process
 
 json_path = Path(__file__).parent / "data"
-process_json_paths = [pg_path for pg_path in (json_path).glob("*.json")]  #  noqa: C416
-DEFAULT_PROCESSES = {f.stem: json.load(open(f)) for f in process_json_paths}
+PROCESS_SPECIFICATIONS = {}
+for f in (json_path).glob("*.json"):
+    spec_json = json.load(open(f))
+    process_name = spec_json["id"]
+    # Make sure we don't overwrite any builtins (e.g min -> _min)
+    if spec_json["id"] in dir(builtins) or keyword.iskeyword(spec_json["id"]):
+        process_name = "_" + spec_json["id"]
 
+    PROCESS_SPECIFICATIONS[process_name] = spec_json
 
-@define(frozen=True)
-class Processes:
-    """Algorithms."""
+PROCESS_IMPLEMENTATIONS = [
+    func
+    for _, func in inspect.getmembers(
+        importlib.import_module("titiler.openeo.processes.implementations"),
+        inspect.isfunction,
+    )
+]
 
-    data: Dict[str, Dict] = field()
+# Create Processes Registry
+process_registry = ProcessRegistry(wrap_funcs=[process])
 
-    def get(self, name: str) -> Dict:
-        """Fetch a TMS."""
-        if name not in self.data:
-            raise KeyError(f"Invalid name: {name}")
-
-        return self.data[name]
-
-    def list(self) -> List[str]:
-        """List registered Algorithm."""
-        return list(self.data.keys())
-
-    def register(
-        self,
-        processes: Dict[str, Dict],
-        overwrite: bool = False,
-    ) -> "Processes":
-        """Register Process(es)."""
-        for name in processes:
-            if name in self.data and not overwrite:
-                raise Exception(f"{name} is already a registered. Use overwrite=True.")
-
-        return Processes({**self.data, **processes})  # type: ignore
-
-
-ProcessesStore = Processes(copy(DEFAULT_PROCESSES))  # type: ignore
+for func in PROCESS_IMPLEMENTATIONS:
+    process_registry[func.__name__] = Process(
+        spec=PROCESS_SPECIFICATIONS[func.__name__], implementation=func
+    )
