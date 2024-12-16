@@ -39,7 +39,7 @@ python -m pip install -e .
 To run the application, use the following command:
 
 ```bash
-cp .env.example .env
+cp .env.eoapi .env
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 ```
 
@@ -48,11 +48,23 @@ uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 Configuration settings can be provided via environment variables or a .env file. The following settings are available:
 
 - TITILER_OPENEO_STAC_API_URL: URL of the STAC API with the collections to be used
-- AWS_S3_ENDPOINT: S3 endpoint URL
-- AWS_ACCESS_KEY_ID : S3 access key
-- AWS_SECRET_ACCESS_KEY : S3 secret key
+- TITILER_OPENEO_SERVICE_STORE_URL: URL of the openEO service store json file
 
-Example `.env` file using the Copernicus STAC API (visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for more information):
+In this repository, 2 examples of a `.env` file are provided
+
+- `.env.eoapi` that uses the [Earth Observation API (EOAPI)](https://earth-observation-api.github.io/api/).
+  - TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
+  - TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
+
+- `.env.cdse` that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
+  - TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
+  - TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
+  and that requires additional environment variables:
+  - AWS_S3_ENDPOINT: S3 endpoint URL (e.g., https://eodata.dataspace.copernicus.eu/)
+  - AWS_ACCESS_KEY_ID : S3 access key
+  - AWS_SECRET_ACCESS_KEY : S3 secret key
+
+visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
 
 ```bash
 TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"

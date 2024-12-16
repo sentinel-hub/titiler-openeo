@@ -79,7 +79,8 @@ class stacApiBackend:
     def getdimensions(self, collection: Collection) -> Dict[str, dc.Dimension]:
         """Get dimensions from collection"""
         dims = {}
-        """ Sptial extent """
+
+        # Spatial extent
         if collection.extent.spatial.bboxes:
             dims["x"] = dc.Dimension.from_dict(
                 {
@@ -101,7 +102,8 @@ class stacApiBackend:
                     ],
                 }
             )
-        """ Temporal extent """
+
+        # Temporal extent
         if collection.extent.temporal.intervals:
             dims["t"] = dc.Dimension.from_dict(
                 {
@@ -113,7 +115,7 @@ class stacApiBackend:
                 }
             )
 
-        """ Add spectral bands """
+        # Spectral bands
         # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
         if (
             eo.EOExtension.has_extension(collection)
@@ -203,7 +205,7 @@ class LoadCollection:
 
     def _get_items(
         self,
-        collection_id: str,
+        id: str,
         spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         properties: Optional[dict] = None,
@@ -212,7 +214,7 @@ class LoadCollection:
         fields = fields or ["assets", "id", "bbox", "collection", "properties"]
 
         query_params: Dict[str, Any] = {
-            "collections": [collection_id],
+            "collections": [id],
             "fields": fields,
         }
 
@@ -257,7 +259,7 @@ class LoadCollection:
 
     def load_collection(
         self,
-        collection_id: str,
+        id: str,
         spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
@@ -267,7 +269,7 @@ class LoadCollection:
     ) -> RasterStack:
         """Load Collection."""
         items = self._get_items(
-            collection_id,
+            id,
             spatial_extent=spatial_extent,
             temporal_extent=temporal_extent,
             properties=properties,
@@ -275,14 +277,11 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # If Not BANDS, we use the assets list from the first Item
-        bands = bands or list(items[0]["assets"])
-
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(*bbox, **kwargs)
+                    return src_dst.part(bbox, **kwargs)
 
             bbox = [
                 spatial_extent.west,
@@ -301,8 +300,8 @@ class LoadCollection:
                 assets=bands,
                 bounds_crs=crs,
                 dst_crs=crs,
-                width=width,
-                height=height,
+                width=int(width) if width else width,
+                height=int(height) if height else height,
             )
             return {
                 _props_to_datename(asset["properties"]): val
@@ -315,7 +314,7 @@ class LoadCollection:
 
     def load_collection_and_reduce(
         self,
-        collection_id: str,
+        id: str,
         spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
@@ -326,7 +325,7 @@ class LoadCollection:
     ) -> ImageData:
         """Load Collection and return image."""
         items = self._get_items(
-            collection_id,
+            id,
             spatial_extent=spatial_extent,
             temporal_extent=temporal_extent,
             properties=properties,
@@ -334,14 +333,15 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # If Not BANDS, we use the assets list from the first Item
-        bands = bands or list(items[0]["assets"])
-
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(*bbox, **kwargs)
+                    return src_dst.part(
+                        bbox,
+                        assets=bands or list(items[0]["assets"]),
+                        **kwargs,
+                    )
 
             bbox = [
                 spatial_extent.west,
@@ -356,12 +356,11 @@ class LoadCollection:
                 items,
                 _reader,
                 bbox,
-                assets=bands,
                 bounds_crs=crs,
                 dst_crs=crs,
+                width=int(width) if width else width,
+                height=int(height) if height else height,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
-                width=width,
-                height=height,
             )
             return img
 

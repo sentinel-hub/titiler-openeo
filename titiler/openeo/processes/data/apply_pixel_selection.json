@@ -1,0 +1,49 @@
+{
+    "id": "apply_pixel_selection",
+    "summary": "Convert DataCube to ImageData.",
+    "description": "Apply `Pixel Selection` method on a DataCube to create an ImageData object",
+    "categories": [
+        "cubes",
+        "aggregate",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "A raster data cube.",
+            "schema": {
+                "type": "object",
+                "subtype": "datacube"
+            }
+        },
+        {
+            "name": "pixel_selection",
+            "description": "Pixel Selection method.",
+            "schema": {
+                "type": "string",
+                "enum": [
+                    "first",
+                    "highest",
+                    "lowest",
+                    "mean",
+                    "median",
+                    "stdev",
+                    "lastbandlow",
+                    "lastbandhight",
+                    "count"
+                ]
+            },
+            "default": "first"
+        }
+    ],
+    "returns": {
+        "description": "An ImageData object for further processing.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {},
+    "examples": [],
+    "links": []
+}

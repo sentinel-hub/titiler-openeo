@@ -5,19 +5,23 @@ from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
+from titiler.core.errors import add_exception_handlers
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
+from titiler.openeo.errors import DEFAULT_STATUS_CODES
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
-from titiler.openeo.services.local import LocalStore
-from titiler.openeo.settings import ApiSettings, STACSettings
+from titiler.openeo.services import get_store
+from titiler.openeo.settings import ApiSettings, BackendSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
+backend_settings = BackendSettings()
 
-stac_client = stacApiBackend(str(STACSettings().api_url))  # type: ignore
+stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
+service_store = get_store(str(backend_settings.service_store_url))
 
 ###############################################################################
 
@@ -83,8 +87,10 @@ process_registry["load_collection_and_reduce"] = process_registry[
 
 # Register OpenEO endpoints
 endpoints = EndpointsFactory(
-    services_store=LocalStore(),
+    services_store=service_store,
     stac_client=stac_client,
     process_registry=process_registry,
 )
 app.include_router(endpoints.router)
+
+add_exception_handlers(app, DEFAULT_STATUS_CODES)

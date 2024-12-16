@@ -1063,8 +1063,8 @@ class Dimension(BaseModel, extra="allow"):
     Code generated using https://github.com/koxudaxi/datamodel-code-generator/
     """
 
-    type: Literal["spatial", "temporal", "bands", "geometry", "other"] = Field(
-        ..., json_schema_extra={"description": "Type of the dimension."}
+    type: Union[Literal["spatial", "temporal", "bands", "geometry", "other"], str] = (
+        Field(..., json_schema_extra={"description": "Type of the dimension."})
     )
     description: Optional[Description] = None
 
