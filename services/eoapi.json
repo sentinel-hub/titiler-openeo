@@ -5,6 +5,11 @@
             "id": "31cbbbc1-9095-42f8-b4a5-fd36a653adaa",
             "title": "New Zealand Floods 2023 (After) - RGB",
             "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
+            },
             "enabled": true,
             "process": {
                 "parameters": [],
@@ -17,10 +22,18 @@
                             ],
                             "id": "MAXAR_New_Zealand_Flooding23",
                             "spatial_extent": {
-                                "west": 174.0,
-                                "south": -37.0,
-                                "east": 175.0,
-                                "north": -35.0
+                              "east": {
+                                "from_parameter": "spatial_extent_east"
+                              },
+                              "north": {
+                                "from_parameter": "spatial_extent_north"
+                              },
+                              "south": {
+                                "from_parameter": "spatial_extent_south"
+                              },
+                              "west": {
+                                "from_parameter": "spatial_extent_west"
+                              }
                             },
                             "temporal_extent": [
                                 "2023-01-01T00:00:00Z",
@@ -51,6 +64,11 @@
             "id": "aa1f8f0f-8ec5-4d08-b271-b2ae85a52285",
             "title": "New Zealand Floods 2023 (Before) - RGB",
             "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
+            },
             "enabled": true,
             "process": {
                 "parameters": [],
@@ -63,10 +81,18 @@
                             ],
                             "id": "MAXAR_New_Zealand_Flooding23",
                             "spatial_extent": {
-                                "west": 174.0,
-                                "south": -37.0,
-                                "east": 175.0,
-                                "north": -35.0
+                              "east": {
+                                "from_parameter": "spatial_extent_east"
+                              },
+                              "north": {
+                                "from_parameter": "spatial_extent_north"
+                              },
+                              "south": {
+                                "from_parameter": "spatial_extent_south"
+                              },
+                              "west": {
+                                "from_parameter": "spatial_extent_west"
+                              }
                             },
                             "temporal_extent": [
                                 "2010-01-01T00:00:00Z",
@@ -97,6 +123,11 @@
             "id": "a1ac985d-14e8-4430-8b4b-094fb26759eb",
             "title": "Maui Fire 2023 (After) - RGB",
             "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
+            },
             "enabled": true,
             "process": {
                 "parameters": [],
@@ -109,10 +140,18 @@
                             ],
                             "id": "MAXAR_Maui_Hawaii_fires_Aug_23",
                             "spatial_extent": {
-                                "west": -156.7541149008616,
-                                "south": 20.61864421171153,
-                                "east": -156.23880228630824,
-                                "north": 21.03020549865336
+                              "east": {
+                                "from_parameter": "spatial_extent_east"
+                              },
+                              "north": {
+                                "from_parameter": "spatial_extent_north"
+                              },
+                              "south": {
+                                "from_parameter": "spatial_extent_south"
+                              },
+                              "west": {
+                                "from_parameter": "spatial_extent_west"
+                              }
                             },
                             "temporal_extent": [
                                 "2023-08-10T00:00:00Z",
@@ -143,6 +182,11 @@
             "id": "a657b83e-4455-4ba4-9754-48f7111e448d",
             "title": "Maui Fire 2023 (Active) - RGB",
             "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
+            },
             "enabled": true,
             "process": {
                 "parameters": [],
@@ -155,10 +199,18 @@
                             ],
                             "id": "MAXAR_Maui_Hawaii_fires_Aug_23",
                             "spatial_extent": {
-                                "west": -156.7541149008616,
-                                "south": 20.61864421171153,
-                                "east": -156.23880228630824,
-                                "north": 21.03020549865336
+                              "east": {
+                                "from_parameter": "spatial_extent_east"
+                              },
+                              "north": {
+                                "from_parameter": "spatial_extent_north"
+                              },
+                              "south": {
+                                "from_parameter": "spatial_extent_south"
+                              },
+                              "west": {
+                                "from_parameter": "spatial_extent_west"
+                              }
                             },
                             "temporal_extent": [
                                 "2023-08-01T00:00:00Z",
@@ -190,7 +242,9 @@
             "title": "Georgia Shovi Landslide 2023 - RGB",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -204,10 +258,18 @@
                       "properties": {},
                       "id": "MAXAR_shovi_georgia_landslide_8Aug23",
                       "spatial_extent": {
-                        "west": 43.093246706359785,
-                        "east": 44.52570426122524,
-                        "south": 42.25149461995011,
-                        "north": 43.28406884410177
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2023-08-01T00:00:00Z",
@@ -271,7 +333,9 @@
             "title": "South-Africa Flooding 2022 - NRG",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -285,10 +349,18 @@
                       "properties": {},
                       "id": "MAXAR_southafrica_flooding22",
                       "spatial_extent": {
-                        "west": 29.987132801982625,
-                        "east": 31.587422555628876,
-                        "south": -30.8587632892144,
-                        "north": -28.886191362214085
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2022-04-21T00:00:00Z",
@@ -352,7 +424,9 @@
             "title": "South-Africa Flooding 2022 - NDVI",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -366,10 +440,18 @@
                       "properties": {},
                       "id": "MAXAR_southafrica_flooding22",
                       "spatial_extent": {
-                        "west": 29.987132801982625,
-                        "east": 31.587422555628876,
-                        "south": -30.8587632892144,
-                        "north": -28.886191362214085
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2022-04-21T00:00:00Z",
@@ -430,7 +512,9 @@
             "title": "South-Africa Flooding 2022 - NDVI 2",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -444,10 +528,18 @@
                       "properties": {},
                       "id": "MAXAR_southafrica_flooding22",
                       "spatial_extent": {
-                        "west": 29.987132801982625,
-                        "east": 31.587422555628876,
-                        "south": -30.8587632892144,
-                        "north": -28.886191362214085
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2022-04-21T00:00:00Z",
@@ -526,7 +618,9 @@
             "title": "South-Africa Flooding 2022 - PixelSelection - Mean",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -540,10 +634,18 @@
                       "properties": {},
                       "id": "MAXAR_southafrica_flooding22",
                       "spatial_extent": {
-                        "west": 29.987132801982625,
-                        "east": 31.587422555628876,
-                        "south": -30.8587632892144,
-                        "north": -28.886191362214085
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2022-04-15T00:00:00Z",
@@ -582,7 +684,9 @@
             "title": "South-Africa Flooding 2022 - PixelSelection - Highest",
             "type": "XYZ",
             "configuration": {
-                "tile_size": 256
+                "tile_size": 256,
+                "minzoom": 12,
+                "maxzoom": 19
             },
             "enabled": true,
             "process": {
@@ -596,10 +700,18 @@
                       "properties": {},
                       "id": "MAXAR_southafrica_flooding22",
                       "spatial_extent": {
-                        "west": 29.987132801982625,
-                        "east": 31.587422555628876,
-                        "south": -30.8587632892144,
-                        "north": -28.886191362214085
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
                       },
                       "temporal_extent": [
                         "2022-04-15T00:00:00Z",
