@@ -277,6 +277,10 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # TODO:
+        # - Get PROJ information about the Items
+        # - Estimate output size in Pixel and raise issue if too big
+
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
@@ -332,6 +336,10 @@ class LoadCollection:
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
+
+        # TODO:
+        # - Get PROJ information about the Items
+        # - Estimate output size in Pixel and raise issue if too big
 
         if spatial_extent:
 
