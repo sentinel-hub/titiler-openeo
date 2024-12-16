@@ -37,6 +37,7 @@ python -m pip install -e .
 To run the application, use the following command:
 
 ```bash
+cp .env.example .env
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 ```
 
@@ -66,6 +67,23 @@ To run the tests, use the following command:
 ```bash
 python -m pytest
 ```
+
+### Use the openEO editor
+
+To use the openEO editor, start the server as described in #usage section.
+Then, run the following command:
+
+```bash
+docker pull mundialis/openeo-web-editor:latest
+docker run -p 8081:80 mundialis/openeo-web-editor:latest
+```
+
+Then, open the editor in your browser at http://localhost:8081.
+In the editor, set the openEO backend URL to http://localhost:8080.
+Login with the following credentials:
+
+- Username: `anynymous`
+- Password: `test`
 
 ## License
 
