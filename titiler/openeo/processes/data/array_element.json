@@ -1,0 +1,37 @@
+{
+  "id": "array_element",
+  "summary": "Get an element from an array",
+  "description": "Gives the element with the specified index from the array.",
+  "categories": [
+    "arrays",
+    "reducer"
+  ],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "An array.",
+      "schema": {
+        "type": "array",
+        "items": {
+          "description": "Any data type is allowed."
+        }
+      }
+    },
+    {
+      "name": "index",
+      "description": "The zero-based index of the element to retrieve.",
+      "schema": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  ],
+  "returns": {
+    "description": "The value of the requested element.",
+    "schema": {
+      "description": "Any data type is allowed."
+    }
+  },
+  "exceptions": {},
+  "examples": []
+}

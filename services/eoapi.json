@@ -422,5 +422,101 @@
                 "parameters": []
             }
         }
+    },
+    "5ce29190-3c13-439d-808c-afd9737f270a": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "5ce29190-3c13-439d-808c-afd9737f270a",
+            "title": "South-Africa Flooding 2022 - NDVI 2",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "west": 29.987132801982625,
+                        "east": 31.587422555628876,
+                        "south": -30.8587632892144,
+                        "north": -28.886191362214085
+                      },
+                      "temporal_extent": [
+                        "2022-04-21T00:00:00Z",
+                        "2022-05-01T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "array": {
+                    "process_id": "to_array",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      }
+                    }
+                  },
+                  "nir": {
+                    "process_id": "array_element",
+                    "arguments": {
+                      "data": {
+                        "from_node": "array"
+                      },
+                      "index": 7
+                    }
+                  },
+                  "red": {
+                    "process_id": "array_element",
+                    "arguments": {
+                      "data": {
+                        "from_node": "array"
+                      },
+                      "index": 0
+                    }
+                  },
+                  "ndvi": {
+                    "process_id": "normalized_difference",
+                    "arguments": {
+                      "x": {
+                        "from_node": "nir"
+                      },
+                      "y": {
+                        "from_node": "red"
+                      }
+                    }
+                  },
+                  "linear_scale_range": {
+                    "process_id": "linear_scale_range",
+                    "arguments": {
+                      "x": {
+                        "from_node": "ndvi"
+                      },
+                      "inputMin": -1,
+                      "inputMax": 1,
+                      "outputMin": 0,
+                      "outputMax": 255
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "linear_scale_range"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
     }
 }

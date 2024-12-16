@@ -9,12 +9,12 @@ __all__ = ["save_result"]
 
 
 def save_result(
-    data: Union[ImageData, numpy.ndarray],
+    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray],
     format: str,
     options: Optional[Dict] = None,
 ) -> bytes:
     """Save Result."""
-    if isinstance(data, numpy.ndarray):
+    if isinstance(data, (numpy.ma.MaskedArray, numpy.ndarray)):
         data = ImageData(data)
 
     options = options or {}
