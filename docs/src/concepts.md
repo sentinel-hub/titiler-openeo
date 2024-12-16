@@ -60,7 +60,7 @@ While the traditional [`load_collections` process](https://github.com/developmen
 
 ![alt text](img/rasterstack.png)
 
-The reduce process comes with a parameter to choose the pixel selection method to apply on the stack of raster data. The default method is `first` that will select the first pixel value of the stack. Other methods are available like `last`, `mean`, `median`, `min`, `max`, `sum`, `stddev`, `count`, `percentile` and `percentile_low` and `percentile_high`.
+The reduce process comes with a parameter to choose the [pixel selection method](https://github.com/developmentseed/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24) to apply on the stack of raster data. The default method is `first` that will select the first pixel value of the stack. Other methods are available like `highest`, `lowest`, `mean`, `median`, `stddev`, `lastbandlow`, `lastbandhigh`, `lastbandavg`, `count`.
 
 ## Collections
 
