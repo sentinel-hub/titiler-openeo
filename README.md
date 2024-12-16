@@ -60,17 +60,21 @@ In this repository, 2 examples of a `.env` file are provided
 - `.env.cdse` that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
   - TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
   - TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
-  and that requires additional **environment variables**:
-  - AWS_S3_ENDPOINT: S3 endpoint URL (e.g., https://eodata.dataspace.copernicus.eu/)
-  - AWS_ACCESS_KEY_ID : S3 access key
-  - AWS_SECRET_ACCESS_KEY : S3 secret key
-  - AWS_VIRTUAL_HOSTING=FALSE : Disable virtual hosting
-  - GDAL_HTTP_MULTIPLEX=TRUE
-  - VSI_CACHE_SIZE=5000000
-  - VSI_CACHE=TRUE
-  - GDAL_CACHEMAX=500
-  - GDAL_INGESTED_BYTES_AT_OPEN=50000
-  - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
+  
+  In order to access CDSE object store, it requires to set additional **environment variables**:
+
+  ```bash
+  AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu # CDSE S3 endpoint URL
+  AWS_ACCESS_KEY_ID=<your_access_key> # CDSE S3 access key
+  AWS_SECRET_ACCESS_KEY=<your_secret_key> # CDSE S3 secret key
+  AWS_VIRTUAL_HOSTING=FALSE # Disable virtual hosting
+  GDAL_HTTP_MULTIPLEX=TRUE # Enable HTTP multiplexing
+  VSI_CACHE_SIZE=5000000 # Set VSI cache size
+  VSI_CACHE=TRUE # Enable VSI cache
+  GDAL_CACHEMAX=500 # Set GDAL cache size
+  GDAL_INGESTED_BYTES_AT_OPEN=50000 # Open a larger bytes range when reading
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES # Merge consecutive ranges
+  ```
 
 visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
 
