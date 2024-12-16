@@ -80,7 +80,7 @@ jobs:
 
       - name: Install OpenEO test suite
         run: |
-          git clone --recurse-submodules https://github.com/Open-EO/openeo-test-suite.git
+          git clone --recurse-submodules -b feature/switch-to-https-submodules-urls https://github.com/vincentsarago/openeo-test-suite.git
           cd openeo-test-suite
           python -m pip install -e .
 
