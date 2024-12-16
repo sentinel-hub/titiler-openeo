@@ -24,7 +24,6 @@ from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
 
-
 STAC_VERSION = "1.0.0"
 
 
@@ -575,7 +574,9 @@ class EndpointsFactory(BaseFactory):
                                 )[1],
                                 crs=spatial_extent.crs,
                             )
-                        intersection = existing_extent.polygon.intersection(spatial_extent.polygon)
+                        intersection = existing_extent.polygon.intersection(
+                            spatial_extent.polygon
+                        )
                         if intersection.is_empty:
                             raise TileOutsideBounds(
                                 f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the process graph."
