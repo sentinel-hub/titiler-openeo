@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 import morecantile
+import pyproj
 from attrs import define, field
 from fastapi import Depends, Path
 from fastapi.responses import JSONResponse
@@ -10,7 +11,6 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
-from pyproj import Transformer
 from rio_tiler.errors import TileOutsideBounds
 from starlette.requests import Request
 from starlette.responses import Response
@@ -585,54 +585,45 @@ class EndpointsFactory(BaseFactory):
                     "load_collection",
                     "load_collection_and_reduce",
                 ]:
-                    bounds = tms.xy_bounds(x, y, z)
-                    spatial_extent = BoundingBox(
-                        west=bounds[0],
-                        south=bounds[1],
-                        east=bounds[2],
-                        north=bounds[3],
-                        crs=tms.crs.to_epsg(),
-                    )
+                    tile_bounds = tms.xy_bounds(x, y, z)
+
                     # Check if the tile is out of bounds
-                    existing_extent = node["arguments"].get("spatial_extent")
-                    if (
-                        existing_extent
-                        and isinstance(existing_extent.get("west"), (int, float))
-                        and isinstance(existing_extent.get("south"), (int, float))
-                        and isinstance(existing_extent.get("east"), (int, float))
-                        and isinstance(existing_extent.get("north"), (int, float))
-                    ):
-                        existing_extent = BoundingBox(**existing_extent)
-                        if existing_extent.crs != spatial_extent.crs:
-                            transformer = Transformer.from_crs(
-                                existing_extent.crs, spatial_extent.crs, always_xy=True
+                    if extent := node["arguments"].get("spatial_extent"):
+                        spatial_extent = BoundingBox(**extent)
+                        collection_bbox = [
+                            spatial_extent.west,
+                            spatial_extent.south,
+                            spatial_extent.east,
+                            spatial_extent.north,
+                        ]
+                        crs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+                        if not crs.equals(tms.crs._pyproj_crs):
+                            trans = pyproj.Transformer.from_crs(
+                                crs,
+                                tms.crs._pyproj_crs,
+                                always_xy=True,
                             )
-                            existing_extent = BoundingBox(
-                                west=transformer.transform(
-                                    existing_extent.west, existing_extent.south
-                                )[0],
-                                south=transformer.transform(
-                                    existing_extent.west, existing_extent.south
-                                )[1],
-                                east=transformer.transform(
-                                    existing_extent.east, existing_extent.north
-                                )[0],
-                                north=transformer.transform(
-                                    existing_extent.east, existing_extent.north
-                                )[1],
-                                crs=spatial_extent.crs,
+                            collection_bbox = trans.transform_bounds(
+                                *collection_bbox, densify_pts=21
                             )
-                        intersection = existing_extent.polygon.intersection(
-                            spatial_extent.polygon
-                        )
-                        if intersection.is_empty:
+
+                        if not (
+                            (tile_bounds[0] < collection_bbox[2])
+                            and (tile_bounds[2] > collection_bbox[0])
+                            and (tile_bounds[3] > collection_bbox[1])
+                            and (tile_bounds[1] < collection_bbox[3])
+                        ):
                             raise TileOutsideBounds(
                                 f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the process graph."
                             )
 
-                    node["arguments"]["spatial_extent"] = spatial_extent.model_dump(
-                        exclude_none=True
-                    )
+                    node["arguments"]["spatial_extent"] = {
+                        "west": tile_bounds[0],
+                        "south": tile_bounds[1],
+                        "east": tile_bounds[2],
+                        "north": tile_bounds[3],
+                        "crs": tms.crs.to_epsg(),
+                    }
                     node["arguments"]["width"] = int(tile_size)
                     node["arguments"]["height"] = int(tile_size)
                     break
