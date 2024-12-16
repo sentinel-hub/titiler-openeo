@@ -41,39 +41,47 @@ To run the application, use the following command:
 
 ```bash
 cp .env.eoapi .env
+export $(cat .env | xargs)
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 ```
 
 ## Configuration
 
-Configuration settings can be provided via environment variables or a .env file. The following settings are available:
+Configuration settings can be provided via environment variables. The following settings are available:
 
 - TITILER_OPENEO_STAC_API_URL: URL of the STAC API with the collections to be used
 - TITILER_OPENEO_SERVICE_STORE_URL: URL of the openEO service store json file
 
-In this repository, 2 examples of a `.env` file are provided
+In this repository, 2 `.env` sample files are provided:
 
-- `.env.eoapi` that uses the [Earth Observation API (EOAPI)](https://earth-observation-api.github.io/api/).
-  - TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
-  - TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
+- [`.env.eoapi`](.env.eopi) that uses the [Earth Observation API (EOAPI)](https://earth-observation-api.github.io/api/).
 
-- `.env.cdse` that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
-  - TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
-  - TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
+  ```bash
+  TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
+  TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
+  ```
+
+- [`.env.cdse`](.env.cdse)] that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
+
+  ```bash
+  TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
+  TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
+  ```
   
-  In order to access CDSE object store, it requires to set additional **environment variables**:
+  In order to access asset object store and to retrieve data efficiently, it requires to set additional **environment variables**:
 
   ```bash
   AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu # CDSE S3 endpoint URL
-  AWS_ACCESS_KEY_ID=<your_access_key> # CDSE S3 access key
-  AWS_SECRET_ACCESS_KEY=<your_secret_key> # CDSE S3 secret key
+  AWS_ACCESS_KEY_ID=<your_access_key> # S3 access key
+  AWS_SECRET_ACCESS_KEY=<your_secret_key> # S3 secret key
   AWS_VIRTUAL_HOSTING=FALSE # Disable virtual hosting
+  CPL_VSIL_CURL_CACHE_SIZE=200000000 # Global LRU cache size
   GDAL_HTTP_MULTIPLEX=TRUE # Enable HTTP multiplexing
-  VSI_CACHE_SIZE=5000000 # Set VSI cache size
-  VSI_CACHE=TRUE # Enable VSI cache
   GDAL_CACHEMAX=500 # Set GDAL cache size
   GDAL_INGESTED_BYTES_AT_OPEN=50000 # Open a larger bytes range when reading
   GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES # Merge consecutive ranges
+  VSI_CACHE_SIZE=5000000 # Set VSI cache size
+  VSI_CACHE=TRUE # Enable VSI cache
   ```
 
 visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
