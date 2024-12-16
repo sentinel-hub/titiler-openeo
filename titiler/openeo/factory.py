@@ -10,6 +10,8 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from pyproj import Transformer
+from shapely.geometry import Polygon
 from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
@@ -21,6 +23,8 @@ from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
 from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
+
+
 
 STAC_VERSION = "1.0.0"
 
@@ -543,7 +547,38 @@ class EndpointsFactory(BaseFactory):
                         north=bounds[3],
                         crs=tms.crs.to_epsg(),
                     )
-                    # TODO: Check intersection with spatial_extent
+                    # Check if the tile is out of bounds
+                    existing_extent = node["arguments"].get("spatial_extent")
+                    if existing_extent:
+                        existing_extent = BoundingBox(**existing_extent)
+                        if existing_extent.crs != spatial_extent.crs:
+                            transformer = Transformer.from_crs(existing_extent.crs, spatial_extent.crs, always_xy=True)
+                            existing_extent = BoundingBox(
+                                west=transformer.transform(existing_extent.west, existing_extent.south)[0],
+                                south=transformer.transform(existing_extent.west, existing_extent.south)[1],
+                                east=transformer.transform(existing_extent.east, existing_extent.north)[0],
+                                north=transformer.transform(existing_extent.east, existing_extent.north)[1],
+                                crs=spatial_extent.crs,
+                            )
+                        existing_polygon = Polygon(
+                            [
+                                [existing_extent.west, existing_extent.south],
+                                [existing_extent.east, existing_extent.south],
+                                [existing_extent.east, existing_extent.north],
+                                [existing_extent.west, existing_extent.north],
+                            ]
+                        )
+                        query_polygon = Polygon(
+                            [
+                                [spatial_extent.west, spatial_extent.south],
+                                [spatial_extent.east, spatial_extent.south],
+                                [spatial_extent.east, spatial_extent.north],
+                                [spatial_extent.west, spatial_extent.north],
+                            ]
+                        )
+                        intersection = existing_polygon.intersection(query_polygon)
+                        if intersection.is_empty:
+                            raise Exception("Tile out of bounds")
 
                     node["arguments"]["spatial_extent"] = spatial_extent.model_dump(
                         exclude_none=True

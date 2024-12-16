@@ -81,7 +81,7 @@
                                 "process_graph": {
                                     "1": {
                                         "arguments": {
-                                            "inputMax": 0.4,
+                                            "inputMax": 3000,
                                             "inputMin": 0,
                                             "outputMax": 255,
                                             "x": {
@@ -155,7 +155,7 @@
                                     "1": {
                                         "process_id": "linear_scale_range",
                                         "arguments": {
-                                            "inputMax": 0.4,
+                                            "inputMax": 3000,
                                             "inputMin": 0,
                                             "outputMax": 255,
                                             "x": {
