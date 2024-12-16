@@ -277,14 +277,11 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # If Not BANDS, we use the assets list from the first Item
-        bands = bands or list(items[0]["assets"])
-
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(*bbox, **kwargs)
+                    return src_dst.part(bbox, **kwargs)
 
             bbox = [
                 spatial_extent.west,

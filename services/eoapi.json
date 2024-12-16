@@ -518,5 +518,117 @@
                 "parameters": []
             }
         }
+    },
+    "28c9b632-1147-46e1-9583-b152c6287108": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "28c9b632-1147-46e1-9583-b152c6287108",
+            "title": "South-Africa Flooding 2022 - PixelSelection - Mean",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                      "bands": [
+                        "visual"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "west": 29.987132801982625,
+                        "east": 31.587422555628876,
+                        "south": -30.8587632892144,
+                        "north": -28.886191362214085
+                      },
+                      "temporal_extent": [
+                        "2022-04-15T00:00:00Z",
+                        "2022-12-31T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "reduce": {
+                    "process_id": "apply_pixel_selection",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "pixel_selection": "mean"
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "reduce"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
+    },
+    "e39b65f4-4729-4c03-9079-91e15b039d01": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "e39b65f4-4729-4c03-9079-91e15b039d01",
+            "title": "South-Africa Flooding 2022 - PixelSelection - Highest",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                      "bands": [
+                        "visual"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "west": 29.987132801982625,
+                        "east": 31.587422555628876,
+                        "south": -30.8587632892144,
+                        "north": -28.886191362214085
+                      },
+                      "temporal_extent": [
+                        "2022-04-15T00:00:00Z",
+                        "2022-12-31T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "reduce": {
+                    "process_id": "apply_pixel_selection",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "pixel_selection": "highest"
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "reduce"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
     }
 }
