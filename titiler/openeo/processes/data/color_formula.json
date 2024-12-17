@@ -1,0 +1,43 @@
+{
+    "id": "color_formula",
+    "summary": "Apply a color formula to an image.",
+    "description": "Return Image data with a color formula applied.",
+    "categories": [
+        "images",
+        "color"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An image.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        },
+        {
+            "name": "formula",
+            "description": "The color formula to apply.",
+            "schema":  {
+                "type": "string"
+            }
+        }
+    ],
+    "returns": {
+        "description": "The image with the color formula applied.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {
+        "IndexError": {
+            "message": "The formula value is invalid."
+        }
+    },
+    "examples": [{
+        "arguments": {
+            "formula": "Gamma RGB 1.5 Sigmoidal RGB 10 0.3 Saturation 1"
+        }
+    }]
+}
