@@ -1,0 +1,63 @@
+{
+    "id": "hillshade",
+    "summary": "Create hillshade from DEM dataset",
+    "description": "Compute a grayscale 3D representation of the terrain surface, with the sun's relative position taken into account for shading the image. Hillshading is a technique for visualizing terrain determined by a light source and the slope and aspect of the elevation surface.",
+    "categories": [
+        "cubes",
+        "3D",
+        "dem"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "A raster data cube.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        },
+        {
+            "name": "azimuth",
+            "description": "Sun's relative position along the horizon (in degrees). This position is indicated by the angle of the sun measured clockwise from due north. An azimuth of 0 degrees indicates north, east is 90 degrees, south is 180 degrees, and west is 270 degrees.",
+            "schema": {
+                "type": "number"
+            }
+        },
+        {
+            "name": "angle_altitude",
+            "description": "Sun's angle of elevation above the horizon and ranges from 0 to 90 degrees. A value of 0 degrees indicates that the sun is on the horizon, that is, on the same horizontal plane as the frame of reference. A value of 90 degrees indicates that the sun is directly overhead.",
+            "schema": {
+                "type": "number"
+            }
+        },
+        {
+            "name": "zfactor",
+            "description": "A multiplier for the elevation values. The default value is 1.0.",
+            "schema": {
+                "type": "number"
+            }
+        },
+        {
+            "name": "buffer",
+            "description": "The number of pixels to add as a buffer around the computed hillshade. This is to avoid edge effects especially when computing tiles. Default is 3.",
+            "schema": {
+                "type": "number"
+            }
+        }
+    ],
+    "returns": {
+        "description": "A raster image data cube containing the computed hillshade values.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {},
+    "links": [
+        {
+            "rel": "about",
+            "href": "https://wiki.openstreetmap.org/wiki/Hillshading",
+            "title": "Hillshading explained by OpenStreetMap"
+        }
+    ]
+}
