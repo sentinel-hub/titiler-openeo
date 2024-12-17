@@ -26,7 +26,6 @@ def apply(
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,
-            band_names=img.band_names,
         )
 
     if isinstance(data, ImageData):
