@@ -122,14 +122,14 @@ Login with the following credentials:
 
 ## License
 
-See [LICENSE](https://github.com/developmentseed/titiler/blob/main/LICENSE)
+See [LICENSE](https://github.com/developmentseed/titiler-open/blob/main/LICENSE)
 
 ## Authors
 
-Created by [Development Seed](<http://developmentseed.org>)
+Created by [Development Seed](<http://developmentseed.org>) for [Planet](https://www.planet.com/).
 
-See [contributors](https://github.com/developmentseed/titiler/graphs/contributors) for a listing of individual contributors.
+See [contributors](https://github.com/developmentseed/titiler-openeo/graphs/contributors) for a listing of individual contributors.
 
 ## Changes
 
-See [CHANGES.md](https://github.com/developmentseed/titiler/blob/main/CHANGES.md).
+See [CHANGES.md](https://github.com/developmentseed/titiler-openeo/blob/main/CHANGES.md).
