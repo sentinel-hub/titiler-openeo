@@ -4,7 +4,11 @@
         "service": {
             "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
             "type": "XYZ",
-            "title": "simple_3-bands_rgb",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 8,
+              "maxzoom": 15
+            },
             "enabled": true,
             "process": {
                 "parameters": [],
