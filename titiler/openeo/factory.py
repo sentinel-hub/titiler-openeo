@@ -1,11 +1,11 @@
 """titiler.openeo endpoint Factory."""
 
 from copy import deepcopy
+from typing import Any, Dict, List
 
 import morecantile
-import pyproj
 from attrs import define, field
-from fastapi import Depends, Path
+from fastapi import Depends, HTTPException, Path
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
@@ -471,9 +471,69 @@ class EndpointsFactory(BaseFactory):
                             "default": 256,
                             "description": "Tile size in pixels.",
                             "type": "number",
-                        }
+                        },
+                        "extent": {
+                            "description": "Limits the XYZ service to the specified bounding box. In form of `[West, South, East, North]` in EPSG:4326 CRS.",
+                            "type": "object",
+                            "required": False,
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "number",
+                                "description": "Extent value",
+                            },
+                        },
+                        "minzoom": {
+                            "default": 0,
+                            "description": "Minimum Zoom level for the XYZ service.",
+                            "type": "number",
+                        },
+                        "maxzoom": {
+                            "default": 24,
+                            "description": "Maximum Zoom level for the XYZ service.",
+                            "type": "number",
+                        },
+                        "tilematrixset": {
+                            "description": "TileMatrixSetId for the tiling grid to use.",
+                            "type": "string",
+                            "enum": [
+                                "CanadianNAD83_LCC",
+                                "EuropeanETRS89_LAEAQuad",
+                                "WGS1984Quad",
+                                "WebMercatorQuad",
+                                "WorldCRS84Quad",
+                                "WorldMercatorWGS84Quad",
+                            ],
+                            "default": "WebMercatorQuad",
+                        },
+                        "buffer": {
+                            "description": "Buffer on each side of the given tile. It must be a multiple of `0.5`. Output **tilesize** will be expanded to `tilesize + 2 * buffer` (e.g 0.5 = 257x257, 1.0 = 258x258).",
+                            "type": "number",
+                            "minimum": 0,
+                        },
                     },
-                    "process_parameters": [],
+                    "process_parameters": [
+                        {
+                            "name": "spatial_extent_west",
+                            "description": "The lower left corner for coordinate axis 1 of the extent currently shown to the consumer.",
+                            "schema": {"type": "number"},
+                        },
+                        {
+                            "name": "spatial_extent_south",
+                            "description": "The lower left corner for coordinate axis 2 of the extent currently shown to the consumer.",
+                            "schema": {"type": "number"},
+                        },
+                        {
+                            "name": "spatial_extent_east",
+                            "description": "The upper right corner for coordinate axis 1 of the extent currently shown to the consumer.",
+                            "schema": {"type": "number"},
+                        },
+                        {
+                            "name": "spatial_extent_north",
+                            "description": "The upper right corner for coordinate axis 2 of the extent currently shown to the consumer.",
+                            "schema": {"type": "number"},
+                        },
+                    ],
                     "title": "XYZ tiled web map",
                 }
             }
@@ -507,16 +567,7 @@ class EndpointsFactory(BaseFactory):
 
             """
             process = body.process.model_dump()
-
-            media_type = "image/png"
-            for _, node in process["process_graph"].items():
-                if node["process_id"] == "save_result":
-                    media_type = (
-                        "image/png"
-                        if node["arguments"]["format"] == "png"
-                        else "image/jpeg"
-                    )
-                    break
+            media_type = _get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
@@ -571,70 +622,66 @@ class EndpointsFactory(BaseFactory):
         ):
             """Create map tile."""
             service = self.services_store.get_service(service_id)
-            tile_size = service.get("configuration", {}).get("tile_size", 256)
+
+            configuration = service.get("configuration", {})
+
+            tile_size = configuration.get("tile_size", 256)
+            tile_buffer = configuration.get("buffer")
+            tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
+            tms = morecantile.tms.get(tilematrixset)
+
+            minzoom = configuration.get("minzoom") or tms.minzoom
+            maxzoom = configuration.get("maxzoom") or tms.maxzoom
+            if z < minzoom or z > maxzoom:
+                raise HTTPException(
+                    400,
+                    f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+                )
+
             process = deepcopy(service["process"])
 
-            tms = morecantile.tms.get("WebMercatorQuad")
+            load_collection_nodes = get_load_collection_nodes(process["process_graph"])
+            # Check there is at least one load_collection process
+            assert (
+                load_collection_nodes
+            ), "Could not find any `load_collection process in service's process-graph"
 
-            media_type = "image/png"
+            # Check that nodes have spatial-extent
+            assert all(
+                node["arguments"].get("spatial_extent")
+                for node in load_collection_nodes
+            ), "Invalid load_collection process, Missing spatial_extent"
 
-            # Overwrite spatial extent for `load_collection`
-            for _, node in process["process_graph"].items():
-                if node["process_id"] in [
-                    "load_collection",
-                    "load_collection_and_reduce",
-                ]:
-                    tile_bounds = tms.xy_bounds(x, y, z)
+            tile_bounds = tms.bounds(x, y, z)
+            args = {
+                "spatial_extent_west": tile_bounds[0],
+                "spatial_extent_south": tile_bounds[1],
+                "spatial_extent_east": tile_bounds[2],
+                "spatial_extent_north": tile_bounds[3],
+            }
 
-                    # Check if the tile is out of bounds
-                    if extent := node["arguments"].get("spatial_extent"):
-                        collection_bbox = [
-                            extent["west"],
-                            extent["south"],
-                            extent["east"],
-                            extent["north"],
-                        ]
-                        crs = pyproj.crs.CRS(extent.get("crs") or "epsg:4326")
-                        if not crs.equals(tms.crs._pyproj_crs):
-                            trans = pyproj.Transformer.from_crs(
-                                crs,
-                                tms.crs._pyproj_crs,
-                                always_xy=True,
-                            )
-                            collection_bbox = trans.transform_bounds(
-                                *collection_bbox,
-                                densify_pts=21,
-                            )
-
-                        if not (
-                            (tile_bounds[0] < collection_bbox[2])
-                            and (tile_bounds[2] > collection_bbox[0])
-                            and (tile_bounds[3] > collection_bbox[1])
-                            and (tile_bounds[1] < collection_bbox[3])
-                        ):
-                            raise TileOutsideBounds(
-                                f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the process graph."
-                            )
-
-                    node["arguments"]["spatial_extent"] = {
-                        "west": tile_bounds[0],
-                        "south": tile_bounds[1],
-                        "east": tile_bounds[2],
-                        "north": tile_bounds[3],
-                        "crs": tms.crs.to_epsg(),
-                    }
-                    node["arguments"]["width"] = int(tile_size)
-                    node["arguments"]["height"] = int(tile_size)
-                    break
-
-            for _, node in process["process_graph"].items():
-                if node["process_id"] == "save_result":
-                    media_type = (
-                        "image/png"
-                        if node["arguments"]["format"] == "png"
-                        else "image/jpeg"
+            if service_extent := configuration.get("extent"):
+                if not (
+                    (tile_bounds[0] < service_extent[2])
+                    and (tile_bounds[2] > service_extent[0])
+                    and (tile_bounds[3] > service_extent[1])
+                    and (tile_bounds[1] < service_extent[3])
+                ):
+                    raise TileOutsideBounds(
+                        f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
                     )
-                    break
+
+            for node in load_collection_nodes:
+                # Adapt spatial extent with tile bounds
+                resolves_process_graph_parameters(process["process_graph"], args)
+
+                # We also add Width/Height/TileBuffer to the load_collection process
+                node["arguments"]["width"] = int(tile_size)
+                node["arguments"]["height"] = int(tile_size)
+                if tile_buffer:
+                    node["arguments"]["tile_buffer"] = tile_buffer
+
+            media_type = _get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
@@ -642,3 +689,32 @@ class EndpointsFactory(BaseFactory):
             )
             img = pg_callable()
             return Response(img, media_type=media_type)
+
+
+def _get_media_type(process_graph: Dict[str, Any]) -> str:
+    for _, node in process_graph.items():
+        if node["process_id"] == "save_result":
+            return "image/png" if node["arguments"]["format"] == "png" else "image/jpeg"
+
+    raise ValueError("Couldn't find `")
+
+
+def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Find all `load_collection/load_collection_and_reduce` processes"""
+    return [
+        node
+        for _, node in process_graph.items()
+        if node["process_id"] in ["load_collection", "load_collection_and_reduce"]
+    ]
+
+
+def resolves_process_graph_parameters(pg, parameters):
+    """Replace `from_parameters` values in process-graph."""
+    iterator = enumerate(pg) if isinstance(pg, list) else pg.items()
+    for key, value in iterator:
+        if isinstance(value, dict) and len(value) == 1 and "from_parameter" in value:
+            if value["from_parameter"] in parameters:
+                pg[key] = parameters[value["from_parameter"]]
+
+        elif isinstance(value, dict) or isinstance(value, list):
+            resolves_process_graph_parameters(value, parameters)

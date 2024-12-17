@@ -279,6 +279,7 @@ class LoadCollection:
         properties: Optional[dict] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
     ) -> RasterStack:
         """Load Collection."""
         items = self._get_items(
@@ -319,6 +320,7 @@ class LoadCollection:
                 dst_crs=crs,
                 width=int(width) if width else width,
                 height=int(height) if height else height,
+                buffer=tile_buffer,
             )
             return {
                 _props_to_datename(asset["properties"]): val
@@ -339,6 +341,7 @@ class LoadCollection:
         pixel_selection: Optional[str] = "first",
         width: Optional[int] = None,
         height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
     ) -> ImageData:
         """Load Collection and return image."""
         items = self._get_items(
@@ -381,6 +384,7 @@ class LoadCollection:
                 dst_crs=crs,
                 width=int(width) if width else width,
                 height=int(height) if height else height,
+                buffer=tile_buffer,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
             )
             return img
