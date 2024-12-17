@@ -39,6 +39,7 @@ __all__ = [
     "subtract",
     "tan",
     "tanh",
+    "trunc",
     "variance",
 ]
 
@@ -79,8 +80,8 @@ def ceil(x):
     return numpy.ceil(x)
 
 
-def _int(x):
-    return numpy.trunc(x)
+def trunc(x):
+    return numpy.trunc(x).astype(numpy.uint8)
 
 
 def _round(x, p=0):
