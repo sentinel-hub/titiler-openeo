@@ -131,7 +131,9 @@ class stacApiBackend:
             ia.ItemAssetsExtension.add_to(collection)
             bands_name = set()
             for key, asset in collection.ext.item_assets.items():
-                if (asset.properties.get("bands", None) or asset.properties.get("eo:common_name", None)):
+                if asset.properties.get("bands", None) or asset.properties.get(
+                    "eo:common_name", None
+                ):
                     bands_name.add(key)
             if len(bands_name) > 0:
                 dims["spectral"] = dc.Dimension.from_dict(
