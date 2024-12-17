@@ -273,7 +273,7 @@ JsonSchemaType = Literal[
 ]
 
 
-class JsonSchema(BaseModel):
+class JsonSchema(BaseModel, extra="allow"):
     """JsonSchema model.
 
     Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
