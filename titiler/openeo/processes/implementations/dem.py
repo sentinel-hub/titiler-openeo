@@ -1,8 +1,9 @@
 """titiler.openeo.processes dem."""
 
 import numpy
-from .data_model import ImageData
 from rasterio import windows
+
+from .data_model import ImageData
 
 __all__ = ["hillshade"]
 
@@ -22,16 +23,15 @@ def hillshade(data: ImageData, azimuth: int, angle_altitude: float, buffer: int)
     datahs[datahs < 0] = 0  # set hillshade values to min of 0.
 
     bounds = data.bounds
-    if buffer:
-        datahs = datahs[buffer : -buffer, buffer : -buffer]
+    datahs = datahs[buffer:-buffer, buffer:-buffer]
 
-        window = windows.Window(
-            col_off=buffer,
-            row_off=buffer,
-            width=datahs.shape[1],
-            height=datahs.shape[0],
-        )
-        bounds = windows.bounds(window, data.transform)
+    window = windows.Window(
+        col_off=buffer,
+        row_off=buffer,
+        width=datahs.shape[1],
+        height=datahs.shape[0],
+    )
+    bounds = windows.bounds(window, data.transform)
 
     return ImageData(
         datahs.astype(numpy.uint8),
