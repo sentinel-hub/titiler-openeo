@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+from rio_tiler.errors import TileOutsideBounds
 from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
@@ -471,6 +472,17 @@ class EndpointsFactory(BaseFactory):
                             "description": "Tile size in pixels.",
                             "type": "number",
                         },
+                        "extent": {
+                            "description": "Limits the XYZ service to the specified bounding box. In form of `[West, South, East, North]` in EPSG:4326 CRS.",
+                            "type": "object",
+                            "required": False,
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "number",
+                                "description": "Extent value",
+                            },
+                        },
                         "minzoom": {
                             "default": 0,
                             "description": "Minimum Zoom level for the XYZ service.",
@@ -482,7 +494,7 @@ class EndpointsFactory(BaseFactory):
                             "type": "number",
                         },
                         "tilematrixset": {
-                            "default": "WebMercatorQuad",
+                            "description": "TileMatrixSetId for the tiling grid to use.",
                             "type": "string",
                             "enum": [
                                 "CanadianNAD83_LCC",
@@ -492,6 +504,12 @@ class EndpointsFactory(BaseFactory):
                                 "WorldCRS84Quad",
                                 "WorldMercatorWGS84Quad",
                             ],
+                            "default": "WebMercatorQuad",
+                        },
+                        "buffer": {
+                            "description": "Buffer on each side of the given tile. It must be a multiple of `0.5`. Output **tilesize** will be expanded to `tilesize + 2 * buffer` (e.g 0.5 = 257x257, 1.0 = 258x258).",
+                            "type": "number",
+                            "minimum": 0,
                         },
                     },
                     "process_parameters": [
@@ -604,14 +622,16 @@ class EndpointsFactory(BaseFactory):
         ):
             """Create map tile."""
             service = self.services_store.get_service(service_id)
-            tile_size = service.get("configuration", {}).get("tile_size", 256)
-            tilematrixset = service.get("configuration", {}).get(
-                "tilematrixset", "WebMercatorQuad"
-            )
+
+            configuration = service.get("configuration", {})
+
+            tile_size = configuration.get("tile_size", 256)
+            tile_buffer = configuration.get("buffer")
+            tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
             tms = morecantile.tms.get(tilematrixset)
 
-            minzoom = service.get("configuration", {}).get("minzoom") or tms.minzoom
-            maxzoom = service.get("configuration", {}).get("maxzoom") or tms.maxzoom
+            minzoom = configuration.get("minzoom") or tms.minzoom
+            maxzoom = configuration.get("maxzoom") or tms.maxzoom
             if z < minzoom or z > maxzoom:
                 raise HTTPException(
                     400,
@@ -632,7 +652,6 @@ class EndpointsFactory(BaseFactory):
                 for node in load_collection_nodes
             ), "Invalid load_collection process, Missing spatial_extent"
 
-            # load_collection_node = load_collection_nodes[0]
             tile_bounds = tms.bounds(x, y, z)
             args = {
                 "spatial_extent_west": tile_bounds[0],
@@ -641,13 +660,26 @@ class EndpointsFactory(BaseFactory):
                 "spatial_extent_north": tile_bounds[3],
             }
 
+            if service_extent := configuration.get("extent"):
+                if not (
+                    (tile_bounds[0] < service_extent[2])
+                    and (tile_bounds[2] > service_extent[0])
+                    and (tile_bounds[3] > service_extent[1])
+                    and (tile_bounds[1] < service_extent[3])
+                ):
+                    raise TileOutsideBounds(
+                        f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
+                    )
+
             for node in load_collection_nodes:
                 # Adapt spatial extent with tile bounds
                 resolves_process_graph_parameters(process["process_graph"], args)
 
-                # We also add Width/Height to the load_collection process
+                # We also add Width/Height/TileBuffer to the load_collection process
                 node["arguments"]["width"] = int(tile_size)
                 node["arguments"]["height"] = int(tile_size)
+                if tile_buffer:
+                    node["arguments"]["tile_buffer"] = tile_buffer
 
             media_type = _get_media_type(process["process_graph"])
 

@@ -8,7 +8,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [174.0, -37.0, 175.0, -35.0]
             },
             "enabled": true,
             "process": {
@@ -67,7 +68,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [174.0, -37.0, 175.0, -35.0]
             },
             "enabled": true,
             "process": {
@@ -126,7 +128,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [-156.7541149008616, 20.61864421171153, -156.23880228630824, 21.03020549865336]
             },
             "enabled": true,
             "process": {
@@ -185,7 +188,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [-156.7541149008616, 20.61864421171153, -156.23880228630824, 21.03020549865336]
             },
             "enabled": true,
             "process": {
@@ -244,7 +248,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [43.093246706359785, 44.52570426122524, 42.25149461995011, 43.28406884410177]
             },
             "enabled": true,
             "process": {
@@ -335,7 +340,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [29.987132801982625, 31.587422555628876, -30.8587632892144, -28.886191362214085]
             },
             "enabled": true,
             "process": {
@@ -426,7 +432,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [29.987132801982625, 31.587422555628876, -30.8587632892144, -28.886191362214085]
             },
             "enabled": true,
             "process": {
@@ -514,7 +521,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [29.987132801982625, 31.587422555628876, -30.8587632892144, -28.886191362214085]
             },
             "enabled": true,
             "process": {
@@ -620,7 +628,8 @@
             "configuration": {
               "tile_size": 256,
               "minzoom": 12,
-              "maxzoom": 19
+              "maxzoom": 19,
+              "extent": [29.987132801982625, 31.587422555628876, -30.8587632892144, -28.886191362214085]
             },
             "enabled": true,
             "process": {
@@ -686,7 +695,8 @@
             "configuration": {
                 "tile_size": 256,
                 "minzoom": 12,
-                "maxzoom": 19
+                "maxzoom": 19,
+                "extent": [29.987132801982625, 31.587422555628876, -30.8587632892144, -28.886191362214085]
             },
             "enabled": true,
             "process": {
