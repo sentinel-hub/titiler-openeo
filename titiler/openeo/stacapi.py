@@ -279,6 +279,7 @@ class LoadCollection:
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
+        # private arguments
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
@@ -322,7 +323,7 @@ class LoadCollection:
                 dst_crs=crs,
                 width=int(width) if width else width,
                 height=int(height) if height else height,
-                buffer=tile_buffer,
+                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
             )
             return {
                 _props_to_datename(asset["properties"]): val
@@ -341,6 +342,7 @@ class LoadCollection:
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
         pixel_selection: Optional[str] = "first",
+        # private arguments
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
@@ -386,7 +388,7 @@ class LoadCollection:
                 dst_crs=crs,
                 width=int(width) if width else width,
                 height=int(height) if height else height,
-                buffer=tile_buffer,
+                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
             )
             return img

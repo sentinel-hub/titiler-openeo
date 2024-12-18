@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, List
 
 import morecantile
+import pyproj
 from attrs import define, field
 from fastapi import Depends, HTTPException, Path
 from fastapi.responses import JSONResponse
@@ -533,6 +534,23 @@ class EndpointsFactory(BaseFactory):
                             "description": "The upper right corner for coordinate axis 2 of the extent currently shown to the consumer.",
                             "schema": {"type": "number"},
                         },
+                        {
+                            "name": "spatial_extent_crs",
+                            "description": "The Coordinate reference system of the extent.",
+                            "schema": [
+                                {
+                                    "title": "EPSG Code",
+                                    "type": "integer",
+                                    "subtype": "epsg-code",
+                                    "minimum": 1000,
+                                },
+                                {
+                                    "title": "WKT2",
+                                    "type": "string",
+                                    "subtype": "wkt2-definition",
+                                },
+                            ],
+                        },
                     ],
                     "title": "XYZ tiled web map",
                 }
@@ -623,8 +641,8 @@ class EndpointsFactory(BaseFactory):
             """Create map tile."""
             service = self.services_store.get_service(service_id)
 
+            # SERVICE CONFIGURATION
             configuration = service.get("configuration", {})
-
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
@@ -652,15 +670,24 @@ class EndpointsFactory(BaseFactory):
                 for node in load_collection_nodes
             ), "Invalid load_collection process, Missing spatial_extent"
 
-            tile_bounds = tms.bounds(x, y, z)
+            tile_bounds = list(tms.xy_bounds(x, y, z))
             args = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
+                "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
             }
 
             if service_extent := configuration.get("extent"):
+                if not tms.crs._pyproj_crs.equals("EPSG:4326"):
+                    trans = pyproj.Transformer.from_crs(
+                        tms.crs._pyproj_crs,
+                        pyproj.CRS.from_epsg(4326),
+                        always_xy=True,
+                    )
+                    tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
+
                 if not (
                     (tile_bounds[0] < service_extent[2])
                     and (tile_bounds[2] > service_extent[0])

@@ -34,6 +34,9 @@
                                 },
                                 "west": {
                                     "from_parameter": "spatial_extent_west"
+                                },
+                                "crs": {
+                                    "from_parameter": "spatial_extent_crs"
                                 }
                             },
                             "temporal_extent": [
