@@ -34,6 +34,9 @@
                               },
                               "west": {
                                 "from_parameter": "spatial_extent_west"
+                              },
+                              "crs": {
+                                "from_parameter": "spatial_extent_crs"
                               }
                             },
                             "temporal_extent": [
@@ -94,6 +97,9 @@
                               },
                               "west": {
                                 "from_parameter": "spatial_extent_west"
+                              },
+                              "crs": {
+                                "from_parameter": "spatial_extent_crs"
                               }
                             },
                             "temporal_extent": [
@@ -154,6 +160,9 @@
                               },
                               "west": {
                                 "from_parameter": "spatial_extent_west"
+                              },
+                              "crs": {
+                                "from_parameter": "spatial_extent_crs"
                               }
                             },
                             "temporal_extent": [
@@ -214,6 +223,9 @@
                               },
                               "west": {
                                 "from_parameter": "spatial_extent_west"
+                              },
+                              "crs": {
+                                "from_parameter": "spatial_extent_crs"
                               }
                             },
                             "temporal_extent": [
@@ -274,6 +286,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -366,6 +381,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -464,6 +482,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -559,6 +580,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -672,6 +696,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -739,6 +766,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -806,6 +836,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -918,6 +951,9 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
@@ -1000,12 +1036,15 @@
                         },
                         "west": {
                           "from_parameter": "spatial_extent_west"
+                        },
+                        "crs": {
+                          "from_parameter": "spatial_extent_crs"
                         }
                       },
                       "temporal_extent": [
                         "2022-05-08T00:00:00Z",
                         "2022-05-10T00:00:00Z"
-                      ] 
+                      ]
                     }
                   },
                   "hillshade": {
