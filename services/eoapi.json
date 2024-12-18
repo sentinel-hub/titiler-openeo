@@ -964,5 +964,71 @@
                 "parameters": []
             }
         }
+    },
+    "b9cb48ae-f210-cdc-cdca-859deefafb18": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "b9cb48ae-f210-cdc-cdca-859deefafb18",
+            "title": "Copernicus DEM",
+            "type": "XYZ",
+            "configuration": {
+              "buffer": 3,
+              "tile_size": 256,
+              "minzoom": 7,
+              "maxzoom": 19
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "dem"
+                      ],
+                      "properties": {},
+                      "id": "copernicus-dem",
+                      "spatial_extent": {
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
+                      },
+                      "temporal_extent": [
+                        "2022-05-08T00:00:00Z",
+                        "2022-05-10T00:00:00Z"
+                      ] 
+                    }
+                  },
+                  "hillshade": {
+                    "process_id": "hillshade",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "hillshade"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
     }
 }
