@@ -215,7 +215,8 @@
                     "count"
                 ]
             },
-            "default": "first"
+            "default": "first",
+            "optional": true
         }
     ],
     "returns": {
