@@ -1,0 +1,10 @@
+# Ignore cdk folder
+cdk.out/
+.history
+.tox
+.git
+
+infrastructure/aws/cdk.out/
+infrastructure/aws/node_modules/
+infrastructure/aws/cdk/
+.ruff_cache/
