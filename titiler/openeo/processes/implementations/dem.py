@@ -8,7 +8,9 @@ from .data_model import ImageData
 __all__ = ["hillshade"]
 
 
-def hillshade(data: ImageData, azimuth: int = 315, angle_altitude: float = 45, buffer: int = 3):
+def hillshade(
+    data: ImageData, azimuth: int = 315, angle_altitude: float = 45, buffer: int = 3
+):
     """Create hillshade from DEM dataset."""
     x, y = numpy.gradient(data.array[0])
     slope = numpy.pi / 2.0 - numpy.arctan(numpy.sqrt(x * x + y * y))
