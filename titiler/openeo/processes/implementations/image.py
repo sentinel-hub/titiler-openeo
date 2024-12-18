@@ -3,10 +3,18 @@
 from typing import Sequence
 
 import numpy
+from rio_tiler.colormap import cmap as default_cmap
+from rio_tiler.types import ColorMapType
 
 from .data_model import ImageData
 
-__all__ = ["image_indexes", "to_array", "color_formula"]
+__all__ = [
+    "image_indexes",
+    "to_array",
+    "color_formula",
+    "colormap",
+    "get_colormap",
+]
 
 
 def image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
@@ -41,3 +49,13 @@ def to_array(data: ImageData) -> numpy.ma.MaskedArray:
 def color_formula(data: ImageData, formula: str) -> ImageData:
     """Apply color formula to ImageData."""
     return data.apply_color_formula(formula)
+
+
+def get_colormap(name: str) -> ColorMapType:
+    """Return rio-tiler colormap."""
+    return default_cmap.get(name)
+
+
+def colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
+    """Apply colormap to ImageData."""
+    return data.apply_colormap(colormap)
