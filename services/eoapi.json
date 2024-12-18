@@ -752,5 +752,265 @@
                 "parameters": []
             }
         }
+    },
+    "48ce6183-d431-4625-b492-ab2f1b63c00a": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "48ce6183-d431-4625-b492-ab2f1b63c00a",
+            "title": "South-Africa Flooding 2022 - NDVI - Viridis",
+            "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19,
+              "extent": [29.987132801982625, -30.8587632892144, 31.587422555628876, -28.886191362214085]
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
+                      },
+                      "temporal_extent": [
+                        "2022-04-21T00:00:00Z",
+                        "2022-05-01T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "ndvi": {
+                    "process_id": "ndvi",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "nir": 8,
+                      "red": 1
+                    }
+                  },
+                  "apply4": {
+                    "process_id": "apply",
+                    "arguments": {
+                      "data": {"from_node": "ndvi"},
+                      "process": {
+                        "process_graph": {
+                          "linear1": {
+                            "process_id": "linear_scale_range",
+                            "arguments": {
+                                "x": {"from_parameter": "x"},
+                                "inputMin": -1,
+                                "inputMax": 1,
+                                "outputMin": 0,
+                                "outputMax": 255
+                            }
+                          },
+                          "trunc": {
+                            "process_id": "trunc",
+                            "arguments": {
+                                "x": {"from_node": "linear1"}
+                            },
+                            "result": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "cmap": {
+                    "process_id": "get_colormap",
+                    "arguments": {
+                      "name": "viridis"
+                    }
+                  },
+                  "colormap1": {
+                    "process_id": "colormap",
+                    "arguments": {
+                      "data": {
+                        "from_node": "apply4"
+                      },
+                      "colormap": {
+                        "from_node": "cmap"
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "colormap1"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
+    },
+    "b9cb48ae-f210-401d-a644-859deefafb18": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "b9cb48ae-f210-401d-a644-859deefafb18",
+            "title": "South-Africa Flooding 2022 - NDVI - Custom ColorMap",
+            "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 12,
+              "maxzoom": 19,
+              "extent": [29.987132801982625, -30.8587632892144, 31.587422555628876, -28.886191362214085]
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "ms_analytic"
+                      ],
+                      "properties": {},
+                      "id": "MAXAR_southafrica_flooding22",
+                      "spatial_extent": {
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
+                      },
+                      "temporal_extent": [
+                        "2022-04-21T00:00:00Z",
+                        "2022-05-01T00:00:00Z"
+                      ]
+                    }
+                  },
+                  "ndvi": {
+                    "process_id": "ndvi",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      },
+                      "nir": 8,
+                      "red": 1
+                    }
+                  },
+                  "colormap1": {
+                    "process_id": "colormap",
+                    "arguments": {
+                      "data": {
+                        "from_node": "ndvi"
+                      },
+                      "colormap": [
+                        [[-2, -1], [0, 255, 0, 255]],
+                        [[-1, 0], [0, 255, 0, 255]],
+                        [[0, 0.5], [255, 0, 0, 255]],
+                        [[0.5, 1.1], [255, 255, 0, 255]]
+                      ]
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "colormap1"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
+    },
+    "b9cb48ae-f210-cdc-cdca-859deefafb18": {
+        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
+        "service": {
+            "id": "b9cb48ae-f210-cdc-cdca-859deefafb18",
+            "title": "Copernicus DEM",
+            "type": "XYZ",
+            "configuration": {
+              "tile_size": 256,
+              "minzoom": 8,
+              "maxzoom": 19
+            },
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                  "load1": {
+                    "process_id": "load_collection_and_reduce",
+                    "arguments": {
+                      "bands": [
+                        "dem"
+                      ],
+                      "properties": {},
+                      "id": "copernicus-dem",
+                      "spatial_extent": {
+                        "east": {
+                          "from_parameter": "spatial_extent_east"
+                        },
+                        "north": {
+                          "from_parameter": "spatial_extent_north"
+                        },
+                        "south": {
+                          "from_parameter": "spatial_extent_south"
+                        },
+                        "west": {
+                          "from_parameter": "spatial_extent_west"
+                        }
+                      },
+                      "temporal_extent": [
+                        "2022-05-08T00:00:00Z",
+                        "2022-05-10T00:00:00Z"
+                      ],
+                      "tile_buffer": 3
+                    }
+                  },
+                  "hillshade": {
+                    "process_id": "hillshade",
+                    "arguments": {
+                      "data": {
+                        "from_node": "load1"
+                      }
+                    }
+                  },
+                  "save5": {
+                    "process_id": "save_result",
+                    "arguments": {
+                      "data": {
+                        "from_node": "hillshade"
+                      },
+                      "format": "PNG"
+                    },
+                    "result": true
+                  }
+                },
+                "parameters": []
+            }
+        }
     }
 }

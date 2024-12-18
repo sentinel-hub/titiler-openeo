@@ -217,6 +217,16 @@
             },
             "default": "first",
             "optional": true
+        },
+        {
+            "name": "tile_buffer",
+            "description": "The number of pixels to add as a buffer around the computed tiles. Default is 0.",
+            "schema": {
+                "type": "number",
+                "minimum": 0
+            },
+            "default": 0,
+            "optional": true
         }
     ],
     "returns": {

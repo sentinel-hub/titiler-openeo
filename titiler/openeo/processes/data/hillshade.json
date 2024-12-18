@@ -21,28 +21,36 @@
             "description": "Sun's relative position along the horizon (in degrees). This position is indicated by the angle of the sun measured clockwise from due north. An azimuth of 0 degrees indicates north, east is 90 degrees, south is 180 degrees, and west is 270 degrees.",
             "schema": {
                 "type": "number"
-            }
+            },
+            "default": 315,
+            "optional": true
         },
         {
             "name": "angle_altitude",
             "description": "Sun's angle of elevation above the horizon and ranges from 0 to 90 degrees. A value of 0 degrees indicates that the sun is on the horizon, that is, on the same horizontal plane as the frame of reference. A value of 90 degrees indicates that the sun is directly overhead.",
             "schema": {
                 "type": "number"
-            }
+            },
+            "default": 45,
+            "optional": true
         },
         {
             "name": "zfactor",
             "description": "A multiplier for the elevation values. The default value is 1.0.",
             "schema": {
                 "type": "number"
-            }
+            },
+            "default": 1.0,
+            "optional": true
         },
         {
             "name": "buffer",
             "description": "The number of pixels to add as a buffer around the computed hillshade. This is to avoid edge effects especially when computing tiles. Default is 3.",
             "schema": {
                 "type": "number"
-            }
+            },
+            "default": 3,
+            "optional": true
         }
     ],
     "returns": {
