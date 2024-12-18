@@ -974,7 +974,7 @@
             "configuration": {
               "buffer": 3,
               "tile_size": 256,
-              "minzoom": 8,
+              "minzoom": 7,
               "maxzoom": 19
             },
             "enabled": true,
