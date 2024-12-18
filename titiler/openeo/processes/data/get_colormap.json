@@ -1,0 +1,77 @@
+{
+    "id": "get_colormap",
+    "summary": "Get rio-tiler Colormap object.",
+    "description": "Get rio-tiler Colormap object.",
+    "categories": [
+        "color"
+    ],
+    "parameters": [
+        {
+            "name": "name",
+            "description": "The name of the colormap.",
+            "schema": {
+                "type": "string"
+            }
+        }
+    ],
+    "returns": {
+        "description": "The Colormap object.",
+        "schema": [
+            {
+                "name": "colormap",
+                "description": "The colormap to apply.",
+                "schema":  [
+                    {
+                        "title": "GDAL ColorMap",
+                        "description":"An GDAL defined colormap in form of `{val: (r, g, b, alpha), ...}`.",
+                        "type": "object",
+                        "patternProperties": {
+                            "^[0-9]+$": {
+                                "type": "array",
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "items": {
+                                    "type": "number"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "title": "Interval ColorMap",
+                        "description":"An Interval colormap in form of `[[(min, max), (r, g, b, alpha)], ...]`.",
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                                "type": "array",
+                                "prefixItems": [
+                                    {
+                                        "type": "array",
+                                        "minItems": 2,
+                                        "maxItems": 2,
+                                        "items": {
+                                            "type": "number"
+                                        }
+                                    },
+                                    {
+                                        "type": "array",
+                                        "minItems": 4,
+                                        "maxItems": 4,
+                                        "items": {
+                                            "type": "number"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "exceptions": {},
+    "examples": []
+}

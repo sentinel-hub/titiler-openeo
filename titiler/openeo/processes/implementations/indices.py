@@ -16,5 +16,7 @@ def ndvi(data: ImageData, nir: int, red: int):
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_names=data.band_names,
+        band_names=[
+            "ndvi",
+        ],
     )

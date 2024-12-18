@@ -162,3 +162,8 @@ cython_debug/
 #.idea/
 
 .vscode/
+
+cdk.out/
+node_modules
+cdk.context.json
+*.nc
