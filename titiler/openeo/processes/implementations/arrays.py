@@ -3,7 +3,9 @@
 import numpy
 from numpy.typing import ArrayLike
 
-__all__ = ["array_element"]
+from .data_model import ImageData
+
+__all__ = ["array_element", "to_image"]
 
 
 def array_element(data: ArrayLike, index: int):
@@ -12,3 +14,8 @@ def array_element(data: ArrayLike, index: int):
         raise IndexError(f"Index value must be >= 0, {index}")
 
     return numpy.take(data, index, axis=0)
+
+
+def to_image(data: ArrayLike) -> ImageData:
+    """Create an ImageData object from an array."""
+    return ImageData(data)
