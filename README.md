@@ -67,7 +67,7 @@ In this repository, 2 `.env` sample files are provided:
   TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
   TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
   ```
-  
+
   In order to access asset object store and to retrieve data efficiently, it requires to set additional **environment variables**:
 
   ```bash
