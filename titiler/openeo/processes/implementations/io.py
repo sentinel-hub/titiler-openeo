@@ -22,4 +22,4 @@ def save_result(
     if format.lower() in ["jpeg", "jpg", "png"] and data.array.dtype != "uint8":
         data.array = data.array.astype("uint8")
 
-    return data.render(img_format=format, **options)
+    return data.render(img_format=format.lower(), **options)
