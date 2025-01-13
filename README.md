@@ -1,4 +1,4 @@
-# titiler-openeo
+# OpenEO by TiTiler
 
 TiTiler backend for openEO
 
@@ -6,7 +6,7 @@ TiTiler backend for openEO
 
 ## Overview
 
-[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO.
+[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a>
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
 This simplicity comes with some specific implementation choice like the type of data managed by the backend.
@@ -24,6 +24,13 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
+
+## Roadmap
+
+- [ ] Services Management (CRUD `/services` endpoints)
+- [ ] Integrated Authentication
+- [ ] More output formats
+- [ ] More OpenEO processes
 
 ## Installation
 
