@@ -1,4 +1,4 @@
-# OpenEO by TiTiler
+# openEO by TiTiler
 
 TiTiler backend for openEO
 
@@ -6,10 +6,10 @@ TiTiler backend for openEO
 
 ## Overview
 
-[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a>
+[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a> and <a href="https://www.sinergise.com/"><img alt="Sinergise" src="docs/src/img/sinergise-logo.png" height="25px"></a>.
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
-This simplicity comes with some specific implementation choice like the type of data managed by the backend.
+This simplicity comes with some specific implementation choices like the type of data managed by the backend.
 It is focused on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
 A concept note is available [here](docs/src/concepts.md) to describe in more detail the implementation choices.
 
@@ -30,7 +30,8 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - [ ] Services Management (CRUD `/services` endpoints)
 - [ ] Integrated Authentication
 - [ ] More output formats
-- [ ] More OpenEO processes
+- [ ] More openEO processes
+- [ ] Github pages documentation
 
 ## Installation
 
@@ -133,7 +134,7 @@ See [LICENSE](https://github.com/developmentseed/titiler-open/blob/main/LICENSE)
 
 ## Authors
 
-Created by [Development Seed](<http://developmentseed.org>) for [Planet](https://www.planet.com/).
+Created by [Development Seed](<http://developmentseed.org>) and [Sinergise](https://www.sinergise.com/).
 
 See [contributors](https://github.com/developmentseed/titiler-openeo/graphs/contributors) for a listing of individual contributors.
 
