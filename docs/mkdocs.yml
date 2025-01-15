@@ -5,7 +5,7 @@ docs_dir: 'src'
 site_dir: 'build'
 
 repo_name: "developmentseed/titiler-openeo"
-repo_url: "https://github.com/developmentseed/titiler-openeo"
+repo_url: "https://github.com/sentinel-hub/titiler-openeo"
 edit_uri: "blob/main/docs/src/"
 site_url: "https://developmentseed.org/titiler-openeo/"
 

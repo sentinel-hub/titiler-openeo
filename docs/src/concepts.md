@@ -48,7 +48,7 @@ Unlike most of the existing openEO implementation, `titiler-openeo` project simp
 ### Raster with ImageData
 
 In order to make the processing as light and fast as possible, the backend must manipulate the data in a way that is easy to process and serve.
-That is why most of the processes use [`ImageData`](https://github.com/developmentseed/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection_and_reduce.json#L225) object type for passing data between the nodes of a process graph.
+That is why most of the processes use [`ImageData`](https://github.com/sentinel-hub/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection_and_reduce.json#L225) object type for passing data between the nodes of a process graph.
 [`ImageData`](https://cogeotiff.github.io/rio-tiler/models/#imagedata) is provided by [rio-tiler](https://cogeotiff.github.io/rio-tiler/) that was initially designed to create slippy map tiles from large raster data sources and render these tiles dynamically on a web map.
 
 ![alt text](img/raster.png)
@@ -56,11 +56,11 @@ That is why most of the processes use [`ImageData`](https://github.com/developme
 ### Reducing the data
 
 The ImageData object is obtained by reducing as early as possible the data from the collections.
-While the traditional [`load_collections` process](https://github.com/developmentseed/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection.json#L2) is implemented and can be used, it is recommended to use the `load_collection_and_reduce` process to have immediately an `imagedata` object to manipulate. The `load_collection_and_reduce` process actually apply the [`apply_pixel_selection`](https://github.com/developmentseed/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json) process on a stack of raster data that are loaded from the collections.
+While the traditional [`load_collections` process](https://github.com/sentinel-hub/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection.json#L2) is implemented and can be used, it is recommended to use the `load_collection_and_reduce` process to have immediately an `imagedata` object to manipulate. The `load_collection_and_reduce` process actually apply the [`apply_pixel_selection`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json) process on a stack of raster data that are loaded from the collections.
 
 ![alt text](img/rasterstack.png)
 
-The reduce process comes with a parameter to choose the [pixel selection method](https://github.com/developmentseed/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24) to apply on the stack of raster data. The default method is `first` that will select the first pixel value of the stack. Other methods are available like `highest`, `lowest`, `mean`, `median`, `stddev`, `lastbandlow`, `lastbandhigh`, `lastbandavg`, `count`.
+The reduce process comes with a parameter to choose the [pixel selection method](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24) to apply on the stack of raster data. The default method is `first` that will select the first pixel value of the stack. Other methods are available like `highest`, `lowest`, `mean`, `median`, `stddev`, `lastbandlow`, `lastbandhigh`, `lastbandavg`, `count`.
 
 ## Collections
 
