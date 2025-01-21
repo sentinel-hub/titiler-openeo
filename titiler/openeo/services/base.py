@@ -13,7 +13,7 @@ class ServicesStore(metaclass=abc.ABCMeta):
     store: Any = field()
 
     @abc.abstractmethod
-    def get_service(self, service_id: str) -> Dict:
+    def get_service(self, service_id: str) -> Dict | None:
         """Return a specific Service."""
         ...
 
@@ -27,7 +27,6 @@ class ServicesStore(metaclass=abc.ABCMeta):
         """Return List Services for a user."""
         ...
 
-    # TODO: define input model
     @abc.abstractmethod
     def add_service(self, user_id: str, service: Dict, **kwargs) -> str:
         """Add Service."""
@@ -38,7 +37,7 @@ class ServicesStore(metaclass=abc.ABCMeta):
         """Delete Service."""
         ...
 
-    # @abc.abstractmethod
-    # def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
-    #     """Update Service."""
-    #     ...
+    @abc.abstractmethod
+    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+        """Update Service."""
+        ...

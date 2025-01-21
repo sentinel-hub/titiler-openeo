@@ -1,4 +1,4 @@
-"""titiler.openeo.services duckDB."""
+"""titiler.openeo.services Parquet."""
 
 import uuid
 from typing import Any, Dict
@@ -10,46 +10,70 @@ from .duckdb_base import DuckDBBaseStore
 
 
 @define()
-class DuckDBStore(DuckDBBaseStore):
-    """DuckDB Service Store using native DB format."""
-
-    def __attrs_post_init__(self):
-        """Post init: create table if not exists."""
-        with duckdb.connect(self.store) as con:
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS services (
-                    service_id VARCHAR PRIMARY KEY,
-                    user_id VARCHAR,
-                    service JSON
-                );
-                """
-            )
+class ParquetStore(DuckDBBaseStore):
+    """DuckDB Service Store using Parquet format."""
 
     def _get_connection(self):
         """Get database connection."""
-        return duckdb.connect(self.store)
+        return duckdb.connect(database=":memory:")
 
     def _get_table_query(self) -> str:
         """Get query to access services table."""
-        return "services"
+        return f"read_parquet('{self.store}')"
 
     def add_service(self, user_id: str, service: Dict, **kwargs) -> str:
         """Add Service."""
         service_id = str(uuid.uuid4())
         with self._get_connection() as con:
+            try:
+                con.execute(
+                    f"""
+                    CREATE TABLE services AS 
+                    SELECT * FROM {self._get_table_query()}
+                    """
+                )
+            except:
+                # File doesn't exist or is empty, create new table
+                con.execute(
+                    """
+                    CREATE TABLE services (
+                        service_id VARCHAR,
+                        user_id VARCHAR,
+                        service JSON
+                    )
+                    """
+                )
+
+            # Insert new service
             con.execute(
                 """
-                INSERT INTO services (service_id, user_id, service)
-                VALUES (?, ?, ?)
+                INSERT INTO services VALUES (?, ?, ?)
                 """,
                 [service_id, user_id, service],
             )
+
+            # Write back to parquet
+            con.execute(
+                """
+                COPY services TO ? (FORMAT PARQUET, OVERWRITE TRUE)
+                """,
+                [self.store],
+            )
+
         return service_id
 
     def delete_service(self, service_id: str, **kwargs) -> bool:
         """Delete Service."""
         with self._get_connection() as con:
+            # Load existing data
+            con.execute(
+                f"""
+                CREATE TABLE services AS 
+                SELECT * FROM {self._get_table_query()}
+                """
+            )
+
+            # Delete service
             result = con.execute(
                 """
                 DELETE FROM services
@@ -62,11 +86,27 @@ class DuckDBStore(DuckDBBaseStore):
             if not result:
                 raise ValueError(f"Could not find service: {service_id}")
 
+            # Write back to parquet
+            con.execute(
+                """
+                COPY services TO ? (FORMAT PARQUET, OVERWRITE TRUE)
+                """,
+                [self.store],
+            )
+
         return True
 
     def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
         """Update Service."""
         with self._get_connection() as con:
+            # Load all data
+            con.execute(
+                f"""
+                CREATE TABLE services AS 
+                SELECT * FROM {self._get_table_query()}
+                """
+            )
+
             # Verify service exists and belongs to user
             result = con.execute(
                 """
@@ -95,6 +135,14 @@ class DuckDBStore(DuckDBBaseStore):
                 WHERE service_id = ?
                 """,
                 [service, item_id],
+            )
+
+            # Write back to parquet
+            con.execute(
+                """
+                COPY services TO ? (FORMAT PARQUET, OVERWRITE TRUE)
+                """,
+                [self.store],
             )
 
         return item_id
