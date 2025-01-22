@@ -38,7 +38,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 To install [`titiler-openeo`](titiler/openeo/main.py ), clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/developmentseed/titiler-openeo.git
+git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler-openeo
 python -m pip install -e .
 ```
@@ -130,14 +130,14 @@ Login with the following credentials:
 
 ## License
 
-See [LICENSE](https://github.com/developmentseed/titiler-open/blob/main/LICENSE)
+See [LICENSE](https://github.com/sentinel-hub/titiler-open/blob/main/LICENSE)
 
 ## Authors
 
 Created by [Development Seed](<http://developmentseed.org>) and [Sinergise](https://www.sinergise.com/).
 
-See [contributors](https://github.com/developmentseed/titiler-openeo/graphs/contributors) for a listing of individual contributors.
+See [contributors](https://github.com/sentinel-hub/titiler-openeo/graphs/contributors) for a listing of individual contributors.
 
 ## Changes
 
-See [CHANGES.md](https://github.com/developmentseed/titiler-openeo/blob/main/CHANGES.md).
+See [CHANGES.md](https://github.com/sentinel-hub/titiler-openeo/blob/main/CHANGES.md).

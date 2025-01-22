@@ -1,11 +1,11 @@
 # Development - Contributing
 
-Issues and pull requests are more than welcome: https://github.com/developmentseed/titiler-openeo/issues
+Issues and pull requests are more than welcome: https://github.com/sentinel-hub/titiler-openeo/issues
 
 **dev install**
 
 ```bash
-git clone https://github.com/developmentseed/titiler-openeo.git
+git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler
 
 python -m pip install -e ".[test,dev]"
@@ -28,7 +28,7 @@ python -m pytest --cov=titiler.openeo --cov-report=xml --cov-append --cov-report
 ### Docs
 
 ```bash
-git clone https://github.com/developmentseed/titiler-openeo.git
+git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler
 python -m pip install -e ".[docs]"
 ```
