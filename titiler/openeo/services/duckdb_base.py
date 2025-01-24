@@ -1,7 +1,7 @@
 """titiler.openeo.services duckDB base."""
 
 import abc
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from attrs import define
 
@@ -22,7 +22,7 @@ class DuckDBBaseStore(ServicesStore, metaclass=abc.ABCMeta):
         """Get query to access services table."""
         ...
 
-    def get_service(self, service_id: str) -> Dict | None:
+    def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         with self._get_connection() as con:
             result = con.execute(

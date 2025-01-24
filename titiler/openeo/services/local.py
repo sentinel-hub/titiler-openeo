@@ -5,7 +5,7 @@ NOTE: This should be used only for Testing Purposes.
 """
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
@@ -18,7 +18,7 @@ class LocalStore(ServicesStore):
 
     store: Dict = field()
 
-    def get_service(self, service_id: str) -> Dict | None:
+    def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         if service_id not in self.store:
             return None

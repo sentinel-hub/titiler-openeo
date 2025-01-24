@@ -1,7 +1,7 @@
 """ABC Base services Store."""
 
 import abc
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
@@ -21,7 +21,7 @@ class ServicesStore(metaclass=abc.ABCMeta):
         self.store = store
 
     @abc.abstractmethod
-    def get_service(self, service_id: str) -> Dict | None:
+    def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         ...
 
