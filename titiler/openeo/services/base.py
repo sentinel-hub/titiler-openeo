@@ -38,6 +38,8 @@ class ServicesStore(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
         """Update Service."""
         ...

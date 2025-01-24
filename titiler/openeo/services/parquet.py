@@ -28,11 +28,11 @@ class ParquetStore(DuckDBBaseStore):
             try:
                 con.execute(
                     f"""
-                    CREATE TABLE services AS 
+                    CREATE TABLE services AS
                     SELECT * FROM {self._get_table_query()}
                     """
                 )
-            except:
+            except:  # noqa: E722
                 # File doesn't exist or is empty, create new table
                 con.execute(
                     """
@@ -68,7 +68,7 @@ class ParquetStore(DuckDBBaseStore):
             # Load existing data
             con.execute(
                 f"""
-                CREATE TABLE services AS 
+                CREATE TABLE services AS
                 SELECT * FROM {self._get_table_query()}
                 """
             )
@@ -96,13 +96,15 @@ class ParquetStore(DuckDBBaseStore):
 
         return True
 
-    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
         """Update Service."""
         with self._get_connection() as con:
             # Load all data
             con.execute(
                 f"""
-                CREATE TABLE services AS 
+                CREATE TABLE services AS
                 SELECT * FROM {self._get_table_query()}
                 """
             )

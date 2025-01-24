@@ -14,6 +14,7 @@ def get_store(store_uri: str) -> ServicesStore:
 
     if parsed.path.endswith(".json"):
         import json
+
         return LocalStore(json.load(open(store_uri)))  # type: ignore
 
     if parsed.path.endswith(".db"):

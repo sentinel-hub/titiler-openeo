@@ -1,7 +1,5 @@
 """Test titiler.openeo services."""
 
-import pytest
-from titiler.openeo.models import Service, ServiceInput
 
 def test_add_service(app):
     """Test adding a service."""
@@ -16,24 +14,21 @@ def test_add_service(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
         "title": "Test Service",
-        "description": "A test service"
+        "description": "A test service",
     }
 
     response = app.post("/services", json=service_input)
@@ -68,23 +63,20 @@ def test_get_service(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
-        "title": "Test Service"
+        "title": "Test Service",
     }
     create_response = app.post("/services", json=service_input)
     assert create_response.status_code == 201
@@ -95,7 +87,7 @@ def test_get_service(app):
     assert service["id"] == service_id
     assert service["title"] == service_input["title"]
     assert service["type"] == service_input["type"]
-    
+
 
 def test_get_user_services(app):
     """Test getting services for a specific user."""
@@ -120,23 +112,20 @@ def test_update_service(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
-        "title": "Original Title"
+        "title": "Original Title",
     }
     create_response = app.post("/services", json=service_input)
     assert create_response.status_code == 201
@@ -154,23 +143,20 @@ def test_update_service(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
-        "title": "Updated Title"
+        "title": "Updated Title",
     }
     response = app.patch(f"/services/{service_id}", json=update_input)
     assert response.status_code == 204
@@ -190,23 +176,20 @@ def test_delete_service(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
-        "title": "Test Service"
+        "title": "Test Service",
     }
     create_response = app.post("/services", json=service_input)
     assert create_response.status_code == 201
@@ -224,10 +207,7 @@ def test_delete_service(app):
 def test_service_validation(app):
     """Test service input validation."""
     # Missing required process
-    invalid_input = {
-        "type": "xyz",
-        "title": "Test Service"
-    }
+    invalid_input = {"type": "xyz", "title": "Test Service"}
     response = app.post("/services", json=invalid_input)
     assert response.status_code == 422
 
@@ -235,22 +215,16 @@ def test_service_validation(app):
     invalid_input = {
         "process": {
             "process_graph": {
-                "loadco1": {
-                    "process_id": "invalid_process",
-                    "arguments": {}
-                },
+                "loadco1": {"process_id": "invalid_process", "arguments": {}},
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
-        "title": "Test Service"
+        "title": "Test Service",
     }
     response = app.post("/services", json=invalid_input)
     assert response.status_code == 400
@@ -269,27 +243,21 @@ def test_service_configuration(app):
                             "west": 16.1,
                             "east": 16.6,
                             "north": 48.6,
-                            "south": 47.2
+                            "south": 47.2,
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"]
-                    }
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
                 },
                 "save1": {
                     "process_id": "save_result",
-                    "arguments": {
-                        "data": {"from_node": "loadco1"},
-                        "format": "png"
-                    },
-                    "result": True
-                }
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
             }
         },
         "type": "xyz",
         "title": "Test Service",
-        "configuration": {
-            "version": "1.0.0",
-            "format": "png"
-        }
+        "configuration": {"version": "1.0.0", "format": "png"},
     }
 
     response = app.post("/services", json=service_input)

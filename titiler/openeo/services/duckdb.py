@@ -64,7 +64,9 @@ class DuckDBStore(DuckDBBaseStore):
 
         return True
 
-    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
         """Update Service."""
         with self._get_connection() as con:
             # Verify service exists and belongs to user

@@ -3,7 +3,6 @@
 import abc
 from typing import Any, Dict, List
 
-import duckdb
 from attrs import define, field
 
 from .base import ServicesStore
@@ -97,6 +96,8 @@ class DuckDBBaseStore(ServicesStore, metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
         """Update Service."""
         ...

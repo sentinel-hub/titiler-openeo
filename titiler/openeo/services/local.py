@@ -64,7 +64,9 @@ class LocalStore(ServicesStore):
         _ = self.store.pop(service_id)
         return True
 
-    def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
         """Update Service."""
         if item_id not in self.store:
             raise ValueError(f"Could not find service: {item_id}")
