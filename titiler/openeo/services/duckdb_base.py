@@ -3,7 +3,7 @@
 import abc
 from typing import Any, Dict, List
 
-from attrs import define, field
+from attrs import define
 
 from .base import ServicesStore
 
@@ -11,8 +11,6 @@ from .base import ServicesStore
 @define()
 class DuckDBBaseStore(ServicesStore, metaclass=abc.ABCMeta):
     """Base class for DuckDB-based stores."""
-
-    store: str = field()
 
     @abc.abstractmethod
     def _get_connection(self):

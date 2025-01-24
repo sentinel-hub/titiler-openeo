@@ -9,8 +9,9 @@ from attrs import define
 from .duckdb_base import DuckDBBaseStore
 
 
-@define()
+@define(kw_only=True, init=False)
 class DuckDBStore(DuckDBBaseStore):
+    store: str
     """DuckDB Service Store using native DB format."""
 
     def __attrs_post_init__(self):

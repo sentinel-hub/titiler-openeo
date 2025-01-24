@@ -12,6 +12,14 @@ class ServicesStore(metaclass=abc.ABCMeta):
 
     store: Any = field()
 
+    def __init__(self, store: Any):
+        """Initialize the ServicesStore.
+
+        Args:
+            store (Any): The store instance to be used by the service.
+        """
+        self.store = store
+
     @abc.abstractmethod
     def get_service(self, service_id: str) -> Dict | None:
         """Return a specific Service."""

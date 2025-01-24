@@ -9,7 +9,7 @@ from attrs import define
 from .duckdb_base import DuckDBBaseStore
 
 
-@define()
+@define(kw_only=True, init=False)
 class ParquetStore(DuckDBBaseStore):
     """DuckDB Service Store using Parquet format."""
 
