@@ -1,11 +1,10 @@
 {
   "id": "to_array",
   "summary": "Convert ImageData to array.",
-  "description": "Gives the element with the specified index from the array.",
+  "description": "Convert an ImageData object to numpy.array.",
   "categories": [
     "images",
-    "arrays",
-    "reducer"
+    "arrays"
   ],
   "parameters": [
     {

@@ -8,10 +8,6 @@ services:
     ports:
       - "8081:8081"
     environment:
-      # Application
-      - HOST=0.0.0.0
-      - PORT=8081
-      - WEB_CONCURRENCY=1
       # GDAL Config
       # This option controls the default GDAL raster block cache size.
       # If its value is small (less than 100000), it is assumed to be measured in megabytes, otherwise in bytes.
@@ -37,10 +33,14 @@ services:
       # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       # TiTiler STAC API Config
       - TITILER_OPENEO_API_DEBUG=TRUE
-      # - TITILER_OPENEO_API_STAC_API_URL=${TITILER_OPENEO_API_STAC_API_URL}
+      # - TITILER_OPENEO_STAC_API_URL=https://stac.eoapi.dev
+      # - TITILER_OPENEO_SERVICE_STORE_URL=/tmp/services/eoapi.json
     env_file:
       - path: .env
         required: false
+    command: ["uvicorn", "titiler.openeo.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "4"]
+    volumes:
+      - ./services:/tmp/services
 
   openeo:
     platform: linux/amd64

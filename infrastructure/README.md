@@ -6,7 +6,7 @@ The following steps detail how to to setup and deploy the CDK stack from your lo
 
 ```bash
 # Download titiler repo
-git clone https://github.com/developmentseed/titiler-openeo.git
+git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler-openeo
 
 # Create a virtual environment

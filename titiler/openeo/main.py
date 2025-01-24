@@ -35,7 +35,7 @@ app = FastAPI(
 
 **Documentation**: <a href="https://developmentseed.org/titiler-openeo/" target="_blank">https://developmentseed.org/titiler-openeo/</a>
 
-**Source Code**: <a href="https://github.com/developmentseed/titiler-openeo" target="_blank">https://github.com/developmentseed/titiler-openeo</a>
+**Source Code**: <a href="https://github.com/sentinel-hub/titiler-openeo" target="_blank">https://github.com/sentinel-hub/titiler-openeo</a>
 
 ---
     """,

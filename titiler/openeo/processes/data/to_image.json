@@ -1,0 +1,27 @@
+{
+  "id": "to_image",
+  "summary": "Convert array to ImageData.",
+  "description": "Convert a 2 or 3 dimensional array to an ImageData object.",
+  "categories": [
+    "images",
+    "arrays"
+  ],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "The array from the ImageData object.",
+      "schema": {
+        "type": "array"
+      }
+    }
+  ],
+  "returns": {
+    "description": "An ImageData object.",
+    "schema": {
+      "type": "object",
+      "subtype": "imagedata"
+    }
+  },
+  "exceptions": {},
+  "examples": []
+}

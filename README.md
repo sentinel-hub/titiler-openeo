@@ -1,4 +1,4 @@
-# titiler-openeo
+# openEO by TiTiler
 
 TiTiler backend for openEO
 
@@ -6,10 +6,10 @@ TiTiler backend for openEO
 
 ## Overview
 
-[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO.
+[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a> and <a href="https://www.sinergise.com/"><img alt="Sinergise" src="docs/src/img/sinergise-logo.png" height="25px"></a>.
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
-This simplicity comes with some specific implementation choice like the type of data managed by the backend.
+This simplicity comes with some specific implementation choices like the type of data managed by the backend.
 It is focused on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
 A concept note is available [here](docs/src/concepts.md) to describe in more detail the implementation choices.
 
@@ -25,12 +25,20 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
 
+## Roadmap
+
+- [ ] Services Management (CRUD `/services` endpoints)
+- [ ] Integrated Authentication
+- [ ] More output formats
+- [ ] More openEO processes
+- [ ] Github pages documentation
+
 ## Installation
 
 To install [`titiler-openeo`](titiler/openeo/main.py ), clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/developmentseed/titiler-openeo.git
+git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler-openeo
 python -m pip install -e .
 ```
@@ -67,7 +75,7 @@ In this repository, 2 `.env` sample files are provided:
   TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
   TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
   ```
-  
+
   In order to access asset object store and to retrieve data efficiently, it requires to set additional **environment variables**:
 
   ```bash
@@ -122,14 +130,14 @@ Login with the following credentials:
 
 ## License
 
-See [LICENSE](https://github.com/developmentseed/titiler-open/blob/main/LICENSE)
+See [LICENSE](https://github.com/sentinel-hub/titiler-open/blob/main/LICENSE)
 
 ## Authors
 
-Created by [Development Seed](<http://developmentseed.org>) for [Planet](https://www.planet.com/).
+Created by [Development Seed](<http://developmentseed.org>) and [Sinergise](https://www.sinergise.com/).
 
-See [contributors](https://github.com/developmentseed/titiler-openeo/graphs/contributors) for a listing of individual contributors.
+See [contributors](https://github.com/sentinel-hub/titiler-openeo/graphs/contributors) for a listing of individual contributors.
 
 ## Changes
 
-See [CHANGES.md](https://github.com/developmentseed/titiler-openeo/blob/main/CHANGES.md).
+See [CHANGES.md](https://github.com/sentinel-hub/titiler-openeo/blob/main/CHANGES.md).
