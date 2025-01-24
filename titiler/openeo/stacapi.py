@@ -261,9 +261,7 @@ class LoadCollection:
                 end_date = str(temporal_extent[1].to_numpy())
 
             if not end_date and not start_date:
-                raise TemporalExtentEmpty(
-                    "The temporal extent is empty. The second instant in time must always be greater/later than the first instant in time."
-                )
+                raise TemporalExtentEmpty()
 
             query_params["datetime"] = [start_date, end_date]
 

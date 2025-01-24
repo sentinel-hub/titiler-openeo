@@ -1,6 +1,6 @@
 """titiler-openeo app."""
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
@@ -94,12 +94,10 @@ endpoints = EndpointsFactory(
 app.include_router(endpoints.router)
 
 # Add OpenEO-specific exception handlers
-app.add_exception_handler(
-    OpenEOException, endpoints.openeo_exception_handler)
+app.add_exception_handler(OpenEOException, endpoints.openeo_exception_handler)
 
 app.add_exception_handler(
-    RequestValidationError, endpoints.validation_exception_handler)
+    RequestValidationError, endpoints.validation_exception_handler
+)
 
-app.add_exception_handler(
-    HTTPException, endpoints.http_exception_handler)
-
+app.add_exception_handler(HTTPException, endpoints.http_exception_handler)

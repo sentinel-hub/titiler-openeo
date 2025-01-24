@@ -7,13 +7,12 @@ import morecantile
 import pyproj
 from attrs import define, field
 from fastapi import Depends, HTTPException, Path, Request
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rio_tiler.errors import TileOutsideBounds
-from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
 
@@ -39,7 +38,9 @@ class EndpointsFactory(BaseFactory):
     auth: Auth = field(factory=FakeBasicAuth)
 
     @staticmethod
-    def openeo_exception_handler(request: Request, exc: OpenEOException) -> JSONResponse:
+    def openeo_exception_handler(
+        request: Request, exc: OpenEOException
+    ) -> JSONResponse:
         """Handle OpenEO exceptions."""
         return JSONResponse(
             status_code=exc.status_code,
@@ -47,14 +48,16 @@ class EndpointsFactory(BaseFactory):
         )
 
     @staticmethod
-    def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         """Handle FastAPI validation errors."""
         return JSONResponse(
             status_code=400,
             content={
                 "code": "InvalidRequest",
                 "message": str(exc),
-            }
+            },
         )
 
     @staticmethod
@@ -65,7 +68,7 @@ class EndpointsFactory(BaseFactory):
             content={
                 "code": "ServerError" if exc.status_code >= 500 else "InvalidRequest",
                 "message": exc.detail,
-            }
+            },
         )
 
     def register_routes(self):  # noqa: C901

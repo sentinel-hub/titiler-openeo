@@ -14,6 +14,7 @@ def app(monkeypatch):
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", "services/eoapi.json")
     from titiler.openeo.main import app
+
     return app
 
 
