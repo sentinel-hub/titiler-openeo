@@ -20,6 +20,7 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
+from titiler.openeo.errors import InvalidProcessGraph
 from titiler.openeo.models import (
     OPENEO_VERSION,
     ServiceInput,
@@ -449,6 +450,25 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
+            process = body.process.model_dump()
+            
+            # Validate process graph
+            try:
+                # Parse and validate process graph structure
+                parsed_graph = OpenEOProcessGraph(pg_data=process)
+                
+                # Check if all processes exist in registry
+                for node in parsed_graph.nodes:
+                    process_id = node[1].get("process_id")
+                    if process_id and process_id not in self.process_registry[None]:
+                        raise InvalidProcessGraph(f"Process '{process_id}' not found in registry")
+                
+                # Try to create callable to validate parameter types
+                parsed_graph.to_callable(process_registry=self.process_registry)
+                
+            except Exception as e:
+                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}")
+
             service_id = self.services_store.add_service(user.user_id, body.model_dump())
             service = self.services_store.get_service(service_id)
             if not service:
