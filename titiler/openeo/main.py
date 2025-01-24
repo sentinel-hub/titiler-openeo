@@ -1,14 +1,14 @@
 """titiler-openeo app."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.exceptions import RequestValidationError
 from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
-from titiler.core.errors import add_exception_handlers
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
-from titiler.openeo.errors import DEFAULT_STATUS_CODES
+from titiler.openeo.errors import OpenEOException
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
@@ -93,4 +93,13 @@ endpoints = EndpointsFactory(
 )
 app.include_router(endpoints.router)
 
-add_exception_handlers(app, DEFAULT_STATUS_CODES)
+# Add OpenEO-specific exception handlers
+app.add_exception_handler(
+    OpenEOException, endpoints.openeo_exception_handler)
+
+app.add_exception_handler(
+    RequestValidationError, endpoints.validation_exception_handler)
+
+app.add_exception_handler(
+    HTTPException, endpoints.http_exception_handler)
+

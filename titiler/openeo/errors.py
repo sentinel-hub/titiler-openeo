@@ -1,30 +1,137 @@
-"""titiler.openeo errors."""
+"""titiler.openeo errors.
 
+This module implements the OpenEO API error handling specification.
+See: https://api.openeo.org/#section/API-Principles/Error-Handling
+"""
+
+from typing import Optional
 from starlette import status
 
 
 class OpenEOException(Exception):
-    """General Error."""
+    """Base class for OpenEO API exceptions."""
 
-    pass
+    def __init__(
+        self,
+        message: str,
+        code: str,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        id: Optional[str] = None,
+        url: Optional[str] = None,
+    ):
+        """Initialize error with required OpenEO error fields.
+
+        Args:
+            message: Explains what went wrong and how to fix it
+            code: Machine-readable error code
+            status_code: HTTP status code
+            id: Optional unique error instance identifier
+            url: Optional URL with more information about the error
+        """
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.id = id
+        self.url = url
+
+    def to_dict(self) -> dict:
+        """Convert error to OpenEO API compliant dict format."""
+        error = {
+            "code": self.code,
+            "message": self.message,
+        }
+        if self.id:
+            error["id"] = self.id
+        if self.url:
+            error["url"] = self.url
+        return error
 
 
 class ProcessParameterMissing(OpenEOException):
     """Invalid Parameters."""
 
-    pass
+    def __init__(self, parameter: str):
+        super().__init__(
+            message=f"Required process parameter '{parameter}' is missing",
+            code="ProcessParameterMissing",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class NoDataAvailable(OpenEOException):
-    """There is no data available for the given extents."""
+    """No data available for the requested extent."""
 
-    pass
+    def __init__(self):
+        super().__init__(
+            message="There is no data available for the given extents",
+            code="NoDataAvailable", 
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
 
 
 class TemporalExtentEmpty(OpenEOException):
-    """The temporal extent is empty. The second instant in time must always be greater/later than the first instant in time."""
+    """Invalid temporal extent."""
 
-    pass
+    def __init__(self):
+        super().__init__(
+            message="The temporal extent is empty. The second instant in time must be greater/later than the first instant in time",
+            code="TemporalExtentEmpty",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
 
-DEFAULT_STATUS_CODES = {NoDataAvailable: status.HTTP_404_NOT_FOUND}
+class AuthenticationRequired(OpenEOException):
+    """Authentication is required."""
+
+    def __init__(self):
+        super().__init__(
+            message="Authentication is required to access this resource",
+            code="AuthenticationRequired",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+class AuthenticationFailed(OpenEOException):
+    """Authentication failed."""
+
+    def __init__(self):
+        super().__init__(
+            message="The provided credentials are invalid",
+            code="AuthenticationFailed",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+class AccessDenied(OpenEOException):
+    """Access to the resource is forbidden."""
+
+    def __init__(self):
+        super().__init__(
+            message="You don't have permission to access this resource",
+            code="AccessDenied",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+
+class ResourceNotFound(OpenEOException):
+    """The requested resource was not found."""
+
+    def __init__(self, resource_type: str, resource_id: str):
+        super().__init__(
+            message=f"The requested {resource_type} with id '{resource_id}' does not exist",
+            code="ResourceNotFound",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+
+class ServiceUnavailable(OpenEOException):
+    """The service is temporarily unavailable."""
+
+    def __init__(self, detail: str = "The service is temporarily unavailable"):
+        super().__init__(
+            message=detail,
+            code="ServiceUnavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+

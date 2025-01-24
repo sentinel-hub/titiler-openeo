@@ -6,8 +6,9 @@ from typing import Any, Dict, List
 import morecantile
 import pyproj
 from attrs import define, field
-from fastapi import Depends, HTTPException, Path
+from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
@@ -20,6 +21,7 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
+from titiler.openeo.errors import OpenEOException
 from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
@@ -35,6 +37,36 @@ class EndpointsFactory(BaseFactory):
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth = field(factory=FakeBasicAuth)
+
+    @staticmethod
+    def openeo_exception_handler(request: Request, exc: OpenEOException) -> JSONResponse:
+        """Handle OpenEO exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
+        )
+
+    @staticmethod
+    def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Handle FastAPI validation errors."""
+        return JSONResponse(
+            status_code=400,
+            content={
+                "code": "InvalidRequest",
+                "message": str(exc),
+            }
+        )
+
+    @staticmethod
+    def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        """Handle HTTP exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": "ServerError" if exc.status_code >= 500 else "InvalidRequest",
+                "message": exc.detail,
+            }
+        )
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -670,7 +702,8 @@ class EndpointsFactory(BaseFactory):
                 for node in load_collection_nodes
             ), "Invalid load_collection process, Missing spatial_extent"
 
-            tile_bounds = list(tms.xy_bounds(x, y, z))
+            tile = morecantile.Tile(x=x, y=y, z=z)
+            tile_bounds = list(tms.xy_bounds(tile))
             args = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
@@ -686,7 +719,7 @@ class EndpointsFactory(BaseFactory):
                         pyproj.CRS.from_epsg(4326),
                         always_xy=True,
                     )
-                    tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
+                    tile_bounds = list(trans.transform_bounds(*tile_bounds))
 
                 if not (
                     (tile_bounds[0] < service_extent[2])

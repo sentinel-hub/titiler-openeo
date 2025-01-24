@@ -1,10 +1,10 @@
 """Test titiler.openeo.main.app."""
 
 
-def test_health(app):
+def test_health(app, client):
     """Test /healthz endpoint."""
-    response = app.get("/api")
+    response = client.get("/api")
     assert response.status_code == 200
 
-    response = app.get("/api.html")
+    response = client.get("/api.html")
     assert response.status_code == 200
