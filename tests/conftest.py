@@ -1,45 +1,42 @@
 """``pytest`` configuration."""
 
-import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
+import psycopg2
 import pytest
 from fastapi import Header
 from starlette.testclient import TestClient
 
 from titiler.openeo.auth import Auth, User
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
-
-StoreType = Literal["local", "duckdb", "parquet"]
+StoreType = Literal["local", "duckdb", "sqlalchemy"]
 
 
-@pytest.fixture(params=["local", "duckdb", "parquet"])
+@pytest.fixture(params=["local", "duckdb", "sqlalchemy"])
 def store_type(request) -> StoreType:
     """Parameterize the service store type."""
     return request.param
 
 
 @pytest.fixture
-def store_path(tmp_path, store_type: StoreType) -> Path:
+def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
     """Create a temporary store path based on store type."""
+    tmp_path.mkdir(exist_ok=True)
     if store_type == "local":
         path = tmp_path / "services.json"
         path.write_text("{}")
+        return path
     elif store_type == "duckdb":
         path = tmp_path / "services.db"
-    else:  # parquet
-        path = tmp_path / "services.parquet"
-    return path
+        return path
+    else:  # sqlalchemy in memory mock test
+        return "sqlite:///:memory:"
 
 
 @pytest.fixture(autouse=True)
 def app(monkeypatch, store_path, store_type) -> TestClient:
     """Create App with temporary services store."""
-    # Create fixtures directory if it doesn't exist
-    Path(DATA_DIR).mkdir(exist_ok=True)
-
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
 
@@ -74,6 +71,16 @@ def clean_services(app, store_path, store_type):
     elif store_type == "duckdb":
         if store_path.exists():
             store_path.unlink()
-    else:  # parquet
-        if store_path.exists():
-            store_path.unlink()
+    else:  # postgres
+        dbname = store_path.split("/")[-1]
+        conn = psycopg2.connect(
+            dbname="postgres", user="postgres", password="postgres", host="localhost"
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+
+        # Drop test database
+        cur.execute(f"DROP DATABASE IF EXISTS {dbname}")
+
+        cur.close()
+        conn.close()

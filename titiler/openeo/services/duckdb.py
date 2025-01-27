@@ -1,18 +1,20 @@
 """titiler.openeo.services duckDB."""
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import duckdb
 from attrs import define
 
-from .duckdb_base import DuckDBBaseStore
+from .base import ServicesStore
 
 
 @define(kw_only=True, init=False)
-class DuckDBStore(DuckDBBaseStore):
+class DuckDBStore(ServicesStore):
+    """DuckDB Service Store."""
+
     store: str
-    """DuckDB Service Store using native DB format."""
+    """DuckDB database file path."""
 
     def __attrs_post_init__(self):
         """Post init: create table if not exists."""
@@ -27,18 +29,71 @@ class DuckDBStore(DuckDBBaseStore):
                 """
             )
 
-    def _get_connection(self):
-        """Get database connection."""
-        return duckdb.connect(self.store)
+    def get_service(self, service_id: str) -> Optional[Dict]:
+        """Return a specific Service."""
+        with duckdb.connect(self.store) as con:
+            result = con.execute(
+                """
+                SELECT service_id, service
+                FROM services
+                WHERE service_id = ?
+                """,
+                [service_id],
+            ).fetchone()
 
-    def _get_table_query(self) -> str:
-        """Get query to access services table."""
-        return "services"
+            if not result:
+                return None
+
+            return {
+                "id": result[0],
+                **result[1],
+            }
+
+    def get_services(self, **kwargs) -> List[Dict]:
+        """Return All Services."""
+        with duckdb.connect(self.store) as con:
+            results = con.execute(
+                """
+                SELECT service_id, service
+                FROM services
+                """
+            ).fetchall()
+
+            return [
+                {
+                    "id": result[0],
+                    **result[1],
+                }
+                for result in results
+            ]
+
+    def get_user_services(self, user_id: str, **kwargs) -> List[Dict]:
+        """Return List Services for a user."""
+        with duckdb.connect(self.store) as con:
+            results = con.execute(
+                """
+                SELECT service_id, service
+                FROM services
+                WHERE user_id = ?
+                """,
+                [user_id],
+            ).fetchall()
+
+            if not results:
+                raise ValueError(f"Could not find service for user: {user_id}")
+
+            return [
+                {
+                    "id": result[0],
+                    **result[1],
+                }
+                for result in results
+            ]
 
     def add_service(self, user_id: str, service: Dict, **kwargs) -> str:
         """Add Service."""
         service_id = str(uuid.uuid4())
-        with self._get_connection() as con:
+        with duckdb.connect(self.store) as con:
             con.execute(
                 """
                 INSERT INTO services (service_id, user_id, service)
@@ -50,7 +105,7 @@ class DuckDBStore(DuckDBBaseStore):
 
     def delete_service(self, service_id: str, **kwargs) -> bool:
         """Delete Service."""
-        with self._get_connection() as con:
+        with duckdb.connect(self.store) as con:
             result = con.execute(
                 """
                 DELETE FROM services
@@ -69,7 +124,7 @@ class DuckDBStore(DuckDBBaseStore):
         self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
     ) -> str:
         """Update Service."""
-        with self._get_connection() as con:
+        with duckdb.connect(self.store) as con:
             # Verify service exists and belongs to user
             result = con.execute(
                 """
