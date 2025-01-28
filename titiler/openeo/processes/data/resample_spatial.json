@@ -79,20 +79,15 @@
         "schema": {
           "type": "string",
           "enum": [
-            "average",
+            "nearest",
             "bilinear",
             "cubic",
-            "cubicspline",
+            "cubic_spline",
             "lanczos",
-            "max",
-            "med",
-            "min",
+            "average",
             "mode",
-            "near",
-            "q1",
-            "q3",
-            "rms",
-            "sum"
+            "sum",
+            "rms"
           ]
         },
         "default": "near",

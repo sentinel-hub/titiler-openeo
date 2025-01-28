@@ -3,7 +3,7 @@
 from typing import Tuple, Union
 
 from pyproj import CRS
-from rasterio.warp import Resampling
+from rio_tiler.types import WarpResampling
 
 from .data_model import ImageData, RasterStack
 
@@ -15,7 +15,7 @@ def resample_spatial(
     projection: Union[int, str],
     resolution: Union[float, Tuple[float, float]],
     align: str,
-    method: str = "nearest",
+    method: WarpResampling = "nearest",
 ) -> Union[RasterStack, ImageData]:
     """Resample and warp the spatial dimensions of the raster at a given resolution."""
 
@@ -28,30 +28,35 @@ def resample_spatial(
                 "resample_spatial: align parameter is not yet implemented"
             )
 
-        dst_crs = CRS(projection)
+        dst_crs = CRS.from_user_input(projection)
         # map resampling method to rio-tiler method using a dictionary
-        resampling_method: Resampling = {
-            "nearest": Resampling.nearest,
-            "bilinear": Resampling.bilinear,
-            "cubic": Resampling.cubic,
-            "cubicspline": Resampling.cubic_spline,
-            "lanczos": Resampling.lanczos,
-            "average": Resampling.average,
-            "mode": Resampling.mode,
-            "max": Resampling.max,
-            "min": Resampling.min,
-            "med": Resampling.med,
-            "q1": Resampling.q1,
-            "q3": Resampling.q3,
-            "sum": Resampling.sum,
-            "rms": Resampling.rms,
+        resampling_method: WarpResampling = {
+            "nearest": WarpResampling.nearest,
+            "bilinear": WarpResampling.bilinear,
+            "cubic": WarpResampling.cubic,
+            "cubicspline": WarpResampling.cubic_spline,
+            "lanczos": WarpResampling.lanczos,
+            "average": WarpResampling.average,
+            "mode": WarpResampling.mode,
+            "max": None,
+            "min": None,
+            "med": None,
+            "q1": None,
+            "q3": None,
+            "sum": WarpResampling.sum,
+            "rms": WarpResampling.rms,
             "near": None,
         }[method]
+
+        if resampling_method is None:
+            raise ValueError(f"Unsupported resampling method: {method}")
 
         res = resolution if isinstance(resolution, tuple) else (resolution, resolution)
 
         # reproject the image
-        return img.reproject(dst_crs, res, resampling_method)
+        return img.reproject(
+            dst_crs, resolution=res, reproject_method=resampling_method
+        )
 
     """ Get destination CRS from parameters """
     dst_crs = CRS.from_epsg(projection)
