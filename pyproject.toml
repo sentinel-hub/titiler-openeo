@@ -37,8 +37,6 @@ dependencies = [
     "openeo-pg-parser-networkx",
     "pystac-client",
     "pydantic-settings~=2.0",
-    "sqlalchemy>=2.0.0",
-    "psycopg2-binary",
 ]
 
 [project.optional-dependencies]
