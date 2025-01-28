@@ -3,7 +3,7 @@
 import uuid
 from typing import Any, Dict, List, Optional
 
-from attrs import define
+from attrs import define, field
 from sqlalchemy import JSON, Column, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -29,6 +29,8 @@ class Service(Base):
 @define(kw_only=True, init=False)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
+    
+    store: str = field()
 
     _engine = None
     _session_factory = None

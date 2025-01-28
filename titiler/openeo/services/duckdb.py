@@ -4,7 +4,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import duckdb
-from attrs import define
+from attrs import define, field
 
 from .base import ServicesStore
 
@@ -13,8 +13,7 @@ from .base import ServicesStore
 class DuckDBStore(ServicesStore):
     """DuckDB Service Store."""
 
-    store: str
-    """DuckDB database file path."""
+    store: str = field()
 
     def __attrs_post_init__(self):
         """Post init: create table if not exists."""
