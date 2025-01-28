@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Any, Literal, Union
 
-import psycopg2
 import pytest
 from fastapi import Header
 from starlette.testclient import TestClient
@@ -71,16 +70,5 @@ def clean_services(app, store_path, store_type):
     elif store_type == "duckdb":
         if store_path.exists():
             store_path.unlink()
-    else:  # postgres
-        dbname = store_path.split("/")[-1]
-        conn = psycopg2.connect(
-            dbname="postgres", user="postgres", password="postgres", host="localhost"
-        )
-        conn.autocommit = True
-        cur = conn.cursor()
-
-        # Drop test database
-        cur.execute(f"DROP DATABASE IF EXISTS {dbname}")
-
-        cur.close()
-        conn.close()
+    else:  # sqlalchemy in memory mock test
+        pass

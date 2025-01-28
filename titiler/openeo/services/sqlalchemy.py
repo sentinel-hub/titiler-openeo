@@ -30,17 +30,13 @@ class Service(Base):
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
 
-    store: Dict[str, str]
-    """SQLAlchemy connection parameters."""
-
     _engine = None
     _session_factory = None
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
-        # Convert psycopg2 connection params to SQLAlchemy URL
-        url = self.store
-        self._engine = create_engine(url)
+        # Convert psycopg connection params to SQLAlchemy URL
+        self._engine = create_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
 
         # Create tables if they don't exist
