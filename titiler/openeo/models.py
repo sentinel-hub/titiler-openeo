@@ -282,7 +282,7 @@ class JsonSchema(BaseModel, extra="allow"):
     """
 
     field_schema: Optional[AnyUrl] = Field(
-        AnyUrl("http://json-schema.org/draft-07/schema#"),
+        None,
         alias="$schema",
         json_schema_extra={
             "description": "The JSON Schema version. If not given in the context of openEO,\ndefaults to `draft-07`.\n\nYou may need to add the default value for `$schema` property explicitly to the JSON Schema\nobject before passing it to a JSON Schema validator."
@@ -319,7 +319,7 @@ class JsonSchema(BaseModel, extra="allow"):
         },
     )
     minItems: Optional[float] = Field(
-        0,
+        None,
         ge=0.0,
         json_schema_extra={
             "description": "The minimum number of items required in an array."
@@ -553,7 +553,7 @@ class BaseParameter(BaseModel):
         },
     )
     optional: Optional[bool] = Field(
-        False,
+        None,
         json_schema_extra={
             "description": "Determines whether this parameter is optional to be specified even when no default is specified.\nClients SHOULD automatically set this parameter to `true`, if a default value is specified. Back-ends SHOULD NOT fail, if a default value is specified and this flag is missing."
         },
