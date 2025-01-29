@@ -31,8 +31,8 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "titiler.core==0.19.2",
-    "titiler.mosaic==0.19.2",
+    "titiler.core==0.21.0",
+    "rio-tiler>=7.4.0,<8.0",
     "starlette-cramjam>=0.4,<0.5",
     "openeo-pg-parser-networkx",
     "pystac-client",
