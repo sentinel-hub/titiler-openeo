@@ -29,7 +29,7 @@ class Service(Base):
 @define(kw_only=True, init=False)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
-    
+
     store: str = field()
 
     _engine = None
