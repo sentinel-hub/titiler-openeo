@@ -40,7 +40,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov", "pytest-asyncio", "httpx", "brotlipy"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "httpx",
+    "brotlipy",
+    "duckdb",
+    "sqlalchemy>=2.0.0",
+]
 dev = ["pre-commit", "bump-my-version"]
 docs = [
     "mkdocs>=1.4.3",
@@ -50,6 +58,8 @@ docs = [
     "mkdocstrings[python]>=0.25.1",
 ]
 server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
+duckdb = ["duckdb"]
+postgres = ["sqlalchemy>=2.0.0", "psycopg[pool]"]
 
 [project.urls]
 Homepage = "https://developmentseed.org/titiler-openeo/"

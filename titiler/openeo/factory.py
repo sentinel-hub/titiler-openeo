@@ -1,7 +1,7 @@
 """titiler.openeo endpoint Factory."""
 
 from copy import deepcopy
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import morecantile
 import pyproj
@@ -20,7 +20,8 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
-from titiler.openeo.models import OPENEO_VERSION
+from titiler.openeo.errors import InvalidProcessGraph
+from titiler.openeo.models import OPENEO_VERSION, ServiceInput
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
 
@@ -70,6 +71,7 @@ class EndpointsFactory(BaseFactory):
                 "api_version": OPENEO_VERSION,
                 "backend_version": titiler_version,
                 "stac_version": STAC_VERSION,
+                "type": "Catalog",
                 "id": "titiler-openeo",
                 "title": "TiTiler for OpenEO",
                 "description": "TiTiler OpenEO by [DevelopmentSeed](https://developmentseed.org)",
@@ -392,6 +394,8 @@ class EndpointsFactory(BaseFactory):
         ):
             """Lists all information about a secondary web service."""
             service = self.services_store.get_service(service_id)
+            if not service:
+                raise HTTPException(404, f"Could not find service: {service_id}")
             return {
                 **service,
                 "url": self.url_for(
@@ -404,47 +408,154 @@ class EndpointsFactory(BaseFactory):
                 ),
             }
 
-        # TODO: Next Phase
-        # @self.router.post(
-        #     "/services",
-        #     response_class=JSONResponse,
-        #     summary="Publish a new service",
-        #     response_model=models.Service,
-        #     response_model_exclude_none=True,
-        #     operation_id="create-service",
-        #     responses={
-        #         201: {
-        # .            "headers": {},
-        #             "description": "Absolute URL to the newly created service.",
-        #         },
-        #     },
-        #     tags=["Secondary Services"],
-        # )
-        # def openeo_service_create(request: Request, body: "ServiceInput"):
-        #     """Deletes all data related to this secondary web service."""
-        #     return Response(
-        #         status_code=201
-        #         headers={
-        #             "Location": ...,  # The URL points to the metadata endpoint
-        #             "OpenEO-Identifier": ...
-        #         }
-        #     )
-        #
-        # @self.router.delete(
-        #     "/services/{service_id}",
-        #     response_class=JSONResponse,
-        #     summary="Delete a service",
-        #     operation_id="delete-service",
-        #     responses={
-        #         204: {
-        #             "description": "The service has been successfully deleted",
-        #         },
-        #     },
-        #     tags=["Secondary Services"],
-        # )
-        # def openeo_service_delete(request: Request):
-        #     """Deletes all data related to this secondary web service."""
-        #     return Response(status_code=204)
+        @self.router.post(
+            "/services",
+            response_class=Response,
+            summary="Publish a new service",
+            response_model=models.Service,
+            response_model_exclude_none=True,
+            operation_id="create-service",
+            responses={
+                201: {
+                    "headers": {
+                        "Location": {
+                            "description": "URL to the newly created service metadata",
+                            "schema": {"type": "string"},
+                        },
+                        "OpenEO-Identifier": {
+                            "description": "Unique identifier for the created service",
+                            "schema": {"type": "string"},
+                        },
+                    },
+                    "description": "The service has been created successfully.",
+                },
+                400: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
+                },
+                403: {
+                    "description": "The request is not allowed.",
+                },
+            },
+            tags=["Secondary Services"],
+        )
+        def openeo_service_create(
+            request: Request,
+            body: ServiceInput,
+            user=Depends(self.auth.validate),
+        ):
+            """Creates a new secondary web service."""
+            process = body.process.model_dump()
+
+            # Validate process graph
+            try:
+                # Parse and validate process graph structure
+                parsed_graph = OpenEOProcessGraph(pg_data=process)
+
+                # Check if all processes exist in registry
+                for node in parsed_graph.nodes:
+                    process_id = node[1].get("process_id")
+                    if process_id and process_id not in self.process_registry[None]:
+                        raise InvalidProcessGraph(
+                            f"Process '{process_id}' not found in registry"
+                        )
+
+                # Try to create callable to validate parameter types
+                parsed_graph.to_callable(process_registry=self.process_registry)
+
+            except Exception as e:
+                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+
+            service_id = self.services_store.add_service(
+                user.user_id, body.model_dump()
+            )
+            service = self.services_store.get_service(service_id)
+            if not service:
+                raise HTTPException(404, f"Could not find service: {service_id}")
+            service_url = self.url_for(
+                request, "openeo_service", service_id=service["id"]
+            )
+
+            return Response(
+                status_code=201,
+                headers={
+                    "Location": service_url,
+                    "OpenEO-Identifier": service["id"],
+                },
+            )
+
+        @self.router.delete(
+            "/services/{service_id}",
+            response_class=Response,
+            summary="Delete a service",
+            operation_id="delete-service",
+            responses={
+                204: {
+                    "description": "The service has been successfully deleted.",
+                },
+                400: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
+                },
+                403: {
+                    "description": "The request is not allowed.",
+                },
+                404: {
+                    "description": "The service with the specified identifier does not exist.",
+                },
+            },
+            tags=["Secondary Services"],
+        )
+        def openeo_service_delete(
+            service_id: str = Path(
+                description="A per-backend unique identifier of the secondary web service.",
+            ),
+            user=Depends(self.auth.validate),
+        ):
+            """Deletes all data related to this secondary web service."""
+            self.services_store.delete_service(service_id)
+            return Response(status_code=204)
+
+        @self.router.patch(
+            "/services/{service_id}",
+            response_class=Response,
+            summary="Modify a service",
+            operation_id="update-service",
+            responses={
+                204: {
+                    "description": "The service has been successfully modified.",
+                },
+                400: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
+                },
+                403: {
+                    "description": "The request is not allowed.",
+                },
+                404: {
+                    "description": "The service with the specified identifier does not exist.",
+                },
+            },
+            tags=["Secondary Services"],
+        )
+        def openeo_service_update(
+            service_id: str = Path(
+                description="A per-backend unique identifier of the secondary web service.",
+            ),
+            body: Optional[ServiceInput] = None,
+            user=Depends(self.auth.validate),
+        ):
+            """Updates an existing secondary web service."""
+            self.services_store.update_service(
+                user.user_id, service_id, body.model_dump() if body else {}
+            )
+            return Response(status_code=204)
 
         @self.router.get(
             "/service_types",
@@ -642,6 +753,8 @@ class EndpointsFactory(BaseFactory):
             service = self.services_store.get_service(service_id)
 
             # SERVICE CONFIGURATION
+            if service is None:
+                raise HTTPException(404, f"Could not find service: {service_id}")
             configuration = service.get("configuration", {})
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
@@ -670,7 +783,7 @@ class EndpointsFactory(BaseFactory):
                 for node in load_collection_nodes
             ), "Invalid load_collection process, Missing spatial_extent"
 
-            tile_bounds = list(tms.xy_bounds(x, y, z))
+            tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
             args = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],

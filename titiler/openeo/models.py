@@ -1541,6 +1541,35 @@ class ServiceTypes(RootModel):
     )
 
 
+class ServiceInput(BaseModel):
+    """Service creation/update input model."""
+
+    process: ProcessGraphWithMetadata = Field(
+        ...,
+        description="A process graph defines the data processing that should be applied to EO data.",
+    )
+    type: str = Field(
+        ...,
+        description="The type of service to be created.",
+    )
+    title: Optional[str] = Field(
+        None,
+        description="A title for the service.",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="A description for the service.",
+    )
+    enabled: Optional[bool] = Field(
+        True,
+        description="Indicates whether the service is enabled or not.",
+    )
+    configuration: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Configuration parameters for the service.",
+    )
+
+
 class ResultRequest(BaseModel):
     """Synchronous Result Request"""
 

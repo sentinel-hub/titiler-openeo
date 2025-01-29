@@ -1,7 +1,7 @@
 """ABC Base services Store."""
 
 import abc
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
@@ -12,8 +12,16 @@ class ServicesStore(metaclass=abc.ABCMeta):
 
     store: Any = field()
 
+    def __init__(self, store: Any):
+        """Initialize the ServicesStore.
+
+        Args:
+            store (Any): The store instance to be used by the service.
+        """
+        self.store = store
+
     @abc.abstractmethod
-    def get_service(self, service_id: str) -> Dict:
+    def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         ...
 
@@ -27,7 +35,6 @@ class ServicesStore(metaclass=abc.ABCMeta):
         """Return List Services for a user."""
         ...
 
-    # TODO: define input model
     @abc.abstractmethod
     def add_service(self, user_id: str, service: Dict, **kwargs) -> str:
         """Add Service."""
@@ -38,7 +45,9 @@ class ServicesStore(metaclass=abc.ABCMeta):
         """Delete Service."""
         ...
 
-    # @abc.abstractmethod
-    # def update_service(self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs) -> str:
-    #     """Update Service."""
-    #     ...
+    @abc.abstractmethod
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
+        """Update Service."""
+        ...
