@@ -20,7 +20,10 @@ def resample_spatial(
     """Resample and warp the spatial dimensions of the raster at a given resolution."""
 
     def _reproject_img(
-        img: ImageData, dst_crs: CRS, resolution: int, method: str
+        img: ImageData,
+        dst_crs: CRS,
+        resolution: Union[int, Tuple[int, int], None],
+        method: str,
     ) -> ImageData:
         # align is not yet implemented
         if align is not None:
@@ -51,11 +54,12 @@ def resample_spatial(
         if resampling_method is None:
             raise ValueError(f"Unsupported resampling method: {method}")
 
-        res = resolution if isinstance(resolution, tuple) else (resolution, resolution)
+        if resolution is not None and not isinstance(resolution, (list, tuple)):
+            resolution = (resolution, resolution)
 
         # reproject the image
         return img.reproject(
-            dst_crs, resolution=res, reproject_method=resampling_method
+            dst_crs, resolution=resolution, reproject_method=resampling_method
         )
 
     """ Get destination CRS from parameters """
