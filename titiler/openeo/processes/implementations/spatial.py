@@ -22,7 +22,7 @@ def resample_spatial(
     def _reproject_img(
         img: ImageData,
         dst_crs: CRS,
-        resolution: Union[int, Tuple[int, int], None],
+        resolution: Union[float, Tuple[float, float], None],
         method: str,
     ) -> ImageData:
         # align is not yet implemented
@@ -68,4 +68,4 @@ def resample_spatial(
     if isinstance(data, ImageData):
         return _reproject_img(data, dst_crs, resolution, method)
 
-    return {k: _reproject_img(img) for k, img in data.items()}
+    return {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
