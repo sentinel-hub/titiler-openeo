@@ -1,12 +1,316 @@
 """titiler.openeo.processes.implementations image methods."""
 
-from typing import Sequence
+from typing import Dict, Sequence, Tuple, Any
 
 import numpy
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
 
+from skimage.draw import disk
+import colour
+
 from .data_model import ImageData
+
+# LEGO colors dictionary with HSL values
+lego_colors = {
+    'White': {
+        'hsl': [0, 0, 96],
+        'rgb': [244, 244, 244],
+        'pantone': 'TBC',
+        'hex': '#F4F4F4'
+    },
+    'Light Bluish Grey (Medium Stone Grey)': {
+        'hsl': [196, 6, 66],
+        'rgb': [162, 170, 173],
+        'pantone': '429 C',
+        'hex': '#A2AAAD'
+    },
+    'Dark Bluish Grey (Dark Stone Grey)': {
+        'hsl': [214, 3, 40],
+        'rgb': [99, 102, 106],
+        'pantone': 'CG 10 C',
+        'hex': '#63666A'
+    },
+    'Black': {
+        'hsl': [210, 33, 9],
+        'rgb': [16, 24, 32],
+        'pantone': 'Black 6 C',
+        'hex': '#101820'
+    },
+    'Tan (Brick Yellow)': {
+        'hsl': [40, 66, 82],
+        'rgb': [239, 219, 178],
+        'pantone': '7506 C',
+        'hex': '#EFDBB2'
+    },
+    'Dark Tan (Sand Yellow)': {
+        'hsl': [31, 22, 49],
+        'rgb': [154, 127, 98],
+        'pantone': '2470 C',
+        'hex': '#9A7F62'
+    },
+    'Olive Green': {
+        'hsl': [58, 26, 44],
+        'rgb': [141, 139, 83],
+        'pantone': '4238 C',
+        'hex': '#8D8B53'
+    },
+    'Sand Green': {
+        'hsl': [132, 13, 56],
+        'rgb': [129, 158, 135],
+        'pantone': '2406 C',
+        'hex': '#819E87'
+    },
+    'Sand Blue': {
+        'hsl': [208, 18, 50],
+        'rgb': [104, 129, 151],
+        'pantone': '2165 C',
+        'hex': '#688197'
+    },
+    'Coral (Vibrant Coral)': {
+        'hsl': [354, 100, 67],
+        'rgb': [255, 88, 105],
+        'pantone': '2346 C',
+        'hex': '#FF5869'
+    },
+    'Red (Bright Red)': {
+        'hsl': [352, 100, 40],
+        'rgb': [205, 0, 26],
+        'pantone': '3546 C',
+        'hex': '#CD001A'
+    },
+    'Dark Red (New Dark Red)': {
+        'hsl': [0, 53, 36],
+        'rgb': [138, 43, 43],
+        'pantone': '7623 C',
+        'hex': '#8A2B2B'
+    },
+    'Reddish Brown': {
+        'hsl': [10, 47, 33],
+        'rgb': [124, 58, 45],
+        'pantone': '7594 C',
+        'hex': '#7C3A2D'
+    },
+    'Dark Brown': {
+        'hsl': [358, 33, 19],
+        'rgb': [63, 32, 33],
+        'pantone': '4975 C',
+        'hex': '#3F2021'
+    },
+    'Light Nougat': {
+        'hsl': [18, 60, 81],
+        'rgb': [236, 195, 178],
+        'pantone': '489 C',
+        'hex': '#ECC3B2'
+    },
+    'Medium Tan (Warm Tan)': {
+        'hsl': [32, 100, 74],
+        'rgb': [255, 194, 123],
+        'pantone': '149 C',
+        'hex': '#FFC27B'
+    },
+    'Nougat': {
+        'hsl': [25, 70, 66],
+        'rgb': [229, 158, 109],
+        'pantone': '472 C',
+        'hex': '#E59E6D'
+    },
+    'Medium Nougat': {
+        'hsl': [29, 55, 52],
+        'rgb': [200, 130, 66],
+        'pantone': '722 C',
+        'hex': '#C88242'
+    },
+    'Orange (Bright Orange)': {
+        'hsl': [31, 100, 50],
+        'rgb': [255, 130, 0],
+        'pantone': '151 C',
+        'hex': '#FF8200'
+    },
+    'Dark Orange': {
+        'hsl': [27, 100, 37],
+        'rgb': [190, 84, 0],
+        'pantone': '2020 C',
+        'hex': '#BE5400'
+    },
+    'Medium Brown': {
+        'hsl': [25, 38, 33],
+        'rgb': [120, 81, 53],
+        'pantone': '7568 C',
+        'hex': '#785135'
+    },
+    'Bright Light Yellow (Cool Yellow)': {
+        'hsl': [48, 91, 73],
+        'rgb': [249, 226, 125],
+        'pantone': '2002 C',
+        'hex': '#F9E27D'
+    },
+    'Yellow (Bright Yellow)': {
+        'hsl': [48, 100, 50],
+        'rgb': [255, 205, 0],
+        'pantone': '116 C',
+        'hex': '#FFCD00'
+    },
+    'Bright Light Orange (Flame Yellowish Orange)': {
+        'hsl': [43, 100, 50],
+        'rgb': [255, 182, 0],
+        'pantone': '2010 C',
+        'hex': '#FFB600'
+    },
+    'Neon Yellow (Vibrant Yellow)': {
+        'hsl': [59, 100, 50],
+        'rgb': [255, 252, 0],
+        'pantone': 'TBC',
+        'hex': '#FFFC00'
+    },
+    'Yellowish Green (Spring Yellowish Green)': {
+        'hsl': [76, 72, 71],
+        'rgb': [205, 234, 128],
+        'pantone': '373 C',
+        'hex': '#CDEA80'
+    },
+    'Lime (Bright Yellowish Green)': {
+        'hsl': [70, 100, 41],
+        'rgb': [174, 208, 0],
+        'pantone': '3507 C',
+        'hex': '#AED000'
+    },
+    'Bright Green': {
+        'hsl': [127, 100, 33],
+        'rgb': [0, 170, 19],
+        'pantone': '2423 C',
+        'hex': '#00AA13'
+    },
+    'Green (Dark Green)': {
+        'hsl': [141, 100, 27],
+        'rgb': [0, 137, 47],
+        'pantone': '3522 C',
+        'hex': '#00892F'
+    },
+    'Dark Green (Earth Green)': {
+        'hsl': [145, 100, 14],
+        'rgb': [0, 73, 30],
+        'pantone': '3537 C',
+        'hex': '#00491E'
+    },
+    'Light Aqua (Aqua)': {
+        'hsl': [163, 33, 79],
+        'rgb': [185, 220, 210],
+        'pantone': '566 C',
+        'hex': '#B9DCD2'
+    },
+    'Dark Turquoise (Bright Bluish Green)': {
+        'hsl': [184, 100, 31],
+        'rgb': [0, 147, 157],
+        'pantone': '3541 C',
+        'hex': '#00939D'
+    },
+    'Medium Azure': {
+        'hsl': [190, 100, 44],
+        'rgb': [0, 188, 225],
+        'pantone': '3545 C',
+        'hex': '#00BCE1'
+    },
+    'Dark Azure': {
+        'hsl': [198, 100, 42],
+        'rgb': [0, 148, 213],
+        'pantone': '3538 C',
+        'hex': '#0094D5'
+    },
+    'Bright Light Blue (Light Royal Blue)': {
+        'hsl': [208, 66, 74],
+        'rgb': [146, 193, 233],
+        'pantone': '283 C',
+        'hex': '#92C1E9'
+    },
+    'Medium Blue': {
+        'hsl': [208, 69, 66],
+        'rgb': [108, 172, 228],
+        'pantone': '284 C',
+        'hex': '#6CACE4'
+    },
+    'Blue (Bright Blue)': {
+        'hsl': [208, 100, 39],
+        'rgb': [0, 106, 198],
+        'pantone': '2175C',
+        'hex': '#006AC6'
+    },
+    'Dark Blue (Earth Blue)': {
+        'hsl': [207, 100, 17],
+        'rgb': [0, 48, 87],
+        'pantone': '540 C',
+        'hex': '#003057'
+    },
+    'Lavender': {
+        'hsl': [269, 40, 78],
+        'rgb': [199, 178, 222],
+        'pantone': '2071 C',
+        'hex': '#C7B2DE'
+    },
+    'Medium Lavender': {
+        'hsl': [273, 43, 64],
+        'rgb': [167, 123, 202],
+        'pantone': '2577 C',
+        'hex': '#A77BCA'
+    },
+    'Dark Purple (Medium Lilac)': {
+        'hsl': [262, 36, 38],
+        'rgb': [86, 61, 130],
+        'pantone': '7679 C',
+        'hex': '#563D82'
+    },
+    'Bright Pink (Light Purple)': {
+        'hsl': [317, 73, 80],
+        'rgb': [241, 167, 220],
+        'pantone': '236 C',
+        'hex': '#F1A7DC'
+    },
+    'Dark Pink (Bright Purple)': {
+        'hsl': [326, 70, 66],
+        'rgb': [229, 109, 177],
+        'pantone': '218 C',
+        'hex': '#E56DB1'
+    },
+    'Magenta (Bright Reddish Violet)': {
+        'hsl': [322, 100, 32],
+        'rgb': [162, 0, 103],
+        'pantone': '234 C',
+        'hex': '#A20067'
+    },
+}
+
+def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
+    """Find the best matching LEGO color for an RGB value using colour-science.
+    
+    Args:
+        rgb: RGB values as numpy array with shape (3,) and values in range [0, 255]
+    
+    Returns:
+        Tuple with the best LEGO color name and RGB values as numpy array with shape (3,)
+    """
+    # Convert input RGB to Lab color space
+    rgb_normalized = rgb.astype(float) / 255.0
+    lab_input = colour.XYZ_to_Lab(
+        colour.sRGB_to_XYZ(rgb_normalized)
+    )
+    
+    min_distance = float('inf')
+    best_color = None
+    
+    # Find closest LEGO color using CIEDE2000 color difference
+    for color_name, color_info in lego_colors.items():
+        rgb_lego = numpy.array(color_info['rgb'], dtype=float) / 255.0
+        lab_lego = colour.XYZ_to_Lab(
+            colour.sRGB_to_XYZ(rgb_lego)
+        )
+        
+        distance = colour.delta_E(lab_input, lab_lego, method='CIE 2000')
+        
+        if distance < min_distance:
+            min_distance = distance
+            best_color = color_name
+    
+    return (best_color, lego_colors[best_color]['rgb'])
 
 __all__ = [
     "image_indexes",
@@ -14,6 +318,7 @@ __all__ = [
     "color_formula",
     "colormap",
     "get_colormap",
+    "legofication",
 ]
 
 
@@ -59,3 +364,65 @@ def get_colormap(name: str) -> ColorMapType:
 def colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     """Apply colormap to ImageData."""
     return data.apply_colormap(colormap)
+
+
+def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
+    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects."""
+
+    def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
+        min_side = min(img.array.shape[-2:])
+        new_shape = numpy.round(numpy.array(img.array.shape[-2:]) / min_side * nbbricks).astype(int)
+        return img.resize(new_shape[0], new_shape[1], resampling_method="bilinear")
+
+    def _upscale(img: ImageData, bricksize: int = 16) -> ImageData:
+        new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
+        return img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
+
+    def _legofication(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
+        nmin = numpy.min(nblocks)
+        d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
+
+        for i in range(nblocks[0]):
+            for j in range(nblocks[1]):
+                xc = round(d + 2 * d * i)
+                yc = round(d + 2 * d * j)
+                cur_values = img.array.data[:, xc, yc].copy()
+
+                # draw lego bricks
+                # light the bricks on top left
+                rr, cc = disk((xc - 2, yc - 2), 0.6 * d, shape=img.array.data.shape[::-1])
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = (
+                        img.array.data[b, rr, cc] * 0.5 + 200 * 0.5
+                    ).astype(img.array.data.dtype)
+
+                # dark the bricks on bottom right
+                rr, cc = disk((xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1])
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = (
+                        img.array.data[b, rr, cc] * 0.5 + 10 * 0.5
+                    ).astype(img.array.data.dtype)
+
+                # draw the studs
+                rr, cc = disk((xc, yc), 0.6 * d, shape=img.array.data.shape[::-1])
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = cur_values[b]
+
+        return img
+
+    # Compress the image
+    small_img = _compress(data, nbbricks)
+    
+    # Map each pixel to the closest LEGO color
+    rgb_data = small_img.array.data
+    shape = rgb_data.shape
+    if shape[0] == 3:  # Only process RGB images
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                rgb_pixel = rgb_data[:, i, j]
+                lego_rgb = find_best_lego_color(rgb_pixel)
+                rgb_data[:, i, j] = lego_rgb[1]
+    
+    # Upscale and add brick effects
+    lego_img = _upscale(small_img, bricksize)
+    return _legofication(lego_img, small_img.array.shape[-2:])

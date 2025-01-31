@@ -1,0 +1,55 @@
+{
+    "id": "legofication",
+    "summary": "Transform an image into a Lego mosaic image.",
+    "description": "Return Image data with a Lego mosaic applied.",
+    "categories": [
+        "images",
+        "color",
+        "fun"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An image.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        },
+        {
+            "name": "nbbricks",
+            "description": "The number of bricks to use on the shortest side of the image.",
+            "schema":  {
+                "type": "integer",
+                "minimum": 1,
+                "default": 16
+            }
+        },
+        {
+            "name": "bricksize",
+            "description": "The size of the bricks in pixels.",
+            "schema":  {
+                "type": "integer",
+                "minimum": 8,
+                "default": 16
+            }
+        }
+    ],
+    "returns": {
+        "description": "The image with the Lego mosaic applied.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {
+        "IndexError": {
+            "message": "The number of bricks is too high for the image size."
+        }
+    },
+    "examples": [{
+        "arguments": {
+            "nbbricks": 32
+        }
+    }]
+}
