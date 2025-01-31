@@ -69,7 +69,7 @@ In this repository, 2 `.env` sample files are provided:
   TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
   ```
 
-- [`.env.cdse`](.env.cdse)] that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
+- [`.env.cdse`](.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
 
   ```bash
   TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
