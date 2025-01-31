@@ -62,14 +62,14 @@ Configuration settings can be provided via environment variables. The following 
 
 In this repository, 2 `.env` sample files are provided:
 
-- [`.env.eoapi`](.env.eopi) that uses the [Earth Observation API (EOAPI)](https://earth-observation-api.github.io/api/).
+- [`.env.eoapi`](.env.eoapi) that uses the [Earth Observation API (EOAPI)](https://eoapi.dev/).
 
   ```bash
   TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
   TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
   ```
 
-- [`.env.cdse`](.env.cdse)] that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
+- [`.env.cdse`](.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
 
   ```bash
   TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
@@ -130,7 +130,7 @@ Login with the following credentials:
 
 ## License
 
-See [LICENSE](https://github.com/sentinel-hub/titiler-open/blob/main/LICENSE)
+See [LICENSE](https://github.com/sentinel-hub/titiler-openeo/blob/main/LICENSE)
 
 ## Authors
 
