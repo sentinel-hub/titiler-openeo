@@ -6,13 +6,12 @@ from typing import Any, Dict, List, Optional
 import morecantile
 import pyproj
 from attrs import define, field
-from fastapi import Depends, HTTPException, Path
+from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rio_tiler.errors import TileOutsideBounds
-from starlette.requests import Request
 from starlette.responses import Response
 from typing_extensions import Annotated
 
@@ -437,6 +436,9 @@ class EndpointsFactory(BaseFactory):
                 },
                 403: {
                     "description": "The request is not allowed.",
+                },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
                 },
             },
             tags=["Secondary Services"],
