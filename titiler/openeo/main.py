@@ -94,10 +94,10 @@ endpoints = EndpointsFactory(
 app.include_router(endpoints.router)
 
 # Add OpenEO-specific exception handlers
-app.add_exception_handler(OpenEOException, endpoints.openeo_exception_handler)
+app.add_exception_handler(OpenEOException, OpenEOException.openeo_exception_handler)
 
 app.add_exception_handler(
-    RequestValidationError, endpoints.validation_exception_handler
+    RequestValidationError, OpenEOException.validation_exception_handler
 )
 
-app.add_exception_handler(HTTPException, endpoints.http_exception_handler)
+app.add_exception_handler(HTTPException, OpenEOException.http_exception_handler)

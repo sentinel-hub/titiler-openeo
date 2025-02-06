@@ -37,39 +37,7 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth = field(factory=FakeBasicAuth)
 
-    @staticmethod
-    def openeo_exception_handler(
-        request: Request, exc: OpenEOException
-    ) -> JSONResponse:
-        """Handle OpenEO exceptions."""
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=exc.to_dict(),
-        )
-
-    @staticmethod
-    def validation_exception_handler(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        """Handle FastAPI validation errors."""
-        return JSONResponse(
-            status_code=400,
-            content={
-                "code": "InvalidRequest",
-                "message": str(exc),
-            },
-        )
-
-    @staticmethod
-    def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-        """Handle HTTP exceptions."""
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "code": "ServerError" if exc.status_code >= 500 else "InvalidRequest",
-                "message": exc.detail,
-            },
-        )
+    
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""

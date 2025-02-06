@@ -6,6 +6,9 @@ See: https://api.openeo.org/#section/API-Principles/Error-Handling
 
 from typing import Optional
 
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette import status
 
 
@@ -47,6 +50,40 @@ class OpenEOException(Exception):
         if self.url:
             error["url"] = self.url
         return error
+
+    @staticmethod
+    def openeo_exception_handler(
+        request: Request, exc: 'OpenEOException'
+    ) -> JSONResponse:
+        """Handle OpenEO exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
+        )
+
+    @staticmethod
+    def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Handle FastAPI validation errors."""
+        return JSONResponse(
+            status_code=400,
+            content={
+                "code": "InvalidRequest",
+                "message": str(exc),
+            },
+        )
+
+    @staticmethod
+    def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        """Handle HTTP exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": "ServerError" if exc.status_code >= 500 else "InvalidRequest",
+                "message": exc.detail,
+            },
+        )
 
 
 class ProcessParameterMissing(OpenEOException):
