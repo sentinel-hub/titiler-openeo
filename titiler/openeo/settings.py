@@ -1,10 +1,30 @@
 """Titiler-openEO API settings."""
 
-from typing import Union
+from typing import Dict, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Annotated
+
+from titiler.openeo.auth import AuthMethod, BasicAuthUser
+
+
+
+class AuthSettings(BaseSettings):
+    """Authentication settings."""
+
+    # Authentication method
+    method: AuthMethod = AuthMethod("basic")
+
+    # Dictionary of users with access
+    # Only used if method is set to "basic"
+    users: Dict[str, BasicAuthUser] = {}
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_AUTH_",
+        env_file=".env",
+        extra="ignore",
+    )
 
 
 class ApiSettings(BaseSettings):

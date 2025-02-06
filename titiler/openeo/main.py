@@ -12,16 +12,25 @@ from titiler.openeo.errors import DEFAULT_STATUS_CODES
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
-from titiler.openeo.settings import ApiSettings, BackendSettings
+from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
+from titiler.openeo.auth import get_auth
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
-backend_settings = BackendSettings()
+backend_settings = BackendSettings(
+    stac_api_url="https://stac.eoapi.dev",  # Default from test config
+    service_store_url="services.json",  # Default local file
+)
+auth_settings = AuthSettings(
+    method="basic",  # Default from test config
+    users={"anonymous": {"password": "test"}},  # Default from test config
+)
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
 service_store = get_store(str(backend_settings.service_store_url))
+auth = get_auth(auth_settings)
 
 ###############################################################################
 
@@ -90,6 +99,7 @@ endpoints = EndpointsFactory(
     services_store=service_store,
     stac_client=stac_client,
     process_registry=process_registry,
+    auth=auth,
 )
 app.include_router(endpoints.router)
 

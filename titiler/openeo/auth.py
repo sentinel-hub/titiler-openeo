@@ -2,9 +2,11 @@
 
 import abc
 from base64 import b64decode
+import enum
 from typing import Any, Literal, Optional
 
 from attrs import define, field
+from .settings import AuthSettings
 from fastapi import Header
 from fastapi.exceptions import HTTPException
 from fastapi.security.utils import get_authorization_scheme_param
@@ -13,17 +15,66 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
 
+def get_auth(settings: AuthSettings) -> 'Auth':
+    """Get Auth instance."""
+    if settings.method == AuthMethod.basic:
+        return BasicAuth(settings=settings)
+    else:
+        raise NotImplementedError(f"Auth method {settings.method} not implemented")
+
+
+class AuthMethod(enum.Enum):
+    """Authentication Method."""
+
+    basic = "basic"
+    oidc = "oidc"
+
+
 class User(BaseModel, extra="allow"):
     """User Model."""
 
-    user_id: str
+    username: str
+
+
+class BasicAuthUser(User):
+    """Basic Auth User Model."""
+
+    password: str
+
+
+@define(kw_only=True)
+class Auth(metaclass=abc.ABCMeta):
+    """Auth BaseClass."""
+
+    method: AuthMethod = field(init=False)
+
+    @abc.abstractmethod
+    def login(self, authorization: str = Header()) -> Any:
+        """Validate login and/or create a new user."""
+        ...
+
+    @abc.abstractmethod
+    def validate(self, authorization: str = Header()) -> User:
+        """Validate Bearer Token."""
+        ...
+
+
+class CredentialsBasic(BaseModel):
+    """HTTP Basic Access Token."""
+
+    access_token: str = Field(
+        ...,
+        json_schema_extra={
+            "description": "The access token (without `basic//` prefix) to be used in the Bearer token for authorization in subsequent API calls."
+        },
+    )
 
 
 class AuthToken(BaseModel):
     """The AuthToken breaks down the OpenEO token into its consituent parts to be used for validation."""
 
     method: Literal["basic", "oidc"]
-    provider: Optional[str] = None  # TODO: optional?
+    provider: Optional[str] = None
     token: str
 
     # @field_validator("provider")
@@ -50,43 +101,37 @@ class AuthToken(BaseModel):
 
 
 @define(kw_only=True)
-class Auth(metaclass=abc.ABCMeta):
-    """Auth BaseClass."""
+class BasicAuth(Auth):
+    """Basic Auth implementation using AuthSettings."""
 
-    method: Literal["basic", "oidc"] = field(init=False)
-
-    @abc.abstractmethod
-    def login(self, authorization: str = Header()) -> Any:
-        """Validate login and/or create a new user."""
-        ...
-
-    @abc.abstractmethod
-    def validate(self, authorization: str = Header()) -> User:
-        """Validate Bearer Token."""
-        ...
-
-
-class CredentialsBasic(BaseModel):
-    """HTTP Basic Access Token."""
-
-    access_token: str = Field(
-        ...,
-        json_schema_extra={
-            "description": "The access token (without `basic//` prefix) to be used in the Bearer token for authorization in subsequent API calls."
-        },
-    )
-
-
-@define(kw_only=True)
-class FakeBasicAuth(Auth):
-    """BasicAuth."""
-
-    method: Literal["basic", "oidc"] = field(default="basic", init=False)
+    method: AuthMethod = field(default=AuthMethod("basic"), init=False)
+    settings: AuthSettings = field()
 
     def login(self, authorization: str = Header()) -> CredentialsBasic:
         """Validate Login credentials."""
+
         scheme, param = get_authorization_scheme_param(authorization)
-        data = b64decode(param).decode("ascii")
+        if scheme.lower() != "basic":
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication scheme",
+                headers={"WWW-Authenticate": "Basic"},
+            )
+
+        self._get_user_from_base64(param)
+        return CredentialsBasic(access_token=param)
+
+
+    def _get_user_from_base64(self, param: str) -> BasicAuthUser:
+
+        try:
+            data = b64decode(param).decode("ascii")
+        except Exception:
+            raise HTTPException(  # noqa: B904
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Invalid base64 encoding",
+                headers={"WWW-Authenticate": "Basic"},
+            )
 
         username, separator, password = data.partition(":")
         if not separator:
@@ -96,37 +141,36 @@ class FakeBasicAuth(Auth):
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-        # FAKE Username/TOKEN
-        if username == "anonymous":
-            return CredentialsBasic(access_token="yo")
+        # Check if user exists and password matches
+        user = self.settings.users.get(username)
+        if not user or user.password != password:
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password",
+                headers={"WWW-Authenticate": "Basic"},
+            )
 
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        # return the user
+        return BasicAuthUser(username=username, password=password)
 
     def validate(self, authorization: str = Header(default=None)) -> User:
-        """Bearer Token."""
+        """Bearer Token or Basic Auth validation."""
+
         if not authorization:
             raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
                 detail="Authorization header missing",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
         parsed_token = AuthToken.from_token(authorization)
+
         if parsed_token.method != self.method:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Invalid authentication credentials",
             )
 
-        # FAKE Username/TOKEN
-        if parsed_token.token == "yo":
-            return User(user_id="12d6b89f-0f26-4fe7-a461-67418919b794")
-
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        new_authorization = f"basic {parsed_token.token}"
+        user = self._get_user_from_base64(new_authorization)
+        return User(username=user.username)

@@ -35,7 +35,7 @@ class EndpointsFactory(BaseFactory):
     services_store: ServicesStore
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
-    auth: Auth = field(factory=FakeBasicAuth)
+    auth: Auth
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""

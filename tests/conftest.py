@@ -7,7 +7,7 @@ import pytest
 from fastapi import Header
 from starlette.testclient import TestClient
 
-from titiler.openeo.auth import Auth, User
+from titiler.openeo.auth import TestBasicAuth, User
 
 StoreType = Literal["local", "duckdb", "sqlalchemy"]
 
@@ -42,22 +42,11 @@ def app(monkeypatch, store_path, store_type) -> TestClient:
     from titiler.openeo.main import app, endpoints
 
     # Override the auth dependency with the mock auth
-    mock_auth = MockAuth()
-    app.dependency_overrides[endpoints.auth.validate] = mock_auth.validate
+    test_auth = TestBasicAuth()
+    app.dependency_overrides[endpoints.auth.validate] = test_auth.validate
 
     return TestClient(app)
 
-
-class MockAuth(Auth):
-    """Mock authentication class for testing."""
-
-    def login(self, authorization: str = Header(default=None)) -> Any:
-        """Mock login method."""
-        return {"access_token": "mock_token"}
-
-    def validate(self, authorization: str = Header(default=None)) -> User:
-        """Mock validate method."""
-        return User(user_id="test_user")
 
 
 @pytest.fixture
