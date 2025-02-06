@@ -5,7 +5,7 @@ NOTE: This should be used only for Testing Purposes.
 """
 
 import uuid
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
@@ -18,9 +18,10 @@ class LocalStore(ServicesStore):
 
     store: Dict = field()
 
-    def get_service(self, service_id: str) -> Dict:
+    def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
-        assert service_id in self.store, f"Could not find service: {service_id}"
+        if service_id not in self.store:
+            return None
         return {
             "id": service_id,
             **self.store[service_id]["service"],
@@ -62,3 +63,16 @@ class LocalStore(ServicesStore):
         """Delete Service."""
         _ = self.store.pop(service_id)
         return True
+
+    def update_service(
+        self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
+    ) -> str:
+        """Update Service."""
+        if item_id not in self.store:
+            raise ValueError(f"Could not find service: {item_id}")
+
+        if self.store[item_id]["user_id"] != user_id:
+            raise ValueError(f"Service {item_id} does not belong to user {user_id}")
+
+        self.store[item_id]["service"].update(val)
+        return item_id

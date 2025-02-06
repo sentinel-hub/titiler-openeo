@@ -112,6 +112,12 @@ class NoDataAvailable(OpenEOException):
         )
 
 
+class InvalidProcessGraph(OpenEOException):
+    """The process graph is invalid."""
+
+    pass
+
+
 class TemporalExtentEmpty(OpenEOException):
     """Invalid temporal extent."""
 

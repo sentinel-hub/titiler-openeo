@@ -106,8 +106,14 @@ class FakeBasicAuth(Auth):
             headers={"WWW-Authenticate": "Basic"},
         )
 
-    def validate(self, authorization: str = Header()) -> User:
+    def validate(self, authorization: str = Header(default=None)) -> User:
         """Bearer Token."""
+        if not authorization:
+            raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Authorization header missing",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         parsed_token = AuthToken.from_token(authorization)
         if parsed_token.method != self.method:
             raise HTTPException(
