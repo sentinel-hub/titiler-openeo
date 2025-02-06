@@ -798,7 +798,7 @@ class EndpointsFactory(BaseFactory):
                         pyproj.CRS.from_epsg(4326),
                         always_xy=True,
                     )
-                    tile_bounds = list(trans.transform_bounds(*tile_bounds))
+                    tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
 
                 if not (
                     (tile_bounds[0] < service_extent[2])

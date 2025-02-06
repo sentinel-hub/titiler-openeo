@@ -45,12 +45,6 @@ def app(monkeypatch, store_path, store_type) -> TestClient:
     mock_auth = MockAuth()
     app.dependency_overrides[endpoints.auth.validate] = mock_auth.validate
 
-    return app
-
-
-@pytest.fixture
-def client(app) -> TestClient:
-    """Get test client."""
     return TestClient(app)
 
 
