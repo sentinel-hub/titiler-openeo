@@ -19,14 +19,8 @@ from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
-backend_settings = BackendSettings(
-    stac_api_url="https://stac.eoapi.dev",  # Default from test config
-    service_store_url="services.json",  # Default local file
-)
-auth_settings = AuthSettings(
-    method="basic",  # Default from test config
-    users={"anonymous": {"password": "test"}},  # Default from test config
-)
+backend_settings = BackendSettings()
+auth_settings = AuthSettings()
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
 service_store = get_store(str(backend_settings.service_store_url))

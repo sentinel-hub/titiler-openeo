@@ -2,7 +2,7 @@
 
 import abc
 from base64 import b64decode
-import enum
+from enum import Enum
 from typing import Any, Literal, Optional
 
 from attrs import define, field
@@ -17,13 +17,13 @@ from typing_extensions import Self
 
 def get_auth(settings: AuthSettings) -> 'Auth':
     """Get Auth instance."""
-    if settings.method == AuthMethod.basic:
+    if settings.method == AuthMethod.basic.value:
         return BasicAuth(settings=settings)
     else:
         raise NotImplementedError(f"Auth method {settings.method} not implemented")
 
 
-class AuthMethod(enum.Enum):
+class AuthMethod(Enum):
     """Authentication Method."""
 
     basic = "basic"
@@ -33,7 +33,7 @@ class AuthMethod(enum.Enum):
 class User(BaseModel, extra="allow"):
     """User Model."""
 
-    username: str
+    user_id: str
 
 
 class BasicAuthUser(User):
@@ -151,7 +151,7 @@ class BasicAuth(Auth):
             )
 
         # return the user
-        return BasicAuthUser(username=username, password=password)
+        return BasicAuthUser(user_id=username, password=password)
 
     def validate(self, authorization: str = Header(default=None)) -> User:
         """Bearer Token or Basic Auth validation."""
@@ -173,4 +173,4 @@ class BasicAuth(Auth):
 
         new_authorization = f"basic {parsed_token.token}"
         user = self._get_user_from_base64(new_authorization)
-        return User(username=user.username)
+        return User(user_id=user.user_id)
