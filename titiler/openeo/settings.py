@@ -7,6 +7,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Annotated
 
 
+class OIDCConfig(BaseSettings):
+    """OIDC configuration settings."""
+
+    client_id: str = ""
+    client_secret: str = ""
+    openid_configuration_url: AnyHttpUrl
+    scopes: list[str] = ["openid", "email", "profile"]
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_AUTH_OIDC_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class AuthSettings(BaseSettings):
     """Authentication settings."""
 
@@ -17,11 +32,22 @@ class AuthSettings(BaseSettings):
     # Only used if method is set to "basic"
     users: Dict[str, Any] = {}
 
+    # OIDC configuration
+    # Only used if method is set to "oidc"
+    oidc: Optional[OIDCConfig] = None
+
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_",
         env_file=".env",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_oidc_config(self):
+        """Validate OIDC configuration when method is oidc."""
+        if self.method == "oidc" and not self.oidc:
+            raise ValueError("OIDC configuration required when method is 'oidc'")
+        return self
 
 
 class ApiSettings(BaseSettings):

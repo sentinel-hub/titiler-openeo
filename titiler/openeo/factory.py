@@ -18,7 +18,7 @@ from typing_extensions import Annotated
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
-from titiler.openeo.auth import Auth, CredentialsBasic
+from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth
 from titiler.openeo.errors import InvalidProcessGraph
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
 from titiler.openeo.services import ServicesStore
@@ -154,10 +154,46 @@ class EndpointsFactory(BaseFactory):
             }
 
         @self.router.get(
+            "/credentials/oidc",
+            response_class=JSONResponse,
+            summary="OpenID Connect authentication",
+            response_model=models.OIDCProviders,
+            response_model_exclude_none=True,
+            operation_id="authenticate-oidc",
+            responses={
+                200: {
+                    "content": {
+                        "application/json": {},
+                    },
+                    "description": "Lists the OpenID Connect Providers.",
+                },
+            },
+            tags=["Account Management"],
+        )
+        def openeo_credentials_oidc():
+            """Lists the supported OpenID Connect providers (OP)."""
+            if not isinstance(self.auth, OIDCAuth):
+                raise HTTPException(
+                    status_code=501,
+                    detail="OpenID Connect authentication not supported"
+                )
+            
+            return {
+                "providers": [
+                    {
+                        "id": "oidc",
+                        "issuer": self.auth._oidc_config.issuer,
+                        "title": "OpenID Connect",
+                        "scopes": ["openid", "email", "profile"],
+                    }
+                ]
+            }
+
+        @self.router.get(
             "/credentials/basic",
             response_class=JSONResponse,
             summary="HTTP Basic authentication",
-            response_model=CredentialsBasic,
+            response_model=models.CredentialsBasic,
             response_model_exclude_none=True,
             operation_id="authenticate-basic",
             responses={
