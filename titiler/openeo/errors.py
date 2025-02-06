@@ -53,7 +53,7 @@ class OpenEOException(Exception):
 
     @staticmethod
     def openeo_exception_handler(
-        request: Request, exc: 'OpenEOException'
+        request: Request, exc: "OpenEOException"
     ) -> JSONResponse:
         """Handle OpenEO exceptions."""
         return JSONResponse(

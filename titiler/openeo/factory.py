@@ -7,7 +7,6 @@ import morecantile
 import pyproj
 from attrs import define, field
 from fastapi import Depends, HTTPException, Path, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
@@ -20,7 +19,6 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
-from titiler.openeo.errors import OpenEOException
 from titiler.openeo.models import OPENEO_VERSION
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
@@ -36,8 +34,6 @@ class EndpointsFactory(BaseFactory):
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth = field(factory=FakeBasicAuth)
-
-    
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
