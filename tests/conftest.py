@@ -33,24 +33,50 @@ def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
         return "sqlite:///:memory:"
 
 
-@pytest.fixture(autouse=True)
-def app(monkeypatch, store_path, store_type) -> TestClient:
-    """Create App with temporary services store."""
+@pytest.fixture
+def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
+    """Create App with authentication for testing."""
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
+    monkeypatch.setenv("TITILER_OPENEO_REQUIRE_AUTH", "true")
 
-    from titiler.openeo.main import app, endpoints
+    from titiler.openeo.main import create_app
+
+    app = create_app()
 
     # Override the auth dependency with the mock auth
-    test_auth = TestBasicAuth()
-    app.dependency_overrides[endpoints.auth.validate] = test_auth.validate
+    mock_auth = MockAuth()
+    app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
 
     return TestClient(app)
 
 
+@pytest.fixture
+def app_no_auth(monkeypatch, store_path, store_type) -> TestClient:
+    """Create App without authentication for testing."""
+    monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
+    monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
+    monkeypatch.setenv("TITILER_OPENEO_REQUIRE_AUTH", "false")
+
+    from titiler.openeo.main import create_app
+
+    return TestClient(create_app())
+
+
+class MockAuth(Auth):
+    """Mock authentication class for testing."""
+
+    def login(self, authorization: str = Header(default=None)) -> Any:
+        """Mock login method."""
+        return {"access_token": "mock_token"}
+
+    def validate(self, authorization: str = Header(default=None)) -> User:
+        """Mock validate method."""
+        return User(user_id="test_user")
+
 
 @pytest.fixture
-def clean_services(app, store_path, store_type):
+def clean_services(app_no_auth, store_path, store_type):
     """Ensure services are cleaned up after each test."""
     yield
     # Reset store to empty state
