@@ -437,6 +437,9 @@ class EndpointsFactory(BaseFactory):
                 403: {
                     "description": "The request is not allowed.",
                 },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
             },
             tags=["Secondary Services"],
         )

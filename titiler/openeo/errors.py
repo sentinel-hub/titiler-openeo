@@ -94,7 +94,7 @@ class ProcessParameterMissing(OpenEOException):
         super().__init__(
             message=f"Required process parameter '{parameter}' is missing",
             code="ProcessParameterMissing",
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
 
@@ -115,7 +115,13 @@ class NoDataAvailable(OpenEOException):
 class InvalidProcessGraph(OpenEOException):
     """The process graph is invalid."""
 
-    pass
+    def __init__(self, message: str):
+        """Initialize error with invalid process graph."""
+        super().__init__(
+            message=message,
+            code="InvalidProcessGraph",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
 
 
 class TemporalExtentEmpty(OpenEOException):
@@ -126,7 +132,7 @@ class TemporalExtentEmpty(OpenEOException):
         super().__init__(
             message="The temporal extent is empty. The second instant in time must be greater/later than the first instant in time",
             code="TemporalExtentEmpty",
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
 
