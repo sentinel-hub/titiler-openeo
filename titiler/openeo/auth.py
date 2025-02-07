@@ -96,7 +96,7 @@ class OIDCAuth(Auth):
         """Get OIDC configuration."""
         if self._config_cache is None:
             with httpx.Client() as client:
-                response = client.get(str(self._oidc_config.openid_configuration_url))
+                response = client.get(str(self._oidc_config.wk_url))
                 response.raise_for_status()
                 self._config_cache = response.json()
         return self._config_cache

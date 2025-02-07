@@ -12,7 +12,8 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = ""
     client_secret: str = ""
-    openid_configuration_url: AnyHttpUrl
+    wk_url: str = ""
+    redirect_url: str = ""
     scopes: list[str] = ["openid", "email", "profile"]
 
     model_config = SettingsConfigDict(
@@ -41,6 +42,11 @@ class AuthSettings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+    
+    def __init__(self, *args, **kwargs):
+        """Initialize settings."""
+        kwargs['oidc'] = OIDCConfig()
+        super().__init__(*args, **kwargs)
 
     @model_validator(mode="after")
     def validate_oidc_config(self):

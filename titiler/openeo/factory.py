@@ -175,25 +175,32 @@ class EndpointsFactory(BaseFactory):
             if not isinstance(self.auth, OIDCAuth):
                 raise HTTPException(
                     status_code=501,
-                    detail="OpenID Connect authentication not supported"
+                    detail="OpenID Connect authentication not supported",
                 )
-            
-            return {
-                "providers": [
-                    {
-                        "id": "oidc",
-                        "issuer": self.auth._oidc_config.issuer,
-                        "title": "OpenID Connect",
-                        "scopes": ["openid", "email", "profile"],
-                    }
+
+            return models.OIDCProviders(
+                providers=[
+                    models.OIDCProvider(
+                        id="oidc",
+                        issuer=self.auth.config["issuer"],
+                        title="OpenID Connect",
+                        scopes=["openid", "email", "profile"],
+                        default_clients=[
+                            models.OIDCDefaultClient(
+                                id=self.auth.settings.oidc.client_id,
+                                grant_types=["authorization_code"],
+                                redirect_urls=[self.auth.settings.oidc.redirect_url],
+                            )
+                        ],
+                    )
                 ]
-            }
+            )
 
         @self.router.get(
             "/credentials/basic",
             response_class=JSONResponse,
             summary="HTTP Basic authentication",
-            response_model=models.CredentialsBasic,
+            response_model=CredentialsBasic,
             response_model_exclude_none=True,
             operation_id="authenticate-basic",
             responses={
@@ -811,9 +818,9 @@ class EndpointsFactory(BaseFactory):
 
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
             # Check there is at least one load_collection process
-            assert (
-                load_collection_nodes
-            ), "Could not find any `load_collection process in service's process-graph"
+            assert load_collection_nodes, (
+                "Could not find any `load_collection process in service's process-graph"
+            )
 
             # Check that nodes have spatial-extent
             assert all(
