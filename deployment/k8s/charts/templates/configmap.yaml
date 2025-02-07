@@ -6,3 +6,7 @@ data:
   {{- if .Values.netrc }}
   netrc: {{ tpl (.Values.netrc) . | quote }}
   {{- end }}
+  {{- if .Values.service.store }}
+  local_store.json: |-
+    {{ .Files.Get .Values.service.store | nindent 4 }}
+  {{- end }}

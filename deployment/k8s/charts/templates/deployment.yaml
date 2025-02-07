@@ -46,18 +46,18 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /api
               port: http
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /api
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
-            - mountPath: /config
-              name: config
-              readOnly: true
+            - name: config-volume
+              mountPath: /tmp/services/local_store.json
+              subPath: local_store.json
           {{- range .Values.extraHostPathMounts }}
             - name: {{ .name }}
               mountPath: {{ .mountPath }}
@@ -68,7 +68,7 @@ spec:
           {{- end }}
       terminationGracePeriodSeconds: {{ .Values.env.terminationGracePeriodSeconds }}
       volumes:
-        - name: config
+        - name: config-volume
           configMap:
             name: {{ include "titiler.fullname" . }}-configmap
       {{- range .Values.extraHostPathMounts }}

@@ -23,6 +23,7 @@ terminationGracePeriodSeconds: 30
 service:
   type: ClusterIP
   port: 80
+  store: "files/eoapi.json"
 
 ingress:
   enabled: false
@@ -56,6 +57,8 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"
   GDAL_HTTP_VERSION: 2
   PYTHONWARNINGS: "ignore"
+  TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
+  TITILER_OPENEO_SERVICE_STORE_URL: "/tmp/services/local_store.json"
 
 resources:
   limits:
