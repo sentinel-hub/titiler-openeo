@@ -50,7 +50,6 @@ class Auth(metaclass=abc.ABCMeta):
     """Auth BaseClass."""
 
     method: AuthMethod = field(init=False)
-    settings: AuthSettings = field()
 
     @abc.abstractmethod
     def login(self, authorization: str = Header()) -> Any:
