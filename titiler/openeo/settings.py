@@ -3,24 +3,90 @@
 from typing import Any, Dict, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
 from typing_extensions import Annotated
 
 
 class OIDCConfig(BaseSettings):
-    """OIDC configuration settings."""
+    """OIDC configuration settings.
+    For now, only supports OpenID Connect (OIDC) Authorization Code Flow with PKCE."""
 
     client_id: str = ""
-    client_secret: str = ""
     wk_url: str = ""
     redirect_url: str = ""
     scopes: list[str] = ["openid", "email", "profile"]
+    name_claim: str = "name"
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
         env_file=".env",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """
+        Customize sources for settings construction.
+
+        This method allows customization of the settings sources hierarchy by inserting
+        a custom settings source after the init_settings source.
+
+        Args:
+            settings_cls (Type[BaseSettings]): The settings class being constructed.
+            init_settings (SettingsSource): Settings from direct class instantiation.
+            env_settings (SettingsSource): Settings from environment variables.
+            dotenv_settings (SettingsSource): Settings from .env file.
+            file_secret_settings (SettingsSource): Settings from secrets file.
+
+        Returns:
+            tuple: A tuple containing the settings sources in order of precedence:
+                - init_settings
+                - custom settings source
+                - dotenv_settings
+                - file_secret_settings
+        """
+        return (
+            init_settings,
+            cls.CustomSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
+
+    class CustomSettingsSource(EnvSettingsSource):
+        """Custom settings source for handling environment variables.
+
+        Extends EnvSettingsSource to provide custom parsing of environment variables.
+        """
+
+        def prepare_field_value(
+            self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
+        ) -> Any:
+            """Prepare field value from environment variable.
+
+            Args:
+                field_name: Name of the field being processed
+                field: Field information
+                value: Raw value from environment
+                value_is_complex: Whether the value is a complex type
+
+            Returns:
+                Processed value for the field
+            """
+            # allow space-separated list parsing for scopes
+            if field_name == "scopes":
+                return value.split(" ") if value else None
+
+            return super().prepare_field_value(
+                field_name, field, value, value_is_complex
+            )
 
 
 class AuthSettings(BaseSettings):
@@ -42,10 +108,10 @@ class AuthSettings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
-    
+
     def __init__(self, *args, **kwargs):
         """Initialize settings."""
-        kwargs['oidc'] = OIDCConfig()
+        kwargs["oidc"] = OIDCConfig()
         super().__init__(*args, **kwargs)
 
     @model_validator(mode="after")
@@ -61,7 +127,7 @@ class ApiSettings(BaseSettings):
 
     name: str = "TiTiler-OpenEO"
     cors_origins: str = "*"
-    cors_allow_methods: str = "GET,OPTIONS"
+    cors_allow_methods: str = "GET,POST,OPTIONS"
     cachecontrol: str = "public, max-age=3600"
     root_path: str = ""
 

@@ -8,19 +8,27 @@ from starlette_cramjam.middleware import CompressionMiddleware
 
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
+from titiler.openeo.auth import get_auth
 from titiler.openeo.errors import OpenEOException
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
 from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
-from titiler.openeo.auth import get_auth
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
 api_settings = ApiSettings()
-backend_settings = BackendSettings()
 auth_settings = AuthSettings()
+
+# BackendSettings requires stac_api_url and service_store_url to be set via environment variables
+try:
+    backend_settings = BackendSettings()
+except Exception as err:
+    raise ValueError(
+        "Missing required environment variables for BackendSettings. "
+        "Please set TITILER_OPENEO_STAC_API_URL and TITILER_OPENEO_SERVICE_STORE_URL"
+    ) from err
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
 service_store = get_store(str(backend_settings.service_store_url))
@@ -107,6 +115,8 @@ def create_app():
     )
 
     app.add_exception_handler(HTTPException, OpenEOException.http_exception_handler)
+
+    app.add_exception_handler(Exception, OpenEOException.general_exception_handler)
 
     return app
 

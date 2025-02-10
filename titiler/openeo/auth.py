@@ -1,28 +1,27 @@
 """titiler.openeo.auth."""
 
 import abc
-from base64 import b64decode
-from enum import Enum
 import base64
 import json
 import time
+from base64 import b64decode
+from enum import Enum
 from typing import Any, Dict, Literal, Optional
-from urllib.parse import urljoin
 
 import httpx
 from attrs import define, field
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidSignature
-from .settings import AuthSettings, OIDCConfig
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
 from fastapi import Header
 from fastapi.exceptions import HTTPException
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
+
+from .settings import AuthSettings, OIDCConfig
 
 
 class AuthMethod(Enum):
@@ -51,6 +50,7 @@ class Auth(metaclass=abc.ABCMeta):
     """Auth BaseClass."""
 
     method: AuthMethod = field(init=False)
+    settings: AuthSettings = field()
 
     @abc.abstractmethod
     def login(self, authorization: str = Header()) -> Any:
@@ -63,7 +63,7 @@ class Auth(metaclass=abc.ABCMeta):
         ...
 
 
-def get_auth(settings: AuthSettings) -> 'Auth':
+def get_auth(settings: AuthSettings) -> "Auth":
     """Get Auth instance."""
     if settings.method == AuthMethod.basic.value:
         return BasicAuth(settings=settings)
@@ -80,7 +80,7 @@ class OIDCAuth(Auth):
     """OpenID Connect authentication implementation."""
 
     method: AuthMethod = field(default=AuthMethod("oidc"), init=False)
-    settings: AuthSettings = field()
+    settings: AuthSettings = field(default=AuthSettings())
     _config_cache: Optional[Dict] = field(default=None, init=False)
     _jwks_cache: Optional[Dict] = field(default=None, init=False)
     _oidc_config: OIDCConfig = field(init=False)
@@ -117,14 +117,20 @@ class OIDCAuth(Auth):
             if jwk["kid"] == kid:
                 if jwk["kty"] != "RSA":
                     raise ValueError(f"Unsupported key type: {jwk['kty']}")
-                
+
                 # Convert JWK to public key
                 numbers = RSAPublicNumbers(
-                    e=int.from_bytes(base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)), byteorder="big"),
-                    n=int.from_bytes(base64.urlsafe_b64decode(jwk["n"] + "=" * (-len(jwk["n"]) % 4)), byteorder="big")
+                    e=int.from_bytes(
+                        base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)),
+                        byteorder="big",
+                    ),
+                    n=int.from_bytes(
+                        base64.urlsafe_b64decode(jwk["n"] + "=" * (-len(jwk["n"]) % 4)),
+                        byteorder="big",
+                    ),
                 )
                 return numbers.public_key()
-        
+
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Unable to find appropriate key",
@@ -135,35 +141,44 @@ class OIDCAuth(Auth):
         try:
             # Split the JWT
             header_b64, payload_b64, signature_b64 = token.split(".")
-            
+
             # Decode header and payload
-            header = json.loads(base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4)))
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)))
-            
+            json.loads(
+                base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4))
+            )
+            payload = json.loads(
+                base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+            )
+
             # Verify signature
-            signature = base64.urlsafe_b64decode(signature_b64 + "=" * (-len(signature_b64) % 4))
+            signature = base64.urlsafe_b64decode(
+                signature_b64 + "=" * (-len(signature_b64) % 4)
+            )
             key.verify(
                 signature,
                 f"{header_b64}.{payload_b64}".encode(),
                 padding.PKCS1v15(),
-                hashes.SHA256()
+                hashes.SHA256(),
             )
-            
+
             # Verify claims
-            if payload.get("aud") != self._oidc_config.client_id:
+            if not (
+                payload.get("azp") == self._oidc_config.client_id
+                or self._oidc_config.client_id in payload.get("aud").split(" ")
+            ):
                 raise ValueError("Invalid audience")
-            
+
             current_time = time.time()
             if payload.get("exp") and payload["exp"] < current_time:
                 raise ValueError("Token expired")
-            
+
             return payload
-            
-        except (ValueError, InvalidSignature) as e:
+
+        except (ValueError, InvalidSignature) as err:
             raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
-                detail=str(e),
-            )
+                detail=str(err),
+            ) from err
 
     def login(self, authorization: str = Header()) -> Any:
         """OIDC doesn't support direct login - must be done through provider."""
@@ -191,7 +206,7 @@ class OIDCAuth(Auth):
             )
 
         # Check the provider
-        if parsed_token.provider != self._config_cache["issuer"]:
+        if parsed_token.provider != "oidc":
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Invalid authentication provider",
@@ -199,26 +214,32 @@ class OIDCAuth(Auth):
 
         try:
             # Get the key id from token header
-            header_b64 = parsed_token.token.split('.')[0]
-            header = json.loads(base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4)))
+            header_b64 = parsed_token.token.split(".")[0]
+            header = json.loads(
+                base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4))
+            )
             key = self._get_key(header["kid"])
 
             # Verify token and get payload
             payload = self._verify_token(parsed_token.token, key)
 
             # Create user from payload
+            name_claim = None
+            if self.settings.oidc and self.settings.oidc.name_claim:
+                name_claim = payload.get(self.settings.oidc.name_claim)
+
             return User(
                 user_id=payload["sub"],
                 email=payload.get("email"),
-                name=payload.get("name"),
+                name=name_claim,
             )
 
-        except Exception as e:
+        except Exception as err:
             raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
-                detail=str(e),
+                detail=str(err),
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from err
 
 
 class CredentialsBasic(BaseModel):
@@ -261,7 +282,7 @@ class BasicAuth(Auth):
     """Basic Auth implementation using AuthSettings."""
 
     method: AuthMethod = field(default=AuthMethod("basic"), init=False)
-    settings: AuthSettings = field()
+    settings: AuthSettings = field(default=AuthSettings())
 
     def login(self, authorization: str = Header()) -> CredentialsBasic:
         """Validate Login credentials."""
@@ -280,12 +301,12 @@ class BasicAuth(Auth):
     def _get_user_from_base64(self, param: str) -> BasicAuthUser:
         try:
             data = b64decode(param).decode("ascii")
-        except Exception:
-            raise HTTPException(  # noqa: B904
+        except Exception as err:
+            raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
                 detail="Invalid base64 encoding",
                 headers={"WWW-Authenticate": "Basic"},
-            )
+            ) from err
 
         username, separator, password = data.partition(":")
         if not separator:

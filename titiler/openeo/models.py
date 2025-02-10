@@ -21,22 +21,24 @@ class OIDCDefaultClient(BaseModel):
 
     id: str = Field(
         ...,
-        description="The OpenID Connect Client ID to be used in the authentication procedure."
+        description="The OpenID Connect Client ID to be used in the authentication procedure.",
     )
-    grant_types: List[Literal[
-        "implicit",
-        "authorization_code",
-        "authorization_code+pkce",
-        "urn:ietf:params:oauth:grant-type:device_code",
-        "urn:ietf:params:oauth:grant-type:device_code+pkce",
-        "refresh_token"
-    ]] = Field(
+    grant_types: List[
+        Literal[
+            "implicit",
+            "authorization_code",
+            "authorization_code+pkce",
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "urn:ietf:params:oauth:grant-type:device_code+pkce",
+            "refresh_token",
+        ]
+    ] = Field(
         ...,
-        description="List of authorization grant types (flows) supported by the OpenID Connect client."
+        description="List of authorization grant types (flows) supported by the OpenID Connect client.",
     )
     redirect_urls: Optional[List[AnyUrl]] = Field(
         None,
-        description="List of redirect URLs that are whitelisted by the OpenID Connect client."
+        description="List of redirect URLs that are whitelisted by the OpenID Connect client.",
     )
 
 
@@ -46,31 +48,30 @@ class OIDCProvider(BaseModel):
     id: str = Field(
         ...,
         pattern=r"[\d\w]{1,20}",
-        description="A per-backend unique identifier for the OpenID Connect Provider to be as prefix for the Bearer token."
+        description="A per-backend unique identifier for the OpenID Connect Provider to be as prefix for the Bearer token.",
     )
     issuer: AnyUrl = Field(
         ...,
-        description="The issuer location (also referred to as 'authority' in some client libraries) is the URL of the OpenID Connect provider."
+        description="The issuer location (also referred to as 'authority' in some client libraries) is the URL of the OpenID Connect provider.",
     )
     title: str = Field(
         ...,
-        description="The name that is publicly shown in clients for this OpenID Connect provider."
+        description="The name that is publicly shown in clients for this OpenID Connect provider.",
     )
     description: Optional[str] = Field(
         None,
-        description="A description that explains how the authentication procedure works."
+        description="A description that explains how the authentication procedure works.",
     )
     scopes: Optional[List[str]] = Field(
         None,
-        description="A list of OpenID Connect scopes that the client MUST at least include when requesting authorization."
+        description="A list of OpenID Connect scopes that the client MUST at least include when requesting authorization.",
     )
     default_clients: Optional[List[OIDCDefaultClient]] = Field(
         None,
-        description="List of default OpenID Connect clients that can be used by an openEO client for OpenID Connect based authentication."
+        description="List of default OpenID Connect clients that can be used by an openEO client for OpenID Connect based authentication.",
     )
     links: Optional[List[Link]] = Field(
-        None,
-        description="Links related to this provider."
+        None, description="Links related to this provider."
     )
 
 
@@ -79,7 +80,7 @@ class OIDCProviders(BaseModel):
 
     providers: List[OIDCProvider] = Field(
         ...,
-        description="The list of OpenID Connect Providers. The first provider in this list is the default provider for authentication."
+        description="The list of OpenID Connect Providers. The first provider in this list is the default provider for authentication.",
     )
 
 

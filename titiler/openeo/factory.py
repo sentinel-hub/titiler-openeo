@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import morecantile
 import pyproj
-from attrs import define, field
+from attrs import define
 from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -18,7 +18,7 @@ from typing_extensions import Annotated
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
-from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth
+from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.errors import InvalidProcessGraph
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
 from titiler.openeo.services import ServicesStore
@@ -184,11 +184,15 @@ class EndpointsFactory(BaseFactory):
                         id="oidc",
                         issuer=self.auth.config["issuer"],
                         title="OpenID Connect",
-                        scopes=["openid", "email", "profile"],
+                        scopes=self.auth.settings.oidc.scopes,
                         default_clients=[
                             models.OIDCDefaultClient(
                                 id=self.auth.settings.oidc.client_id,
-                                grant_types=["authorization_code"],
+                                grant_types=[
+                                    "authorization_code+pkce",
+                                    "urn:ietf:params:oauth:grant-type:device_code+pkce",
+                                    "refresh_token",
+                                ],
                                 redirect_urls=[self.auth.settings.oidc.redirect_url],
                             )
                         ],
@@ -219,6 +223,30 @@ class EndpointsFactory(BaseFactory):
 
             """
             return token
+
+        @self.router.get(
+            "/me",
+            response_class=JSONResponse,
+            summary="Get information about the authenticated user",
+            response_model=User,
+            response_model_exclude_none=True,
+            operation_id="get-current-user",
+            responses={
+                200: {
+                    "content": {
+                        "application/json": {},
+                    },
+                    "description": "Information about the currently authenticated user.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
+                },
+            },
+            tags=["Account Management"],
+        )
+        def openeo_me(user=Depends(self.auth.validate)):
+            """Get information about the currently authenticated user."""
+            return user
 
         # Well-Known Document
         # Ref: https://openeo.org/documentation/1.0/developers/profiles/api.html#well-known-discovery
@@ -818,9 +846,9 @@ class EndpointsFactory(BaseFactory):
 
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
             # Check there is at least one load_collection process
-            assert load_collection_nodes, (
-                "Could not find any `load_collection process in service's process-graph"
-            )
+            assert (
+                load_collection_nodes
+            ), "Could not find any `load_collection process in service's process-graph"
 
             # Check that nodes have spatial-extent
             assert all(
@@ -881,7 +909,7 @@ def _get_media_type(process_graph: Dict[str, Any]) -> str:
         if node["process_id"] == "save_result":
             return "image/png" if node["arguments"]["format"] == "png" else "image/jpeg"
 
-    raise ValueError("Couldn't find `")
+    raise ValueError("Couldn't find a `save_result` process in the process graph")
 
 
 def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:

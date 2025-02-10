@@ -85,6 +85,19 @@ class OpenEOException(Exception):
             },
         )
 
+    @staticmethod
+    def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Handle general exceptions."""
+        if isinstance(exc, ValueError):
+            return OpenEOException.validation_exception_handler(request, exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": "ServerError",
+                "message": str(exc),
+            },
+        )
+
 
 class ProcessParameterMissing(OpenEOException):
     """Invalid Parameters."""
