@@ -24,12 +24,7 @@ docker compose up
    - Username: `admin`
    - Password: `admin`
 
-3. Create a new realm for testing:
-   - Click "Create Realm"
-   - Name it `titiler-openeo`
-   - Click "Create"
-
-4. Create a new client:
+3. Create a new client:
    - Go to "Clients" → "Create client"
    - Client ID: `titiler-openeo`
    - Client type: `OpenID Connect`
@@ -38,16 +33,12 @@ docker compose up
    - Enable "Authorization"
    - Click "Save"
 
-5. Configure client settings:
-   - Valid redirect URIs: `http://localhost:8081/*`
-   - Web origins: `http://localhost:8081`
+4. Configure client settings:
+   - Valid redirect URIs: `http://localhost:8081/*` and `http://localhost:8080/*` for the openEO editor
+   - Web origins: `http://localhost:8081` and `http://localhost:8080` for the openEO editor
    - Click "Save"
 
-6. Get client credentials:
-   - Go to "Clients" → "titiler-openeo" → "Credentials" tab
-   - Copy the "Client secret"
-
-7. Create a test user:
+5. Create a test user:
    - Go to "Users" → "Add user"
    - Username: `test`
    - Email: `test@example.com`
