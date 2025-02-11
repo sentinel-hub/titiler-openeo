@@ -1,0 +1,91 @@
+# Default values for titiler-openeo.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sentinel-hub/titiler-openeo
+  tag: "3d0eba699104d179f7d814380d519b4e22c71ec1"
+  pullPolicy: IfNotPresent
+  command: "uvicorn"
+  args:
+    - "titiler.openeo.main:app"
+    - "--host"
+    - "0.0.0.0"
+    - "--port"
+    - "80"
+    - "--workers"
+    - "1"
+
+nameOverride: ""
+fullnameOverride: ""
+
+terminationGracePeriodSeconds: 30
+
+service:
+  type: ClusterIP
+  port: 80
+  store: "files/eoapi.json"
+
+ingress:
+  enabled: false
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: titiler.local
+      paths: ["/"]
+  tls: []
+  #  - secretName: titiler-tls
+  #    hosts:
+  #      - titiler.local
+
+extraHostPathMounts: []
+  # - name: map-sources
+  #   mountPath: /map-sources/
+  #   hostPath: /home/ubuntu/map-sources
+  #   readOnly: false
+  #   mountPropagation: HostToContainer # OPTIONAL
+
+imagePullSecrets: []
+
+env:
+  CPL_TMPDIR: /tmp
+  GDAL_CACHEMAX: 200  # 200 mb
+  VSI_CACHE: "TRUE"
+  VSI_CACHE_SIZE: 5000000  # 5 MB (per file-handle)
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"
+  GDAL_HTTP_MULTIPLEX: "YES"
+  GDAL_HTTP_VERSION: 2
+  PYTHONWARNINGS: "ignore"
+  TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
+  TITILER_OPENEO_SERVICE_STORE_URL: "/tmp/services/local_store.json"
+
+resources:
+  limits:
+    cpu: 1
+    memory: 2Gi
+  requests:
+    cpu: 1
+    memory: 2Gi
+
+serviceAccountName: ""
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # readOnlyRootFilesystem: true
+  # allowPrivilegeEscalation: false
+  # runAsNonRoot: true
+  # runAsUser: 1001
+
+podSecurityContext: {}
+  # fsGroup: 1001
+  # runAsNonRoot: true
+  # runAsUser: 1001
