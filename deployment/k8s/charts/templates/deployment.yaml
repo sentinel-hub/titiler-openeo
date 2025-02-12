@@ -56,7 +56,7 @@ spec:
           env:
             - name: TITILER_OPENEO_SERVICE_STORE_URL
               {{- if .Values.externalDatabase.enabled }}
-              value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host .Values.externalDatabase.port .Values.externalDatabase.database | quote }}
+              value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host (.Values.externalDatabase.port | int)  .Values.externalDatabase.database | quote }}
               {{- else }}
               value: {{ printf "%s/%s" "/data" .Values.persistence.localStoreFile | quote }}
               {{- end }}

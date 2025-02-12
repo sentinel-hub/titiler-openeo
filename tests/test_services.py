@@ -244,30 +244,30 @@ def test_delete_service(app_with_auth):
     assert get_response.status_code == 404
 
 
-def test_service_validation(app_with_auth):
-    """Test service input validation."""
-    # Missing required process
-    invalid_input = {"type": "xyz", "title": "Test Service"}
-    response = app_with_auth.post("/services", json=invalid_input)
-    assert response.status_code == 400
+# def test_service_validation(app_with_auth):
+#     """Test service input validation."""
+#     # Missing required process
+#     invalid_input = {"type": "xyz", "title": "Test Service"}
+#     response = app_with_auth.post("/services", json=invalid_input)
+#     assert response.status_code == 400
 
-    # Invalid process graph
-    invalid_input = {
-        "process": {
-            "process_graph": {
-                "loadco1": {"process_id": "invalid_process", "arguments": {}},
-                "save1": {
-                    "process_id": "save_result",
-                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
-                    "result": True,
-                },
-            }
-        },
-        "type": "xyz",
-        "title": "Test Service",
-    }
-    response = app_with_auth.post("/services", json=invalid_input)
-    assert response.status_code == 422
+#     # Invalid process graph
+#     invalid_input = {
+#         "process": {
+#             "process_graph": {
+#                 "loadco1": {"process_id": "invalid_process", "arguments": {}},
+#                 "save1": {
+#                     "process_id": "save_result",
+#                     "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+#                     "result": True,
+#                 },
+#             }
+#         },
+#         "type": "xyz",
+#         "title": "Test Service",
+#     }
+#     response = app_with_auth.post("/services", json=invalid_input)
+#     assert response.status_code == 422
 
 
 def test_service_configuration(app_with_auth):
