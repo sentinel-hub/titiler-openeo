@@ -448,7 +448,7 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
-            process = body.process.model_dump()
+            # process = body.process.model_dump()
 
             # TODO Validate process graph
             # try:
