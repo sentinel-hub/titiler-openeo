@@ -19,3 +19,7 @@ COPY README.md README.md
 
 RUN python -m pip install --no-cache-dir --upgrade ".[pystac]"
 RUN rm -rf /tmp/titiler pyproject.toml README.md
+
+RUN mkdir /data
+
+WORKDIR /app
