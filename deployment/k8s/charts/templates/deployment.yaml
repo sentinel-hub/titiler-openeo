@@ -14,24 +14,33 @@ spec:
       labels:
         {{- include "titiler.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.podSecurityContext }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [ {{ .Values.image.command }} ]
-          args: [ {{- range $arg := .Values.image.args }}
-            {{- $arg | quote }},
+          command:
+            - {{ .Values.image.command | quote }}
+          args:
+            {{- range .Values.image.args }}
+            - {{ . | quote }}
             {{- end }}
-          ]
+          {{- with .Values.securityContext }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
-          {{- range $key, $val := .Values.env }}
+            - name: TITILER_OPENEO_SERVICE_STORE_URL
+              value: {{ printf "%s/%s" "/data" .Values.persistence.localStoreFile | quote }}
+            {{- range $key, $val := .Values.env }}
+            {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
             - name: {{ $key }}
               value: {{ $val | quote }}
-          {{- end }}
+            {{- end }}
+            {{- end }}
           {{- if .Values.netrc }}
             - name: NETRC
               value: /config/netrc
@@ -52,49 +61,59 @@ spec:
             httpGet:
               path: /api
               port: http
+          {{- with .Values.resources }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
-            - name: config-volume
-              mountPath: /tmp/services/local_store.json
-              subPath: local_store.json
-          {{- range .Values.extraHostPathMounts }}
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            {{- range .Values.extraHostPathMounts }}
             - name: {{ .name }}
               mountPath: {{ .mountPath }}
               readOnly: {{ .readOnly }}
-            {{- if .mountPropagation }}
+              {{- if .mountPropagation }}
               mountPropagation: {{ .mountPropagation }}
+              {{- end }}
             {{- end }}
-          {{- end }}
-      terminationGracePeriodSeconds: {{ .Values.env.terminationGracePeriodSeconds }}
       volumes:
         - name: config-volume
           configMap:
             name: {{ include "titiler.fullname" . }}-configmap
-      {{- range .Values.extraHostPathMounts }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          {{- if .Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "titiler.fullname" . }}-data
+          {{- end }}
+        {{- end }}
+        {{- range .Values.extraHostPathMounts }}
         - name: {{ .name }}
           hostPath:
             path: {{ .hostPath }}
             type: Directory
-      {{- end }}
+        {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
-        {{- range . }}
-      - name: {{ .name }}
-        {{- end }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.serviceAccountName }}
-      serviceAccountName: {{ . | quote }}
+      serviceAccountName: {{ . }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- with .Values.affinity }}
+      {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
-    {{- end }}
-    {{- with .Values.tolerations }}
+      {{- end }}
+      {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
-    {{- end }}
+      {{- end }}

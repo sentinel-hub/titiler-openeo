@@ -23,7 +23,6 @@ terminationGracePeriodSeconds: 30
 service:
   type: ClusterIP
   port: 80
-  store: "files/eoapi.json"
 
 ingress:
   enabled: false
@@ -58,7 +57,6 @@ env:
   GDAL_HTTP_VERSION: 2
   PYTHONWARNINGS: "ignore"
   TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
-  TITILER_OPENEO_SERVICE_STORE_URL: "/tmp/services/local_store.json"
 
 resources:
   limits:
@@ -75,6 +73,18 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Persistent storage configuration for the local database file
+persistence:
+  enabled: true
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+  # existingClaim: ""
+  localStoreFile: "local_store.json"
+  localStoreSeed: "files/eoapi.json"
 
 securityContext: {}
   # capabilities:
