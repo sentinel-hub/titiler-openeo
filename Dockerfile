@@ -17,5 +17,9 @@ COPY titiler/ titiler/
 COPY pyproject.toml pyproject.toml
 COPY README.md README.md
 
-RUN python -m pip install --no-cache-dir --upgrade ".[pystac,oidc]"
+RUN python -m pip install --no-cache-dir --upgrade ".[pystac,oidc,postgres]"
 RUN rm -rf /tmp/titiler pyproject.toml README.md
+
+RUN mkdir /data
+
+WORKDIR /app

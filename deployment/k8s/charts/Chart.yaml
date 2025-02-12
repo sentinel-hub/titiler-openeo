@@ -1,0 +1,9 @@
+apiVersion: v1
+appVersion: 0.1.0
+description: OpenEO by TiTiler
+name: titiler-openeo
+version: 0.3.0
+icon: https://raw.githubusercontent.com/developmentseed/titiler/main/docs/logos/TiTiler_logo_small.png
+maintainers:
+  - name: DevelopmentSeed
+    url: https://github.com/developmentseed

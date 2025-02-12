@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "titiler.fullname" . }}-configmap
+data:
+  {{- if .Values.netrc }}
+  netrc: {{ tpl (.Values.netrc) . | quote }}
+  {{- end }}
+  {{- if .Values.persistence.localStoreSeed }}
+  init_store.json: |-
+    {{ .Files.Get .Values.persistence.localStoreSeed | nindent 4 }}
+  {{- end }}

@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "titiler.fullname" . }}
+  labels:
+    {{- include "titiler.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "titiler.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "titiler.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+      {{- if .Values.persistence.localStoreSeed }}
+        - name: init-store
+          image: busybox
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ -f "/config/init_store.json" ]; then
+                echo "Initializing local_store.json from init_store.json..."
+                cp /config/init_store.json /data/local_store.json
+                echo "Initialization complete."
+              else
+                echo "No init_store.json found in configmap, skipping initialization."
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config-volume
+              mountPath: /config
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - {{ .Values.image.command | quote }}
+          args:
+            {{- range .Values.image.args }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: TITILER_OPENEO_SERVICE_STORE_URL
+              {{- if .Values.externalDatabase.enabled }}
+              value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host .Values.externalDatabase.port .Values.externalDatabase.database | quote }}
+              {{- else }}
+              value: {{ printf "%s/%s" "/data" .Values.persistence.localStoreFile | quote }}
+              {{- end }}
+            {{- range $key, $val := .Values.env }}
+            {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if .Values.netrc }}
+            - name: NETRC
+              value: /config/netrc
+            - name: CURLOPT_NETRC
+              value: CURL_NETRC_OPTIONAL
+            - name: CURLOPT_NETRC_FILE
+              value: /config/netrc
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api
+              port: http
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api
+              port: http
+            initialDelaySeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            - name: config-volume
+              mountPath: /config
+            {{- range .Values.extraHostPathMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              readOnly: {{ .readOnly }}
+              {{- if .mountPropagation }}
+              mountPropagation: {{ .mountPropagation }}
+              {{- end }}
+            {{- end }}
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "titiler.fullname" . }}-configmap
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          {{- if .Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "titiler.fullname" . }}-data
+          {{- end }}
+        {{- end }}
+        {{- range .Values.extraHostPathMounts }}
+        - name: {{ .name }}
+          hostPath:
+            path: {{ .hostPath }}
+            type: Directory
+        {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
