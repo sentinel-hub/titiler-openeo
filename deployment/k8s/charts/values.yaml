@@ -3,7 +3,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
-  tag: "3d0eba699104d179f7d814380d519b4e22c71ec1"
+  tag: "dev"
   pullPolicy: IfNotPresent
   command: "uvicorn"
   args:
@@ -14,6 +14,8 @@ image:
     - "80"
     - "--workers"
     - "1"
+    - "--forwarded-allow-ips" # to make sure it works behind a reverse proxy
+    - "*"  # Allow all
 
 nameOverride: ""
 fullnameOverride: ""

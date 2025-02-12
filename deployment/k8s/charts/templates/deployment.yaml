@@ -19,6 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
+      {{- if .Values.persistence.localStoreSeed }}
         - name: init-store
           image: busybox
           command:
@@ -35,10 +36,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            {{- if or .Values.netrc .Values.persistence.localStoreSeed }}
             - name: config-volume
               mountPath: /config
-            {{- end }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -112,7 +112,7 @@ spec:
             claimName: {{ .Values.persistence.existingClaim }}
           {{- else }}
           persistentVolumeClaim:
-            claimName: {{ include "titiler.fullname" . }}-pvc
+            claimName: {{ include "titiler.fullname" . }}-data
           {{- end }}
         {{- end }}
         {{- range .Values.extraHostPathMounts }}
