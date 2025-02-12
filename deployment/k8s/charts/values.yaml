@@ -88,6 +88,16 @@ persistence:
   localStoreFile: "local_store.json"
   localStoreSeed: "files/eoapi.json"
 
+# Configuration for the external database
+# PostgreSQL only supported for now
+externalDatabase:
+  enabled: false
+  host: "172.16.4.5"
+  port: 5432
+  user: openeo
+  database: openeo
+  password: "secret"
+
 securityContext: {}
   # capabilities:
   #   drop:

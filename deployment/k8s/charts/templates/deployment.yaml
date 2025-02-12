@@ -55,7 +55,11 @@ spec:
           {{- end }}
           env:
             - name: TITILER_OPENEO_SERVICE_STORE_URL
+              {{- if .Values.externalDatabase.enabled }}
+              value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host .Values.externalDatabase.port .Values.externalDatabase.database | quote }}
+              {{- else }}
               value: {{ printf "%s/%s" "/data" .Values.persistence.localStoreFile | quote }}
+              {{- end }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
             - name: {{ $key }}
