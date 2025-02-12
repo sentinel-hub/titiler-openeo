@@ -14,7 +14,7 @@ image:
     - "80"
     - "--workers"
     - "1"
-    - "--forwarded-allow-ips" # to make sure it works behind a reverse proxy
+    - "--forwarded-allow-ips"  # to make sure it works behind a reverse proxy
     - "*"  # Allow all
 
 nameOverride: ""
