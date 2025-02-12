@@ -18,6 +18,27 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: init-store
+          image: busybox
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ -f "/config/init_store.json" ]; then
+                echo "Initializing local_store.json from init_store.json..."
+                cp /config/init_store.json /data/local_store.json
+                echo "Initialization complete."
+              else
+                echo "No init_store.json found in configmap, skipping initialization."
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if or .Values.netrc .Values.persistence.localStoreSeed }}
+            - name: config-volume
+              mountPath: /config
+            {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -70,6 +91,8 @@ spec:
             - name: data
               mountPath: /data
             {{- end }}
+            - name: config-volume
+              mountPath: /config
             {{- range .Values.extraHostPathMounts }}
             - name: {{ .name }}
               mountPath: {{ .mountPath }}
@@ -89,7 +112,7 @@ spec:
             claimName: {{ .Values.persistence.existingClaim }}
           {{- else }}
           persistentVolumeClaim:
-            claimName: {{ include "titiler.fullname" . }}-data
+            claimName: {{ include "titiler.fullname" . }}-pvc
           {{- end }}
         {{- end }}
         {{- range .Values.extraHostPathMounts }}
