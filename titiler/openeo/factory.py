@@ -19,7 +19,6 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
-from titiler.openeo.errors import InvalidProcessGraph
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
