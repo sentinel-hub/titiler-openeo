@@ -12,7 +12,7 @@ class ApiSettings(BaseSettings):
 
     name: str = "TiTiler-OpenEO"
     cors_origins: str = "*"
-    cors_allow_methods: str = "GET,OPTIONS"
+    cors_allow_methods: str = "GET,POST,OPTIONS"
     cachecontrol: str = "public, max-age=3600"
     root_path: str = ""
 

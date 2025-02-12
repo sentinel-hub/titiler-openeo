@@ -26,14 +26,13 @@ class Service(Base):
     service = Column(JSON)
 
 
-@define(kw_only=True, init=False)
+@define(kw_only=True)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
 
     store: str = field()
-
-    _engine = None
-    _session_factory = None
+    _engine: Any = field(default=None, init=False)
+    _session_factory: Any = field(default=None, init=False)
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
@@ -42,6 +41,7 @@ class SQLAlchemyStore(ServicesStore):
         self._session_factory = sessionmaker(bind=self._engine)
 
         # Create tables if they don't exist
+
         Base.metadata.create_all(self._engine)
 
     def get_service(self, service_id: str) -> Optional[Dict]:
