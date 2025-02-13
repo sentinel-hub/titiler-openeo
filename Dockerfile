@@ -58,8 +58,9 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Create non-root user
 RUN useradd -m -s /bin/bash titiler && \
-    mkdir -p /data && \
-    chown -R titiler:titiler /data
+    mkdir -p /data /config &&
+COPY log_config.yaml /config/log_config.yaml
+RUN chown -R titiler:titiler /data /config
 
 WORKDIR /app
 USER titiler
@@ -68,7 +69,6 @@ USER titiler
 VOLUME /data
 # Create config directory and copy default config
 VOLUME /config
-COPY log_config.yaml /config/log_config.yaml
 
 # Add healthcheck
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
