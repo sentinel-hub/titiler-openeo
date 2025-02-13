@@ -6,7 +6,7 @@ services:
     build:
       context: .
     ports:
-      - "8081:8000"
+      - "8081:80"
     environment:
       # GDAL Config
       # This option controls the default GDAL raster block cache size.
