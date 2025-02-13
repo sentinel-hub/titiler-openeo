@@ -47,7 +47,6 @@ class LocalStore(ServicesStore):
             for service_id, data in self.store.items()
             if data["user_id"] == user_id
         ]
-        assert services, f"Could not find service for user: {user_id}"
         return services
 
     def add_service(self, user_id: str, service: Dict, **kwargs) -> str:

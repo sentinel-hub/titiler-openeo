@@ -6,6 +6,8 @@ data:
   {{- if .Values.netrc }}
   netrc: {{ tpl (.Values.netrc) . | quote }}
   {{- end }}
+  log_config.yaml: |-
+    {{ .Files.Get .Values.logging.configFile | nindent 4 }}
   {{- if .Values.persistence.localStoreSeed }}
   init_store.json: |-
     {{ .Files.Get .Values.persistence.localStoreSeed | nindent 4 }}

@@ -37,18 +37,20 @@ class stacApiBackend:
     """PySTAC-Client Backend."""
 
     url: str = field()
-    client: Client = field(default=None)
+    _client_cache: Client = field(default=None, init=False)
 
-    def __attrs_post_init__(self) -> None:
-        """Create Client."""
-        if not self.client:
+    @property
+    def client(self) -> Client:
+        """Return a PySTAC-Client."""
+        if not self._client_cache:
             stac_api_io = StacApiIO(
                 max_retries=Retry(
                     total=pystac_settings.retry,
                     backoff_factor=pystac_settings.retry_factor,
                 ),
             )
-            self.client = Client.open(self.url, stac_io=stac_api_io)
+            self._client_cache = Client.open(self.url, stac_io=stac_api_io)
+        return self._client_cache
 
     @cached(  # type: ignore
         TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),

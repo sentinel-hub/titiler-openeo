@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import morecantile
 import pyproj
-from attrs import define, field
+from attrs import define
 from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -18,7 +18,7 @@ from typing_extensions import Annotated
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
-from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
+from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
@@ -33,7 +33,7 @@ class EndpointsFactory(BaseFactory):
     services_store: ServicesStore
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
-    auth: Auth = field(factory=FakeBasicAuth)
+    auth: Auth
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -152,29 +152,105 @@ class EndpointsFactory(BaseFactory):
                 },
             }
 
+        if isinstance(self.auth, OIDCAuth):
+
+            @self.router.get(
+                "/credentials/oidc",
+                response_class=JSONResponse,
+                summary="OpenID Connect authentication",
+                response_model=models.OIDCProviders,
+                response_model_exclude_none=True,
+                operation_id="authenticate-oidc",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
+                        "description": "Lists the OpenID Connect Providers.",
+                    },
+                },
+                tags=["Account Management"],
+            )
+            def openeo_credentials_oidc():
+                """Lists the supported OpenID Connect providers (OP)."""
+                if not isinstance(self.auth, OIDCAuth):
+                    raise HTTPException(
+                        status_code=501,
+                        detail="OpenID Connect authentication not supported",
+                    )
+
+                return models.OIDCProviders(
+                    providers=[
+                        models.OIDCProvider(
+                            id="oidc",
+                            issuer=self.auth.config["issuer"],
+                            title="OpenID Connect",
+                            scopes=self.auth.settings.oidc.scopes,
+                            default_clients=[
+                                models.OIDCDefaultClient(
+                                    id=self.auth.settings.oidc.client_id,
+                                    grant_types=[
+                                        "authorization_code+pkce",
+                                        "urn:ietf:params:oauth:grant-type:device_code+pkce",
+                                        "refresh_token",
+                                    ],
+                                    redirect_urls=[
+                                        self.auth.settings.oidc.redirect_url
+                                    ],
+                                )
+                            ],
+                        )
+                    ]
+                )
+        else:
+
+            @self.router.get(
+                "/credentials/basic",
+                response_class=JSONResponse,
+                summary="HTTP Basic authentication",
+                response_model=CredentialsBasic,
+                response_model_exclude_none=True,
+                operation_id="authenticate-basic",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
+                    },
+                },
+                tags=["Account Management"],
+            )
+            def openeo_credentials_basic(token=Depends(self.auth.login)):
+                """Checks the credentials provided through [HTTP Basic Authentication
+                according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
+                an access token for valid credentials.
+
+                """
+                return token
+
         @self.router.get(
-            "/credentials/basic",
+            "/me",
             response_class=JSONResponse,
-            summary="HTTP Basic authentication",
-            response_model=CredentialsBasic,
+            summary="Get information about the authenticated user",
+            response_model=User,
             response_model_exclude_none=True,
-            operation_id="authenticate-basic",
+            operation_id="get-current-user",
             responses={
                 200: {
                     "content": {
                         "application/json": {},
                     },
+                    "description": "Information about the currently authenticated user.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
                 },
             },
             tags=["Account Management"],
         )
-        def openeo_credentials_basic(token=Depends(self.auth.login)):
-            """Checks the credentials provided through [HTTP Basic Authentication
-            according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
-            an access token for valid credentials.
-
-            """
-            return token
+        def openeo_me(user=Depends(self.auth.validate)):
+            """Get information about the currently authenticated user."""
+            return user
 
         # Well-Known Document
         # Ref: https://openeo.org/documentation/1.0/developers/profiles/api.html#well-known-discovery
@@ -483,7 +559,7 @@ class EndpointsFactory(BaseFactory):
                 status_code=201,
                 headers={
                     "Location": service_url,
-                    "OpenEO-Identifier": service["id"],
+                    "openeo-identifier": service["id"],
                 },
             )
 
@@ -837,7 +913,7 @@ def _get_media_type(process_graph: Dict[str, Any]) -> str:
         if node["process_id"] == "save_result":
             return "image/png" if node["arguments"]["format"] == "png" else "image/jpeg"
 
-    raise ValueError("Couldn't find `")
+    raise ValueError("Couldn't find a `save_result` process in the process graph")
 
 
 def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
