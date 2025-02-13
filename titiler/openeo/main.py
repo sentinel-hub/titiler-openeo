@@ -1,5 +1,6 @@
 """titiler-openeo app."""
 
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from openeo_pg_parser_networkx.process_registry import Process
@@ -9,7 +10,7 @@ from starlette_cramjam.middleware import CompressionMiddleware
 from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.auth import get_auth
-from titiler.openeo.errors import OpenEOException
+from titiler.openeo.errors import OpenEOException, ExceptionHandler
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
@@ -54,6 +55,7 @@ def create_app():
         """,
         version=titiler_version,
         root_path=api_settings.root_path,
+        debug=api_settings.debug,
     )
 
     # Set all CORS enabled origins
@@ -107,16 +109,14 @@ def create_app():
     app.include_router(endpoints.router)
     app.endpoints = endpoints
 
+    # Create exception handler instance
+    exception_handler = ExceptionHandler(logger=logging.getLogger(__name__))
+
     # Add OpenEO-specific exception handlers
-    app.add_exception_handler(OpenEOException, OpenEOException.openeo_exception_handler)
-
-    app.add_exception_handler(
-        RequestValidationError, OpenEOException.validation_exception_handler
-    )
-
-    app.add_exception_handler(HTTPException, OpenEOException.http_exception_handler)
-
-    app.add_exception_handler(Exception, OpenEOException.general_exception_handler)
+    app.add_exception_handler(OpenEOException, exception_handler.openeo_exception_handler)
+    app.add_exception_handler(RequestValidationError, exception_handler.validation_exception_handler)
+    app.add_exception_handler(HTTPException, exception_handler.http_exception_handler)
+    app.add_exception_handler(Exception, exception_handler.general_exception_handler)
 
     return app
 

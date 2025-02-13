@@ -5,6 +5,7 @@ See: https://api.openeo.org/#section/API-Principles/Error-Handling
 """
 
 from typing import Optional
+import logging
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -51,21 +52,33 @@ class OpenEOException(Exception):
             error["url"] = self.url
         return error
 
-    @staticmethod
+
+class ExceptionHandler:
+    """Class to handle all OpenEO API exceptions."""
+
+    def __init__(self, logger: logging.Logger):
+        """Initialize exception handler with a logger.
+
+        Args:
+            logger: Logger instance to log exceptions
+        """
+        self.logger = logger
+
     def openeo_exception_handler(
-        request: Request, exc: "OpenEOException"
+        self, request: Request, exc: OpenEOException
     ) -> JSONResponse:
         """Handle OpenEO exceptions."""
+        self.logger.error(f"OpenEO Exception: {exc.message}", exc_info=exc)
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
         )
 
-    @staticmethod
     def validation_exception_handler(
-        request: Request, exc: RequestValidationError
+        self, request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Handle FastAPI validation errors."""
+        self.logger.error(f"Validation Error: {str(exc)}", exc_info=exc)
         return JSONResponse(
             status_code=400,
             content={
@@ -74,9 +87,9 @@ class OpenEOException(Exception):
             },
         )
 
-    @staticmethod
-    def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    def http_exception_handler(self, request: Request, exc: HTTPException) -> JSONResponse:
         """Handle HTTP exceptions."""
+        self.logger.error(f"HTTP Exception: {exc.detail}", exc_info=exc)
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -85,11 +98,17 @@ class OpenEOException(Exception):
             },
         )
 
-    @staticmethod
-    def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    def general_exception_handler(self, request: Request, exc: Exception) -> JSONResponse:
         """Handle general exceptions."""
+        self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
         if isinstance(exc, ValueError):
-            return OpenEOException.validation_exception_handler(request, exc)
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "code": "InvalidRequest",
+                    "message": str(exc),
+                },
+            )
         return JSONResponse(
             status_code=500,
             content={

@@ -13,9 +13,11 @@ image:
     - "--port"
     - "80"
     - "--workers"
-    - "1"
+    - "4"
     - "--forwarded-allow-ips"  # to make sure it works behind a reverse proxy
     - "*"  # Allow all
+    - "--log-config"
+    - "/config/log_config.yaml"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -75,6 +77,10 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# logging configuration
+logging:
+  configFile: "files/log_config.yaml"
 
 # Persistent storage configuration for the local database file
 persistence:

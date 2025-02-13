@@ -6,7 +6,7 @@ services:
     build:
       context: .
     ports:
-      - "8081:8081"
+      - "8081:8000"
     environment:
       # GDAL Config
       # This option controls the default GDAL raster block cache size.
@@ -45,7 +45,7 @@ services:
     env_file:
       - path: .env
         required: false
-    command: ["uvicorn", "titiler.openeo.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "4"]
+    # command: ["uvicorn", "titiler.openeo.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     volumes:
       - ./services:/tmp/services
 
