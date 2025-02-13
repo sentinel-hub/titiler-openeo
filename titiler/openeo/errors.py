@@ -4,8 +4,8 @@ This module implements the OpenEO API error handling specification.
 See: https://api.openeo.org/#section/API-Principles/Error-Handling
 """
 
-from typing import Optional
 import logging
+from typing import Optional
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -87,7 +87,9 @@ class ExceptionHandler:
             },
         )
 
-    def http_exception_handler(self, request: Request, exc: HTTPException) -> JSONResponse:
+    def http_exception_handler(
+        self, request: Request, exc: HTTPException
+    ) -> JSONResponse:
         """Handle HTTP exceptions."""
         self.logger.error(f"HTTP Exception: {exc.detail}", exc_info=exc)
         return JSONResponse(
@@ -98,7 +100,9 @@ class ExceptionHandler:
             },
         )
 
-    def general_exception_handler(self, request: Request, exc: Exception) -> JSONResponse:
+    def general_exception_handler(
+        self, request: Request, exc: Exception
+    ) -> JSONResponse:
         """Handle general exceptions."""
         self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
         if isinstance(exc, ValueError):
