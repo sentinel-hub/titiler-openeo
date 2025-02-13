@@ -153,6 +153,7 @@ class EndpointsFactory(BaseFactory):
             }
 
         if isinstance(self.auth, OIDCAuth):
+
             @self.router.get(
                 "/credentials/oidc",
                 response_class=JSONResponse,
@@ -193,13 +194,16 @@ class EndpointsFactory(BaseFactory):
                                         "urn:ietf:params:oauth:grant-type:device_code+pkce",
                                         "refresh_token",
                                     ],
-                                    redirect_urls=[self.auth.settings.oidc.redirect_url],
+                                    redirect_urls=[
+                                        self.auth.settings.oidc.redirect_url
+                                    ],
                                 )
                             ],
                         )
                     ]
                 )
         else:
+
             @self.router.get(
                 "/credentials/basic",
                 response_class=JSONResponse,
