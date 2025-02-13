@@ -58,7 +58,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Create non-root user
 RUN useradd -m -s /bin/bash titiler && \
-    mkdir -p /data /config &&
+    mkdir -p /data /config
 COPY log_config.yaml /config/log_config.yaml
 RUN chown -R titiler:titiler /data /config
 
