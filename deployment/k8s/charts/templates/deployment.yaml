@@ -19,7 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
-      {{- if .Values.persistence.localStoreSeed }}
+      {{- if and .Values.persistence.enabled .Values.persistence.localStoreSeed }}
         - name: init-store
           image: busybox
           command:
