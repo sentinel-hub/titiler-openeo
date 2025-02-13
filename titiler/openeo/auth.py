@@ -317,7 +317,7 @@ class BasicAuth(Auth):
 
         # Check if user exists and password matches
         user = self.settings.users.get(username)
-        if not user or user.password != password:
+        if not user or user["password"] != password:
             raise HTTPException(
                 status_code=HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
@@ -339,12 +339,11 @@ class BasicAuth(Auth):
 
         parsed_token = AuthToken.from_token(authorization)
 
-        if parsed_token.method != self.method:
+        if parsed_token.method != self.method.name:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Invalid authentication credentials",
             )
 
-        new_authorization = f"basic {parsed_token.token}"
-        user = self._get_user_from_base64(new_authorization)
+        user = self._get_user_from_base64(parsed_token.token)
         return User(user_id=user.user_id)

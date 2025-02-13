@@ -1,5 +1,5 @@
 # Default values for titiler-openeo.
-replicaCount: 1
+
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
@@ -40,6 +40,16 @@ ingress:
   #  - secretName: titiler-tls
   #    hosts:
   #      - titiler.local
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+replicaCount: 1
 
 extraHostPathMounts: []
   # - name: map-sources

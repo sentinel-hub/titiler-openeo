@@ -97,7 +97,12 @@ class AuthSettings(BaseSettings):
 
     # Dictionary of users with access
     # Only used if method is set to "basic"
-    users: Dict[str, Any] = {}
+    users: Dict[str, Any] = {
+        "test": {
+            "password": "test",
+            "roles": ["user"],
+        }
+    }
 
     # OIDC configuration
     # Only used if method is set to "oidc"

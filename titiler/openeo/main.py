@@ -67,6 +67,7 @@ def create_app():
             allow_credentials=True,
             allow_methods=api_settings.cors_allow_methods,
             allow_headers=["*"],
+            expose_headers=["*"]
         )
 
     app.add_middleware(

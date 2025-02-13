@@ -152,76 +152,77 @@ class EndpointsFactory(BaseFactory):
                 },
             }
 
-        @self.router.get(
-            "/credentials/oidc",
-            response_class=JSONResponse,
-            summary="OpenID Connect authentication",
-            response_model=models.OIDCProviders,
-            response_model_exclude_none=True,
-            operation_id="authenticate-oidc",
-            responses={
-                200: {
-                    "content": {
-                        "application/json": {},
+        if isinstance(self.auth, OIDCAuth):
+            @self.router.get(
+                "/credentials/oidc",
+                response_class=JSONResponse,
+                summary="OpenID Connect authentication",
+                response_model=models.OIDCProviders,
+                response_model_exclude_none=True,
+                operation_id="authenticate-oidc",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
+                        "description": "Lists the OpenID Connect Providers.",
                     },
-                    "description": "Lists the OpenID Connect Providers.",
                 },
-            },
-            tags=["Account Management"],
-        )
-        def openeo_credentials_oidc():
-            """Lists the supported OpenID Connect providers (OP)."""
-            if not isinstance(self.auth, OIDCAuth):
-                raise HTTPException(
-                    status_code=501,
-                    detail="OpenID Connect authentication not supported",
-                )
-
-            return models.OIDCProviders(
-                providers=[
-                    models.OIDCProvider(
-                        id="oidc",
-                        issuer=self.auth.config["issuer"],
-                        title="OpenID Connect",
-                        scopes=self.auth.settings.oidc.scopes,
-                        default_clients=[
-                            models.OIDCDefaultClient(
-                                id=self.auth.settings.oidc.client_id,
-                                grant_types=[
-                                    "authorization_code+pkce",
-                                    "urn:ietf:params:oauth:grant-type:device_code+pkce",
-                                    "refresh_token",
-                                ],
-                                redirect_urls=[self.auth.settings.oidc.redirect_url],
-                            )
-                        ],
-                    )
-                ]
+                tags=["Account Management"],
             )
+            def openeo_credentials_oidc():
+                """Lists the supported OpenID Connect providers (OP)."""
+                if not isinstance(self.auth, OIDCAuth):
+                    raise HTTPException(
+                        status_code=501,
+                        detail="OpenID Connect authentication not supported",
+                    )
 
-        @self.router.get(
-            "/credentials/basic",
-            response_class=JSONResponse,
-            summary="HTTP Basic authentication",
-            response_model=CredentialsBasic,
-            response_model_exclude_none=True,
-            operation_id="authenticate-basic",
-            responses={
-                200: {
-                    "content": {
-                        "application/json": {},
+                return models.OIDCProviders(
+                    providers=[
+                        models.OIDCProvider(
+                            id="oidc",
+                            issuer=self.auth.config["issuer"],
+                            title="OpenID Connect",
+                            scopes=self.auth.settings.oidc.scopes,
+                            default_clients=[
+                                models.OIDCDefaultClient(
+                                    id=self.auth.settings.oidc.client_id,
+                                    grant_types=[
+                                        "authorization_code+pkce",
+                                        "urn:ietf:params:oauth:grant-type:device_code+pkce",
+                                        "refresh_token",
+                                    ],
+                                    redirect_urls=[self.auth.settings.oidc.redirect_url],
+                                )
+                            ],
+                        )
+                    ]
+                )
+        else:
+            @self.router.get(
+                "/credentials/basic",
+                response_class=JSONResponse,
+                summary="HTTP Basic authentication",
+                response_model=CredentialsBasic,
+                response_model_exclude_none=True,
+                operation_id="authenticate-basic",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
                     },
                 },
-            },
-            tags=["Account Management"],
-        )
-        def openeo_credentials_basic(token=Depends(self.auth.login)):
-            """Checks the credentials provided through [HTTP Basic Authentication
-            according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
-            an access token for valid credentials.
+                tags=["Account Management"],
+            )
+            def openeo_credentials_basic(token=Depends(self.auth.login)):
+                """Checks the credentials provided through [HTTP Basic Authentication
+                according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
+                an access token for valid credentials.
 
-            """
-            return token
+                """
+                return token
 
         @self.router.get(
             "/me",
@@ -554,7 +555,7 @@ class EndpointsFactory(BaseFactory):
                 status_code=201,
                 headers={
                     "Location": service_url,
-                    "OpenEO-Identifier": service["id"],
+                    "openeo-identifier": service["id"],
                 },
             )
 
