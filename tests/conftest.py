@@ -38,7 +38,6 @@ def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
     """Create App with authentication for testing."""
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
-    monkeypatch.setenv("TITILER_OPENEO_REQUIRE_AUTH", "true")
 
     from titiler.openeo.main import create_app
 

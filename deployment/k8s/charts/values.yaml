@@ -1,5 +1,5 @@
 # Default values for titiler-openeo.
-replicaCount: 1
+
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
@@ -13,9 +13,11 @@ image:
     - "--port"
     - "80"
     - "--workers"
-    - "1"
+    - "4"
     - "--forwarded-allow-ips"  # to make sure it works behind a reverse proxy
     - "*"  # Allow all
+    - "--log-config"
+    - "/config/log_config.yaml"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -38,6 +40,16 @@ ingress:
   #  - secretName: titiler-tls
   #    hosts:
   #      - titiler.local
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+replicaCount: 1
 
 extraHostPathMounts: []
   # - name: map-sources
@@ -76,6 +88,10 @@ tolerations: []
 
 affinity: {}
 
+# logging configuration
+logging:
+  configFile: "files/log_config.yaml"
+
 # Persistent storage configuration for the local database file
 persistence:
   enabled: true
@@ -107,7 +123,10 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1001
 
-podSecurityContext: {}
+podSecurityContext:
+  sysctls:
+    - name: net.ipv4.ip_unprivileged_port_start
+      value: "0"
   # fsGroup: 1001
   # runAsNonRoot: true
   # runAsUser: 1001
