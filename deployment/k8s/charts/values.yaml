@@ -124,7 +124,7 @@ securityContext: {}
   # runAsUser: 1001
 
 podSecurityContext:
-  sysctls:              
+  sysctls:
     - name: net.ipv4.ip_unprivileged_port_start
       value: "0"
   # fsGroup: 1001
