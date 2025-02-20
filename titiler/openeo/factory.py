@@ -186,7 +186,8 @@ class EndpointsFactory(BaseFactory):
                             issuer=self.auth.config["issuer"],
                             title=self.auth.settings.oidc.title or "OpenID Connect",
                             scopes=self.auth.settings.oidc.scopes,
-                            description=self.auth.settings.oidc.description or "OpenID Connect Provider",
+                            description=self.auth.settings.oidc.description
+                            or "OpenID Connect Provider",
                             default_clients=[
                                 models.OIDCDefaultClient(
                                     id=self.auth.settings.oidc.client_id,
