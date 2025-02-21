@@ -17,6 +17,8 @@ class OIDCConfig(BaseSettings):
     redirect_url: str = ""
     scopes: list[str] = ["openid", "email", "profile"]
     name_claim: str = "name"
+    title: str = "OIDC"
+    description: str = "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
