@@ -184,6 +184,19 @@ class PySTACSettings(BaseSettings):
     )
 
 
+class ProcessingSettings(BaseSettings):
+    """Processing settings"""
+
+    # Maximum allowed pixel count (width * height) for image processing
+    max_pixels: int = 100_000_000  # 100 million pixels default
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_PROCESSING_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class CacheSettings(BaseSettings):
     """Cache settings"""
 

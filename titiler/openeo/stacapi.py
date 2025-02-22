@@ -26,10 +26,11 @@ from .errors import NoDataAvailable, TemporalExtentEmpty
 from .processes.implementations.data_model import RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import SimpleSTACReader
-from .settings import CacheSettings, PySTACSettings
+from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
 pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
+processing_settings = ProcessingSettings()
 
 
 @define
@@ -294,9 +295,44 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # TODO:
-        # - Get PROJ information about the Items
-        # - Estimate output size in Pixel and raise issue if too big
+        # Get PROJ information about the Items and validate pixel dimensions
+        item_crs = None
+        max_width = 0
+        max_height = 0
+
+        for item in items:
+            with SimpleSTACReader(item) as src_dst:
+                if item_crs is None:
+                    item_crs = src_dst.crs
+                elif not item_crs.equals(src_dst.crs):
+                    raise ValueError(
+                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
+                    )
+
+                max_width = max(max_width, src_dst.width)
+                max_height = max(max_height, src_dst.height)
+
+        # Estimate output size in pixels using the spatial extent and max dimensions
+        if spatial_extent:
+            proj_bbox = [
+                spatial_extent.west,
+                spatial_extent.south,
+                spatial_extent.east,
+                spatial_extent.north,
+            ]
+            input_crs = pyproj.CRS(spatial_extent.crs or "epsg:4326")
+
+            # If width/height not specified, estimate from max item dimensions
+            if not width and not height:
+                width = max_width
+                height = max_height
+
+            # Check if estimated pixel count exceeds maximum allowed
+            pixel_count = int(width or 0) * int(height or 0)
+            if pixel_count > processing_settings.max_pixels:
+                raise ValueError(
+                    f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+                )
 
         if spatial_extent:
 
@@ -357,9 +393,44 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # TODO #18:
-        # - Get PROJ information about the Items
-        # - Estimate output size in Pixel and raise issue if too big
+        # Get PROJ information about the Items and validate pixel dimensions
+        item_crs = None
+        max_width = 0
+        max_height = 0
+
+        for item in items:
+            with SimpleSTACReader(item) as src_dst:
+                if item_crs is None:
+                    item_crs = src_dst.crs
+                elif not item_crs.equals(src_dst.crs):
+                    raise ValueError(
+                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
+                    )
+
+                max_width = max(max_width, src_dst.width)
+                max_height = max(max_height, src_dst.height)
+
+        # Estimate output size in pixels using the spatial extent and max dimensions
+        if spatial_extent:
+            proj_bbox = [
+                spatial_extent.west,
+                spatial_extent.south,
+                spatial_extent.east,
+                spatial_extent.north,
+            ]
+            input_crs = pyproj.CRS(spatial_extent.crs or "epsg:4326")
+
+            # If width/height not specified, estimate from max item dimensions
+            if not width and not height:
+                width = max_width
+                height = max_height
+
+            # Check if estimated pixel count exceeds maximum allowed
+            pixel_count = int(width or 0) * int(height or 0)
+            if pixel_count > processing_settings.max_pixels:
+                raise ValueError(
+                    f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+                )
 
         if spatial_extent:
 
