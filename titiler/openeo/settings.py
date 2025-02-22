@@ -189,6 +189,7 @@ class ProcessingSettings(BaseSettings):
 
     # Maximum allowed pixel count (width * height) for image processing
     max_pixels: int = 100_000_000  # 100 million pixels default
+    max_items: int = 20
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_PROCESSING_",

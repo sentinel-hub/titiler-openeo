@@ -4,8 +4,8 @@ import pytest
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.models import ImageData
 
-from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 from titiler.openeo.settings import ProcessingSettings
+from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
 
 def test_processing_settings():
@@ -21,6 +21,7 @@ def test_processing_settings():
 
 def test_load_collection_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection."""
+
     # Mock SimpleSTACReader to return fixed dimensions
     class MockReader:
         def __init__(self, *args, **kwargs):
@@ -37,6 +38,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
         def part(self, bbox, **kwargs):
             """Mock part method returning ImageData."""
             import numpy
+
             return ImageData(
                 numpy.zeros((1, 100, 100), dtype="uint8"),
                 assets=kwargs.get("assets", ["B01"]),
@@ -50,17 +52,15 @@ def test_load_collection_pixel_threshold(monkeypatch):
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
-            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {
-            "datetime": "2021-01-01T00:00:00Z"
-        },
+        "properties": {"datetime": "2021-01-01T00:00:00Z"},
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff"
+                "type": "image/tiff; application=geotiff",
             }
-        }
+        },
     }
 
     # Mock _get_items to return our test item
@@ -93,9 +93,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     # Test with acceptable dimensions
     result = loader.load_collection(
         id="test",
-        spatial_extent=BoundingBox(
-            west=0, south=0, east=1, north=1, crs="EPSG:4326"
-        ),
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
         width=1000,
         height=1000,
     )
@@ -108,6 +106,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
 
 def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection_and_reduce."""
+
     # Mock SimpleSTACReader to return fixed dimensions
     class MockReader:
         def __init__(self, *args, **kwargs):
@@ -124,6 +123,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
         def part(self, bbox, **kwargs):
             """Mock part method returning ImageData."""
             import numpy
+
             return ImageData(
                 numpy.zeros((1, 100, 100), dtype="uint8"),
                 assets=kwargs.get("assets", ["B01"]),
@@ -137,17 +137,15 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
-            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {
-            "datetime": "2021-01-01T00:00:00Z"
-        },
+        "properties": {"datetime": "2021-01-01T00:00:00Z"},
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff"
+                "type": "image/tiff; application=geotiff",
             }
-        }
+        },
     }
 
     # Mock _get_items to return our test item
@@ -180,9 +178,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     # Test with acceptable dimensions
     result = loader.load_collection_and_reduce(
         id="test",
-        spatial_extent=BoundingBox(
-            west=0, south=0, east=1, north=1, crs="EPSG:4326"
-        ),
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
         width=1000,
         height=1000,
     )

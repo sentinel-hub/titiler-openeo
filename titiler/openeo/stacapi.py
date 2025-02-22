@@ -295,6 +295,12 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # Check the items limit
+        if len(items) > processing_settings.max_items:
+            raise ValueError(
+                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
+            )
+
         # Get PROJ information about the Items and validate pixel dimensions
         item_crs = None
         max_width = 0
@@ -314,14 +320,6 @@ class LoadCollection:
 
         # Estimate output size in pixels using the spatial extent and max dimensions
         if spatial_extent:
-            proj_bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            input_crs = pyproj.CRS(spatial_extent.crs or "epsg:4326")
-
             # If width/height not specified, estimate from max item dimensions
             if not width and not height:
                 width = max_width
@@ -333,8 +331,6 @@ class LoadCollection:
                 raise ValueError(
                     f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
                 )
-
-        if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 with SimpleSTACReader(item) as src_dst:
@@ -393,6 +389,12 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # Check the items limit
+        if len(items) > processing_settings.max_items:
+            raise ValueError(
+                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
+            )
+
         # Get PROJ information about the Items and validate pixel dimensions
         item_crs = None
         max_width = 0
@@ -412,14 +414,6 @@ class LoadCollection:
 
         # Estimate output size in pixels using the spatial extent and max dimensions
         if spatial_extent:
-            proj_bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            input_crs = pyproj.CRS(spatial_extent.crs or "epsg:4326")
-
             # If width/height not specified, estimate from max item dimensions
             if not width and not height:
                 width = max_width
@@ -431,8 +425,6 @@ class LoadCollection:
                 raise ValueError(
                     f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
                 )
-
-        if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 with SimpleSTACReader(item) as src_dst:
