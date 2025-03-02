@@ -40,7 +40,7 @@
         "description": "An ImageData object for further processing.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {},

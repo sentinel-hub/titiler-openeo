@@ -12,7 +12,7 @@
             "description": "An image.",
             "schema": {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             }
         },
         {
@@ -73,7 +73,7 @@
         "description": "The image with the colormap applied.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {},

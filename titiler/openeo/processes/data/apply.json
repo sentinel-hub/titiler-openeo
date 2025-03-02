@@ -16,7 +16,7 @@
                 },
                 {
                     "type": "object",
-                    "subtype": "imagedata"
+                    "subtype": "datacube"
                 },
                 {
                     "type": "array"
@@ -74,7 +74,7 @@
             },
             {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             },
             {
                 "type": "array"
