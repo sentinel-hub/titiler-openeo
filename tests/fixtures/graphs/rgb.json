@@ -11,7 +11,7 @@
         "description": "A PNG image with 3 bands (RGB).",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "parameters": [
