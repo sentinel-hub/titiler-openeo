@@ -23,7 +23,7 @@ from rio_tiler.types import BBox
 from urllib3 import Retry
 
 from .errors import NoDataAvailable, TemporalExtentEmpty
-from .processes.implementations.data_model import RasterStack
+from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import SimpleSTACReader
 from .settings import CacheSettings, PySTACSettings
@@ -325,12 +325,12 @@ class LoadCollection:
                 height=int(height) if height else height,
                 buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
             )
-            return {
-                _props_to_datename(asset["properties"]): val
-                for val, asset in filter_tasks(
-                    tasks, allowed_exceptions=(TileOutsideBounds,)
-                )
-            }
+            # Return a LazyRasterStack that will only execute the tasks when accessed
+            return LazyRasterStack(
+                tasks=tasks,
+                date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+                allowed_exceptions=(TileOutsideBounds,),
+            )
 
         raise NotImplementedError("Can't use this backend without spatial extent")
 
