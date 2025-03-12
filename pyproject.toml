@@ -37,6 +37,7 @@ dependencies = [
     "openeo-pg-parser-networkx",
     "pystac-client",
     "pydantic-settings~=2.0",
+    "boto3",
 ]
 
 [project.optional-dependencies]
