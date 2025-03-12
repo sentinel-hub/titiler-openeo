@@ -82,7 +82,7 @@ class SQLAlchemyStore(ServicesStore):
             )
 
             if not results:
-                raise ValueError(f"Could not find service for user: {user_id}")
+                return []
 
             return [
                 {
