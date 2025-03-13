@@ -41,7 +41,9 @@ def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
     )
 
 
-def image_indexes(data: Union[ImageData, RasterStack], indexes: Sequence[int]) -> Union[ImageData, RasterStack]:
+def image_indexes(
+    data: Union[ImageData, RasterStack], indexes: Sequence[int]
+) -> Union[ImageData, RasterStack]:
     """Select indexes from an ImageData or RasterStack.
 
     Args:
@@ -66,22 +68,24 @@ def image_indexes(data: Union[ImageData, RasterStack], indexes: Sequence[int]) -
     raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
 
 
-def to_array(data: Union[ImageData, RasterStack]) -> Union[numpy.ma.MaskedArray, Dict[str, numpy.ma.MaskedArray]]:
+def to_array(
+    data: Union[ImageData, RasterStack],
+) -> Union[numpy.ma.MaskedArray, Dict[str, numpy.ma.MaskedArray]]:
     """Convert ImageData or RasterStack to array(s).
 
     Args:
         data: ImageData or RasterStack to convert
-        
+
     Returns:
         For ImageData: numpy.ma.MaskedArray
         For RasterStack: Dictionary mapping keys to numpy.ma.MaskedArray
     """
     if isinstance(data, ImageData):
         return data.array
-    
+
     if isinstance(data, dict):
         return {key: img_data.array for key, img_data in data.items()}
-    
+
     raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
 
 
@@ -90,25 +94,27 @@ def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
     return data.apply_color_formula(formula)
 
 
-def color_formula(data: Union[ImageData, RasterStack], formula: str) -> Union[ImageData, RasterStack]:
+def color_formula(
+    data: Union[ImageData, RasterStack], formula: str
+) -> Union[ImageData, RasterStack]:
     """Apply color formula to ImageData or RasterStack.
-    
+
     Args:
         data: ImageData or RasterStack to process
         formula: Color formula to apply
-        
+
     Returns:
         ImageData or RasterStack with color formula applied
     """
     if isinstance(data, ImageData):
         return _apply_color_formula(data, formula)
-    
+
     if isinstance(data, dict):
         result: Dict[str, ImageData] = {}
         for key, img_data in data.items():
             result[key] = _apply_color_formula(img_data, formula)
         return result
-    
+
     raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
 
 
@@ -122,23 +128,25 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
-def colormap(data: Union[ImageData, RasterStack], colormap: ColorMapType) -> Union[ImageData, RasterStack]:
+def colormap(
+    data: Union[ImageData, RasterStack], colormap: ColorMapType
+) -> Union[ImageData, RasterStack]:
     """Apply colormap to ImageData or RasterStack.
-    
+
     Args:
         data: ImageData or RasterStack to process
         colormap: Colormap to apply
-        
+
     Returns:
         ImageData or RasterStack with colormap applied
     """
     if isinstance(data, ImageData):
         return _apply_colormap(data, colormap)
-    
+
     if isinstance(data, dict):
         result: Dict[str, ImageData] = {}
         for key, img_data in data.items():
             result[key] = _apply_colormap(img_data, colormap)
         return result
-    
+
     raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")

@@ -1,6 +1,6 @@
 """titiler.openeo.processes."""
 
-from typing import Dict, Optional, Union, Any
+from typing import Dict, Optional, Union
 
 import numpy
 from rio_tiler.models import ImageData

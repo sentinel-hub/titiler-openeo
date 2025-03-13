@@ -1,22 +1,23 @@
 """Test LazyRasterStack with apply_pixel_selection."""
 
+import numpy as np
+from rio_tiler.models import ImageData
+
 from titiler.openeo.processes.implementations.data_model import LazyRasterStack
 from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
-from rio_tiler.models import ImageData
-import numpy as np
+
 
 # Create a mock task that returns an ImageData
 def mock_task():
     """Mock task that returns an ImageData."""
     # Create a simple 1-band image
     array = np.ma.MaskedArray(
-        data=np.ones((1, 10, 10)),
-        mask=np.zeros((1, 10, 10), dtype=bool)
+        data=np.ones((1, 10, 10)), mask=np.zeros((1, 10, 10), dtype=bool)
     )
     return ImageData(array)
 
-def test_lazy_raster_stack():
 
+def test_lazy_raster_stack():
     # Create a mock asset
     mock_asset = {"properties": {"datetime": "2021-01-01"}}
 

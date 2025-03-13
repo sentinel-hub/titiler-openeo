@@ -1,6 +1,6 @@
 """TiTiler.openeo data models."""
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, cast
 
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
@@ -12,7 +12,7 @@ from rio_tiler.tasks import TaskType, filter_tasks
 # These choices are left to the backend implementor, this guide only tries to highlight the possibilities.
 RasterStack = Dict[str, ImageData]
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class LazyRasterStack(Dict[str, ImageData]):
@@ -50,7 +50,9 @@ class LazyRasterStack(Dict[str, ImageData]):
     def _execute_tasks(self) -> None:
         """Execute the tasks and populate the dictionary."""
         if not self._executed:
-            for data, asset in filter_tasks(self._tasks, allowed_exceptions=self._allowed_exceptions):
+            for data, asset in filter_tasks(
+                self._tasks, allowed_exceptions=self._allowed_exceptions
+            ):
                 key = self._date_name_fn(asset)
                 self[key] = data
             self._executed = True

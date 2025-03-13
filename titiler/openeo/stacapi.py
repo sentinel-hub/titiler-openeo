@@ -18,7 +18,7 @@ from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
-from rio_tiler.tasks import create_tasks, filter_tasks
+from rio_tiler.tasks import create_tasks
 from rio_tiler.types import BBox
 from urllib3 import Retry
 
@@ -398,7 +398,7 @@ class LoadCollection:
                 key = str(temporal_extent[0].to_numpy())
             elif items and "properties" in items[0]:
                 key = _props_to_datename(items[0]["properties"])
-            
+
             return {key: img}
 
         raise NotImplementedError("Can't use this backend without spatial extent")
