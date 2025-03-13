@@ -17,7 +17,7 @@ T = TypeVar('T')
 
 class LazyRasterStack(Dict[str, ImageData]):
     """A RasterStack that lazily loads data when accessed.
-    
+
     This class wraps the tasks created by rio_tiler.tasks.create_tasks and only executes
     them when the data is actually accessed. This allows for more efficient processing
     when the data is not needed immediately.
@@ -30,7 +30,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         allowed_exceptions: Optional[Tuple] = None,
     ):
         """Initialize a LazyRasterStack.
-        
+
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
             date_name_fn: A function that extracts a date name from an asset

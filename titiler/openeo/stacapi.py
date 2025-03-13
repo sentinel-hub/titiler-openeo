@@ -346,7 +346,7 @@ class LoadCollection:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
-    ) -> ImageData:
+    ) -> RasterStack:
         """Load Collection and return image."""
         items = self._get_items(
             id,
@@ -391,6 +391,14 @@ class LoadCollection:
                 buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
             )
-            return img
+            # Return a RasterStack with a single entry
+            # Use a consistent key naming approach
+            key = "reduced"
+            if temporal_extent and temporal_extent[0]:
+                key = str(temporal_extent[0].to_numpy())
+            elif items and "properties" in items[0]:
+                key = _props_to_datename(items[0]["properties"])
+            
+            return {key: img}
 
         raise NotImplementedError("Can't use this backend without spatial extent")

@@ -1,7 +1,7 @@
 """titiler.openeo processed reduce."""
 
 import warnings
-from typing import List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import numpy
 from rasterio.crs import CRS
@@ -12,7 +12,7 @@ from rio_tiler.utils import resize_array
 
 from .data_model import RasterStack
 
-__all__ = ["apply_pixel_selection"]
+__all__ = ["apply_pixel_selection", "reduce_dimension"]
 
 pixel_methods = Literal[
     "first",
@@ -25,6 +25,13 @@ pixel_methods = Literal[
     "lastbandhight",
     "count",
 ]
+
+class DimensionNotAvailable(Exception):
+    """Exception raised when a dimension is not available."""
+    
+    def __init__(self, dimension: str):
+        self.dimension = dimension
+        super().__init__(f"A dimension with the specified name '{dimension}' does not exist.")
 
 
 def apply_pixel_selection(
@@ -104,3 +111,72 @@ def apply_pixel_selection(
             "pixel_selection_method": pixel_selection,
         },
     )
+
+
+def reduce_dimension(
+    data: Union[RasterStack, ImageData],
+    reducer: Callable,
+    dimension: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> ImageData:
+    """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
+    
+    Args:
+        data: A data cube (RasterStack or ImageData)
+        reducer: A reducer function to apply on the specified dimension
+        dimension: The name of the dimension over which to reduce
+        context: Additional data to be passed to the reducer
+        
+    Returns:
+        A data cube with the newly computed values, missing the given dimension
+        
+    Raises:
+        DimensionNotAvailable: If the specified dimension does not exist
+    """
+    # Currently, we only support the temporal dimension for RasterStack
+    if dimension.lower() in ["t", "temporal", "time"]:
+        if isinstance(data, ImageData):
+            # If it's already a single ImageData, there's no temporal dimension to reduce
+            raise DimensionNotAvailable(dimension)
+        
+        if not isinstance(data, dict) or not data:
+            raise ValueError("Expected a non-empty RasterStack for temporal dimension reduction")
+        
+        # Extract arrays from all images in the stack
+        # Create a labeled array for the reducer
+        labeled_arrays = []
+        for key, img in data.items():
+            labeled_arrays.append({"label": key, "data": img.array})
+        
+        # Apply the reducer to the labeled arrays
+        context = context or {}
+        reduced_array = reducer(labeled_arrays, context)
+        
+        # Get metadata from the first image in the stack
+        first_key = next(iter(data))
+        first_img = data[first_key]
+        
+        # Create a new ImageData with the reduced array
+        return ImageData(
+            reduced_array,
+            assets=[key for key in data.keys()],
+            crs=first_img.crs,
+            bounds=first_img.bounds,
+            band_names=first_img.band_names,
+            metadata={
+                "reduced_dimension": dimension,
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
+    else:
+        # For other dimensions, we need to check if they exist
+        if isinstance(data, ImageData):
+            # For ImageData, we can reduce along the band dimension
+            if dimension.lower() in ["bands", "spectral"]:
+                # This would require a different implementation that reduces across bands
+                # For now, we'll raise an error
+                raise NotImplementedError(f"Reduction along '{dimension}' dimension is not implemented yet")
+            else:
+                raise DimensionNotAvailable(dimension)
+        else:
+            raise DimensionNotAvailable(dimension)
