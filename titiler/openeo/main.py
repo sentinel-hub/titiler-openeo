@@ -16,7 +16,7 @@ from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
 from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
-from titiler.openeo.stacapi import LoadCollection, stacApiBackend, LoadStac
+from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 

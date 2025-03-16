@@ -158,7 +158,15 @@ class EndpointsFactory(BaseFactory):
                             "datatype": {
                                 "type": "string",
                                 "description": "The values data type.",
-                                "enum": ["byte", "uint16", "int16", "uint32", "int32", "float32", "float64"],
+                                "enum": [
+                                    "byte",
+                                    "uint16",
+                                    "int16",
+                                    "uint32",
+                                    "int32",
+                                    "float32",
+                                    "float64",
+                                ],
                                 "default": "byte",
                             }
                         },
@@ -801,7 +809,6 @@ class EndpointsFactory(BaseFactory):
                 result = save_result(result, "GTiff")
 
             return Response(result.data, media_type=result.media_type)
-
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",

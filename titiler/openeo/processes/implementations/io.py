@@ -1,7 +1,7 @@
 """titiler.openeo.processes."""
 
-from typing import Any, Dict, Optional, Union
 from dataclasses import dataclass
+from typing import Any, Dict, Optional, Union
 
 import numpy
 from rio_tiler.models import ImageData
@@ -14,11 +14,11 @@ __all__ = ["save_result", "SaveResultData"]
 @dataclass
 class SaveResultData:
     """Container for result data with additional metadata."""
-    
+
     data: bytes
     media_type: str
     metadata: Optional[Dict] = None
-    
+
     def __bytes__(self) -> bytes:
         """Return the raw bytes data."""
         return self.data
@@ -41,7 +41,7 @@ def _save_single_result(
             data.array = numpy.ma.array(
                 data.array.data.astype("uint8"),
                 mask=data.array.mask,
-                fill_value=data.array.fill_value
+                fill_value=data.array.fill_value,
             )
         else:
             data.array = data.array.astype("uint8")
@@ -85,58 +85,65 @@ def save_result(
         if data.__len__() == 1:
             # If there is only one item, save it as a single result
             return _save_single_result(list(data.values())[0], format, options)
-        
+
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
             # Get all ImageData objects from the RasterStack
             image_data_list = list(data.values())
-            
+
             # Check if all ImageData objects have the same shape, bounds, and CRS
             first_img = image_data_list[0]
             shape = first_img.array.shape[1:]  # Height, Width
             bounds = first_img.bounds
             crs = first_img.crs
-            
+
             for img in image_data_list[1:]:
                 if img.array.shape[1:] != shape:
-                    raise ValueError("All images in RasterStack must have the same shape")
+                    raise ValueError(
+                        "All images in RasterStack must have the same shape"
+                    )
                 if img.bounds != bounds:
-                    raise ValueError("All images in RasterStack must have the same bounds")
+                    raise ValueError(
+                        "All images in RasterStack must have the same bounds"
+                    )
                 if img.crs != crs:
                     raise ValueError("All images in RasterStack must have the same CRS")
-            
+
             # Stack all arrays into a single multi-band array
             # Each ImageData.array has shape (bands, height, width)
             # We need to extract the first band from each image (assuming single-band images)
             # and stack them into a new array with shape (num_images, height, width)
-            arrays = [img.array[0] if img.array.ndim > 2 else img.array for img in image_data_list]
+            arrays = [
+                img.array[0] if img.array.ndim > 2 else img.array
+                for img in image_data_list
+            ]
             stacked_array = numpy.ma.stack(arrays)
-            
+
             # Create a new ImageData object with the stacked array
             band_names_list = [str(key) for key in data.keys()]
-            
+
             # Create metadata dictionary
             combined_metadata: Dict[str, Any] = {}
             combined_metadata["band_names"] = band_names_list.copy()
             combined_metadata["original_keys"] = band_names_list.copy()
-            
+
             # Add any metadata from the original images
-            for i, (key, img) in enumerate(data.items()):
+            for i, (key, img) in enumerate(data.items()):  # noqa: B007
                 if img.metadata:
                     combined_metadata[f"band_{i}_metadata"] = img.metadata
-            
+
             # Create the combined image
             combined_img = ImageData(
                 stacked_array,
                 bounds=bounds,
                 crs=crs,
                 metadata=combined_metadata,
-                band_names=band_names_list
+                band_names=band_names_list,
             )
-            
+
             # Save the combined image as a GeoTIFF
             return _save_single_result(combined_img, format, options)
-        
+
         # For other formats, save each band separately
         results = {}
         for key, img_data in data.items():
