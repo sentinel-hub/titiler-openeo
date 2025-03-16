@@ -20,6 +20,7 @@ from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
+from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
 
@@ -145,6 +146,19 @@ class EndpointsFactory(BaseFactory):
                                 "type": "string",
                                 "description": "The values data type.",
                                 "enum": ["byte", "uint16"],
+                                "default": "byte",
+                            }
+                        },
+                    },
+                    "GTiff": {
+                        "gis_data_types": ["raster"],
+                        "title": "GeoTIFF",
+                        "description": "GeoTIFF is a public domain metadata standard which allows georeferencing information to be embedded within a TIFF file. The potential additional information includes map projection, coordinate systems, ellipsoids, datums, and everything else necessary to establish the exact spatial reference for the file.",
+                        "parameters": {
+                            "datatype": {
+                                "type": "string",
+                                "description": "The values data type.",
+                                "enum": ["byte", "uint16", "int16", "uint32", "int32", "float32", "float64"],
                                 "default": "byte",
                             }
                         },
@@ -775,15 +789,19 @@ class EndpointsFactory(BaseFactory):
 
             """
             process = body.process.model_dump()
-            media_type = _get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry
             )
-            img = pg_callable()
+            result = pg_callable()
 
-            return Response(img, media_type=media_type)
+            # if the reslt is not a SaveResultData object, convert it to one
+            if not isinstance(result, SaveResultData):
+                result = save_result(result, "GTiff")
+
+            return Response(result.data, media_type=result.media_type)
+
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",

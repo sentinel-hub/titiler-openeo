@@ -3,11 +3,12 @@
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
+import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
 from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
-from pystac import Collection
+from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
@@ -334,6 +335,7 @@ class LoadCollection:
 
         raise NotImplementedError("Can't use this backend without spatial extent")
 
+
     def load_collection_and_reduce(
         self,
         id: str,
@@ -402,3 +404,168 @@ class LoadCollection:
             return {key: img}
 
         raise NotImplementedError("Can't use this backend without spatial extent")
+
+
+@define
+class LoadStac:
+    """Backend Specific STAC loaders."""
+
+    def load_stac(
+        self,
+        url: str,
+        spatial_extent: Optional[BoundingBox] = None,
+        temporal_extent: Optional[TemporalInterval] = None,
+        bands: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        # private arguments
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Load data from a STAC catalog or API.
+
+        Args:
+            url: URL to a static STAC catalog or a STAC API Collection
+            spatial_extent: Optional bounding box to limit the data
+            temporal_extent: Optional temporal interval to limit the data
+            bands: Optional list of band names to include
+            properties: Optional metadata properties to filter by
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+            
+        Returns:
+            A RasterStack containing the loaded data
+            
+        Raises:
+            NoDataAvailable: If no data is available for the given extents
+            TemporalExtentEmpty: If the temporal extent is empty
+            NotImplementedError: If spatial_extent is not provided
+        """
+        # Load the STAC catalog or item from the URL
+        try:
+            stac_obj = pystac.read_file(url)
+        except Exception as e:
+            raise ValueError(f"Failed to read STAC from URL: {url}. Error: {str(e)}")
+        
+        # If the STAC object is a Collection or Catalog, use load_collection
+        if isinstance(stac_obj, (pystac.Collection, pystac.Catalog)):
+            # For a collection or catalog, use load_collection
+            if isinstance(stac_obj, pystac.Collection):
+                collection_id = stac_obj.id
+            else:  # It's a Catalog
+                collection_id = stac_obj.id
+            
+            # Create a stacApiBackend instance for the collection
+            stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
+            
+            # Create a LoadCollection instance
+            load_collection = LoadCollection(stac_api=stac_api)
+            
+            # Use load_collection to get the items
+            return load_collection.load_collection(
+                id=collection_id,
+                spatial_extent=spatial_extent,
+                temporal_extent=temporal_extent,
+                bands=bands,
+                properties=properties,
+                width=width,
+                height=height,
+                tile_buffer=tile_buffer,
+            )
+        
+        # For a single item, use it directly
+        elif isinstance(stac_obj, pystac.Item):
+            items = [stac_obj.to_dict()]
+        else:
+            raise ValueError(f"Unsupported STAC object type: {type(stac_obj)}")
+        
+        if not items:
+            raise NoDataAvailable("There is no data available in the STAC catalog.")
+        
+        # Filter items by temporal extent if provided
+        if temporal_extent is not None:
+            start_date = None
+            end_date = None
+            if temporal_extent[0] is not None:
+                start_date = str(temporal_extent[0].to_numpy())
+            if temporal_extent[1] is not None:
+                end_date = str(temporal_extent[1].to_numpy())
+            
+            if not end_date and not start_date:
+                raise TemporalExtentEmpty()
+            
+            filtered_items = []
+            for item in items:
+                item_datetime = item.get("properties", {}).get("datetime")
+                if not item_datetime:
+                    continue
+                
+                if start_date and end_date:
+                    if start_date <= item_datetime < end_date:
+                        filtered_items.append(item)
+                elif start_date:
+                    if start_date <= item_datetime:
+                        filtered_items.append(item)
+                elif end_date:
+                    if item_datetime < end_date:
+                        filtered_items.append(item)
+            
+            items = filtered_items
+        
+        # Filter items by properties if provided
+        if properties is not None:
+            # Simple property filtering - in a real implementation, this would use the process graphs
+            # defined in the properties parameter
+            filtered_items = []
+            for item in items:
+                include = True
+                for prop_name, prop_value in properties.items():
+                    if prop_name not in item.get("properties", {}) or item["properties"][prop_name] != prop_value:
+                        include = False
+                        break
+                if include:
+                    filtered_items.append(item)
+            items = filtered_items
+        
+        if not items:
+            raise NoDataAvailable("There is no data available for the given extents.")
+        
+        # Process spatial extent similar to load_collection
+        if spatial_extent:
+            def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
+                with SimpleSTACReader(item) as src_dst:
+                    return src_dst.part(bbox, **kwargs)
+            
+            bbox = [
+                spatial_extent.west,
+                spatial_extent.south,
+                spatial_extent.east,
+                spatial_extent.north,
+            ]
+            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+            crs = to_rasterio_crs(projcrs)
+            
+            tasks = create_tasks(
+                _reader,
+                items,
+                MAX_THREADS,
+                bbox,
+                assets=bands,
+                bounds_crs=crs,
+                dst_crs=crs,
+                width=int(width) if width else width,
+                height=int(height) if height else height,
+                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            )
+            
+            # Return a LazyRasterStack that will only execute the tasks when accessed
+            return LazyRasterStack(
+                tasks=tasks,
+                date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+                allowed_exceptions=(TileOutsideBounds,),
+            )
+        
+        raise NotImplementedError("Can't use this backend without spatial extent")
+
+    

@@ -16,7 +16,7 @@ from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.services import get_store
 from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
-from titiler.openeo.stacapi import LoadCollection, stacApiBackend
+from titiler.openeo.stacapi import LoadCollection, stacApiBackend, LoadStac
 
 STAC_VERSION = "1.0.0"
 
@@ -99,6 +99,11 @@ def create_app():
     ] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection_and_reduce"],
         implementation=loaders.load_collection_and_reduce,
+    )
+    loaders = LoadStac()  # type: ignore
+    process_registry["load_stac"] = process_registry["load_stac"] = Process(
+        spec=PROCESS_SPECIFICATIONS["load_stac"],
+        implementation=loaders.load_stac,
     )
 
     # Register OpenEO endpoints
