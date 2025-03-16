@@ -121,7 +121,7 @@ def reduce_dimension(
     reducer: Callable,
     dimension: str,
     context: Optional[Dict[str, Any]] = None,
-) -> ImageData:
+) -> Union[RasterStack, ImageData]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
     Args:
@@ -173,17 +173,29 @@ def reduce_dimension(
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
             },
         )
-    else:
-        # For other dimensions, we need to check if they exist
+    # spectral dimension
+    elif dimension.lower() in ["bands", "spectral"]:
         if isinstance(data, ImageData):
-            # For ImageData, we can reduce along the band dimension
-            if dimension.lower() in ["bands", "spectral"]:
-                # This would require a different implementation that reduces across bands
-                # For now, we'll raise an error
-                raise NotImplementedError(
-                    f"Reduction along '{dimension}' dimension is not implemented yet"
-                )
-            else:
-                raise DimensionNotAvailable(dimension)
-        else:
-            raise DimensionNotAvailable(dimension)
+            # For ImageData, we simply return the band(s) specified
+            return data
+        if not isinstance(data, dict) or not data:
+            raise ValueError(
+                "Expected a non-empty RasterStack for spectral dimension reduction"
+            )
+
+        # For each image in the stack, apply the reducer to the specified dimension
+        reduced_stack = {}
+        for key, img in data.items():
+            reduced_img_data = reducer(data=img.array)
+            reduced_img = ImageData(
+                reduced_img_data,
+                assets=img.assets,
+                crs=img.crs,
+                bounds=img.bounds,
+                band_names=img.band_names,
+            )
+            reduced_stack[key] = reduced_img
+
+        return reduced_stack
+
+    raise DimensionNotAvailable(dimension)
