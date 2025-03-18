@@ -25,7 +25,7 @@ class SaveResultData:
 
 
 def _save_single_result(
-    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray],
+    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray, dict],
     format: str,
     options: Optional[Dict] = None,
 ) -> SaveResultData:
@@ -81,7 +81,7 @@ def save_result(
         For RasterStack: dictionary mapping keys to ResultData objects
     """
     # If data is a RasterStack (dictionary), save each item
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         if data.__len__() == 1:
             # If there is only one item, save it as a single result
             return _save_single_result(list(data.values())[0], format, options)

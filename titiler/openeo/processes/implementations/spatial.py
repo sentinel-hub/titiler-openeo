@@ -97,7 +97,6 @@ def aggregate_spatial(
             coverage = data.get_coverage_array(geom_obj.__geo_interface__)
 
             # Extract values for pixels that intersect with the geometry
-            values = []
             for band_idx in range(data.count):
                 # Get band data
                 band_data = data.array[band_idx]
@@ -107,30 +106,27 @@ def aggregate_spatial(
                 if numpy.any(mask):
                     band_values = band_data[mask]
 
-                    # If there are valid values, add them to the list
-                    if len(band_values) > 0:
-                        values.extend(band_values.compressed().tolist())
+                    # If there are valid values, apply reducer
+                    if len(band_values) == 0:
+                        break
 
-            # Apply reducer to values
-            if values:
-                context = context or {}
-                result = reducer(values, context)
+                    result = reducer(data=band_values)
 
-                # Store results
-                if target_dimension is not None:
-                    # Count total and valid pixels
-                    total_count = numpy.sum(coverage > 0)
-                    valid_count = numpy.sum(
-                        ~numpy.ma.getmaskarray(band_data)[coverage > 0]
-                    )
+                    # Store results
+                    if target_dimension is not None:
+                        # Count total and valid pixels
+                        total_count = numpy.sum(coverage > 0)
+                        valid_count = numpy.sum(
+                            ~numpy.ma.getmaskarray(band_data)[coverage > 0]
+                        )
 
-                    results[str(idx)] = {
-                        "value": result,
-                        "total_count": int(total_count),
-                        "valid_count": int(valid_count),
-                    }
-                else:
-                    results[str(idx)] = result
+                        results[str(idx)] = {
+                            "value": result,
+                            "total_count": int(total_count),
+                            "valid_count": int(valid_count),
+                        }
+                    else:
+                        results[str(idx)] = result
 
         elif isinstance(data, dict):  # RasterStack
             # Process each image in the stack
@@ -141,7 +137,6 @@ def aggregate_spatial(
                 coverage = img.get_coverage_array(geom_obj.__geo_interface__)
 
                 # Extract values for pixels that intersect with the geometry
-                values = []
                 for band_idx in range(img.count):
                     # Get band data
                     band_data = img.array[band_idx]
@@ -152,29 +147,26 @@ def aggregate_spatial(
                         band_values = band_data[mask]
 
                         # If there are valid values, add them to the list
-                        if len(band_values) > 0:
-                            values.extend(band_values.compressed().tolist())
+                        if len(band_values) == 0:
+                            break
 
-                # Apply reducer to values
-                if values:
-                    context = context or {}
-                    result = reducer(values, context)
+                        result = reducer(data=band_values)
 
-                    # Store results
-                    if target_dimension is not None:
-                        # Count total and valid pixels
-                        total_count = numpy.sum(coverage > 0)
-                        valid_count = numpy.sum(
-                            ~numpy.ma.getmaskarray(band_data)[coverage > 0]
-                        )
+                        # Store results
+                        if target_dimension is not None:
+                            # Count total and valid pixels
+                            total_count = numpy.sum(coverage > 0)
+                            valid_count = numpy.sum(
+                                ~numpy.ma.getmaskarray(band_data)[coverage > 0]
+                            )
 
-                        stack_results[key] = {
-                            "value": result,
-                            "total_count": int(total_count),
-                            "valid_count": int(valid_count),
-                        }
-                    else:
-                        stack_results[key] = result
+                            stack_results[key] = {
+                                "value": result,
+                                "total_count": int(total_count),
+                                "valid_count": int(valid_count),
+                            }
+                        else:
+                            stack_results[key] = result
 
             results[str(idx)] = stack_results
 

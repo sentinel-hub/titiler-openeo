@@ -180,18 +180,18 @@ def _max(x, axis=None, keepdims=False):
     return numpy.max(x, axis=axis, keepdims=keepdims)
 
 
-def median(x, axis=None, keepdims=False):
-    if isinstance(x, numpy.ma.MaskedArray):
-        return numpy.ma.median(x, axis=axis, keepdims=keepdims)
+def median(data, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        return numpy.ma.median(data, axis=axis, keepdims=keepdims)
 
-    return numpy.median(x, axis=axis, keepdims=keepdims)
+    return numpy.median(data, axis=axis, keepdims=keepdims)
 
 
-def mean(x, axis=None, keepdims=False):
-    if isinstance(x, numpy.ma.MaskedArray):
-        return numpy.ma.mean(x, axis=axis, keepdims=keepdims)
+def mean(data, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
 
-    return numpy.mean(x, axis=axis, keepdims=keepdims)
+    return numpy.mean(data, axis=axis, keepdims=keepdims)
 
 
 def sd(x, axis=None, keepdims=False):
