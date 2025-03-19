@@ -45,9 +45,9 @@ def apply_pixel_selection(
     pixsel_method = PixelSelectionMethod[pixel_selection].value()
 
     assets_used: List = []
-    crs: Optional[CRS]
-    bounds: Optional[BBox]
-    band_names: List[str]
+    crs: Optional[CRS] = None
+    bounds: Optional[BBox] = None
+    band_names: Optional[List[str]] = None
 
     for datetime, img in data.items():
         # On the first Image we set the properties
@@ -95,7 +95,7 @@ def apply_pixel_selection(
                 assets=assets_used,
                 crs=crs,
                 bounds=bounds,
-                band_names=band_names,
+                band_names=band_names if band_names is not None else [],
                 metadata={
                     "pixel_selection_method": pixel_selection,
                 },
@@ -109,11 +109,141 @@ def apply_pixel_selection(
         assets=assets_used,
         crs=crs,
         bounds=bounds,
-        band_names=band_names,
+        band_names=band_names if band_names is not None else [],
         metadata={
             "pixel_selection_method": pixel_selection,
         },
     )
+
+
+def _reduce_temporal_dimension(
+    data: RasterStack,
+    reducer: Callable,
+    dimension: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> ImageData:
+    """Reduce the temporal dimension of a RasterStack.
+
+    Args:
+        data: A RasterStack with temporal dimension
+        reducer: A reducer function to apply on the temporal dimension
+        dimension: The name of the temporal dimension
+        context: Additional data to be passed to the reducer
+
+    Returns:
+        An ImageData with the temporal dimension reduced
+
+    Raises:
+        ValueError: If the data is not a valid RasterStack
+    """
+    if not isinstance(data, dict) or not data:
+        raise ValueError(
+            "Expected a non-empty RasterStack for temporal dimension reduction"
+        )
+
+    # Extract arrays from all images in the stack and create labeled arrays for the reducer
+    labeled_arrays = [{"label": key, "data": img.array} for key, img in data.items()]
+
+    # Apply the reducer to the labeled arrays
+    context = context or {}
+    reduced_array = reducer(labeled_arrays, context)
+
+    # Get metadata from the first image in the stack
+    first_key = next(iter(data))
+    first_img = data[first_key]
+
+    # Create a new ImageData with the reduced array
+    return ImageData(
+        reduced_array,
+        assets=list(data.keys()),
+        crs=first_img.crs,
+        bounds=first_img.bounds,
+        band_names=first_img.band_names if first_img.band_names is not None else [],
+        metadata={
+            "reduced_dimension": dimension,
+            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+        },
+    )
+
+
+def _reduce_spectral_dimension_single_image(
+    data: ImageData,
+    reducer: Callable,
+) -> ImageData:
+    """Reduce the spectral dimension of a single ImageData.
+
+    Args:
+        data: An ImageData with spectral dimension
+        reducer: A reducer function to apply on the spectral dimension
+
+    Returns:
+        An ImageData with the spectral dimension reduced
+    """
+    reduced_img_data = reducer(data=data)
+    return ImageData(
+        reduced_img_data,
+        assets=data.assets,
+        crs=data.crs,
+        bounds=data.bounds,
+        band_names=data.band_names if data.band_names is not None else [],
+        metadata={
+            "reduced_dimension": "spectral",
+            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+        },
+    )
+
+
+def _reduce_spectral_dimension_stack(
+    data: RasterStack,
+    reducer: Callable,
+) -> RasterStack:
+    """Reduce the spectral dimension of a RasterStack.
+
+    Args:
+        data: A RasterStack with spectral dimension
+        reducer: A reducer function to apply on the spectral dimension
+
+    Returns:
+        A RasterStack with the spectral dimension reduced for each image
+
+    Raises:
+        ValueError: If the reducer doesn't return valid data
+    """
+    if not isinstance(data, dict) or not data:
+        raise ValueError(
+            "Expected a non-empty RasterStack for spectral dimension reduction"
+        )
+
+    # Apply the reducer to the entire stack
+    reduced_img_data = reducer(data=data)
+
+    # Validate the reducer output
+    if not isinstance(reduced_img_data, numpy.ndarray):
+        raise ValueError(
+            "The reducer must return a numpy array for spectral dimension reduction"
+        )
+
+    if reduced_img_data.shape[0] != len(data):
+        raise ValueError(
+            "The reduced data must have the same first dimension as the input stack"
+        )
+
+    # Create a new stack with the reduced data
+    result = {}
+    for i, (key, img) in enumerate(data.items()):
+        result[key] = ImageData(
+            reduced_img_data[i],
+            assets=[key],
+            crs=img.crs,
+            bounds=img.bounds,
+            band_names=img.band_names if img.band_names is not None else [],
+            metadata={
+                "reduced_dimension": "spectral",
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
+
+    return result
 
 
 def reduce_dimension(
@@ -135,67 +265,26 @@ def reduce_dimension(
 
     Raises:
         DimensionNotAvailable: If the specified dimension does not exist
+        ValueError: If the input data is invalid or the reducer returns invalid data
     """
-    # Currently, we only support the temporal dimension for RasterStack
-    if dimension.lower() in ["t", "temporal", "time"]:
+    # Normalize dimension name
+    dim_lower = dimension.lower()
+
+    # Handle temporal dimension
+    if dim_lower in ["t", "temporal", "time"]:
         if isinstance(data, ImageData):
             # If it's already a single ImageData, there's no temporal dimension to reduce
             raise DimensionNotAvailable(dimension)
 
-        if not isinstance(data, dict) or not data:
-            raise ValueError(
-                "Expected a non-empty RasterStack for temporal dimension reduction"
-            )
+        return _reduce_temporal_dimension(data, reducer, dimension, context)
 
-        # Extract arrays from all images in the stack
-        # Create a labeled array for the reducer
-        labeled_arrays = []
-        for key, img in data.items():
-            labeled_arrays.append({"label": key, "data": img.array})
-
-        # Apply the reducer to the labeled arrays
-        context = context or {}
-        reduced_array = reducer(labeled_arrays, context)
-
-        # Get metadata from the first image in the stack
-        first_key = next(iter(data))
-        first_img = data[first_key]
-
-        # Create a new ImageData with the reduced array
-        return ImageData(
-            reduced_array,
-            assets=list(data.keys()),
-            crs=first_img.crs,
-            bounds=first_img.bounds,
-            band_names=first_img.band_names,
-            metadata={
-                "reduced_dimension": dimension,
-                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-            },
-        )
-    # spectral dimension
-    elif dimension.lower() in ["bands", "spectral"]:
+    # Handle spectral dimension
+    elif dim_lower in ["bands", "spectral"]:
         if isinstance(data, ImageData):
-            # For ImageData, we simply return the band(s) specified
-            return data
-        if not isinstance(data, dict) or not data:
-            raise ValueError(
-                "Expected a non-empty RasterStack for spectral dimension reduction"
-            )
+            return _reduce_spectral_dimension_single_image(data, reducer)
+        else:
+            return _reduce_spectral_dimension_stack(data, reducer)
 
-        # For each image in the stack, apply the reducer to the specified dimension
-        reduced_stack = {}
-        for key, img in data.items():
-            reduced_img_data = reducer(data=img.array)
-            reduced_img = ImageData(
-                reduced_img_data,
-                assets=img.assets,
-                crs=img.crs,
-                bounds=img.bounds,
-                band_names=img.band_names,
-            )
-            reduced_stack[key] = reduced_img
-
-        return reduced_stack
-
-    raise DimensionNotAvailable(dimension)
+    # Unsupported dimension
+    else:
+        raise DimensionNotAvailable(dimension)

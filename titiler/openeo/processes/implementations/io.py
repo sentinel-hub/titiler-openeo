@@ -1,5 +1,6 @@
 """titiler.openeo.processes."""
 
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
@@ -30,21 +31,34 @@ def _save_single_result(
     options: Optional[Dict] = None,
 ) -> SaveResultData:
     """Save a single result (ImageData or numpy array)."""
+    if isinstance(data, dict) and data.get("type") == "FeatureCollection":
+        if format.lower() == "json":
+            # convert json to bytes
+            bytes = json.dumps(data).encode("utf-8")
+            return SaveResultData(data=bytes, media_type="application/json")
+        raise ValueError("Only GeoJSON format is supported for FeatureCollection data")
+
     if isinstance(data, (numpy.ma.MaskedArray, numpy.ndarray)):
         data = ImageData(data)
 
+    # At this point, data should be an ImageData object
+    # Add an explicit type check
+    if not isinstance(data, ImageData):
+        raise TypeError(f"Expected ImageData object, got {type(data).__name__}")
+
+    image_data: ImageData = data
     options = options or {}
 
-    if format.lower() in ["jpeg", "jpg", "png"] and data.array.dtype != "uint8":
+    if format.lower() in ["jpeg", "jpg", "png"] and image_data.array.dtype != "uint8":
         # Convert to uint8 while preserving the mask if it's a masked array
-        if isinstance(data.array, numpy.ma.MaskedArray):
-            data.array = numpy.ma.array(
-                data.array.data.astype("uint8"),
-                mask=data.array.mask,
-                fill_value=data.array.fill_value,
+        if isinstance(image_data.array, numpy.ma.MaskedArray):
+            image_data.array = numpy.ma.array(
+                image_data.array.data.astype("uint8"),
+                mask=image_data.array.mask,
+                fill_value=image_data.array.fill_value,
             )
         else:
-            data.array = data.array.astype("uint8")
+            image_data.array = image_data.array.astype("uint8")
 
     # Get the appropriate media type based on the format
     format_lower = format.lower()
@@ -58,14 +72,14 @@ def _save_single_result(
         media_type = f"application/{format_lower}"
 
     # Render the data
-    rendered_data = data.render(img_format=format_lower, **options)
+    rendered_data = image_data.render(img_format=format_lower, **options)
 
     # Return the container with the rendered data and media type
     return SaveResultData(data=rendered_data, media_type=media_type)
 
 
 def save_result(
-    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray, RasterStack],
+    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray, RasterStack, dict],
     format: str,
     options: Optional[Dict] = None,
 ) -> Union[SaveResultData, Dict[str, SaveResultData]]:
@@ -80,8 +94,11 @@ def save_result(
         For single images: ResultData containing the rendered image bytes and metadata
         For RasterStack: dictionary mapping keys to ResultData objects
     """
+    if format.lower() in ["json", "geojson"]:
+        return _save_single_result(data, format, options)
+
     # If data is a RasterStack (dictionary), save each item
-    if isinstance(data, RasterStack):
+    if isinstance(data, dict):
         if data.__len__() == 1:
             # If there is only one item, save it as a single result
             return _save_single_result(list(data.values())[0], format, options)
@@ -90,6 +107,12 @@ def save_result(
         if format.lower() in ["tiff", "gtiff"]:
             # Get all ImageData objects from the RasterStack
             image_data_list = list(data.values())
+
+            # Check if this is a RasterStack with ImageData objects
+            if not all(isinstance(img, ImageData) for img in image_data_list):
+                raise ValueError(
+                    "All items in RasterStack must be ImageData objects to save as GeoTIFF"
+                )
 
             # Check if all ImageData objects have the same shape, bounds, and CRS
             first_img = image_data_list[0]
@@ -143,12 +166,5 @@ def save_result(
 
             # Save the combined image as a GeoTIFF
             return _save_single_result(combined_img, format, options)
-
-        # For other formats, save each band separately
-        results = {}
-        for key, img_data in data.items():
-            results[key] = _save_single_result(img_data, format, options)
-        return results
-
     # Otherwise, save as a single result
     return _save_single_result(data, format, options)
