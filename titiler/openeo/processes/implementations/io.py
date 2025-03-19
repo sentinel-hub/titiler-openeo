@@ -1,5 +1,7 @@
 """titiler.openeo.processes."""
 
+import csv
+import io
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
@@ -36,7 +38,31 @@ def _save_single_result(
             # convert json to bytes
             bytes = json.dumps(data).encode("utf-8")
             return SaveResultData(data=bytes, media_type="application/json")
-        raise ValueError("Only GeoJSON format is supported for FeatureCollection data")
+        elif format.lower() == "csv":
+            # Extract features from the FeatureCollection
+            features = data.get("features", [])
+            
+            # Create CSV output with date, feature_index, and value columns
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write header
+            writer.writerow(["date", "feature_index", "value"])
+            
+            # Write data rows
+            for idx, feature in enumerate(features):
+                properties = feature.get("properties", {})
+                values_dict = properties.get("values", {})
+                
+                # For each date-value pair in the values dictionary
+                for date, value in values_dict.items():
+                    writer.writerow([date, idx, value])
+            
+            # Convert to bytes
+            csv_bytes = output.getvalue().encode("utf-8")
+            return SaveResultData(data=csv_bytes, media_type="text/csv")
+            
+        raise ValueError("Only GeoJSON and CSV formats are supported for FeatureCollection data")
 
     if isinstance(data, (numpy.ma.MaskedArray, numpy.ndarray)):
         data = ImageData(data)

@@ -1,9 +1,11 @@
 """Stac API backend."""
 
 from typing import Any, Dict, List, Optional, Sequence, Union
+import time
 
 import pyproj
 import pystac
+from rasterio.errors import RasterioIOError
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
@@ -302,8 +304,24 @@ class LoadCollection:
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(bbox, **kwargs)
+                max_retries = 4
+                retry_delay = 1.0  # seconds
+                retries = 0
+                
+                while True:
+                    try:
+                        with SimpleSTACReader(item) as src_dst:
+                            return src_dst.part(bbox, **kwargs)
+                    except RasterioIOError as e:
+                        retries += 1
+                        if retries >= max_retries:
+                            # If we've reached max retries, re-raise the exception
+                            raise
+                        # Log the error and retry after a delay
+                        print(f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                        time.sleep(retry_delay)
+                        # Increase delay for next retry (exponential backoff)
+                        retry_delay *= 2
 
             bbox = [
                 spatial_extent.west,
@@ -563,8 +581,24 @@ class LoadStac:
         """
 
         def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-            with SimpleSTACReader(item) as src_dst:
-                return src_dst.part(bbox, **kwargs)
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+            retries = 0
+            
+            while True:
+                try:
+                    with SimpleSTACReader(item) as src_dst:
+                        return src_dst.part(bbox, **kwargs)
+                except RasterioIOError as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        # If we've reached max retries, re-raise the exception
+                        raise
+                    # Log the error and retry after a delay
+                    print(f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                    time.sleep(retry_delay)
+                    # Increase delay for next retry (exponential backoff)
+                    retry_delay *= 2
 
         bbox = [
             spatial_extent.west,
