@@ -14,6 +14,21 @@ RasterStack = Dict[str, ImageData]
 
 T = TypeVar("T")
 
+def to_raster_stack(data: Union[ImageData, RasterStack]) -> RasterStack:
+    """Convert ImageData to RasterStack if necessary.
+    
+    Args:
+        data: ImageData or RasterStack to convert
+        
+    Returns:
+        RasterStack: Always a RasterStack, even if input was a single ImageData
+    """
+    if isinstance(data, ImageData):
+        # Convert single ImageData to a RasterStack with one item
+        # Using "data" as the key for single images
+        return {"data": data}
+    return data
+
 
 class LazyRasterStack(Dict[str, ImageData]):
     """A RasterStack that lazily loads data when accessed.

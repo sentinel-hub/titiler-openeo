@@ -2,17 +2,17 @@
 
 from typing import Callable, Dict, Optional, Union
 
-from .data_model import ImageData, RasterStack
+from .data_model import ImageData, RasterStack, to_raster_stack
 
 __all__ = ["apply"]
 
 
 def apply(
-    data: Union[RasterStack, ImageData],
+    data: RasterStack,
     process: Callable,
     context: Optional[Dict] = None,
-) -> Union[RasterStack, ImageData]:
-    """Apply process on Data."""
+) -> RasterStack:
+    """Apply process on RasterStack."""
     positional_parameters = {"x": 0}
     named_parameters = {"context": context}
 
@@ -27,8 +27,6 @@ def apply(
             crs=img.crs,
             bounds=img.bounds,
         )
-
-    if isinstance(data, ImageData):
-        return _process_img(data)
-
+    
+    # Apply process to each item in the stack
     return {k: _process_img(img) for k, img in data.items()}

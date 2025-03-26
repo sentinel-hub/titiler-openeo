@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Union
 import numpy
 from rio_tiler.models import ImageData
 
-from .data_model import RasterStack
+from .data_model import RasterStack, to_raster_stack
 
 __all__ = ["save_result", "SaveResultData"]
 
@@ -105,14 +105,14 @@ def _save_single_result(
 
 
 def save_result(
-    data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray, RasterStack, dict],
+    data: Union[numpy.ndarray, numpy.ma.MaskedArray, RasterStack, dict],
     format: str,
     options: Optional[Dict] = None,
 ) -> Union[SaveResultData, Dict[str, SaveResultData]]:
     """Save Result.
 
     Args:
-        data: ImageData, numpy array, or RasterStack to save
+        data: numpy array or RasterStack to save
         format: Output format (e.g., 'png', 'jpeg', 'tiff')
         options: Additional rendering options
 
@@ -120,15 +120,21 @@ def save_result(
         For single images: ResultData containing the rendered image bytes and metadata
         For RasterStack: dictionary mapping keys to ResultData objects
     """
-    if format.lower() in ["json", "geojson"]:
+    # Handle special cases for GeoJSON data directly
+    if format.lower() in ["json", "geojson"] and isinstance(data, dict) and data.get("type") == "FeatureCollection":
         return _save_single_result(data, format, options)
-
-    # If data is a RasterStack (dictionary), save each item
+    
+    # Handle special cases for numpy arrays
+    if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
+        # Create a RasterStack with a single ImageData
+        data = {"data": ImageData(data)}
+    
+    # If data is a RasterStack, handle appropriately
     if isinstance(data, dict):
-        if data.__len__() == 1:
-            # If there is only one item, save it as a single result
+        # If there is only one item, save it as a single result
+        if len(data) == 1:
             return _save_single_result(list(data.values())[0], format, options)
-
+            
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
             # Get all ImageData objects from the RasterStack

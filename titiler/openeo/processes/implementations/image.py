@@ -6,7 +6,7 @@ import numpy
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
 
-from .data_model import ImageData, RasterStack
+from .data_model import ImageData, RasterStack, to_raster_stack
 
 __all__ = [
     "image_indexes",
@@ -42,51 +42,37 @@ def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
 
 
 def image_indexes(
-    data: Union[ImageData, RasterStack], indexes: Sequence[int]
-) -> Union[ImageData, RasterStack]:
-    """Select indexes from an ImageData or RasterStack.
+    data: RasterStack, indexes: Sequence[int]
+) -> RasterStack:
+    """Select indexes from a RasterStack.
 
     Args:
-        data: ImageData or RasterStack to process
+        data: RasterStack to process
         indexes: Sequence of band indexes to select (1-based)
 
     Returns:
-        ImageData or RasterStack with selected indexes
+        RasterStack with selected indexes
     """
-    # If data is a single ImageData, apply directly
-    if isinstance(data, ImageData):
-        return _apply_image_indexes(data, indexes)
-
-    # If data is a RasterStack (dictionary), apply to each item
-    if isinstance(data, dict):
-        result: Dict[str, ImageData] = {}
-        for key, img_data in data.items():
-            result[key] = _apply_image_indexes(img_data, indexes)
-        return result
-
-    # If we get here, data is neither ImageData nor a dictionary
-    raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_image_indexes(img_data, indexes)
+    return result
 
 
 def to_array(
-    data: Union[ImageData, RasterStack],
-) -> Union[numpy.ma.MaskedArray, Dict[str, numpy.ma.MaskedArray]]:
-    """Convert ImageData or RasterStack to array(s).
+    data: RasterStack,
+) -> Dict[str, numpy.ma.MaskedArray]:
+    """Convert RasterStack to array(s).
 
     Args:
-        data: ImageData or RasterStack to convert
+        data: RasterStack to convert
 
     Returns:
-        For ImageData: numpy.ma.MaskedArray
-        For RasterStack: Dictionary mapping keys to numpy.ma.MaskedArray
+        Dictionary mapping keys to numpy.ma.MaskedArray
     """
-    if isinstance(data, ImageData):
-        return data.array
-
-    if isinstance(data, dict):
-        return {key: img_data.array for key, img_data in data.items()}
-
-    raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
+    # Convert each item to array
+    return {key: img_data.array for key, img_data in data.items()}
 
 
 def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
@@ -95,27 +81,22 @@ def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
 
 
 def color_formula(
-    data: Union[ImageData, RasterStack], formula: str
-) -> Union[ImageData, RasterStack]:
-    """Apply color formula to ImageData or RasterStack.
+    data: RasterStack, formula: str
+) -> RasterStack:
+    """Apply color formula to RasterStack.
 
     Args:
-        data: ImageData or RasterStack to process
+        data: RasterStack to process
         formula: Color formula to apply
 
     Returns:
-        ImageData or RasterStack with color formula applied
+        RasterStack with color formula applied
     """
-    if isinstance(data, ImageData):
-        return _apply_color_formula(data, formula)
-
-    if isinstance(data, dict):
-        result: Dict[str, ImageData] = {}
-        for key, img_data in data.items():
-            result[key] = _apply_color_formula(img_data, formula)
-        return result
-
-    raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_color_formula(img_data, formula)
+    return result
 
 
 def get_colormap(name: str) -> ColorMapType:
@@ -129,24 +110,19 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
 
 
 def colormap(
-    data: Union[ImageData, RasterStack], colormap: ColorMapType
-) -> Union[ImageData, RasterStack]:
-    """Apply colormap to ImageData or RasterStack.
+    data: RasterStack, colormap: ColorMapType
+) -> RasterStack:
+    """Apply colormap to RasterStack.
 
     Args:
-        data: ImageData or RasterStack to process
+        data: RasterStack to process
         colormap: Colormap to apply
 
     Returns:
-        ImageData or RasterStack with colormap applied
+        RasterStack with colormap applied
     """
-    if isinstance(data, ImageData):
-        return _apply_colormap(data, colormap)
-
-    if isinstance(data, dict):
-        result: Dict[str, ImageData] = {}
-        for key, img_data in data.items():
-            result[key] = _apply_colormap(img_data, colormap)
-        return result
-
-    raise TypeError(f"Expected ImageData or RasterStack, got {type(data)}")
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_colormap(img_data, colormap)
+    return result

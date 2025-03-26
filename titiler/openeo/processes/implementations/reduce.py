@@ -10,7 +10,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import RasterStack
+from .data_model import RasterStack, to_raster_stack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -247,7 +247,7 @@ def _reduce_spectral_dimension_stack(
 
 
 def reduce_dimension(
-    data: Union[RasterStack, ImageData],
+    data: RasterStack,
     reducer: Callable,
     dimension: str,
     context: Optional[Dict[str, Any]] = None,
@@ -255,7 +255,7 @@ def reduce_dimension(
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
     Args:
-        data: A data cube (RasterStack or ImageData)
+        data: A RasterStack data cube
         reducer: A reducer function to apply on the specified dimension
         dimension: The name of the dimension over which to reduce
         context: Additional data to be passed to the reducer
@@ -272,16 +272,19 @@ def reduce_dimension(
 
     # Handle temporal dimension
     if dim_lower in ["t", "temporal", "time"]:
-        if isinstance(data, ImageData):
-            # If it's already a single ImageData, there's no temporal dimension to reduce
+        # If there's only one item in the stack, there's no temporal dimension to reduce
+        if len(data) <= 1:
             raise DimensionNotAvailable(dimension)
 
         return _reduce_temporal_dimension(data, reducer, dimension, context)
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
-        if isinstance(data, ImageData):
-            return _reduce_spectral_dimension_single_image(data, reducer)
+        # Check if we have a single-image stack (common case from ImageData input)
+        if len(data) == 1:
+            # Get the single image and reduce its spectral dimension
+            key = next(iter(data))
+            return {key: _reduce_spectral_dimension_single_image(data[key], reducer)}
         else:
             return _reduce_spectral_dimension_stack(data, reducer)
 

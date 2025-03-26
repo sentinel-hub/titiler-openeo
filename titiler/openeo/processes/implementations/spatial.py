@@ -4,10 +4,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from pyproj import CRS
-from rio_tiler.types import WarpResampling
+from rasterio.warp import Resampling as WarpResampling
 from shapely.geometry import shape
 
-from .data_model import ImageData, RasterStack
+from .data_model import ImageData, RasterStack, to_raster_stack
 
 __all__ = ["resample_spatial", "aggregate_spatial"]
 
@@ -197,7 +197,7 @@ def _create_feature_collection(
 
 
 def aggregate_spatial(
-    data: Union[RasterStack, ImageData],
+    data: RasterStack,
     geometries: Union[Dict, Any],
     reducer: Callable,
     target_dimension: Optional[str] = None,
@@ -235,30 +235,25 @@ def aggregate_spatial(
         # Extract and convert geometry
         geom = _extract_geometry(feature)
         geom_obj = shape(geom) if isinstance(geom, Dict) else geom
-
-        # Apply reducer based on data type
-        if isinstance(data, ImageData):
-            result = _apply_reducer_to_image(data, geom_obj, reducer, target_dimension)
-            if result is not None:
-                results[str(idx)] = result
-        elif isinstance(data, dict):  # RasterStack
-            stack_results = _apply_reducer_to_raster_stack(
-                data, geom_obj, reducer, target_dimension
-            )
-            if stack_results:
-                results[str(idx)] = stack_results
+        
+        # Apply reducer to the RasterStack
+        stack_results = _apply_reducer_to_raster_stack(
+            data, geom_obj, reducer, target_dimension
+        )
+        if stack_results:
+            results[str(idx)] = stack_results
 
     # Create and return GeoJSON FeatureCollection
     return _create_feature_collection(features, properties, results)
 
 
 def resample_spatial(
-    data: Union[RasterStack, ImageData],
+    data: RasterStack,
     projection: Union[int, str],
     resolution: Union[float, Tuple[float, float]],
     align: str,
     method: WarpResampling = "nearest",
-) -> Union[RasterStack, ImageData]:
+) -> RasterStack:
     """Resample and warp the spatial dimensions of the raster at a given resolution."""
 
     def _reproject_img(
@@ -274,32 +269,28 @@ def resample_spatial(
             )
 
         dst_crs = CRS.from_user_input(projection)
-        # map resampling method to rio-tiler method using a dictionary
-        resampling_method: WarpResampling = {
-            "nearest": WarpResampling.nearest,
-            "bilinear": WarpResampling.bilinear,
-            "cubic": WarpResampling.cubic,
-            "cubicspline": WarpResampling.cubic_spline,
-            "lanczos": WarpResampling.lanczos,
-            "average": WarpResampling.average,
-            "mode": WarpResampling.mode,
-            "max": None,
-            "min": None,
-            "med": None,
-            "q1": None,
-            "q3": None,
-            "sum": WarpResampling.sum,
-            "rms": WarpResampling.rms,
-            "near": None,
-        }[method]
-
-        if resampling_method is None:
+        # Map the string resampling method to the matching enum name
+        resampling_method_map = {
+            "nearest": "nearest",
+            "bilinear": "bilinear", 
+            "cubic": "cubic",
+            "cubicspline": "cubic_spline",
+            "lanczos": "lanczos",
+            "average": "average",
+            "mode": "mode",
+            "sum": "sum",
+            "rms": "rms"
+        }
+        
+        if method not in resampling_method_map:
             raise ValueError(f"Unsupported resampling method: {method}")
+            
+        resampling_method = resampling_method_map[method]
 
         if resolution is not None and not isinstance(resolution, (list, tuple)):
             resolution = (resolution, resolution)
 
-        # reproject the image
+        # Reproject the image with the string method name
         return img.reproject(
             dst_crs, resolution=resolution, reproject_method=resampling_method
         )
@@ -307,7 +298,5 @@ def resample_spatial(
     """ Get destination CRS from parameters """
     dst_crs = CRS.from_epsg(projection)
 
-    if isinstance(data, ImageData):
-        return _reproject_img(data, dst_crs, resolution, method)
-
+    # Reproject each image in the stack
     return {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
