@@ -127,18 +127,12 @@ class stacApiBackend:
                 }
             )
 
-        # Spectral bands
-        # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
-        if (
-            eo.EOExtension.has_extension(collection)
-            and "item_assets" in collection.extra_fields
-        ):
+        # bands
+        if "item_assets" in collection.extra_fields:
             ia.ItemAssetsExtension.add_to(collection)
             bands_name = set()
             for key, asset in collection.ext.item_assets.items():
-                if asset.properties.get("bands", None) or asset.properties.get(
-                    "eo:common_name", None
-                ):
+                if "data" in asset.properties.get("roles", []): 
                     bands_name.add(key)
             if len(bands_name) > 0:
                 dims["spectral"] = dc.Dimension.from_dict(
@@ -307,7 +301,7 @@ class LoadCollection:
                 max_retries = 4
                 retry_delay = 1.0  # seconds
                 retries = 0
-                
+
                 while True:
                     try:
                         with SimpleSTACReader(item) as src_dst:
@@ -318,7 +312,9 @@ class LoadCollection:
                             # If we've reached max retries, re-raise the exception
                             raise
                         # Log the error and retry after a delay
-                        print(f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                        print(
+                            f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+                        )
                         time.sleep(retry_delay)
                         # Increase delay for next retry (exponential backoff)
                         retry_delay *= 2
@@ -584,7 +580,7 @@ class LoadStac:
             max_retries = 3
             retry_delay = 1.0  # seconds
             retries = 0
-            
+
             while True:
                 try:
                     with SimpleSTACReader(item) as src_dst:
@@ -595,7 +591,9 @@ class LoadStac:
                         # If we've reached max retries, re-raise the exception
                         raise
                     # Log the error and retry after a delay
-                    print(f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                    print(
+                        f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+                    )
                     time.sleep(retry_delay)
                     # Increase delay for next retry (exponential backoff)
                     retry_delay *= 2
