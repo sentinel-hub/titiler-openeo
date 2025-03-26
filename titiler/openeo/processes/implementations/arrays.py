@@ -6,14 +6,12 @@ import numpy
 from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
-from .data_model import LazyRasterStack, RasterStack, to_raster_stack
+from .data_model import LazyRasterStack, RasterStack
 
 __all__ = ["array_element", "to_image"]
 
 
-def array_element(
-    data: Union[ArrayLike, RasterStack, LazyRasterStack], index: int
-):
+def array_element(data: Union[ArrayLike, RasterStack, LazyRasterStack], index: int):
     """Return element from array.
 
     Args:

@@ -1,8 +1,8 @@
 """titiler.openeo.processes indices."""
 
-from typing import Dict, Union
+from typing import Dict
 
-from .data_model import ImageData, RasterStack, to_raster_stack
+from .data_model import ImageData, RasterStack
 from .math import normalized_difference
 
 __all__ = ["ndvi"]
@@ -24,9 +24,7 @@ def _apply_ndvi(data: ImageData, nir: int, red: int) -> ImageData:
     )
 
 
-def ndvi(
-    data: RasterStack, nir: int, red: int
-) -> RasterStack:
+def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
     """Apply NDVI to RasterStack.
 
     Args:

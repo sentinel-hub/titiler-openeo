@@ -14,12 +14,13 @@ RasterStack = Dict[str, ImageData]
 
 T = TypeVar("T")
 
+
 def to_raster_stack(data: Union[ImageData, RasterStack]) -> RasterStack:
     """Convert ImageData to RasterStack if necessary.
-    
+
     Args:
         data: ImageData or RasterStack to convert
-        
+
     Returns:
         RasterStack: Always a RasterStack, even if input was a single ImageData
     """

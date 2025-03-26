@@ -1,12 +1,12 @@
 """titiler.openeo.processes.implementations image methods."""
 
-from typing import Dict, Sequence, Union
+from typing import Dict, Sequence
 
 import numpy
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
 
-from .data_model import ImageData, RasterStack, to_raster_stack
+from .data_model import ImageData, RasterStack
 
 __all__ = [
     "image_indexes",
@@ -41,9 +41,7 @@ def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
     )
 
 
-def image_indexes(
-    data: RasterStack, indexes: Sequence[int]
-) -> RasterStack:
+def image_indexes(data: RasterStack, indexes: Sequence[int]) -> RasterStack:
     """Select indexes from a RasterStack.
 
     Args:
@@ -80,9 +78,7 @@ def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
     return data.apply_color_formula(formula)
 
 
-def color_formula(
-    data: RasterStack, formula: str
-) -> RasterStack:
+def color_formula(data: RasterStack, formula: str) -> RasterStack:
     """Apply color formula to RasterStack.
 
     Args:
@@ -109,9 +105,7 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
-def colormap(
-    data: RasterStack, colormap: ColorMapType
-) -> RasterStack:
+def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
 
     Args:

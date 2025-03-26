@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Union
 import numpy
 from rio_tiler.models import ImageData
 
-from .data_model import RasterStack, to_raster_stack
+from .data_model import RasterStack
 
 __all__ = ["save_result", "SaveResultData"]
 
@@ -41,28 +41,30 @@ def _save_single_result(
         elif format.lower() == "csv":
             # Extract features from the FeatureCollection
             features = data.get("features", [])
-            
+
             # Create CSV output with date, feature_index, and value columns
             output = io.StringIO()
             writer = csv.writer(output)
-            
+
             # Write header
             writer.writerow(["date", "feature_index", "value"])
-            
+
             # Write data rows
             for idx, feature in enumerate(features):
                 properties = feature.get("properties", {})
                 values_dict = properties.get("values", {})
-                
+
                 # For each date-value pair in the values dictionary
                 for date, value in values_dict.items():
                     writer.writerow([date, idx, value])
-            
+
             # Convert to bytes
             csv_bytes = output.getvalue().encode("utf-8")
             return SaveResultData(data=csv_bytes, media_type="text/csv")
-            
-        raise ValueError("Only GeoJSON and CSV formats are supported for FeatureCollection data")
+
+        raise ValueError(
+            "Only GeoJSON and CSV formats are supported for FeatureCollection data"
+        )
 
     if isinstance(data, (numpy.ma.MaskedArray, numpy.ndarray)):
         data = ImageData(data)
@@ -121,20 +123,24 @@ def save_result(
         For RasterStack: dictionary mapping keys to ResultData objects
     """
     # Handle special cases for GeoJSON data directly
-    if format.lower() in ["json", "geojson"] and isinstance(data, dict) and data.get("type") == "FeatureCollection":
+    if (
+        format.lower() in ["json", "geojson"]
+        and isinstance(data, dict)
+        and data.get("type") == "FeatureCollection"
+    ):
         return _save_single_result(data, format, options)
-    
+
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
         # Create a RasterStack with a single ImageData
         data = {"data": ImageData(data)}
-    
+
     # If data is a RasterStack, handle appropriately
     if isinstance(data, dict):
         # If there is only one item, save it as a single result
         if len(data) == 1:
             return _save_single_result(list(data.values())[0], format, options)
-            
+
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
             # Get all ImageData objects from the RasterStack

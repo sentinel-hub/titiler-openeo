@@ -1,11 +1,10 @@
 """Stac API backend."""
 
-from typing import Any, Dict, List, Optional, Sequence, Union
 import time
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
 import pystac
-from rasterio.errors import RasterioIOError
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
@@ -16,6 +15,7 @@ from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
+from rasterio.errors import RasterioIOError
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
@@ -132,7 +132,7 @@ class stacApiBackend:
             ia.ItemAssetsExtension.add_to(collection)
             bands_name = set()
             for key, asset in collection.ext.item_assets.items():
-                if "data" in asset.properties.get("roles", []): 
+                if "data" in asset.properties.get("roles", []):
                     bands_name.add(key)
             if len(bands_name) > 0:
                 dims["spectral"] = dc.Dimension.from_dict(

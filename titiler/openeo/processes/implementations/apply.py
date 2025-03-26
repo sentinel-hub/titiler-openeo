@@ -1,8 +1,8 @@
 """titiler.openeo.processes Apply."""
 
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, Optional
 
-from .data_model import ImageData, RasterStack, to_raster_stack
+from .data_model import ImageData, RasterStack
 
 __all__ = ["apply"]
 
@@ -27,6 +27,6 @@ def apply(
             crs=img.crs,
             bounds=img.bounds,
         )
-    
+
     # Apply process to each item in the stack
     return {k: _process_img(img) for k, img in data.items()}

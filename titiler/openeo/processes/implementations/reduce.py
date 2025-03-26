@@ -10,7 +10,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import RasterStack, to_raster_stack
+from .data_model import RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 

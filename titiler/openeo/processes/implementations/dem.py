@@ -2,9 +2,8 @@
 
 import numpy
 from rasterio import windows
-from typing import Union
 
-from .data_model import ImageData, RasterStack, to_raster_stack
+from .data_model import ImageData, RasterStack
 
 __all__ = ["hillshade"]
 
@@ -45,19 +44,16 @@ def _apply_hillshade(
 
 
 def hillshade(
-    data: RasterStack, 
-    azimuth: int = 315, 
-    angle_altitude: float = 45, 
-    buffer: int = 3
+    data: RasterStack, azimuth: int = 315, angle_altitude: float = 45, buffer: int = 3
 ) -> RasterStack:
     """Create hillshade from DEM dataset.
-    
+
     Args:
         data: RasterStack to process
         azimuth: Azimuth of the light source in degrees
         angle_altitude: Altitude of the light source in degrees
         buffer: Number of pixels to use as a buffer
-        
+
     Returns:
         RasterStack with hillshade results
     """
@@ -65,5 +61,5 @@ def hillshade(
     result = {}
     for key, img_data in data.items():
         result[key] = _apply_hillshade(img_data, azimuth, angle_altitude, buffer)
-    
+
     return result

@@ -7,7 +7,7 @@ from pyproj import CRS
 from rasterio.warp import Resampling as WarpResampling
 from shapely.geometry import shape
 
-from .data_model import ImageData, RasterStack, to_raster_stack
+from .data_model import ImageData, RasterStack
 
 __all__ = ["resample_spatial", "aggregate_spatial"]
 
@@ -235,7 +235,7 @@ def aggregate_spatial(
         # Extract and convert geometry
         geom = _extract_geometry(feature)
         geom_obj = shape(geom) if isinstance(geom, Dict) else geom
-        
+
         # Apply reducer to the RasterStack
         stack_results = _apply_reducer_to_raster_stack(
             data, geom_obj, reducer, target_dimension
@@ -272,19 +272,19 @@ def resample_spatial(
         # Map the string resampling method to the matching enum name
         resampling_method_map = {
             "nearest": "nearest",
-            "bilinear": "bilinear", 
+            "bilinear": "bilinear",
             "cubic": "cubic",
             "cubicspline": "cubic_spline",
             "lanczos": "lanczos",
             "average": "average",
             "mode": "mode",
             "sum": "sum",
-            "rms": "rms"
+            "rms": "rms",
         }
-        
+
         if method not in resampling_method_map:
             raise ValueError(f"Unsupported resampling method: {method}")
-            
+
         resampling_method = resampling_method_map[method]
 
         if resolution is not None and not isinstance(resolution, (list, tuple)):
