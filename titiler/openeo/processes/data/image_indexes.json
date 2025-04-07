@@ -12,7 +12,7 @@
             "description": "An image.",
             "schema": {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             }
         },
         {
@@ -32,7 +32,7 @@
         "description": "The image with the selected indexes.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {

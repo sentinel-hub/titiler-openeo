@@ -12,7 +12,7 @@
             "schema": [
                 {
                     "type": "object",
-                    "subtype": "imagedata"
+                    "subtype": "datacube"
                 },
                 {
                     "type": "array"

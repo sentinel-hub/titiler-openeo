@@ -12,7 +12,7 @@
       "description": "An ImageData object.",
       "schema": {
         "type": "object",
-        "subtype": "imagedata"
+        "subtype": "datacube"
       }
     }
   ],
