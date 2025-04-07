@@ -33,7 +33,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - [ ] Integrated Authentication
 - [ ] More output formats
 - [ ] More openEO processes
-- [ ] Github pages documentation
+- [x] Github pages documentation
 
 ## Installation
 
