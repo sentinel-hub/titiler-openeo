@@ -64,11 +64,11 @@ postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary"]
 oidc = ["cryptography"]
 
 [project.urls]
-Homepage = "https://developmentseed.org/titiler-openeo/"
-Documentation = "https://developmentseed.org/titiler-openeo/"
-Issues = "https://github.com/developmentseed/titileropeneo/issues"
-Source = "https://github.com/developmentseed/titileropeneo"
-Changelog = "https://developmentseed.org/titileropeneo/release-notes/"
+Homepage = "https://sentinel-hub.github.io/titiler-openeo/"
+Documentation = "https://sentinel-hub.github.io/titiler-openeo/"
+Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
+Source = "https://github.com/sentinel-hub/titiler-openeo"
+Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 
 [build-system]
 requires = ["pdm-backend"]
