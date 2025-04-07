@@ -301,10 +301,10 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
-        # Get PROJ information about the Items and validate pixel dimensions
+        # Get PROJ information about the Items and collect resolutions
         item_crs = None
-        max_width = 0
-        max_height = 0
+        x_resolutions = []
+        y_resolutions = []
 
         for item in items:
             with SimpleSTACReader(item) as src_dst:
@@ -315,15 +315,58 @@ class LoadCollection:
                         f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
                     )
 
-                max_width = max(max_width, src_dst.width)
-                max_height = max(max_height, src_dst.height)
+                # Get resolution information
+                transform = src_dst.transform
+                x_resolutions.append(abs(transform.a))
+                y_resolutions.append(abs(transform.e))
 
-        # Estimate output size in pixels using the spatial extent and max dimensions
+        # Get the highest resolution (smallest pixel size)
+        x_resolution = min(x_resolutions) if x_resolutions else None
+        y_resolution = min(y_resolutions) if y_resolutions else None
+
+        # Estimate output size in pixels using the spatial extent and resolution
         if spatial_extent:
-            # If width/height not specified, estimate from max item dimensions
+            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+            crs = to_rasterio_crs(projcrs)
+
+            # Convert bounds to the same CRS if needed
+            bbox = [
+                spatial_extent.west,
+                spatial_extent.south,
+                spatial_extent.east,
+                spatial_extent.north,
+            ]
+
+            # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
+            if item_crs and not item_crs.equals(crs):
+                # Calculate approximate resolution in target CRS
+                transformer = pyproj.Transformer.from_crs(
+                    item_crs.to_epsg(),
+                    crs.to_epsg(),
+                    always_xy=True,
+                )
+                # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
+                center_x = (bbox[0] + bbox[2]) / 2
+                center_y = (bbox[1] + bbox[3]) / 2
+                src_box = [
+                    center_x,
+                    center_y,
+                    center_x + x_resolution,
+                    center_y + y_resolution,
+                ]
+                dst_box = transformer.transform_bounds(*src_box)
+                x_resolution = abs(dst_box[2] - dst_box[0])
+                y_resolution = abs(dst_box[3] - dst_box[1])
+
+            # Calculate dimensions based on bounds and resolution
             if not width and not height:
-                width = max_width
-                height = max_height
+                if x_resolution and y_resolution:
+                    width = int(round((bbox[2] - bbox[0]) / x_resolution))
+                    height = int(round((bbox[3] - bbox[1]) / y_resolution))
+                else:
+                    # Fallback to a reasonable default if resolution can't be determined
+                    width = 1024
+                    height = 1024
 
             # Check if estimated pixel count exceeds maximum allowed
             pixel_count = int(width or 0) * int(height or 0)
@@ -395,10 +438,10 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
-        # Get PROJ information about the Items and validate pixel dimensions
+        # Get PROJ information about the Items and collect resolutions
         item_crs = None
-        max_width = 0
-        max_height = 0
+        x_resolutions = []
+        y_resolutions = []
 
         for item in items:
             with SimpleSTACReader(item) as src_dst:
@@ -409,15 +452,58 @@ class LoadCollection:
                         f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
                     )
 
-                max_width = max(max_width, src_dst.width)
-                max_height = max(max_height, src_dst.height)
+                # Get resolution information
+                transform = src_dst.transform
+                x_resolutions.append(abs(transform.a))
+                y_resolutions.append(abs(transform.e))
 
-        # Estimate output size in pixels using the spatial extent and max dimensions
+        # Get the highest resolution (smallest pixel size)
+        x_resolution = min(x_resolutions) if x_resolutions else None
+        y_resolution = min(y_resolutions) if y_resolutions else None
+
+        # Estimate output size in pixels using the spatial extent and resolution
         if spatial_extent:
-            # If width/height not specified, estimate from max item dimensions
+            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+            crs = to_rasterio_crs(projcrs)
+
+            # Convert bounds to the same CRS if needed
+            bbox = [
+                spatial_extent.west,
+                spatial_extent.south,
+                spatial_extent.east,
+                spatial_extent.north,
+            ]
+
+            # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
+            if item_crs and not item_crs.equals(crs):
+                # Calculate approximate resolution in target CRS
+                transformer = pyproj.Transformer.from_crs(
+                    item_crs.to_epsg(),
+                    crs.to_epsg(),
+                    always_xy=True,
+                )
+                # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
+                center_x = (bbox[0] + bbox[2]) / 2
+                center_y = (bbox[1] + bbox[3]) / 2
+                src_box = [
+                    center_x,
+                    center_y,
+                    center_x + x_resolution,
+                    center_y + y_resolution,
+                ]
+                dst_box = transformer.transform_bounds(*src_box)
+                x_resolution = abs(dst_box[2] - dst_box[0])
+                y_resolution = abs(dst_box[3] - dst_box[1])
+
+            # Calculate dimensions based on bounds and resolution
             if not width and not height:
-                width = max_width
-                height = max_height
+                if x_resolution and y_resolution:
+                    width = int(round((bbox[2] - bbox[0]) / x_resolution))
+                    height = int(round((bbox[3] - bbox[1]) / y_resolution))
+                else:
+                    # Fallback to a reasonable default if resolution can't be determined
+                    width = 1024
+                    height = 1024
 
             # Check if estimated pixel count exceeds maximum allowed
             pixel_count = int(width or 0) * int(height or 0)
