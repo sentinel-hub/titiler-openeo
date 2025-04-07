@@ -221,6 +221,115 @@ class LoadCollection:
 
     stac_api: stacApiBackend = field()
 
+    def _estimate_output_dimensions(
+        self,
+        items: List[Dict],
+        spatial_extent: Optional[BoundingBox],
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Estimate output dimensions based on items and spatial extent.
+
+        Args:
+            items: List of STAC items
+            spatial_extent: Bounding box for the output
+            width: Optional user-specified width
+            height: Optional user-specified height
+
+        Returns:
+            Dictionary containing:
+                - width: Estimated or specified width
+                - height: Estimated or specified height
+                - item_crs: CRS of the items
+                - crs: Target CRS to use
+                - bbox: Bounding box as a list [west, south, east, north]
+        """
+        # Extract CRS and resolution information from items
+        item_crs = None
+        x_resolutions = []
+        y_resolutions = []
+
+        for item in items:
+            with SimpleSTACReader(item) as src_dst:
+                if item_crs is None:
+                    item_crs = src_dst.crs
+                elif not item_crs.equals(src_dst.crs):
+                    raise ValueError(
+                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
+                    )
+
+                # Get resolution information
+                transform = src_dst.transform
+                x_resolutions.append(abs(transform.a))
+                y_resolutions.append(abs(transform.e))
+
+        # Get the highest resolution (smallest pixel size)
+        x_resolution = min(x_resolutions) if x_resolutions else None
+        y_resolution = min(y_resolutions) if y_resolutions else None
+
+        if not spatial_extent:
+            raise NotImplementedError("Can't use this backend without spatial extent")
+
+        # Get target CRS and bounds
+        projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+        crs = to_rasterio_crs(projcrs)
+
+        # Convert bounds to the same CRS if needed
+        bbox = [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
+
+        # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
+        if item_crs and not item_crs.equals(crs):
+            # Calculate approximate resolution in target CRS
+            transformer = pyproj.Transformer.from_crs(
+                item_crs.to_epsg(),
+                crs.to_epsg(),
+                always_xy=True,
+            )
+            # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            src_box = [
+                center_x,
+                center_y,
+                center_x + x_resolution,
+                center_y + y_resolution,
+            ]
+            dst_box = transformer.transform_bounds(*src_box)
+            x_resolution = abs(dst_box[2] - dst_box[0])
+            y_resolution = abs(dst_box[3] - dst_box[1])
+
+        # Calculate dimensions based on bounds and resolution if not specified
+        if not width and not height:
+            if x_resolution and y_resolution:
+                width = int(round((bbox[2] - bbox[0]) / x_resolution))
+                height = int(round((bbox[3] - bbox[1]) / y_resolution))
+            else:
+                # Fallback to a reasonable default if resolution can't be determined
+                width = 1024
+                height = 1024
+
+        # Check if estimated pixel count exceeds maximum allowed
+        pixel_count = int(width or 0) * int(height or 0)
+        if pixel_count > processing_settings.max_pixels:
+            raise ValueError(
+                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+            )
+
+        # Return all information needed for rendering
+        return {
+            "width": width,
+            "height": height,
+            "item_crs": item_crs,
+            "crs": crs,
+            "bbox": bbox,
+        }
+
     def _get_items(
         self,
         id: str,
@@ -301,113 +410,39 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
-        # Get PROJ information about the Items and collect resolutions
-        item_crs = None
-        x_resolutions = []
-        y_resolutions = []
+        # Estimate dimensions based on items and spatial extent
+        dimensions = self._estimate_output_dimensions(
+            items, spatial_extent, width, height
+        )
 
-        for item in items:
+        # Extract values from the result
+        width = dimensions["width"]
+        height = dimensions["height"]
+        bbox = dimensions["bbox"]
+        crs = dimensions["crs"]
+
+        def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
             with SimpleSTACReader(item) as src_dst:
-                if item_crs is None:
-                    item_crs = src_dst.crs
-                elif not item_crs.equals(src_dst.crs):
-                    raise ValueError(
-                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
-                    )
+                return src_dst.part(bbox, **kwargs)
 
-                # Get resolution information
-                transform = src_dst.transform
-                x_resolutions.append(abs(transform.a))
-                y_resolutions.append(abs(transform.e))
-
-        # Get the highest resolution (smallest pixel size)
-        x_resolution = min(x_resolutions) if x_resolutions else None
-        y_resolution = min(y_resolutions) if y_resolutions else None
-
-        # Estimate output size in pixels using the spatial extent and resolution
-        if spatial_extent:
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            # Convert bounds to the same CRS if needed
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-
-            # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-            if item_crs and not item_crs.equals(crs):
-                # Calculate approximate resolution in target CRS
-                transformer = pyproj.Transformer.from_crs(
-                    item_crs.to_epsg(),
-                    crs.to_epsg(),
-                    always_xy=True,
-                )
-                # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
-                center_x = (bbox[0] + bbox[2]) / 2
-                center_y = (bbox[1] + bbox[3]) / 2
-                src_box = [
-                    center_x,
-                    center_y,
-                    center_x + x_resolution,
-                    center_y + y_resolution,
-                ]
-                dst_box = transformer.transform_bounds(*src_box)
-                x_resolution = abs(dst_box[2] - dst_box[0])
-                y_resolution = abs(dst_box[3] - dst_box[1])
-
-            # Calculate dimensions based on bounds and resolution
-            if not width and not height:
-                if x_resolution and y_resolution:
-                    width = int(round((bbox[2] - bbox[0]) / x_resolution))
-                    height = int(round((bbox[3] - bbox[1]) / y_resolution))
-                else:
-                    # Fallback to a reasonable default if resolution can't be determined
-                    width = 1024
-                    height = 1024
-
-            # Check if estimated pixel count exceeds maximum allowed
-            pixel_count = int(width or 0) * int(height or 0)
-            if pixel_count > processing_settings.max_pixels:
-                raise ValueError(
-                    f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
-                )
-
-            def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(bbox, **kwargs)
-
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            tasks = create_tasks(
-                _reader,
-                items,
-                MAX_THREADS,
-                bbox,
-                assets=bands,
-                bounds_crs=crs,
-                dst_crs=crs,
-                width=int(width) if width else width,
-                height=int(height) if height else height,
-                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        tasks = create_tasks(
+            _reader,
+            items,
+            MAX_THREADS,
+            bbox,
+            assets=bands,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        )
+        return {
+            _props_to_datename(asset["properties"]): val
+            for val, asset in filter_tasks(
+                tasks, allowed_exceptions=(TileOutsideBounds,)
             )
-            return {
-                _props_to_datename(asset["properties"]): val
-                for val, asset in filter_tasks(
-                    tasks, allowed_exceptions=(TileOutsideBounds,)
-                )
-            }
-
-        raise NotImplementedError("Can't use this backend without spatial extent")
+        }
 
     def load_collection_and_reduce(
         self,
@@ -438,108 +473,34 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
-        # Get PROJ information about the Items and collect resolutions
-        item_crs = None
-        x_resolutions = []
-        y_resolutions = []
+        # Estimate dimensions based on items and spatial extent
+        dimensions = self._estimate_output_dimensions(
+            items, spatial_extent, width, height
+        )
 
-        for item in items:
+        # Extract values from the result
+        width = dimensions["width"]
+        height = dimensions["height"]
+        bbox = dimensions["bbox"]
+        crs = dimensions["crs"]
+
+        def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
             with SimpleSTACReader(item) as src_dst:
-                if item_crs is None:
-                    item_crs = src_dst.crs
-                elif not item_crs.equals(src_dst.crs):
-                    raise ValueError(
-                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
-                    )
-
-                # Get resolution information
-                transform = src_dst.transform
-                x_resolutions.append(abs(transform.a))
-                y_resolutions.append(abs(transform.e))
-
-        # Get the highest resolution (smallest pixel size)
-        x_resolution = min(x_resolutions) if x_resolutions else None
-        y_resolution = min(y_resolutions) if y_resolutions else None
-
-        # Estimate output size in pixels using the spatial extent and resolution
-        if spatial_extent:
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            # Convert bounds to the same CRS if needed
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-
-            # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-            if item_crs and not item_crs.equals(crs):
-                # Calculate approximate resolution in target CRS
-                transformer = pyproj.Transformer.from_crs(
-                    item_crs.to_epsg(),
-                    crs.to_epsg(),
-                    always_xy=True,
-                )
-                # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
-                center_x = (bbox[0] + bbox[2]) / 2
-                center_y = (bbox[1] + bbox[3]) / 2
-                src_box = [
-                    center_x,
-                    center_y,
-                    center_x + x_resolution,
-                    center_y + y_resolution,
-                ]
-                dst_box = transformer.transform_bounds(*src_box)
-                x_resolution = abs(dst_box[2] - dst_box[0])
-                y_resolution = abs(dst_box[3] - dst_box[1])
-
-            # Calculate dimensions based on bounds and resolution
-            if not width and not height:
-                if x_resolution and y_resolution:
-                    width = int(round((bbox[2] - bbox[0]) / x_resolution))
-                    height = int(round((bbox[3] - bbox[1]) / y_resolution))
-                else:
-                    # Fallback to a reasonable default if resolution can't be determined
-                    width = 1024
-                    height = 1024
-
-            # Check if estimated pixel count exceeds maximum allowed
-            pixel_count = int(width or 0) * int(height or 0)
-            if pixel_count > processing_settings.max_pixels:
-                raise ValueError(
-                    f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+                return src_dst.part(
+                    bbox,
+                    assets=bands or list(items[0]["assets"]),
+                    **kwargs,
                 )
 
-            def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(
-                        bbox,
-                        assets=bands or list(items[0]["assets"]),
-                        **kwargs,
-                    )
-
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            img, _ = mosaic_reader(
-                items,
-                _reader,
-                bbox,
-                bounds_crs=crs,
-                dst_crs=crs,
-                width=int(width) if width else width,
-                height=int(height) if height else height,
-                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-                pixel_selection=PixelSelectionMethod[pixel_selection].value(),
-            )
-            return img
-
-        raise NotImplementedError("Can't use this backend without spatial extent")
+        img, _ = mosaic_reader(
+            items,
+            _reader,
+            bbox,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            pixel_selection=PixelSelectionMethod[pixel_selection].value(),
+        )
+        return img
