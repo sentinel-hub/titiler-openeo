@@ -1,8 +1,10 @@
 """Stac API backend."""
 
+import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
+import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
@@ -13,17 +15,18 @@ from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
+from rasterio.errors import RasterioIOError
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
-from rio_tiler.tasks import create_tasks, filter_tasks
+from rio_tiler.tasks import create_tasks
 from rio_tiler.types import BBox
 from urllib3 import Retry
 
 from .errors import NoDataAvailable, TemporalExtentEmpty
-from .processes.implementations.data_model import RasterStack
+from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import SimpleSTACReader
 from .settings import CacheSettings, PySTACSettings
@@ -124,18 +127,12 @@ class stacApiBackend:
                 }
             )
 
-        # Spectral bands
-        # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
-        if (
-            eo.EOExtension.has_extension(collection)
-            and "item_assets" in collection.extra_fields
-        ):
+        # bands
+        if "item_assets" in collection.extra_fields:
             ia.ItemAssetsExtension.add_to(collection)
             bands_name = set()
             for key, asset in collection.ext.item_assets.items():
-                if asset.properties.get("bands", None) or asset.properties.get(
-                    "eo:common_name", None
-                ):
+                if "data" in asset.properties.get("roles", []):
                     bands_name.add(key)
             if len(bands_name) > 0:
                 dims["spectral"] = dc.Dimension.from_dict(
@@ -301,8 +298,26 @@ class LoadCollection:
         if spatial_extent:
 
             def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(bbox, **kwargs)
+                max_retries = 4
+                retry_delay = 1.0  # seconds
+                retries = 0
+
+                while True:
+                    try:
+                        with SimpleSTACReader(item) as src_dst:
+                            return src_dst.part(bbox, **kwargs)
+                    except RasterioIOError as e:
+                        retries += 1
+                        if retries >= max_retries:
+                            # If we've reached max retries, re-raise the exception
+                            raise
+                        # Log the error and retry after a delay
+                        print(
+                            f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+                        )
+                        time.sleep(retry_delay)
+                        # Increase delay for next retry (exponential backoff)
+                        retry_delay *= 2
 
             bbox = [
                 spatial_extent.west,
@@ -325,12 +340,12 @@ class LoadCollection:
                 height=int(height) if height else height,
                 buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
             )
-            return {
-                _props_to_datename(asset["properties"]): val
-                for val, asset in filter_tasks(
-                    tasks, allowed_exceptions=(TileOutsideBounds,)
-                )
-            }
+            # Return a LazyRasterStack that will only execute the tasks when accessed
+            return LazyRasterStack(
+                tasks=tasks,
+                date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+                allowed_exceptions=(TileOutsideBounds,),
+            )
 
         raise NotImplementedError("Can't use this backend without spatial extent")
 
@@ -346,7 +361,7 @@ class LoadCollection:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
-    ) -> ImageData:
+    ) -> RasterStack:
         """Load Collection and return image."""
         items = self._get_items(
             id,
@@ -391,6 +406,303 @@ class LoadCollection:
                 buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
                 pixel_selection=PixelSelectionMethod[pixel_selection].value(),
             )
-            return img
+            # Return a RasterStack with a single entry
+            # Use a consistent key naming approach
+            key = "reduced"
+            if temporal_extent and temporal_extent[0]:
+                key = str(temporal_extent[0].to_numpy())
+            elif items and "properties" in items[0]:
+                key = _props_to_datename(items[0]["properties"])
+
+            return {key: img}
+
+        raise NotImplementedError("Can't use this backend without spatial extent")
+
+
+@define
+class LoadStac:
+    """Backend Specific STAC loaders."""
+
+    def _load_stac_object(self, url: str) -> pystac.STACObject:
+        """Load a STAC object from a URL.
+
+        Args:
+            url: URL to a static STAC catalog or a STAC API Collection
+
+        Returns:
+            The loaded STAC object
+
+        Raises:
+            ValueError: If the STAC object cannot be loaded
+        """
+        try:
+            return pystac.read_file(url)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to read STAC from URL: {url}. Error: {str(e)}"
+            ) from e
+
+    def _handle_collection_or_catalog(
+        self,
+        stac_obj: Union[pystac.Collection, pystac.Catalog],
+        spatial_extent: Optional[BoundingBox] = None,
+        temporal_extent: Optional[TemporalInterval] = None,
+        bands: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Handle a STAC Collection or Catalog.
+
+        Args:
+            stac_obj: The STAC Collection or Catalog
+            spatial_extent: Optional bounding box to limit the data
+            temporal_extent: Optional temporal interval to limit the data
+            bands: Optional list of band names to include
+            properties: Optional metadata properties to filter by
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A RasterStack containing the loaded data
+        """
+        collection_id = stac_obj.id
+        stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
+        load_collection = LoadCollection(stac_api=stac_api)
+
+        return load_collection.load_collection(
+            id=collection_id,
+            spatial_extent=spatial_extent,
+            temporal_extent=temporal_extent,
+            bands=bands,
+            properties=properties,
+            width=width,
+            height=height,
+            tile_buffer=tile_buffer,
+        )
+
+    def _filter_by_temporal_extent(
+        self, items: List[Dict], temporal_extent: TemporalInterval
+    ) -> List[Dict]:
+        """Filter items by temporal extent.
+
+        Args:
+            items: List of STAC items
+            temporal_extent: Temporal interval to filter by
+
+        Returns:
+            Filtered list of items
+
+        Raises:
+            TemporalExtentEmpty: If the temporal extent is empty
+        """
+        start_date = None
+        end_date = None
+        if temporal_extent[0] is not None:
+            start_date = str(temporal_extent[0].to_numpy())
+        if temporal_extent[1] is not None:
+            end_date = str(temporal_extent[1].to_numpy())
+
+        if not end_date and not start_date:
+            raise TemporalExtentEmpty()
+
+        filtered_items = []
+        for item in items:
+            item_datetime = item.get("properties", {}).get("datetime")
+            if not item_datetime:
+                continue
+
+            if start_date and end_date:
+                if start_date <= item_datetime < end_date:
+                    filtered_items.append(item)
+            elif start_date:
+                if start_date <= item_datetime:
+                    filtered_items.append(item)
+            elif end_date:
+                if item_datetime < end_date:
+                    filtered_items.append(item)
+
+        return filtered_items
+
+    def _filter_by_properties(self, items: List[Dict], properties: dict) -> List[Dict]:
+        """Filter items by properties.
+
+        Args:
+            items: List of STAC items
+            properties: Properties to filter by
+
+        Returns:
+            Filtered list of items
+        """
+        filtered_items = []
+        for item in items:
+            include = True
+            for prop_name, prop_value in properties.items():
+                if (
+                    prop_name not in item.get("properties", {})
+                    or item["properties"][prop_name] != prop_value
+                ):
+                    include = False
+                    break
+            if include:
+                filtered_items.append(item)
+        return filtered_items
+
+    def _process_spatial_extent(
+        self,
+        items: List[Dict],
+        spatial_extent: BoundingBox,
+        bands: Optional[list[str]] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Process spatial extent and create tasks.
+
+        Args:
+            items: List of STAC items
+            spatial_extent: Bounding box to limit the data
+            bands: Optional list of band names to include
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A LazyRasterStack containing the tasks
+
+        Raises:
+            NotImplementedError: If spatial_extent is not provided
+        """
+
+        def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+            retries = 0
+
+            while True:
+                try:
+                    with SimpleSTACReader(item) as src_dst:
+                        return src_dst.part(bbox, **kwargs)
+                except RasterioIOError as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        # If we've reached max retries, re-raise the exception
+                        raise
+                    # Log the error and retry after a delay
+                    print(
+                        f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+                    )
+                    time.sleep(retry_delay)
+                    # Increase delay for next retry (exponential backoff)
+                    retry_delay *= 2
+
+        bbox = [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
+        projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+        crs = to_rasterio_crs(projcrs)
+
+        tasks = create_tasks(
+            _reader,
+            items,
+            MAX_THREADS,
+            bbox,
+            assets=bands,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        )
+
+        return LazyRasterStack(
+            tasks=tasks,
+            date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+            allowed_exceptions=(TileOutsideBounds,),
+        )
+
+    def load_stac(
+        self,
+        url: str,
+        spatial_extent: Optional[BoundingBox] = None,
+        temporal_extent: Optional[TemporalInterval] = None,
+        bands: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        # private arguments
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Load data from a STAC catalog or API.
+
+        Args:
+            url: URL to a static STAC catalog or a STAC API Collection
+            spatial_extent: Optional bounding box to limit the data
+            temporal_extent: Optional temporal interval to limit the data
+            bands: Optional list of band names to include
+            properties: Optional metadata properties to filter by
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A RasterStack containing the loaded data
+
+        Raises:
+            NoDataAvailable: If no data is available for the given extents
+            TemporalExtentEmpty: If the temporal extent is empty
+            NotImplementedError: If spatial_extent is not provided
+        """
+        # Load the STAC catalog or item from the URL
+        stac_obj = self._load_stac_object(url)
+
+        # If the STAC object is a Collection or Catalog, use load_collection
+        if isinstance(stac_obj, (pystac.Collection, pystac.Catalog)):
+            return self._handle_collection_or_catalog(
+                stac_obj,
+                spatial_extent=spatial_extent,
+                temporal_extent=temporal_extent,
+                bands=bands,
+                properties=properties,
+                width=width,
+                height=height,
+                tile_buffer=tile_buffer,
+            )
+
+        # For a single item, use it directly
+        elif isinstance(stac_obj, pystac.Item):
+            items = [stac_obj.to_dict()]
+        else:
+            raise ValueError(f"Unsupported STAC object type: {type(stac_obj)}")
+
+        if not items:
+            raise NoDataAvailable("There is no data available in the STAC catalog.")
+
+        # Filter items by temporal extent if provided
+        if temporal_extent is not None:
+            items = self._filter_by_temporal_extent(items, temporal_extent)
+
+        # Filter items by properties if provided
+        if properties is not None:
+            items = self._filter_by_properties(items, properties)
+
+        if not items:
+            raise NoDataAvailable("There is no data available for the given extents.")
+
+        # Process spatial extent
+        if spatial_extent:
+            return self._process_spatial_extent(
+                items,
+                spatial_extent,
+                bands=bands,
+                width=width,
+                height=height,
+                tile_buffer=tile_buffer,
+            )
 
         raise NotImplementedError("Can't use this backend without spatial extent")
