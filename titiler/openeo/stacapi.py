@@ -247,7 +247,11 @@ class LoadCollection:
         """
         if not spatial_extent:
             raise ValueError("Missing required input: spatial_extent")
-            
+
+        # Test if items are empty
+        if not items:
+            raise ValueError("Missing required input: items")
+
         # Extract CRS and resolution information from items
         item_crs = None
         x_resolutions = []
@@ -283,7 +287,7 @@ class LoadCollection:
         ]
 
         # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-        if not item_crs.equals(crs):
+        if item_crs and not item_crs.equals(crs):
             # Calculate approximate resolution in target CRS
             transformer = pyproj.Transformer.from_crs(
                 item_crs,
@@ -314,7 +318,7 @@ class LoadCollection:
                 height = 1024
 
         # Check if estimated pixel count exceeds maximum allowed
-        pixel_count = int(width) * int(height)
+        pixel_count = int(width or 0) * int(height or 0)
         if pixel_count > processing_settings.max_pixels:
             raise ValueError(
                 f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
