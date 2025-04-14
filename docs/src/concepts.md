@@ -67,6 +67,39 @@ The reduce process comes with a parameter to choose the [pixel selection method]
 In openEO, the backend offers set of collections to be processed. `titiler-openeo` offers the possibiltiy to use external STAC API services to get the collections.
 It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API and get the collections. The STAC API is configured through `TITILER_OPENEO_SERVICE_STORE_URL` environment variable.
 
+### OpenEO Process Graph to CQL2-JSON Conversion
+
+When filtering STAC collections using OpenEO properties, `titiler-openeo` automatically converts OpenEO process graphs to CQL2-JSON format, which is the standard filtering format for STAC API. This conversion improves interoperability between OpenEO filters and STAC API, allowing for more complex and efficient filtering of collections.
+
+Supported operators include:
+- Comparison operators (`eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `between`)
+- Array operators (`in`, `array_contains`)
+- Pattern matching operators (`starts_with`, `ends_with`, `contains`)
+- Null checks (`is_null`)
+- Logical operators (`and`, `or`, `not`)
+
+For example, the following OpenEO process graph filter:
+```json
+{
+  "cloud_cover": {
+    "process_graph": {
+      "cc": {
+        "process_id": "lt",
+        "arguments": {"x": {"from_parameter": "value"}, "y": 20}
+      }
+    }
+  }
+}
+```
+
+Will be converted to the CQL2-JSON filter:
+```json
+{
+  "op": "<",
+  "args": [{"property": "properties.cloud_cover"}, 20]
+}
+```
+
 ## File formats
 
 Since the backend is built on top of the TiTiler engine, it supports the same output formats:
