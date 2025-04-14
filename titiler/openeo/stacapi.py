@@ -224,7 +224,7 @@ class LoadCollection:
     def _estimate_output_dimensions(
         self,
         items: List[Dict],
-        spatial_extent: Optional[BoundingBox],
+        spatial_extent: BoundingBox,
         width: Optional[int] = None,
         height: Optional[int] = None,
     ) -> Dict[str, Any]:
