@@ -269,7 +269,7 @@ class LoadCollection:
         y_resolution = min(y_resolutions) if y_resolutions else None
 
         if not spatial_extent:
-            raise NotImplementedError("Can't use this backend without spatial extent")
+            raise ValueError("Missing required input: spatial_extent")
 
         # Get target CRS and bounds
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
