@@ -442,7 +442,7 @@ class LoadCollection:
 
         for handler in handlers:
             # Call handler without checking process_id type first
-            condition = handler(process_id, prop_name, args)
+            condition = handler(process_id, prop_name, args)  # type: ignore
             if condition:
                 return condition
 
