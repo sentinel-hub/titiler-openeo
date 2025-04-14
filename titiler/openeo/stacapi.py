@@ -265,7 +265,13 @@ class LoadCollection:
             if not end_date and not start_date:
                 raise TemporalExtentEmpty()
 
-            query_params["datetime"] = [start_date, end_date]
+            # Create datetime string in the format "start_date/end_date"
+            if start_date and end_date:
+                query_params["datetime"] = f"{start_date}/{end_date}"
+            elif start_date:
+                query_params["datetime"] = f"{start_date}/.."
+            elif end_date:
+                query_params["datetime"] = f"../{end_date}"
 
         if properties is not None:
             # Convert OpenEO process graphs to STAC CQL2-JSON format
@@ -275,7 +281,9 @@ class LoadCollection:
 
         return self.stac_api.get_items(**query_params)
 
-    def _handle_comparison_operator(self, process_id: str, prop_name: str, args: dict) -> dict:
+    def _handle_comparison_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
         """Handle comparison operators like eq, lt, gt, etc."""
         operators = {
             "eq": "=",
@@ -285,13 +293,13 @@ class LoadCollection:
             "gt": ">",
             "gte": ">=",
         }
-        
+
         if process_id in operators:
             return {
                 "op": operators[process_id],
                 "args": [{"property": f"properties.{prop_name}"}, args.get("y")],
             }
-        
+
         if process_id == "between":
             return {
                 "op": "between",
@@ -301,10 +309,12 @@ class LoadCollection:
                     args.get("max"),
                 ],
             }
-            
+
         return None
 
-    def _handle_array_operator(self, process_id: str, prop_name: str, args: dict) -> dict:
+    def _handle_array_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
         """Handle array operators like in, array_contains."""
         if process_id in ["in", "array_contains"]:
             return {
@@ -316,7 +326,9 @@ class LoadCollection:
             }
         return None
 
-    def _handle_pattern_operator(self, process_id: str, prop_name: str, args: dict) -> dict:
+    def _handle_pattern_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
         """Handle pattern matching operators like starts_with, ends_with, contains."""
         if process_id == "starts_with":
             pattern = args.get("y", "") + "%"
@@ -338,7 +350,7 @@ class LoadCollection:
             }
         return None
 
-    def _handle_null_check(self, process_id: str, prop_name: str) -> dict:
+    def _handle_null_check(self, process_id: str, prop_name: str) -> Optional[Dict]:
         """Handle null check operators."""
         if process_id == "is_null":
             return {
@@ -347,11 +359,13 @@ class LoadCollection:
             }
         return None
 
-    def _handle_logical_operator(self, process_id: str, prop_name: str, args: dict, node_id: str) -> dict:
+    def _handle_logical_operator(
+        self, process_id: str, prop_name: str, args: dict, node_id: str
+    ) -> Optional[Dict]:
         """Handle logical operators like and, or, not."""
         if process_id not in ["and", "or", "not"]:
             return None
-            
+
         if process_id in ["and", "or"]:
             sub_conditions = []
             for sub_arg in args.get("expressions", []):
@@ -363,22 +377,25 @@ class LoadCollection:
 
             if sub_conditions:
                 return {"op": process_id, "args": sub_conditions}
-        
+
         elif process_id == "not":
             # Recursively process the negated condition
             sub_pg = {"process_graph": {f"sub_{node_id}": args.get("expression")}}
             sub_condition = self._convert_process_graph_to_cql2({prop_name: sub_pg})
             if sub_condition:
                 return {"op": "not", "args": [sub_condition]}
-                
+
         return None
 
-    def _handle_default_operator(self, prop_name: str, args: dict) -> dict:
+    def _handle_default_operator(self, prop_name: str, args: dict) -> Optional[Dict]:
         """Handle default case for unmatched processes."""
         # Try to extract target value from arguments
         target_value = None
-        for arg_name, arg_value in args.items():
-            if isinstance(arg_value, dict) and arg_value.get("from_parameter") == "value":
+        for _, arg_value in args.items():
+            if (
+                isinstance(arg_value, dict)
+                and arg_value.get("from_parameter") == "value"
+            ):
                 continue
             else:
                 target_value = arg_value
@@ -391,14 +408,11 @@ class LoadCollection:
             }
         return None
 
-    def _handle_direct_value(self, prop_name: str, value) -> dict:
+    def _handle_direct_value(self, prop_name: str, value) -> Dict:
         """Handle non-process graph case (direct value)."""
-        return {
-            "op": "=", 
-            "args": [{"property": f"properties.{prop_name}"}, value]
-        }
+        return {"op": "=", "args": [{"property": f"properties.{prop_name}"}, value]}
 
-    def _process_single_property(self, prop_name: str, process_graph) -> dict:
+    def _process_single_property(self, prop_name: str, process_graph) -> Optional[Dict]:
         """Process a single property in the process graph."""
         # Handle non-process graph case (direct value)
         if not isinstance(process_graph, dict) or "process_graph" not in process_graph:
@@ -421,17 +435,17 @@ class LoadCollection:
             self._handle_array_operator,
             self._handle_pattern_operator,
             self._handle_null_check,
-            lambda p_id, p_name, a: self._handle_logical_operator(p_id, p_name, a, node_id),
+            lambda p_id, p_name, a: self._handle_logical_operator(
+                p_id, p_name, a, node_id
+            ),
         ]
-        
+
         for handler in handlers:
-            if process_id in ["and", "or", "not"]:
-                condition = handler(process_id, prop_name, args)
-            else:
-                condition = handler(process_id, prop_name, args)
+            # Call handler without checking process_id type first
+            condition = handler(process_id, prop_name, args)
             if condition:
                 return condition
-                
+
         # Try default handler as fallback
         return self._handle_default_operator(prop_name, args)
 
@@ -455,12 +469,12 @@ class LoadCollection:
             return condition if condition else {}
 
         # For multiple properties, combine with AND
-        cql2_filter = {"op": "and", "args": []}
+        cql2_filter: Dict[str, Any] = {"op": "and", "args": []}
         for prop_name, process_graph in properties.items():
             condition = self._process_single_property(prop_name, process_graph)
             if condition:
                 cql2_filter["args"].append(condition)
-                
+
         return cql2_filter
 
     def load_collection(
@@ -580,7 +594,9 @@ class LoadCollection:
                 width=int(width) if width else width,
                 height=int(height) if height else height,
                 buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-                pixel_selection=PixelSelectionMethod[pixel_selection].value(),
+                pixel_selection=PixelSelectionMethod[
+                    pixel_selection or "first"
+                ].value(),
             )
             return img
 
