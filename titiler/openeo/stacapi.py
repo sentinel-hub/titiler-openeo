@@ -245,6 +245,9 @@ class LoadCollection:
                 - crs: Target CRS to use
                 - bbox: Bounding box as a list [west, south, east, north]
         """
+        if not spatial_extent:
+            raise ValueError("Missing required input: spatial_extent")
+            
         # Extract CRS and resolution information from items
         item_crs = None
         x_resolutions = []
@@ -260,16 +263,12 @@ class LoadCollection:
                     )
 
                 # Get resolution information
-                transform = src_dst.transform
-                x_resolutions.append(abs(transform.a))
-                y_resolutions.append(abs(transform.e))
+                x_resolutions.append(abs(src_dst.transform.a))
+                y_resolutions.append(abs(src_dst.transform.e))
 
         # Get the highest resolution (smallest pixel size)
         x_resolution = min(x_resolutions) if x_resolutions else None
         y_resolution = min(y_resolutions) if y_resolutions else None
-
-        if not spatial_extent:
-            raise ValueError("Missing required input: spatial_extent")
 
         # Get target CRS and bounds
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
@@ -284,11 +283,11 @@ class LoadCollection:
         ]
 
         # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-        if item_crs and not item_crs.equals(crs):
+        if not item_crs.equals(crs):
             # Calculate approximate resolution in target CRS
             transformer = pyproj.Transformer.from_crs(
-                item_crs.to_epsg(),
-                crs.to_epsg(),
+                item_crs,
+                crs,
                 always_xy=True,
             )
             # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
@@ -315,7 +314,7 @@ class LoadCollection:
                 height = 1024
 
         # Check if estimated pixel count exceeds maximum allowed
-        pixel_count = int(width or 0) * int(height or 0)
+        pixel_count = int(width) * int(height)
         if pixel_count > processing_settings.max_pixels:
             raise ValueError(
                 f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
