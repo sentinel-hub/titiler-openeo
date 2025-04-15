@@ -18,7 +18,7 @@ from pystac_client.stac_api_io import StacApiIO
 from rasterio.errors import RasterioIOError
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
-from rio_tiler.models import ImageData
+from rio_tiler.models import ImageData, to_coordsbbox
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
@@ -222,6 +222,7 @@ class LoadCollection:
         self,
         items: List[Dict],
         spatial_extent: BoundingBox,
+        bands: Optional[list[str]],
         width: Optional[int] = None,
         height: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -248,6 +249,10 @@ class LoadCollection:
         # Test if items are empty
         if not items:
             raise ValueError("Missing required input: items")
+        
+        # Check if bands are empty
+        if not bands:
+            raise ValueError("Missing required input: bands")
 
         # Extract CRS and resolution information from items
         item_crs = None
@@ -258,14 +263,28 @@ class LoadCollection:
             with SimpleSTACReader(item) as src_dst:
                 if item_crs is None:
                     item_crs = src_dst.crs
-                elif not item_crs.equals(src_dst.crs):
+                elif item_crs != src_dst.crs:
                     raise ValueError(
                         f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
                     )
 
-                # Get resolution information
-                x_resolutions.append(abs(src_dst.transform.a))
-                y_resolutions.append(abs(src_dst.transform.e))
+                # Get resolution information at item level first if available
+                if src_dst.transform:
+                    x_resolutions.append(abs(src_dst.transform.a))
+                    y_resolutions.append(abs(src_dst.transform.e))
+                # If no transform, check for assets
+                else:
+                    src_dst_assets_info = src_dst.info(bands)
+                    for _,asset in src_dst_assets_info.items():
+                        asset_width = asset.model_extra.get("width")
+                        asset_height = asset.model_extra.get("height")
+                        if asset.bounds:
+                            x_resolutions.append(
+                                abs((asset.bounds[2] - asset.bounds[0]) / asset_width)
+                            )
+                            y_resolutions.append(
+                                abs((asset.bounds[3] - asset.bounds[1]) / asset_height)
+                            )
 
         # Get the highest resolution (smallest pixel size)
         x_resolution = min(x_resolutions) if x_resolutions else None
@@ -284,7 +303,7 @@ class LoadCollection:
         ]
 
         # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-        if item_crs and not item_crs.equals(crs):
+        if item_crs and item_crs != crs:
             # Calculate approximate resolution in target CRS
             transformer = pyproj.Transformer.from_crs(
                 item_crs,
@@ -639,7 +658,7 @@ class LoadCollection:
 
         # Estimate dimensions based on items and spatial extent
         dimensions = self._estimate_output_dimensions(
-            items, spatial_extent, width, height
+            items, spatial_extent, bands, width, height
         )
 
         # Extract values from the result
@@ -704,7 +723,7 @@ class LoadCollection:
 
         # Estimate dimensions based on items and spatial extent
         dimensions = self._estimate_output_dimensions(
-            items, spatial_extent, width, height
+            items, spatial_extent, bands, width, height
         )
 
         # Extract values from the result
@@ -718,6 +737,7 @@ class LoadCollection:
             self._reader,
             bbox,
             bounds_crs=crs,
+            assets=bands,
             dst_crs=crs,
             width=int(width) if width else width,
             height=int(height) if height else height,

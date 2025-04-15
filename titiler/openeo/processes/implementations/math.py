@@ -20,7 +20,9 @@ __all__ = [
     "divide",
     "e",
     "exp",
+    "first",
     "floor",
+    "last",
     "linear_scale_range",
     "ln",
     "log",
@@ -222,3 +224,32 @@ def linear_scale_range(
     return ((x - inputMin) / (inputMax - inputMin)) * (
         outputMax - outputMin
     ) + outputMin
+
+def first(data):
+    """Return the first element of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        first_elements = {k: v.array[0] for k, v in data.items()}
+        # return a multi-dimensional array
+        return numpy.stack(list(first_elements.values()), axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return data[0]
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return data[0].filled()
+    else:
+        raise TypeError("Unsupported data type for first function.")
+
+def last(data):
+    """Return the last element of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        last_elements = {k: v.array[-1] for k, v in data.items()}
+        # return a multi-dimensional array
+        return numpy.stack(list(last_elements.values()), axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return data[-1]
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return data[-1].filled()
+    else:
+        raise TypeError("Unsupported data type for last function.")
+    

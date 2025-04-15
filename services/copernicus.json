@@ -236,72 +236,116 @@
             "enabled": true,
             "process": {
                 "process_graph": {
-                  "load1": {
-                    "process_id": "load_collection_and_reduce",
-                    "arguments": {
-                      "bands": [
+                    "load1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
                                 "B04",
                                 "B08"
                             ],
-                      "properties": {},
-                      "id": "sentinel-2-global-mosaics",
-                      "spatial_extent": {
-                        "east": {
-                          "from_parameter": "spatial_extent_east"
-                        },
-                        "north": {
-                          "from_parameter": "spatial_extent_north"
-                        },
-                        "south": {
-                          "from_parameter": "spatial_extent_south"
-                        },
-                        "west": {
-                          "from_parameter": "spatial_extent_west"
-                        },
-                        "crs": {
-                          "from_parameter": "spatial_extent_crs"
+                            "properties": {},
+                            "id": "sentinel-2-global-mosaics",
+                            "spatial_extent": {
+                                "east": {
+                                    "from_parameter": "spatial_extent_east"
+                                },
+                                "north": {
+                                    "from_parameter": "spatial_extent_north"
+                                },
+                                "south": {
+                                    "from_parameter": "spatial_extent_south"
+                                },
+                                "west": {
+                                    "from_parameter": "spatial_extent_west"
+                                },
+                                "crs": {
+                                    "from_parameter": "spatial_extent_crs"
+                                }
+                            },
+                            "temporal_extent": [
+                                "2022-04-21T00:00:00Z",
+                                "2022-05-01T00:00:00Z"
+                            ]
                         }
-                      },
-                      "temporal_extent": [
-                        "2022-04-21T00:00:00Z",
-                        "2022-05-01T00:00:00Z"
-                      ]
-                    }
-                  },
-                  "ndvi": {
-                    "process_id": "ndvi",
-                    "arguments": {
-                      "data": {
-                        "from_node": "load1"
-                      },
-                      "nir": 1,
-                      "red": 0
-                    }
-                  },
-                  "colormap": {
-                    "process_id": "colormap",
-                    "arguments": {
-                      "data": {
-                        "from_node": "ndvi"
-                      },
-                      "colormap": [
-                        [[-2, -1], [0, 255, 0, 255]],
-                        [[-1, 0], [0, 255, 0, 255]],
-                        [[0, 0.5], [255, 0, 0, 255]],
-                        [[0.5, 1.1], [255, 255, 0, 255]]
-                      ]
-                    }
-                  },
-                  "save5": {
-                    "process_id": "save_result",
-                    "arguments": {
-                      "data": {
-                        "from_node": "colormap"
-                      },
-                      "format": "PNG"
                     },
-                    "result": true
-                  }
+                    "ndvi": {
+                        "process_id": "ndvi",
+                        "arguments": {
+                            "data": {
+                                "from_node": "load1"
+                            },
+                            "nir": 1,
+                            "red": 0
+                        }
+                    },
+                    "colormap": {
+                        "process_id": "colormap",
+                        "arguments": {
+                            "data": {
+                                "from_node": "ndvi"
+                            },
+                            "colormap": [
+                                [
+                                    [
+                                        -2,
+                                        -1
+                                    ],
+                                    [
+                                        0,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        -1,
+                                        0
+                                    ],
+                                    [
+                                        0,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        0,
+                                        0.5
+                                    ],
+                                    [
+                                        255,
+                                        0,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        0.5,
+                                        1.1
+                                    ],
+                                    [
+                                        255,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ]
+                            ]
+                        }
+                    },
+                    "save5": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "colormap"
+                            },
+                            "format": "PNG"
+                        },
+                        "result": true
+                    }
                 },
                 "parameters": []
             }

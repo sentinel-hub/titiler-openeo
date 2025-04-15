@@ -932,13 +932,22 @@ class EndpointsFactory(BaseFactory):
                 process_registry=self.process_registry
             )
             img = pg_callable()
-            return Response(img, media_type=media_type)
+            return Response(img.data, media_type=media_type)
 
 
 def _get_media_type(process_graph: Dict[str, Any]) -> str:
     for _, node in process_graph.items():
         if node["process_id"] == "save_result":
-            return "image/png" if node["arguments"]["format"] == "png" else "image/jpeg"
+            if node["arguments"]["format"] == "PNG":
+                return "image/png"
+            elif node["arguments"]["format"] == "JPEG":
+                return "image/jpeg"
+            elif node["arguments"]["format"] == "JPEG":
+                return "image/jpg"
+            elif node["arguments"]["format"] == "GTiff":
+                return "image/tiff"
+            else:
+                return "application/PNG"
 
     raise ValueError("Couldn't find a `save_result` process in the process graph")
 

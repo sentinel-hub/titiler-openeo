@@ -1,0 +1,100 @@
+{
+    "id": "last",
+    "title": "last",
+    "description": "Returns the last element of an array. If the array is empty, `null` is returned.\n\nNo-data values are taken into account so that `null` is returned if any element is such a value.",
+    "summary": "Get the last element of an array",
+    "categories": [
+        "math"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array of numbers.",
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            }
+        }
+    ],
+    "returns": {
+        "description": "The last element of the array.",
+        "schema": {
+            "type": [
+                "number",
+                "null"
+            ]
+        }
+    },
+    "examples": [
+        {
+            "arguments": {
+                "data": [
+                    1,
+                    0,
+                    3,
+                    2
+                ]
+            },
+            "returns": 2
+        },
+        {
+            "arguments": {
+                "data": [
+                    9,
+                    2.5,
+                    null,
+                    -2.5
+                ]
+            },
+            "returns": -2.5
+        },
+        {
+            "arguments": {
+                "data": [
+                    null,
+                    null
+                ]
+            },
+            "returns": null
+        },
+        {
+            "description": "The input array is empty: return `null`.",
+            "arguments": {
+                "data": []
+            },
+            "returns": null
+        }
+    ],
+    "links": [
+        {
+            "rel": "about",
+            "href": "https://en.wikipedia.org/wiki/Last_element",
+            "title": "Last element explained by Wikipedia"
+        }
+    ],
+    "process_graph": {
+        "last": {
+            "process_id": "last",
+            "arguments": {
+                "data": {
+                    "from_parameter": "data"
+                }
+            }
+        },
+        "if": {
+            "process_id": "if",
+            "arguments": {
+                "value": {
+                    "from_node": "last"
+                },
+                "accept": null
+            },
+            "result": true
+        }
+    }
+}

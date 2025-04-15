@@ -119,9 +119,7 @@ def apply_pixel_selection(
 def _reduce_temporal_dimension(
     data: RasterStack,
     reducer: Callable,
-    dimension: str,
-    context: Optional[Dict[str, Any]] = None,
-) -> ImageData:
+) -> RasterStack:
     """Reduce the temporal dimension of a RasterStack.
 
     Args:
@@ -131,7 +129,7 @@ def _reduce_temporal_dimension(
         context: Additional data to be passed to the reducer
 
     Returns:
-        An ImageData with the temporal dimension reduced
+        A RasterStack with the temporal dimension reduced
 
     Raises:
         ValueError: If the data is not a valid RasterStack
@@ -142,28 +140,35 @@ def _reduce_temporal_dimension(
         )
 
     # Extract arrays from all images in the stack and create labeled arrays for the reducer
-    labeled_arrays = [{"label": key, "data": img.array} for key, img in data.items()]
+    # labeled_arrays = [{"label": key, "data": img.array} for key, img in data.items()]
 
     # Apply the reducer to the labeled arrays
-    context = context or {}
-    reduced_array = reducer(labeled_arrays, context)
+    reduced_array = reducer(data=data)
 
-    # Get metadata from the first image in the stack
-    first_key = next(iter(data))
-    first_img = data[first_key]
+    # Create a new stack with the reduced data
+    if not isinstance(reduced_array, numpy.ndarray):
+        raise ValueError(
+            "The reducer must return a numpy array for temporal dimension reduction"
+        )
+    if reduced_array.shape[0] != 1:
+        raise ValueError(
+            "The reduced data must have the same first dimension as the input stack"
+        )
 
-    # Create a new ImageData with the reduced array
-    return ImageData(
-        reduced_array,
-        assets=list(data.keys()),
-        crs=first_img.crs,
-        bounds=first_img.bounds,
-        band_names=first_img.band_names if first_img.band_names is not None else [],
-        metadata={
-            "reduced_dimension": dimension,
-            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-        },
-    )
+    return {
+        key: ImageData(
+            reduced_array[0],
+            assets=[key],
+            crs=img.crs,
+            bounds=img.bounds,
+            band_names=img.band_names if img.band_names is not None else [],
+            metadata={
+                "reduced_dimension": "temporal",
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
+        for key, img in data.items()
+    }
 
 
 def _reduce_spectral_dimension_single_image(
@@ -274,9 +279,9 @@ def reduce_dimension(
     if dim_lower in ["t", "temporal", "time"]:
         # If there's only one item in the stack, there's no temporal dimension to reduce
         if len(data) <= 1:
-            raise DimensionNotAvailable(dimension)
+            return data
 
-        return _reduce_temporal_dimension(data, reducer, dimension, context)
+        return _reduce_temporal_dimension(data, reducer)
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
