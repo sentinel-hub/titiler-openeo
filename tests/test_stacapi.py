@@ -61,7 +61,9 @@ def test_load_collection_pixel_threshold(monkeypatch):
             "type": "Polygon",
             "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {"datetime": "2021-01-01T00:00:00Z"},
+        "properties": {"datetime": "2021-01-01T00:00:00Z",
+                       "proj:crs": "EPSG:4326",
+                       "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0]},
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
@@ -91,6 +93,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
             spatial_extent=BoundingBox(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
+            bands=["B01"],
             width=5000,
             height=5000,
         )

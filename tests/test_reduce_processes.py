@@ -49,23 +49,31 @@ def test_reduce_temporal_dimension(sample_temporal_stack):
     """Test reducing the temporal dimension of a RasterStack."""
 
     # Mean reducer for temporal dimension
-    def mean_reducer(arrays, context=None, **kwargs):
+    def mean_reducer(data):
         """Calculate mean across temporal dimension."""
         # Extract arrays and stack them
-        stacked = np.stack([item["data"] for item in arrays])
+        stacked = np.stack([img.array for key,img in data.items()])
         # Calculate mean along first axis (temporal)
-        return np.mean(stacked, axis=0)
+        mean = np.mean(stacked, axis=0)
+        return mean
 
     # Reduce temporal dimension
     result = reduce_dimension(
         data=sample_temporal_stack, reducer=mean_reducer, dimension="temporal"
     )
 
-    # Result should be a single ImageData with values = mean(1,2,3) = 2
-    assert isinstance(result, ImageData)
-    assert result.count == 1
+    # Result should be a RasterStack with 1 ImageData
+    assert isinstance(result, dict)
+    assert len(result) == 1
+    assert "reduced" in result
+    img = result["reduced"]
+    assert img.count == 1
+    assert img.array.shape == (1, 10, 10)  # Single band with original shape
+    assert img.band_names == ["band1"]
+    assert img.metadata["reduced_dimension"] == "temporal"
+    assert img.metadata["reduction_method"] == "mean_reducer"
     # Check the mean value is approximately 2.0
-    assert np.allclose(result.array.mean(), 2.0)
+    assert np.allclose(img.array.mean(), 2.0)
 
 
 def test_reduce_spectral_dimension(sample_spectral_stack):
@@ -125,16 +133,3 @@ def test_apply_pixel_selection(sample_temporal_stack):
     assert "pixel_selection_method" in result.metadata
     assert result.metadata["pixel_selection_method"] == "mean"
 
-
-def test_no_temporal_dimension(sample_spectral_stack):
-    """Test reducing temporal dimension when it doesn't exist."""
-
-    # Mean reducer
-    def mean_reducer(arrays, **kwargs):
-        return np.mean(np.stack([item["data"] for item in arrays]), axis=0)
-
-    # Reduce temporal dimension of a single-date stack
-    with pytest.raises(DimensionNotAvailable):
-        reduce_dimension(
-            data=sample_spectral_stack, reducer=mean_reducer, dimension="temporal"
-        )

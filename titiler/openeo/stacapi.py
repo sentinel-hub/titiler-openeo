@@ -18,7 +18,7 @@ from pystac_client.stac_api_io import StacApiIO
 from rasterio.errors import RasterioIOError
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
-from rio_tiler.models import ImageData, to_coordsbbox
+from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
@@ -28,7 +28,7 @@ from urllib3 import Retry
 from .errors import NoDataAvailable, TemporalExtentEmpty
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
-from .reader import SimpleSTACReader
+from .reader import SimpleSTACReader, _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
 pystac_settings = PySTACSettings()
@@ -218,136 +218,6 @@ class LoadCollection:
 
     stac_api: stacApiBackend = field()
 
-    def _estimate_output_dimensions(
-        self,
-        items: List[Dict],
-        spatial_extent: BoundingBox,
-        bands: Optional[list[str]],
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Estimate output dimensions based on items and spatial extent.
-
-        Args:
-            items: List of STAC items
-            spatial_extent: Bounding box for the output
-            width: Optional user-specified width
-            height: Optional user-specified height
-
-        Returns:
-            Dictionary containing:
-                - width: Estimated or specified width
-                - height: Estimated or specified height
-                - item_crs: CRS of the items
-                - crs: Target CRS to use
-                - bbox: Bounding box as a list [west, south, east, north]
-        """
-        if not spatial_extent:
-            raise ValueError("Missing required input: spatial_extent")
-
-        # Test if items are empty
-        if not items:
-            raise ValueError("Missing required input: items")
-        
-        # Check if bands are empty
-        if not bands:
-            raise ValueError("Missing required input: bands")
-
-        # Extract CRS and resolution information from items
-        item_crs = None
-        x_resolutions = []
-        y_resolutions = []
-
-        for item in items:
-            with SimpleSTACReader(item) as src_dst:
-                if item_crs is None:
-                    item_crs = src_dst.crs
-                elif item_crs != src_dst.crs:
-                    raise ValueError(
-                        f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
-                    )
-
-                # Get resolution information at item level first if available
-                if src_dst.transform:
-                    x_resolutions.append(abs(src_dst.transform.a))
-                    y_resolutions.append(abs(src_dst.transform.e))
-                # If no transform, check for assets
-                else:
-                    src_dst_assets_info = src_dst.info(bands)
-                    for _,asset in src_dst_assets_info.items():
-                        asset_width = asset.model_extra.get("width")
-                        asset_height = asset.model_extra.get("height")
-                        if asset.bounds:
-                            x_resolutions.append(
-                                abs((asset.bounds[2] - asset.bounds[0]) / asset_width)
-                            )
-                            y_resolutions.append(
-                                abs((asset.bounds[3] - asset.bounds[1]) / asset_height)
-                            )
-
-        # Get the highest resolution (smallest pixel size)
-        x_resolution = min(x_resolutions) if x_resolutions else None
-        y_resolution = min(y_resolutions) if y_resolutions else None
-
-        # Get target CRS and bounds
-        projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-        crs = to_rasterio_crs(projcrs)
-
-        # Convert bounds to the same CRS if needed
-        bbox = [
-            spatial_extent.west,
-            spatial_extent.south,
-            spatial_extent.east,
-            spatial_extent.north,
-        ]
-
-        # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-        if item_crs and item_crs != crs:
-            # Calculate approximate resolution in target CRS
-            transformer = pyproj.Transformer.from_crs(
-                item_crs,
-                crs,
-                always_xy=True,
-            )
-            # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
-            center_x = (bbox[0] + bbox[2]) / 2
-            center_y = (bbox[1] + bbox[3]) / 2
-            src_box = [
-                center_x,
-                center_y,
-                center_x + x_resolution,
-                center_y + y_resolution,
-            ]
-            dst_box = transformer.transform_bounds(*src_box)
-            x_resolution = abs(dst_box[2] - dst_box[0])
-            y_resolution = abs(dst_box[3] - dst_box[1])
-
-        # Calculate dimensions based on bounds and resolution if not specified
-        if not width and not height:
-            if x_resolution and y_resolution:
-                width = int(round((bbox[2] - bbox[0]) / x_resolution))
-                height = int(round((bbox[3] - bbox[1]) / y_resolution))
-            else:
-                # Fallback to a reasonable default if resolution can't be determined
-                width = 1024
-                height = 1024
-
-        # Check if estimated pixel count exceeds maximum allowed
-        pixel_count = int(width or 0) * int(height or 0)
-        if pixel_count > processing_settings.max_pixels:
-            raise ValueError(
-                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
-            )
-
-        # Return all information needed for rendering
-        return {
-            "width": width,
-            "height": height,
-            "item_crs": item_crs,
-            "crs": crs,
-            "bbox": bbox,
-        }
 
     def _get_items(
         self,
@@ -606,27 +476,6 @@ class LoadCollection:
 
         return cql2_filter
 
-    def _reader(self, item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-        max_retries = 4
-        retry_delay = 1.0  # seconds
-        retries = 0
-
-        while True:
-            try:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(bbox, **kwargs)
-            except RasterioIOError as e:
-                retries += 1
-                if retries >= max_retries:
-                    # If we've reached max retries, re-raise the exception
-                    raise
-                # Log the error and retry after a delay
-                print(
-                    f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
-                )
-                time.sleep(retry_delay)
-                # Increase delay for next retry (exponential backoff)
-                retry_delay *= 2
 
     def load_collection(
         self,
@@ -657,7 +506,7 @@ class LoadCollection:
             )
 
         # Estimate dimensions based on items and spatial extent
-        dimensions = self._estimate_output_dimensions(
+        dimensions = _estimate_output_dimensions(
             items, spatial_extent, bands, width, height
         )
 
@@ -668,7 +517,7 @@ class LoadCollection:
         crs = dimensions["crs"]
 
         tasks = create_tasks(
-            self._reader,
+            _reader,
             items,
             MAX_THREADS,
             bbox,
@@ -722,7 +571,7 @@ class LoadCollection:
             )
 
         # Estimate dimensions based on items and spatial extent
-        dimensions = self._estimate_output_dimensions(
+        dimensions = _estimate_output_dimensions(
             items, spatial_extent, bands, width, height
         )
 
@@ -734,7 +583,7 @@ class LoadCollection:
 
         img, _ = mosaic_reader(
             items,
-            self._reader,
+            _reader,
             bbox,
             bounds_crs=crs,
             assets=bands,
@@ -911,29 +760,6 @@ class LoadStac:
         Raises:
             NotImplementedError: If spatial_extent is not provided
         """
-
-        def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-            max_retries = 3
-            retry_delay = 1.0  # seconds
-            retries = 0
-
-            while True:
-                try:
-                    with SimpleSTACReader(item) as src_dst:
-                        return src_dst.part(bbox, **kwargs)
-                except RasterioIOError as e:
-                    retries += 1
-                    if retries >= max_retries:
-                        # If we've reached max retries, re-raise the exception
-                        raise
-                    # Log the error and retry after a delay
-                    print(
-                        f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
-                    )
-                    time.sleep(retry_delay)
-                    # Increase delay for next retry (exponential backoff)
-                    retry_delay *= 2
-
         bbox = [
             spatial_extent.west,
             spatial_extent.south,
@@ -1042,8 +868,8 @@ class LoadStac:
             )
 
         # Estimate dimensions based on items and spatial extent
-        dimensions = self._estimate_output_dimensions(
-            items, spatial_extent, width, height
+        dimensions = _estimate_output_dimensions(
+            items, spatial_extent, bands, width, height
         )
 
         # Extract values from the result
@@ -1052,13 +878,6 @@ class LoadStac:
         bbox = dimensions["bbox"]
         crs = dimensions["crs"]
 
-        def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-            with SimpleSTACReader(item) as src_dst:
-                return src_dst.part(
-                    bbox,
-                    assets=bands or list(items[0]["assets"]),
-                    **kwargs,
-                )
 
         img, _ = mosaic_reader(
             items,
@@ -1069,6 +888,5 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-            pixel_selection=PixelSelectionMethod[pixel_selection].value(),
         )
         return img

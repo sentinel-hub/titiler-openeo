@@ -225,6 +225,7 @@ def linear_scale_range(
         outputMax - outputMin
     ) + outputMin
 
+
 def first(data):
     """Return the first element of the array."""
     # Handle RasterStack
@@ -239,6 +240,7 @@ def first(data):
     else:
         raise TypeError("Unsupported data type for first function.")
 
+
 def last(data):
     """Return the last element of the array."""
     # Handle RasterStack
@@ -252,4 +254,3 @@ def last(data):
         return data[-1].filled()
     else:
         raise TypeError("Unsupported data type for last function.")
-    

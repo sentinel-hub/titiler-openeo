@@ -60,9 +60,9 @@ def apply_pixel_selection(
             pixsel_method.height = img.height
             pixsel_method.count = img.count
 
-        assert (
-            img.count == pixsel_method.count
-        ), "Assets HAVE TO have the same number of bands"
+        assert img.count == pixsel_method.count, (
+            "Assets HAVE TO have the same number of bands"
+        )
 
         if any(
             [
@@ -154,20 +154,21 @@ def _reduce_temporal_dimension(
         raise ValueError(
             "The reduced data must have the same first dimension as the input stack"
         )
+    
+    first_img = next(iter(data.values()))
 
     return {
-        key: ImageData(
+        "reduced": ImageData(
             reduced_array[0],
-            assets=[key],
-            crs=img.crs,
-            bounds=img.bounds,
-            band_names=img.band_names if img.band_names is not None else [],
+            assets=first_img.assets,
+            crs=first_img.crs,
+            bounds=first_img.bounds,
+            band_names=first_img.band_names,
             metadata={
                 "reduced_dimension": "temporal",
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
             },
         )
-        for key, img in data.items()
     }
 
 
