@@ -12,18 +12,17 @@ from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
-from rio_tiler.constants import MAX_THREADS, WEB_MERCATOR_TMS, WGS84_CRS
+from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import (
     AssetAsBandError,
     ExpressionMixingWarning,
     InvalidAssetName,
     MissingAssets,
-    TileOutsideBounds,
 )
 from rio_tiler.io import Reader
 from rio_tiler.io.base import BaseReader, MultiBaseReader
 from rio_tiler.models import ImageData
-from rio_tiler.tasks import create_tasks, multi_arrays
+from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
 
@@ -56,9 +55,9 @@ def _estimate_output_dimensions(
             - bbox: Bounding box as a list [west, south, east, north]
     """
     from .settings import ProcessingSettings
-    
+
     processing_settings = ProcessingSettings()
-    
+
     if not spatial_extent:
         raise ValueError("Missing required input: spatial_extent")
 
@@ -88,19 +87,18 @@ def _estimate_output_dimensions(
             if src_dst.transform:
                 x_resolutions.append(abs(src_dst.transform.a))
                 y_resolutions.append(abs(src_dst.transform.e))
-            # If no transform, check for assets
+            # If no transform, check for assets metadata
             else:
-                src_dst_assets_info = src_dst.info(bands)
-                for _, asset in src_dst_assets_info.items():
-                    asset_width = asset.model_extra.get("width")
-                    asset_height = asset.model_extra.get("height")
-                    if asset.bounds:
-                        x_resolutions.append(
-                            abs((asset.bounds[2] - asset.bounds[0]) / asset_width)
-                        )
-                        y_resolutions.append(
-                            abs((asset.bounds[3] - asset.bounds[1]) / asset_height)
-                        )
+                for _, asset in item.get("assets", {}).items():
+                    # Get resolution from asset metadata
+                    asset_transform = asset.get("proj:transform")
+                    if asset_transform:
+                        x_resolutions.append(abs(asset_transform[0]))
+                        y_resolutions.append(abs(asset_transform[4]))
+                    else:
+                        # Default to 1024x1024 if no resolution is found
+                        x_resolutions.append(1024)
+                        y_resolutions.append(1024)
 
     # Get the highest resolution (smallest pixel size)
     x_resolution = min(x_resolutions) if x_resolutions else None
@@ -165,15 +163,16 @@ def _estimate_output_dimensions(
         "bbox": bbox,
     }
 
+
 def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
-    
+
     Args:
         item: STAC item dictionary
         bbox: Bounding box to read
         **kwargs: Additional keyword arguments to pass to the reader
-        
+
     Returns:
         ImageData object
     """
@@ -197,6 +196,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
             time.sleep(retry_delay)
             # Increase delay for next retry (exponential backoff)
             retry_delay *= 2
+
 
 @attr.s
 class SimpleSTACReader(MultiBaseReader):

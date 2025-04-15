@@ -1,6 +1,5 @@
 """Stac API backend."""
 
-import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
@@ -15,20 +14,17 @@ from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
-from rasterio.errors import RasterioIOError
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
-from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
-from rio_tiler.types import BBox
 from urllib3 import Retry
 
 from .errors import NoDataAvailable, TemporalExtentEmpty
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
-from .reader import SimpleSTACReader, _estimate_output_dimensions, _reader
+from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
 pystac_settings = PySTACSettings()
@@ -217,7 +213,6 @@ class LoadCollection:
     """Backend Specific Collection loaders."""
 
     stac_api: stacApiBackend = field()
-
 
     def _get_items(
         self,
@@ -475,7 +470,6 @@ class LoadCollection:
                 cql2_filter["args"].append(condition)
 
         return cql2_filter
-
 
     def load_collection(
         self,
@@ -877,7 +871,6 @@ class LoadStac:
         height = dimensions["height"]
         bbox = dimensions["bbox"]
         crs = dimensions["crs"]
-
 
         img, _ = mosaic_reader(
             items,

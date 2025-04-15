@@ -60,9 +60,9 @@ def apply_pixel_selection(
             pixsel_method.height = img.height
             pixsel_method.count = img.count
 
-        assert img.count == pixsel_method.count, (
-            "Assets HAVE TO have the same number of bands"
-        )
+        assert (
+            img.count == pixsel_method.count
+        ), "Assets HAVE TO have the same number of bands"
 
         if any(
             [
@@ -154,7 +154,7 @@ def _reduce_temporal_dimension(
         raise ValueError(
             "The reduced data must have the same first dimension as the input stack"
         )
-    
+
     first_img = next(iter(data.values()))
 
     return {

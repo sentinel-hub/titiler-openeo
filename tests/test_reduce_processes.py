@@ -52,7 +52,7 @@ def test_reduce_temporal_dimension(sample_temporal_stack):
     def mean_reducer(data):
         """Calculate mean across temporal dimension."""
         # Extract arrays and stack them
-        stacked = np.stack([img.array for key,img in data.items()])
+        stacked = np.stack([img.array for key, img in data.items()])
         # Calculate mean along first axis (temporal)
         mean = np.mean(stacked, axis=0)
         return mean
@@ -132,4 +132,3 @@ def test_apply_pixel_selection(sample_temporal_stack):
     # Metadata should include the pixel selection method
     assert "pixel_selection_method" in result.metadata
     assert result.metadata["pixel_selection_method"] == "mean"
-

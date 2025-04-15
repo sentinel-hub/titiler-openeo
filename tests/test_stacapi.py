@@ -5,7 +5,6 @@ from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
-from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
@@ -61,9 +60,11 @@ def test_load_collection_pixel_threshold(monkeypatch):
             "type": "Polygon",
             "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {"datetime": "2021-01-01T00:00:00Z",
-                       "proj:crs": "EPSG:4326",
-                       "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0]},
+        "properties": {
+            "datetime": "2021-01-01T00:00:00Z",
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+        },
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
