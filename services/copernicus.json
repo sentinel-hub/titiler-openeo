@@ -118,11 +118,11 @@
             "enabled": true,
             "process": {
                 "process_graph": {
-                    "load1": {
+                    "load_collection": {
                         "process_id": "load_collection_and_reduce",
                         "arguments": {
                             "bands": [
-                                "B05",
+                                "B04",
                                 "B08"
                             ],
                             "properties": {},
@@ -148,77 +148,89 @@
                                 "2022-04-21T00:00:00Z",
                                 "2022-05-01T00:00:00Z"
                             ]
-                        }
+                        },
+                        "description": "Loading the data; The order of the specified bands is important for the following reduce operation."
                     },
-                    "array": {
-                        "process_id": "to_array",
+                    "reduce_bands": {
+                        "process_id": "reduce_dimension",
                         "arguments": {
                             "data": {
-                                "from_node": "load1"
+                                "from_node": "load_collection"
+                            },
+                            "reducer": {
+                                "process_graph": {
+                                    "red": {
+                                        "process_id": "array_element",
+                                        "arguments": {
+                                            "data": {
+                                                "from_parameter": "data"
+                                            },
+                                            "index": 0
+                                        }
+                                    },
+                                    "nir": {
+                                        "process_id": "array_element",
+                                        "arguments": {
+                                            "data": {
+                                                "from_parameter": "data"
+                                            },
+                                            "index": 1
+                                        }
+                                    },
+                                    "ndvi": {
+                                        "process_id": "normalized_difference",
+                                        "arguments": {
+                                            "x": {
+                                                "from_node": "nir"
+                                            },
+                                            "y": {
+                                                "from_node": "red"
+                                            }
+                                        },
+                                        "result": true
+                                    }
+                                }
+                            },
+                            "dimension": "bands"
+                        },
+                        "description": "Compute the NDVI: (NIR - RED) / (NIR + RED)"
+                    },
+                    "rescale": {
+                        "process_id": "apply",
+                        "arguments": {
+                            "data": {
+                                "from_node": "reduce_bands"
+                            },
+                            "process": {
+                                "process_graph": {
+                                    "linear1": {
+                                        "process_id": "linear_scale_range",
+                                        "arguments": {
+                                            "x": {
+                                                "from_parameter": "x"
+                                            },
+                                            "inputMin": -1,
+                                            "inputMax": 1,
+                                            "outputMin": 0,
+                                            "outputMax": 255
+                                        },
+                                        "result": true
+                                    }
+                                }
                             }
                         }
                     },
-                    "nir": {
-                        "process_id": "array_element",
-                        "arguments": {
-                            "data": {
-                                "from_node": "array"
-                            },
-                            "index": 1
-                        }
-                    },
-                    "red": {
-                        "process_id": "array_element",
-                        "arguments": {
-                            "data": {
-                                "from_node": "array"
-                            },
-                            "index": 0
-                        }
-                    },
-                    "ndvi": {
-                        "process_id": "normalized_difference",
-                        "arguments": {
-                            "x": {
-                                "from_node": "nir"
-                            },
-                            "y": {
-                                "from_node": "red"
-                            }
-                        }
-                    },
-                    "linear_scale_range": {
-                        "process_id": "linear_scale_range",
-                        "arguments": {
-                            "x": {
-                                "from_node": "ndvi"
-                            },
-                            "inputMin": -1,
-                            "inputMax": 1,
-                            "outputMin": 0,
-                            "outputMax": 255
-                        }
-                    },
-                    "trunc": {
-                        "process_id": "trunc",
-                        "arguments": {
-                            "x": {
-                                "from_node": "linear_scale_range"
-                            }
-                        }
-                    },
-                    "save5": {
+                    "save": {
                         "process_id": "save_result",
                         "arguments": {
                             "data": {
-                                "from_node": "trunc"
+                                "from_node": "rescale"
                             },
                             "format": "PNG"
                         },
                         "result": true
                     }
-                },
-                "parameters": []
+                }
             }
         }
     },
