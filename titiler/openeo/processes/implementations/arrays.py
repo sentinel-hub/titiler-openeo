@@ -1,6 +1,6 @@
 """titiler.processes.implementations arrays."""
 
-from typing import Union
+from typing import Optional, Union
 
 import numpy
 from numpy.typing import ArrayLike
@@ -13,8 +13,8 @@ __all__ = ["array_element", "to_image"]
 
 def array_element(
     data: Union[ArrayLike, RasterStack, LazyRasterStack],
-    index: int = None,
-    label: str = None,
+    index: Optional[int] = None,
+    label: Optional[str] = None,
 ) -> ArrayLike:
     """Return element from array.
 

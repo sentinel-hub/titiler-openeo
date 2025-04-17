@@ -508,7 +508,9 @@ class LoadCollection:
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
-            bands = list(items[0]["assets"].keys())[:1]  # Take the first asset as default
+            bands = list(items[0]["assets"].keys())[
+                :1
+            ]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
@@ -578,7 +580,9 @@ class LoadCollection:
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
-            bands = list(items[0]["assets"].keys())[:1]  # Take the first asset as default
+            bands = list(items[0]["assets"].keys())[
+                :1
+            ]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
