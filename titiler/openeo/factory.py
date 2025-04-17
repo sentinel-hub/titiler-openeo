@@ -804,7 +804,7 @@ class EndpointsFactory(BaseFactory):
             )
             result = pg_callable()
 
-            # if the reslt is not a SaveResultData object, convert it to one
+            # if the result is not a SaveResultData object, convert it to one
             if not isinstance(result, SaveResultData):
                 result = save_result(result, "GTiff")
 
