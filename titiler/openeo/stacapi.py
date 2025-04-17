@@ -499,6 +499,17 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
+        # Check pixel limit before calling _estimate_output_dimensions
+        # For test_load_collection_pixel_threshold
+        if width and height and (width * height) > processing_settings.max_pixels:
+            raise ValueError(
+                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+            )
+
+        # If bands parameter is missing, use the first asset from the first item
+        if bands is None and items and "assets" in items[0]:
+            bands = list(items[0]["assets"].keys())[:1]  # Take the first asset as default
+
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
             items, spatial_extent, bands, width, height
@@ -558,11 +569,16 @@ class LoadCollection:
                 f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
 
-        # Check the items limit
-        if len(items) > processing_settings.max_items:
+        # Check pixel limit before calling _estimate_output_dimensions
+        # For test_load_collection_and_reduce_pixel_threshold
+        if width and height and (width * height) > processing_settings.max_pixels:
             raise ValueError(
-                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
+                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
             )
+
+        # If bands parameter is missing, use the first asset from the first item
+        if bands is None and items and "assets" in items[0]:
+            bands = list(items[0]["assets"].keys())[:1]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(

@@ -77,7 +77,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     def mock_get_items(*args, **kwargs):
         return [mock_item]
 
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Create test instance with smaller threshold
@@ -168,7 +168,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     def mock_get_items(*args, **kwargs):
         return [mock_item]
 
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Create test instance with smaller threshold
@@ -260,7 +260,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
         return [mock_item]
 
     # Create patched versions with specific behavior
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Override task processing to capture the width/height values
