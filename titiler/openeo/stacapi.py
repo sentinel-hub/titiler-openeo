@@ -291,14 +291,14 @@ class LoadCollection:
         if process_id in operators:
             return {
                 "op": operators[process_id],
-                "args": [{"property": f"properties.{prop_name}"}, args.get("y")],
+                "args": [{"property": f"{prop_name}"}, args.get("y")],
             }
 
         if process_id == "between":
             return {
                 "op": "between",
                 "args": [
-                    {"property": f"properties.{prop_name}"},
+                    {"property": f"{prop_name}"},
                     args.get("min"),
                     args.get("max"),
                 ],
@@ -314,7 +314,7 @@ class LoadCollection:
             return {
                 "op": "in",
                 "args": [
-                    {"property": f"properties.{prop_name}"},
+                    {"property": f"{prop_name}"},
                     {"array": args.get("values", [])},
                 ],
             }
@@ -328,19 +328,19 @@ class LoadCollection:
             pattern = args.get("y", "") + "%"
             return {
                 "op": "like",
-                "args": [{"property": f"properties.{prop_name}"}, pattern],
+                "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "ends_with":
             pattern = "%" + args.get("y", "")
             return {
                 "op": "like",
-                "args": [{"property": f"properties.{prop_name}"}, pattern],
+                "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "contains":
             pattern = "%" + args.get("y", "") + "%"
             return {
                 "op": "like",
-                "args": [{"property": f"properties.{prop_name}"}, pattern],
+                "args": [{"property": f"{prop_name}"}, pattern],
             }
         return None
 
@@ -349,7 +349,7 @@ class LoadCollection:
         if process_id == "is_null":
             return {
                 "op": "isNull",
-                "args": [{"property": f"properties.{prop_name}"}],
+                "args": [{"property": f"{prop_name}"}],
             }
         return None
 
@@ -404,7 +404,7 @@ class LoadCollection:
 
     def _handle_direct_value(self, prop_name: str, value) -> Dict:
         """Handle non-process graph case (direct value)."""
-        return {"op": "=", "args": [{"property": f"properties.{prop_name}"}, value]}
+        return {"op": "=", "args": [{"property": f"{prop_name}"}, value]}
 
     def _process_single_property(self, prop_name: str, process_graph) -> Optional[Dict]:
         """Process a single property in the process graph."""
