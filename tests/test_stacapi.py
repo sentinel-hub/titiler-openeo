@@ -60,7 +60,11 @@ def test_load_collection_pixel_threshold(monkeypatch):
             "type": "Polygon",
             "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {"datetime": "2021-01-01T00:00:00Z"},
+        "properties": {
+            "datetime": "2021-01-01T00:00:00Z",
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+        },
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
@@ -73,7 +77,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     def mock_get_items(*args, **kwargs):
         return [mock_item]
 
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Create test instance with smaller threshold
@@ -90,6 +94,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
             spatial_extent=BoundingBox(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
+            bands=["B01"],
             width=5000,
             height=5000,
         )
@@ -163,7 +168,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     def mock_get_items(*args, **kwargs):
         return [mock_item]
 
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Create test instance with smaller threshold
@@ -193,9 +198,12 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
         width=1000,
         height=1000,
     )
-    assert isinstance(result, ImageData)
-    assert result.data.shape[0] == 1  # Single band
-    assert result.crs == "EPSG:4326"
+    assert isinstance(result, dict)
+    # FIrst value should be ImageData
+    first_value = next(iter(result.values()))
+    assert isinstance(first_value, ImageData)
+    assert first_value.data.shape[0] == 1  # Single band
+    assert first_value.crs == "EPSG:4326"
 
 
 def test_resolution_based_dimension_calculation(monkeypatch):
@@ -252,7 +260,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
         return [mock_item]
 
     # Create patched versions with specific behavior
-    monkeypatch.setattr("titiler.openeo.stacapi.SimpleSTACReader", MockReader)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
     # Override task processing to capture the width/height values

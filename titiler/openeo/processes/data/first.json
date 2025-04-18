@@ -1,0 +1,99 @@
+{
+    "id": "first",
+    "summary": "Get the first element of an array",
+    "description": "Returns the first element of an array. If the array is empty, `null` is returned.\n\nNo-data values are taken into account so that `null` is returned if any element is such a value.",
+    "categories": [
+        "math"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array of numbers.",
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            }
+        }
+    ],
+    "returns": {
+        "description": "The first element of the array.",
+        "schema": {
+            "type": [
+                "number",
+                "null"
+            ]
+        }
+    },
+    "examples": [
+        {
+            "arguments": {
+                "data": [
+                    1,
+                    0,
+                    3,
+                    2
+                ]
+            },
+            "returns": 1
+        },
+        {
+            "arguments": {
+                "data": [
+                    9,
+                    2.5,
+                    null,
+                    -2.5
+                ]
+            },
+            "returns": 9
+        },
+        {
+            "arguments": {
+                "data": [
+                    null,
+                    null
+                ]
+            },
+            "returns": null
+        },
+        {
+            "description": "The input array is empty: return `null`.",
+            "arguments": {
+                "data": []
+            },
+            "returns": null
+        }
+    ],
+    "links": [
+        {
+            "rel": "about",
+            "href": "https://en.wikipedia.org/wiki/First_element",
+            "title": "First element explained by Wikipedia"
+        }
+    ],
+    "process_graph": {
+        "first": {
+            "process_id": "first",
+            "arguments": {
+                "data": {
+                    "from_parameter": "data"
+                }
+            }
+        },
+        "if": {
+            "process_id": "if",
+            "arguments": {
+                "value": {
+                    "from_node": "first"
+                },
+                "accept": null
+            },
+            "result": true
+        }
+    }
+}

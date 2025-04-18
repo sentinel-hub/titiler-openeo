@@ -264,6 +264,7 @@ def process(f):
             "keepdims",
             "context",
             "dim_labels",
+            "data",
         ]
         # Remove 'axis' and keepdims parameter if not expected in function signature.
         for arg in special_args:
