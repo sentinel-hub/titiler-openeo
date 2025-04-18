@@ -25,7 +25,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
-from typing_extension import TypedDict
+from typing_extensions import TypedDict
 
 
 class Dims(TypedDict):
@@ -159,8 +159,8 @@ def _estimate_output_dimensions(
 
     # Return all information needed for rendering
     return Dims(
-        width=width,
-        height=height,
+        width=width,  # type: ignore
+        height=height,  # type: ignore
         crs=crs,
         bbox=bbox,
     )
