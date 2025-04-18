@@ -531,8 +531,8 @@ class LoadCollection:
             assets=bands,
             bounds_crs=crs,
             dst_crs=crs,
-            width=int(width) if width else width,
-            height=int(height) if height else height,
+            width=width if width else width,
+            height=height if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
         )
         # Return a LazyRasterStack that will only execute the tasks when accessed
