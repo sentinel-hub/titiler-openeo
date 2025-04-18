@@ -6,12 +6,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlparse
 
 import attr
-import pyproj
 import rasterio
 from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
+from rasterio.warp import transform_bounds
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import (
     AssetAsBandError,
@@ -25,8 +25,16 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
+from typing_extension import TypedDict
 
-from .processes.implementations.utils import to_rasterio_crs
+
+class Dims(TypedDict):
+    """Estimate Dimensions."""
+
+    width: int
+    height: int
+    crs: rasterio.crs.CRS
+    bbox: List[float]
 
 
 def _estimate_output_dimensions(
@@ -35,7 +43,7 @@ def _estimate_output_dimensions(
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
 
@@ -50,7 +58,6 @@ def _estimate_output_dimensions(
         Dictionary containing:
             - width: Estimated or specified width
             - height: Estimated or specified height
-            - item_crs: CRS of the items
             - crs: Target CRS to use
             - bbox: Bounding box as a list [west, south, east, north]
     """
@@ -70,7 +77,7 @@ def _estimate_output_dimensions(
         raise ValueError("Missing required input: bands")
 
     # Extract CRS and resolution information from items
-    item_crs = None
+    item_crs: rasterio.crs.CRS = None
     x_resolutions = []
     y_resolutions = []
 
@@ -87,14 +94,15 @@ def _estimate_output_dimensions(
             if src_dst.transform:
                 x_resolutions.append(abs(src_dst.transform.a))
                 y_resolutions.append(abs(src_dst.transform.e))
+
             # If no transform, check for assets metadata
             else:
                 for _, asset in item.get("assets", {}).items():
                     # Get resolution from asset metadata
-                    asset_transform = asset.get("proj:transform")
-                    if asset_transform:
+                    if asset_transform := asset.get("proj:transform"):
                         x_resolutions.append(abs(asset_transform[0]))
                         y_resolutions.append(abs(asset_transform[4]))
+
                     else:
                         # Default to 1024x1024 if no resolution is found
                         x_resolutions.append(1024)
@@ -105,8 +113,7 @@ def _estimate_output_dimensions(
     y_resolution = min(y_resolutions) if y_resolutions else None
 
     # Get target CRS and bounds
-    projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-    crs = to_rasterio_crs(projcrs)
+    crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
 
     # Convert bounds to the same CRS if needed
     bbox = [
@@ -119,11 +126,6 @@ def _estimate_output_dimensions(
     # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
     if item_crs and item_crs != crs:
         # Calculate approximate resolution in target CRS
-        transformer = pyproj.Transformer.from_crs(
-            item_crs,
-            crs,
-            always_xy=True,
-        )
         # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
         center_x = (bbox[0] + bbox[2]) / 2
         center_y = (bbox[1] + bbox[3]) / 2
@@ -133,7 +135,8 @@ def _estimate_output_dimensions(
             center_x + x_resolution,
             center_y + y_resolution,
         ]
-        dst_box = transformer.transform_bounds(*src_box)
+        dst_box = transform_bounds(item_crs, crs, *src_box, densify_pts=21)
+
         x_resolution = abs(dst_box[2] - dst_box[0])
         y_resolution = abs(dst_box[3] - dst_box[1])
 
@@ -155,13 +158,12 @@ def _estimate_output_dimensions(
         )
 
     # Return all information needed for rendering
-    return {
-        "width": width,
-        "height": height,
-        "item_crs": item_crs,
-        "crs": crs,
-        "bbox": bbox,
-    }
+    return Dims(
+        width=width,
+        height=height,
+        crs=crs,
+        bbox=bbox,
+    )
 
 
 def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
