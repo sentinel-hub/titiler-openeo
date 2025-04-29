@@ -29,7 +29,7 @@ def test_simple_eq_conversion(load_collection):
         }
     }
 
-    expected = {"op": "=", "args": [{"property": "properties.cloud_cover"}, 10]}
+    expected = {"op": "=", "args": [{"property": "cloud_cover"}, 10]}
 
     result = load_collection._convert_process_graph_to_cql2(properties)
     assert result == expected
@@ -55,7 +55,7 @@ def test_between_conversion(load_collection):
 
     expected = {
         "op": "between",
-        "args": [{"property": "properties.cloud_cover"}, 0, 50],
+        "args": [{"property": "cloud_cover"}, 0, 50],
     }
 
     result = load_collection._convert_process_graph_to_cql2(properties)
@@ -92,8 +92,8 @@ def test_multiple_conditions(load_collection):
     expected = {
         "op": "and",
         "args": [
-            {"op": "<", "args": [{"property": "properties.cloud_cover"}, 20]},
-            {"op": "=", "args": [{"property": "properties.platform"}, "Sentinel-2B"]},
+            {"op": "<", "args": [{"property": "cloud_cover"}, 20]},
+            {"op": "=", "args": [{"property": "platform"}, "Sentinel-2B"]},
         ],
     }
 
@@ -115,7 +115,7 @@ def test_pattern_matching(load_collection):
         }
     }
 
-    expected = {"op": "like", "args": [{"property": "properties.title"}, "Sentinel%"]}
+    expected = {"op": "like", "args": [{"property": "title"}, "Sentinel%"]}
 
     result = load_collection._convert_process_graph_to_cql2(properties)
     assert result == expected
@@ -141,7 +141,7 @@ def test_array_operator(load_collection):
     expected = {
         "op": "in",
         "args": [
-            {"property": "properties.band_names"},
+            {"property": "band_names"},
             {"array": ["B02", "B03", "B04"]},
         ],
     }
@@ -154,7 +154,7 @@ def test_direct_value_conversion(load_collection):
     """Test conversion of a direct value (not a process graph)."""
     properties = {"platform": "Sentinel-2"}
 
-    expected = {"op": "=", "args": [{"property": "properties.platform"}, "Sentinel-2"]}
+    expected = {"op": "=", "args": [{"property": "platform"}, "Sentinel-2"]}
 
     result = load_collection._convert_process_graph_to_cql2(properties)
     assert result == expected

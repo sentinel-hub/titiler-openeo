@@ -81,9 +81,6 @@ class SQLAlchemyStore(ServicesStore):
                 .all()
             )
 
-            if not results:
-                raise ValueError(f"Could not find service for user: {user_id}")
-
             return [
                 {
                     "id": result.service_id,
