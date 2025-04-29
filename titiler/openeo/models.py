@@ -777,7 +777,17 @@ class ProcessArgumentValue3(BaseModel, extra="forbid"):
     )
 
 
-class ProcessArgumentValue(RootModel):
+class ProcessArgumentValue(RootModel[Union[
+    ProcessArgumentValue1,
+    str,
+    float,
+    bool,
+    List['ProcessArgumentValue'],
+    Dict[str, Any],  # Use Dict[str, Any] for complex objects like spatial_extent
+    ProcessArgumentValue2,
+    ProcessArgumentValue3,
+    None
+]]):
     """ProcessArgumentValue model.
 
     Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
@@ -785,23 +795,7 @@ class ProcessArgumentValue(RootModel):
     Code generated using https://github.com/koxudaxi/datamodel-code-generator/
     """
 
-    # Union[
-    #     ProcessArgumentValue1,
-    #     str,
-    #     float,
-    #     bool,
-    #     List[Self],
-    #     ProcessGraphWithMetadata,
-    #     ProcessArgumentValue2,
-    #     ProcessArgumentValue3,
-    # ]
-    root: Any = Field(
-        None,
-        json_schema_extra={
-            "description": "Arguments for a process. See the API documentation for more information.",
-            "title": "Process Argument Value",
-        },
-    )
+    model_config = {"title": "Process Argument Value"}
 
 
 class ProcessGraph(BaseModel):
