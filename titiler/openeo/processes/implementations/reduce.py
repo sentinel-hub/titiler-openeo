@@ -42,7 +42,7 @@ def apply_pixel_selection(
     pixel_selection: str = "first",
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack.
-    
+
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
     """
