@@ -777,17 +777,23 @@ class ProcessArgumentValue3(BaseModel, extra="forbid"):
     )
 
 
-class ProcessArgumentValue(RootModel[Union[
-    ProcessArgumentValue1,
-    str,
-    float,
-    bool,
-    List['ProcessArgumentValue'],
-    Dict[str, Any],  # Use Dict[str, Any] for complex objects like spatial_extent
-    ProcessArgumentValue2,
-    ProcessArgumentValue3,
-    None
-]]):
+class ProcessArgumentValue(
+    RootModel[
+        Union[
+            ProcessArgumentValue1,
+            str,
+            float,
+            bool,
+            List["ProcessArgumentValue"],
+            Dict[
+                str, Any
+            ],  # Use Dict[str, Any] for complex objects like spatial_extent
+            ProcessArgumentValue2,
+            ProcessArgumentValue3,
+            None,
+        ]
+    ]
+):
     """ProcessArgumentValue model.
 
     Ref: https://github.com/Open-EO/openeo-api/blob/1.2.0/openapi.yaml
