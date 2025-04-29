@@ -36,5 +36,7 @@ def test_lazy_raster_stack():
     # Apply pixel selection
     result = apply_pixel_selection(lazy_stack, pixel_selection="first")
 
-    assert type(result) is ImageData
+    assert isinstance(result, dict)  # RasterStack is Dict[str, ImageData]
+    assert "data" in result
+    assert isinstance(result["data"], ImageData)
     assert lazy_stack._executed is True

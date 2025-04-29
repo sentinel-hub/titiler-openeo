@@ -40,8 +40,12 @@ class DimensionNotAvailable(Exception):
 def apply_pixel_selection(
     data: RasterStack,
     pixel_selection: str = "first",
-) -> ImageData:
-    """Apply PixelSelection method on a RasterStack."""
+) -> RasterStack:
+    """Apply PixelSelection method on a RasterStack.
+
+    Returns:
+        RasterStack: A single-image RasterStack containing the result of pixel selection
+    """
     pixsel_method = PixelSelectionMethod[pixel_selection].value()
 
     assets_used: List = []
@@ -90,30 +94,34 @@ def apply_pixel_selection(
         assets_used.append(datetime)
 
         if pixsel_method.is_done and pixsel_method.data is not None:
-            return ImageData(
-                pixsel_method.data,
-                assets=assets_used,
-                crs=crs,
-                bounds=bounds,
-                band_names=band_names if band_names is not None else [],
-                metadata={
-                    "pixel_selection_method": pixel_selection,
-                },
-            )
+            return {
+                "data": ImageData(
+                    pixsel_method.data,
+                    assets=assets_used,
+                    crs=crs,
+                    bounds=bounds,
+                    band_names=band_names if band_names is not None else [],
+                    metadata={
+                        "pixel_selection_method": pixel_selection,
+                    },
+                )
+            }
 
     if pixsel_method.data is None:
         raise ValueError("Method returned an empty array")
 
-    return ImageData(
-        pixsel_method.data,
-        assets=assets_used,
-        crs=crs,
-        bounds=bounds,
-        band_names=band_names if band_names is not None else [],
-        metadata={
-            "pixel_selection_method": pixel_selection,
-        },
-    )
+    return {
+        "data": ImageData(
+            pixsel_method.data,
+            assets=assets_used,
+            crs=crs,
+            bounds=bounds,
+            band_names=band_names if band_names is not None else [],
+            metadata={
+                "pixel_selection_method": pixel_selection,
+            },
+        )
+    }
 
 
 def _reduce_temporal_dimension(
