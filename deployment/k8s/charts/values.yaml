@@ -1,9 +1,9 @@
 # Default values for titiler-openeo.
-replicaCount: 1
+
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
-  tag: "3d0eba699104d179f7d814380d519b4e22c71ec1"
+  tag: "dev"
   pullPolicy: IfNotPresent
   command: "uvicorn"
   args:
@@ -13,7 +13,11 @@ image:
     - "--port"
     - "80"
     - "--workers"
-    - "1"
+    - "4"
+    - "--forwarded-allow-ips"  # to make sure it works behind a reverse proxy
+    - "*"  # Allow all
+    - "--log-config"
+    - "/config/log_config.yaml"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -23,7 +27,6 @@ terminationGracePeriodSeconds: 30
 service:
   type: ClusterIP
   port: 80
-  store: "files/eoapi.json"
 
 ingress:
   enabled: false
@@ -37,6 +40,16 @@ ingress:
   #  - secretName: titiler-tls
   #    hosts:
   #      - titiler.local
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+replicaCount: 1
 
 extraHostPathMounts: []
   # - name: map-sources
@@ -58,7 +71,6 @@ env:
   GDAL_HTTP_VERSION: 2
   PYTHONWARNINGS: "ignore"
   TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
-  TITILER_OPENEO_SERVICE_STORE_URL: "/tmp/services/local_store.json"
 
 resources:
   limits:
@@ -76,6 +88,32 @@ tolerations: []
 
 affinity: {}
 
+# logging configuration
+logging:
+  configFile: "files/log_config.yaml"
+
+# Persistent storage configuration for the local database file
+persistence:
+  enabled: true
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+  # existingClaim: ""
+  localStoreFile: "local_store.json"
+  localStoreSeed: "files/eoapi.json"
+
+# Configuration for the external database
+# PostgreSQL only supported for now
+externalDatabase:
+  enabled: false
+  host: "172.16.4.5"
+  port: 5432
+  user: openeo
+  database: openeo
+  password: "secret"
+
 securityContext: {}
   # capabilities:
   #   drop:
@@ -85,7 +123,10 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1001
 
-podSecurityContext: {}
+podSecurityContext:
+  sysctls:
+    - name: net.ipv4.ip_unprivileged_port_start
+      value: "0"
   # fsGroup: 1001
   # runAsNonRoot: true
   # runAsUser: 1001

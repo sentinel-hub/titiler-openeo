@@ -1,5 +1,6 @@
 """titiler.openeo.services duckDB."""
 
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +10,7 @@ from attrs import define, field
 from .base import ServicesStore
 
 
-@define(kw_only=True, init=False)
+@define(kw_only=True)
 class DuckDBStore(ServicesStore):
     """DuckDB Service Store."""
 
@@ -45,7 +46,7 @@ class DuckDBStore(ServicesStore):
 
             return {
                 "id": result[0],
-                **result[1],
+                **json.loads(result[1]),
             }
 
     def get_services(self, **kwargs) -> List[Dict]:
@@ -53,7 +54,7 @@ class DuckDBStore(ServicesStore):
         with duckdb.connect(self.store) as con:
             results = con.execute(
                 """
-                SELECT service_id, service
+                SELECT service_id, json(service)
                 FROM services
                 """
             ).fetchall()
@@ -61,7 +62,7 @@ class DuckDBStore(ServicesStore):
             return [
                 {
                     "id": result[0],
-                    **result[1],
+                    **json.loads(result[1]),
                 }
                 for result in results
             ]
@@ -71,20 +72,17 @@ class DuckDBStore(ServicesStore):
         with duckdb.connect(self.store) as con:
             results = con.execute(
                 """
-                SELECT service_id, service
+                SELECT service_id, service::JSON
                 FROM services
                 WHERE user_id = ?
                 """,
                 [user_id],
             ).fetchall()
 
-            if not results:
-                raise ValueError(f"Could not find service for user: {user_id}")
-
             return [
                 {
                     "id": result[0],
-                    **result[1],
+                    **json.loads(result[1]),
                 }
                 for result in results
             ]

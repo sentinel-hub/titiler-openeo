@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import morecantile
 import pyproj
-from attrs import define, field
+from attrs import define
 from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -18,9 +18,9 @@ from typing_extensions import Annotated
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
-from titiler.openeo.auth import Auth, CredentialsBasic, FakeBasicAuth
-from titiler.openeo.errors import InvalidProcessGraph
+from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput
+from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
 
@@ -34,7 +34,7 @@ class EndpointsFactory(BaseFactory):
     services_store: ServicesStore
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
-    auth: Auth = field(factory=FakeBasicAuth)
+    auth: Auth
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -150,32 +150,131 @@ class EndpointsFactory(BaseFactory):
                             }
                         },
                     },
+                    "GTiff": {
+                        "gis_data_types": ["raster"],
+                        "title": "GeoTIFF",
+                        "description": "GeoTIFF is a public domain metadata standard which allows georeferencing information to be embedded within a TIFF file. The potential additional information includes map projection, coordinate systems, ellipsoids, datums, and everything else necessary to establish the exact spatial reference for the file.",
+                        "parameters": {
+                            "datatype": {
+                                "type": "string",
+                                "description": "The values data type.",
+                                "enum": [
+                                    "byte",
+                                    "uint16",
+                                    "int16",
+                                    "uint32",
+                                    "int32",
+                                    "float32",
+                                    "float64",
+                                ],
+                                "default": "byte",
+                            }
+                        },
+                    },
                 },
             }
 
+        if isinstance(self.auth, OIDCAuth):
+
+            @self.router.get(
+                "/credentials/oidc",
+                response_class=JSONResponse,
+                summary="OpenID Connect authentication",
+                response_model=models.OIDCProviders,
+                response_model_exclude_none=True,
+                operation_id="authenticate-oidc",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
+                        "description": "Lists the OpenID Connect Providers.",
+                    },
+                },
+                tags=["Account Management"],
+            )
+            def openeo_credentials_oidc():
+                """Lists the supported OpenID Connect providers (OP)."""
+                if not isinstance(self.auth, OIDCAuth):
+                    raise HTTPException(
+                        status_code=501,
+                        detail="OpenID Connect authentication not supported",
+                    )
+
+                return models.OIDCProviders(
+                    providers=[
+                        models.OIDCProvider(
+                            id="oidc",
+                            issuer=self.auth.config["issuer"],
+                            title=self.auth.settings.oidc.title or "OpenID Connect",
+                            scopes=self.auth.settings.oidc.scopes,
+                            description=self.auth.settings.oidc.description
+                            or "OpenID Connect Provider",
+                            default_clients=[
+                                models.OIDCDefaultClient(
+                                    id=self.auth.settings.oidc.client_id,
+                                    grant_types=[
+                                        "authorization_code+pkce",
+                                        "urn:ietf:params:oauth:grant-type:device_code+pkce",
+                                        "refresh_token",
+                                    ],
+                                    redirect_urls=[
+                                        self.auth.settings.oidc.redirect_url
+                                    ],
+                                )
+                            ],
+                        )
+                    ]
+                )
+        else:
+
+            @self.router.get(
+                "/credentials/basic",
+                response_class=JSONResponse,
+                summary="HTTP Basic authentication",
+                response_model=CredentialsBasic,
+                response_model_exclude_none=True,
+                operation_id="authenticate-basic",
+                responses={
+                    200: {
+                        "content": {
+                            "application/json": {},
+                        },
+                    },
+                },
+                tags=["Account Management"],
+            )
+            def openeo_credentials_basic(token=Depends(self.auth.login)):
+                """Checks the credentials provided through [HTTP Basic Authentication
+                according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
+                an access token for valid credentials.
+
+                """
+                return token
+
         @self.router.get(
-            "/credentials/basic",
+            "/me",
             response_class=JSONResponse,
-            summary="HTTP Basic authentication",
-            response_model=CredentialsBasic,
+            summary="Get information about the authenticated user",
+            response_model=User,
             response_model_exclude_none=True,
-            operation_id="authenticate-basic",
+            operation_id="get-current-user",
             responses={
                 200: {
                     "content": {
                         "application/json": {},
                     },
+                    "description": "Information about the currently authenticated user.",
+                },
+                401: {
+                    "description": "The request could not be fulfilled since it was not authenticated.",
                 },
             },
             tags=["Account Management"],
         )
-        def openeo_credentials_basic(token=Depends(self.auth.login)):
-            """Checks the credentials provided through [HTTP Basic Authentication
-            according to RFC 7617](https://www.rfc-editor.org/rfc/rfc7617.html) and returns
-            an access token for valid credentials.
-
-            """
-            return token
+        def openeo_me(user=Depends(self.auth.validate)):
+            """Get information about the currently authenticated user."""
+            return user
 
         # Well-Known Document
         # Ref: https://openeo.org/documentation/1.0/developers/profiles/api.html#well-known-discovery
@@ -449,26 +548,26 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
-            process = body.process.model_dump()
+            # process = body.process.model_dump()
 
-            # Validate process graph
-            try:
-                # Parse and validate process graph structure
-                parsed_graph = OpenEOProcessGraph(pg_data=process)
+            # TODO Validate process graph
+            # try:
+            #     # Parse and validate process graph structure
+            #     parsed_graph = OpenEOProcessGraph(pg_data=process)
 
-                # Check if all processes exist in registry
-                for node in parsed_graph.nodes:
-                    process_id = node[1].get("process_id")
-                    if process_id and process_id not in self.process_registry[None]:
-                        raise InvalidProcessGraph(
-                            f"Process '{process_id}' not found in registry"
-                        )
+            #     # Check if all processes exist in registry
+            #     for node in parsed_graph.nodes:
+            #         process_id = node[1].get("process_id")
+            #         if process_id and process_id not in self.process_registry[None]:
+            #             raise InvalidProcessGraph(
+            #                 f"Process '{process_id}' not found in registry"
+            #             )
 
-                # Try to create callable to validate parameter types
-                parsed_graph.to_callable(process_registry=self.process_registry)
+            #     # Try to create callable to validate parameter types
+            #     parsed_graph.to_callable(process_registry=self.process_registry)
 
-            except Exception as e:
-                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+            # except Exception as e:
+            #     raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
 
             service_id = self.services_store.add_service(
                 user.user_id, body.model_dump()
@@ -484,7 +583,7 @@ class EndpointsFactory(BaseFactory):
                 status_code=201,
                 headers={
                     "Location": service_url,
-                    "OpenEO-Identifier": service["id"],
+                    "openeo-identifier": service["id"],
                 },
             )
 
@@ -698,15 +797,18 @@ class EndpointsFactory(BaseFactory):
 
             """
             process = body.process.model_dump()
-            media_type = _get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry
             )
-            img = pg_callable()
+            result = pg_callable()
 
-            return Response(img, media_type=media_type)
+            # if the result is not a SaveResultData object, convert it to one
+            if not isinstance(result, SaveResultData):
+                result = save_result(result, "GTiff")
+
+            return Response(result.data, media_type=result.media_type)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
@@ -830,15 +932,24 @@ class EndpointsFactory(BaseFactory):
                 process_registry=self.process_registry
             )
             img = pg_callable()
-            return Response(img, media_type=media_type)
+            return Response(img.data, media_type=media_type)
 
 
 def _get_media_type(process_graph: Dict[str, Any]) -> str:
     for _, node in process_graph.items():
         if node["process_id"] == "save_result":
-            return "image/png" if node["arguments"]["format"] == "png" else "image/jpeg"
+            if node["arguments"]["format"] == "PNG":
+                return "image/png"
+            elif node["arguments"]["format"] == "JPEG":
+                return "image/jpeg"
+            elif node["arguments"]["format"] == "JPEG":
+                return "image/jpg"
+            elif node["arguments"]["format"] == "GTiff":
+                return "image/tiff"
+            else:
+                return "application/PNG"
 
-    raise ValueError("Couldn't find `")
+    raise ValueError("Couldn't find a `save_result` process in the process graph")
 
 
 def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:

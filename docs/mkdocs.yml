@@ -1,18 +1,18 @@
-site_name: TiTiler-OpenEO
+site_name: openEO by TiTiler
 site_description: TiTiler backend for openEO
 
 docs_dir: 'src'
 site_dir: 'build'
 
-repo_name: "developmentseed/titiler-openeo"
+repo_name: "sentinel-hub/titiler-openeo"
 repo_url: "https://github.com/sentinel-hub/titiler-openeo"
 edit_uri: "blob/main/docs/src/"
-site_url: "https://developmentseed.org/titiler-openeo/"
+site_url: "https://sentinel-hub.github.io/titiler-openeo/"
 
 extra:
   analytics:
     provider: plausible
-    domain: developmentseed.org/titiler-openeo
+    domain: sentinel-hub.github.io/titiler-openeo
 
     feedback:
       title: Was this page helpful?
@@ -28,12 +28,13 @@ extra:
           note: Thanks for your feedback!
   social:
     - icon: "fontawesome/brands/github"
-      link: "https://github.com/developmentseed"
-    - icon: "fontawesome/brands/medium"
-      link: "https://medium.com/devseed"
+      link: "https://github.com/sentinel-hub"
 
 nav:
   - TiTiler-OpenEO: "index.md"
+  - Concepts:
+    - Overview: "concepts.md"
+    - RasterStack Data Model: "raster-stack.md"
   - Development - Contributing: "contributing.md"
   - Release Notes: "release-notes.md"
 
@@ -101,8 +102,8 @@ markdown_extensions:
       insert: false
   - pymdownx.details
   - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: "material.extensions.emoji.twemoji"
+      emoji_generator: "material.extensions.emoji.to_svg"
   - pymdownx.escapeall:
       hardbreak: true
       nbsp: true

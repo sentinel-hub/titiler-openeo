@@ -20,7 +20,9 @@ __all__ = [
     "divide",
     "e",
     "exp",
+    "first",
     "floor",
+    "last",
     "linear_scale_range",
     "ln",
     "log",
@@ -180,18 +182,18 @@ def _max(x, axis=None, keepdims=False):
     return numpy.max(x, axis=axis, keepdims=keepdims)
 
 
-def median(x, axis=None, keepdims=False):
-    if isinstance(x, numpy.ma.MaskedArray):
-        return numpy.ma.median(x, axis=axis, keepdims=keepdims)
+def median(data, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        return numpy.ma.median(data, axis=axis, keepdims=keepdims)
 
-    return numpy.median(x, axis=axis, keepdims=keepdims)
+    return numpy.median(data, axis=axis, keepdims=keepdims)
 
 
-def mean(x, axis=None, keepdims=False):
-    if isinstance(x, numpy.ma.MaskedArray):
-        return numpy.ma.mean(x, axis=axis, keepdims=keepdims)
+def mean(data, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
 
-    return numpy.mean(x, axis=axis, keepdims=keepdims)
+    return numpy.mean(data, axis=axis, keepdims=keepdims)
 
 
 def sd(x, axis=None, keepdims=False):
@@ -222,3 +224,33 @@ def linear_scale_range(
     return ((x - inputMin) / (inputMax - inputMin)) * (
         outputMax - outputMin
     ) + outputMin
+
+
+def first(data):
+    """Return the first element of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        first_elements = {k: v.array[0] for k, v in data.items()}
+        # return a multi-dimensional array
+        return numpy.stack(list(first_elements.values()), axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return data[0]
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return data[0].filled()
+    else:
+        raise TypeError("Unsupported data type for first function.")
+
+
+def last(data):
+    """Return the last element of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        last_elements = {k: v.array[-1] for k, v in data.items()}
+        # return a multi-dimensional array
+        return numpy.stack(list(last_elements.values()), axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return data[-1]
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return data[-1].filled()
+    else:
+        raise TypeError("Unsupported data type for last function.")

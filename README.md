@@ -24,6 +24,8 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
+- Optimized RasterStack data model for consistent processing
+- LazyRasterStack implementation for improved performance
 
 ## Roadmap
 
@@ -31,7 +33,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - [ ] Integrated Authentication
 - [ ] More output formats
 - [ ] More openEO processes
-- [ ] Github pages documentation
+- [x] Github pages documentation
 
 ## Installation
 

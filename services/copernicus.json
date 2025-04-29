@@ -5,9 +5,9 @@
             "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
             "type": "XYZ",
             "configuration": {
-              "tile_size": 256,
-              "minzoom": 8,
-              "maxzoom": 15
+                "tile_size": 256,
+                "minzoom": 8,
+                "maxzoom": 15
             },
             "title": "sentinel-2 global mosaics 3 bands RGB",
             "enabled": true,
@@ -101,6 +101,265 @@
                         "process_id": "apply"
                     }
                 }
+            }
+        }
+    },
+    "d55ae9e5-83d7-41c2-ae56-e6c72d3b7ea5": {
+        "user_id": "test",
+        "service": {
+            "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7ea5",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256,
+                "minzoom": 8,
+                "maxzoom": 15
+            },
+            "title": "sentinel-2 global mosaics NDVI",
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                    "load_collection": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "B04",
+                                "B08"
+                            ],
+                            "properties": {},
+                            "id": "sentinel-2-global-mosaics",
+                            "spatial_extent": {
+                                "east": {
+                                    "from_parameter": "spatial_extent_east"
+                                },
+                                "north": {
+                                    "from_parameter": "spatial_extent_north"
+                                },
+                                "south": {
+                                    "from_parameter": "spatial_extent_south"
+                                },
+                                "west": {
+                                    "from_parameter": "spatial_extent_west"
+                                },
+                                "crs": {
+                                    "from_parameter": "spatial_extent_crs"
+                                }
+                            },
+                            "temporal_extent": [
+                                "2022-04-21T00:00:00Z",
+                                "2022-05-01T00:00:00Z"
+                            ]
+                        },
+                        "description": "Loading the data; The order of the specified bands is important for the following reduce operation."
+                    },
+                    "reduce_bands": {
+                        "process_id": "reduce_dimension",
+                        "arguments": {
+                            "data": {
+                                "from_node": "load_collection"
+                            },
+                            "reducer": {
+                                "process_graph": {
+                                    "red": {
+                                        "process_id": "array_element",
+                                        "arguments": {
+                                            "data": {
+                                                "from_parameter": "data"
+                                            },
+                                            "index": 0
+                                        }
+                                    },
+                                    "nir": {
+                                        "process_id": "array_element",
+                                        "arguments": {
+                                            "data": {
+                                                "from_parameter": "data"
+                                            },
+                                            "index": 1
+                                        }
+                                    },
+                                    "ndvi": {
+                                        "process_id": "normalized_difference",
+                                        "arguments": {
+                                            "x": {
+                                                "from_node": "nir"
+                                            },
+                                            "y": {
+                                                "from_node": "red"
+                                            }
+                                        },
+                                        "result": true
+                                    }
+                                }
+                            },
+                            "dimension": "bands"
+                        },
+                        "description": "Compute the NDVI: (NIR - RED) / (NIR + RED)"
+                    },
+                    "rescale": {
+                        "process_id": "apply",
+                        "arguments": {
+                            "data": {
+                                "from_node": "reduce_bands"
+                            },
+                            "process": {
+                                "process_graph": {
+                                    "linear1": {
+                                        "process_id": "linear_scale_range",
+                                        "arguments": {
+                                            "x": {
+                                                "from_parameter": "x"
+                                            },
+                                            "inputMin": -1,
+                                            "inputMax": 1,
+                                            "outputMin": 0,
+                                            "outputMax": 255
+                                        },
+                                        "result": true
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "save": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "rescale"
+                            },
+                            "format": "PNG"
+                        },
+                        "result": true
+                    }
+                }
+            }
+        }
+    },
+    "d55ae9e5-83d8-41c2-ae56-e6c72d3b7ea5": {
+        "user_id": "test",
+        "service": {
+            "id": "d55ae9e5-83d8-41c2-ae56-e6c72d3b7ea5",
+            "type": "XYZ",
+            "configuration": {
+                "tile_size": 256,
+                "minzoom": 8,
+                "maxzoom": 15
+            },
+            "title": "sentinel-2 global mosaics NDVI 2",
+            "enabled": true,
+            "process": {
+                "process_graph": {
+                    "load1": {
+                        "process_id": "load_collection_and_reduce",
+                        "arguments": {
+                            "bands": [
+                                "B04",
+                                "B08"
+                            ],
+                            "properties": {},
+                            "id": "sentinel-2-global-mosaics",
+                            "spatial_extent": {
+                                "east": {
+                                    "from_parameter": "spatial_extent_east"
+                                },
+                                "north": {
+                                    "from_parameter": "spatial_extent_north"
+                                },
+                                "south": {
+                                    "from_parameter": "spatial_extent_south"
+                                },
+                                "west": {
+                                    "from_parameter": "spatial_extent_west"
+                                },
+                                "crs": {
+                                    "from_parameter": "spatial_extent_crs"
+                                }
+                            },
+                            "temporal_extent": [
+                                "2022-04-21T00:00:00Z",
+                                "2022-05-01T00:00:00Z"
+                            ]
+                        }
+                    },
+                    "ndvi": {
+                        "process_id": "ndvi",
+                        "arguments": {
+                            "data": {
+                                "from_node": "load1"
+                            },
+                            "nir": 1,
+                            "red": 0
+                        }
+                    },
+                    "colormap": {
+                        "process_id": "colormap",
+                        "arguments": {
+                            "data": {
+                                "from_node": "ndvi"
+                            },
+                            "colormap": [
+                                [
+                                    [
+                                        -2,
+                                        -1
+                                    ],
+                                    [
+                                        0,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        -1,
+                                        0
+                                    ],
+                                    [
+                                        0,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        0,
+                                        0.5
+                                    ],
+                                    [
+                                        255,
+                                        0,
+                                        0,
+                                        255
+                                    ]
+                                ],
+                                [
+                                    [
+                                        0.5,
+                                        1.1
+                                    ],
+                                    [
+                                        255,
+                                        255,
+                                        0,
+                                        255
+                                    ]
+                                ]
+                            ]
+                        }
+                    },
+                    "save5": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {
+                                "from_node": "colormap"
+                            },
+                            "format": "PNG"
+                        },
+                        "result": true
+                    }
+                },
+                "parameters": []
             }
         }
     }

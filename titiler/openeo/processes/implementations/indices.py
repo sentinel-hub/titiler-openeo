@@ -1,13 +1,15 @@
 """titiler.openeo.processes indices."""
 
-from .data_model import ImageData
+from typing import Dict
+
+from .data_model import ImageData, RasterStack
 from .math import normalized_difference
 
 __all__ = ["ndvi"]
 
 
-def ndvi(data: ImageData, nir: int, red: int):
-    """Apply NDVI."""
+def _apply_ndvi(data: ImageData, nir: int, red: int) -> ImageData:
+    """Apply NDVI to a single ImageData."""
     nirb = data.array[int(nir) - 1]
     redb = data.array[int(red) - 1]
 
@@ -20,3 +22,21 @@ def ndvi(data: ImageData, nir: int, red: int):
             "ndvi",
         ],
     )
+
+
+def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
+    """Apply NDVI to RasterStack.
+
+    Args:
+        data: RasterStack to process
+        nir: Index of the NIR band (1-based)
+        red: Index of the red band (1-based)
+
+    Returns:
+        RasterStack with NDVI results
+    """
+    # Apply NDVI to each item in the stack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_ndvi(img_data, nir, red)
+    return result
