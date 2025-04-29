@@ -33,7 +33,7 @@ def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
         red: Index of the red band (1-based)
 
     Returns:
-        RasterStack with NDVI results
+        RasterStack (Dict[str, ImageData]) containing NDVI results
     """
     # Apply NDVI to each item in the stack
     result: Dict[str, ImageData] = {}

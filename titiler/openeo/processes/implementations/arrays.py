@@ -51,6 +51,6 @@ def array_element(
         return numpy.take(data, index, axis=0)
 
 
-def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> ImageData:
-    """Create an ImageData object from an array."""
-    return ImageData(data)
+def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
+    """Create a RasterStack from an array."""
+    return {"data": ImageData(data)}

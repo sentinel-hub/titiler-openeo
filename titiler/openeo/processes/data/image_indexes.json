@@ -1,7 +1,7 @@
 {
     "id": "image_indexes",
-    "summary": "Select indexes from an ImageData.",
-    "description": "Return Image data with only selected indexes.",
+    "summary": "Select indexes from a datacube.",
+    "description": "Return datacube with only selected indexes.",
     "categories": [
         "images",
         "reducer"
@@ -9,15 +9,15 @@
     "parameters": [
         {
             "name": "data",
-            "description": "An image.",
+            "description": "A datacube.",
             "schema": {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             }
         },
         {
             "name": "indexes",
-            "description": "The 1-based index of the image to retrieve.",
+            "description": "The 1-based index of the band to retrieve.",
             "schema":  {
                 "type": "array",
                 "minItems": 1,
@@ -29,10 +29,10 @@
         }
     ],
     "returns": {
-        "description": "The image with the selected indexes.",
+        "description": "The datacube with the selected indexes.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {
