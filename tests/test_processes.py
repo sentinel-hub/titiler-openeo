@@ -112,6 +112,7 @@ def test_ndvi(sample_raster_stack):
         assert img_data.count == 1  # NDVI results in a single band
         assert img_data.band_names == ["ndvi"]  # Should be named "ndvi"
 
+
 def test_ndwi(sample_raster_stack):
     """Test the ndwi function."""
     # NDWI uses nir and swir bands, but we only have 3 bands

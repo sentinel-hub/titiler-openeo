@@ -39,6 +39,7 @@ def _apply_ndwi(data: ImageData, nir: int, swir: int) -> ImageData:
         ],
     )
 
+
 def ndwi(data: RasterStack, nir: int, swir: int) -> RasterStack:
     """Apply NDWI to RasterStack.
 
@@ -55,6 +56,7 @@ def ndwi(data: RasterStack, nir: int, swir: int) -> RasterStack:
     for key, img_data in data.items():
         result[key] = _apply_ndwi(img_data, nir, swir)
     return result
+
 
 def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
     """Apply NDVI to RasterStack.
