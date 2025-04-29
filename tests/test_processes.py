@@ -13,7 +13,7 @@ from titiler.openeo.processes.implementations.image import (
     image_indexes,
     to_array,
 )
-from titiler.openeo.processes.implementations.indices import ndvi
+from titiler.openeo.processes.implementations.indices import ndvi, ndwi
 from titiler.openeo.processes.implementations.reduce import reduce_dimension
 
 
@@ -111,6 +111,22 @@ def test_ndvi(sample_raster_stack):
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1  # NDVI results in a single band
         assert img_data.band_names == ["ndvi"]  # Should be named "ndvi"
+
+
+def test_ndwi(sample_raster_stack):
+    """Test the ndwi function."""
+    # NDWI uses nir and swir bands, but we only have 3 bands
+    # Let's use bands 2 and 3 for this test
+    result = ndwi(sample_raster_stack, 2, 3)
+
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+
+    # Each result should be an ImageData with 1 band
+    for _key, img_data in result.items():
+        assert isinstance(img_data, ImageData)
+        assert img_data.count == 1  # NDWI results in a single band
+        assert img_data.band_names == ["ndwi"]  # Should be named "ndwi"
 
 
 def test_apply(sample_raster_stack):
