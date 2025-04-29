@@ -13,7 +13,7 @@
             "description": "A raster data cube.",
             "schema": {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             }
         },
         {
@@ -57,7 +57,7 @@
         "description": "A raster image data cube containing the computed hillshade values.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {},

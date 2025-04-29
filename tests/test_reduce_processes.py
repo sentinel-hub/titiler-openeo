@@ -122,13 +122,17 @@ def test_apply_pixel_selection(sample_temporal_stack):
     # Apply pixel selection to combine temporal stack
     result = apply_pixel_selection(data=sample_temporal_stack, pixel_selection="mean")
 
-    # Result should be a single ImageData
-    assert isinstance(result, ImageData)
-    assert result.count == 1
+    # Result should be a RasterStack with a single ImageData
+    assert isinstance(result, dict)
+    assert len(result) == 1
+    assert "data" in result
+    img = result["data"]
+    assert isinstance(img, ImageData)
+    assert img.count == 1
 
     # The mean value should be (1+2+3)/3 = 2
-    assert np.allclose(result.array.mean(), 2.0)
+    assert np.allclose(img.array.mean(), 2.0)
 
     # Metadata should include the pixel selection method
-    assert "pixel_selection_method" in result.metadata
-    assert result.metadata["pixel_selection_method"] == "mean"
+    assert "pixel_selection_method" in img.metadata
+    assert img.metadata["pixel_selection_method"] == "mean"

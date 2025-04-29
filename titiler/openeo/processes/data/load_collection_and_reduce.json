@@ -1,7 +1,7 @@
 {
     "id": "load_collection_and_reduce",
-    "summary": "Load a collection and return an imagedata object",
-    "description": "Loads a collection from the current back-end by its id and returns it as a ImageData Object.",
+    "summary": "Load a collection and return a datacube",
+    "description": "Loads a collection from the current back-end by its id and returns it as a datacube.",
     "categories": [
         "cubes",
         "import"
@@ -220,10 +220,10 @@
         }
     ],
     "returns": {
-        "description": "An ImageData object for further processing.",
+        "description": "A datacube for further processing.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {

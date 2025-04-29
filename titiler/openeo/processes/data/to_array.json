@@ -1,7 +1,7 @@
 {
   "id": "to_array",
-  "summary": "Convert ImageData to array.",
-  "description": "Convert an ImageData object to numpy.array.",
+  "summary": "Convert datacube to array.",
+  "description": "Convert a datacube to numpy.array.",
   "categories": [
     "images",
     "arrays"
@@ -9,15 +9,15 @@
   "parameters": [
     {
       "name": "data",
-      "description": "An ImageData object.",
+      "description": "A datacube.",
       "schema": {
         "type": "object",
-        "subtype": "imagedata"
+        "subtype": "datacube"
       }
     }
   ],
   "returns": {
-    "description": "The array from the ImageData object.",
+    "description": "The array from the datacube.",
     "schema": {
       "type": "array"
     }
