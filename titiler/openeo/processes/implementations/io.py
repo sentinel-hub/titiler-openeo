@@ -7,19 +7,20 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
 import numpy
-import rasterio
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.io import COGReader
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
-from ...reader import _estimate_output_dimensions, _reader
+from ...reader import _reader
 from .data_model import LazyRasterStack, RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
 
-def load_url(url: str, format: Optional[str] = None, options: Optional[Dict] = None) -> RasterStack:
+def load_url(
+    url: str, format: Optional[str] = None, options: Optional[Dict] = None
+) -> RasterStack:
     """Load data from a URL.
 
     Args:
@@ -34,21 +35,21 @@ def load_url(url: str, format: Optional[str] = None, options: Optional[Dict] = N
         ValueError: If the URL is invalid
     """
     # Create a dummy STAC item for the COG
-    item = {
+    item: Dict[str, Any] = {
         "type": "Feature",
         "id": "cog",
         "bbox": None,  # Will be set from the COG metadata
         "assets": {
             "data": {
                 "href": url,
-                "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
             }
-        }
+        },
     }
 
     # Get metadata from COG to set bbox
     with COGReader(url) as cog:
-        item["bbox"] = list(cog.bounds)
+        item["bbox"] = [float(x) for x in cog.bounds]
 
     # Create the tasks
     tasks = create_tasks(
@@ -63,7 +64,7 @@ def load_url(url: str, format: Optional[str] = None, options: Optional[Dict] = N
     return LazyRasterStack(
         tasks=tasks,
         date_name_fn=lambda _: "data",  # Single timestamp since it's a single COG
-        allowed_exceptions=()
+        allowed_exceptions=(),
     )
 
 
