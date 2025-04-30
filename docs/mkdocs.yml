@@ -32,11 +32,14 @@ extra:
 
 nav:
   - TiTiler-OpenEO: "index.md"
-  - Concepts:
+  - Project:
     - Overview: "concepts.md"
+    - Documentation Plan: "documentation-plan.md"
+    - Release Notes: "release-notes.md"
+  - Concepts:
     - RasterStack Data Model: "raster-stack.md"
-  - Development - Contributing: "contributing.md"
-  - Release Notes: "release-notes.md"
+  - Development:
+    - Contributing: "contributing.md"
 
 plugins:
   - search
