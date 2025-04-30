@@ -2,16 +2,16 @@
 
 TiTiler backend for openEO
 
-![alt text](image.png)
+![TiTiler OpenEO](img/image.png)
 
 ## Overview
 
-[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a> and <a href="https://www.sinergise.com/"><img alt="Sinergise" src="docs/src/img/sinergise-logo.png" height="25px"></a>.
+[`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/main.py) is a TiTiler backend implementation for openEO developed by [![Development Seed](img/ds-logo-hor.svg){: style="height:25px"}](https://developmentseed.org/) and [![Sinergise](img/sinergise-logo.png){: style="height:25px"}](https://www.sinergise.com/).
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
 This simplicity comes with some specific implementation choices like the type of data managed by the backend.
 It is focused on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
-A concept note is available [here](docs/src/concepts.md) to describe in more detail the implementation choices.
+A concept note is available [here](concepts.md) to describe in more detail the implementation choices.
 
 The application provides with a minimal [openEO API (L1A and L1C)](https://openeo.org/documentation/1.0/developers/profiles/api.html#api-profiles).
 
@@ -37,7 +37,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 
 ## Installation
 
-To install [`titiler-openeo`](titiler/openeo/main.py ), clone the repository and install the dependencies:
+To install [`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/main.py), clone the repository and install the dependencies:
 
 ```bash
 git clone https://github.com/sentinel-hub/titiler-openeo.git
@@ -64,14 +64,14 @@ Configuration settings can be provided via environment variables. The following 
 
 In this repository, 2 `.env` sample files are provided:
 
-- [`.env.eoapi`](.env.eoapi) that uses the [Earth Observation API (EOAPI)](https://eoapi.dev/).
+- [`.env.eoapi`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.eoapi) that uses the [Earth Observation API (EOAPI)](https://eoapi.dev/).
 
   ```bash
   TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
   TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
   ```
 
-- [`.env.cdse`](.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
+- [`.env.cdse`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
 
   ```bash
   TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"

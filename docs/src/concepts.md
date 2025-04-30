@@ -120,7 +120,7 @@ Since the backend is built on top of the TiTiler engine, it supports the same ou
 
 ### Load Collection
 
-The `load_collection` process is used to load a collection from the STAC API. In `titiler-openeo`, it also returns a `Datacube` object type that needs to be reduced to an [`ImageData`](.#reducing-the-data) object type to be used with most of the other process.
+The `load_collection` process is used to load a collection from the STAC API. In `titiler-openeo`, it also returns a `Datacube` object type that needs to be reduced to an [`ImageData`](#reducing-the-data) object type to be used with most of the other process.
 
 ## General limitations
 
