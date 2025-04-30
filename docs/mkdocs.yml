@@ -32,11 +32,14 @@ extra:
 
 nav:
   - TiTiler-OpenEO: "index.md"
-  - Concepts:
+  - Project:
     - Overview: "concepts.md"
+    - Documentation Plan: "documentation-plan.md"
+    - Release Notes: "release-notes.md"
+  - Concepts:
     - RasterStack Data Model: "raster-stack.md"
-  - Development - Contributing: "contributing.md"
-  - Release Notes: "release-notes.md"
+  - Development:
+    - Contributing: "contributing.md"
 
 plugins:
   - search
@@ -44,6 +47,7 @@ plugins:
   - mkdocs-jupyter:
       include_source: true
       ignore: ["**/.ipynb_checkpoints/*.ipynb"]
+      execute: false
   - mkdocstrings:
       enable_inventory: true
       handlers:
@@ -73,47 +77,90 @@ plugins:
 
 theme:
   name: material
-  palette:
-    primary: indigo
-    scheme: default
   custom_dir: 'src/overrides'
   favicon: img/favicon.png
+  
+  # Enhanced theme configuration
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
 
+  # Enhanced navigation and features
   features:
-    - content.code.annotate
-    - content.code.copy
+    # Navigation
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
     - navigation.indexes
     - navigation.instant
     - navigation.tracking
-    - search.suggest
+    - navigation.top
+    - toc.integrate
+    
+    # Content
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    
+    # Search
+    - search.highlight
     - search.share
+    - search.suggest
+    
+    # Header
+    - header.autohide
 
-# https://github.com/kylebarron/cogeo-mosaic/blob/mkdocs/mkdocs.yml#L50-L75
 markdown_extensions:
+  # Python Markdown extensions
   - admonition
   - attr_list
-  - codehilite:
-      guess_lang: false
   - def_list
   - footnotes
-  - pymdownx.arithmatex
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # PyMdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.betterem
-  - pymdownx.caret:
-      insert: false
+  - pymdownx.caret
   - pymdownx.details
   - pymdownx.emoji:
-      emoji_index: "material.extensions.emoji.twemoji"
-      emoji_generator: "material.extensions.emoji.to_svg"
-  - pymdownx.escapeall:
-      hardbreak: true
-      nbsp: true
+      emoji_index: !!python/name:material.extensions.emoji.twemoji 
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
   - pymdownx.magiclink:
       hide_protocol: true
       repo_url_shortener: true
+  - pymdownx.mark
   - pymdownx.smartsymbols
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: div
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
   - pymdownx.tilde
-  - toc:
-      permalink: true
