@@ -63,13 +63,13 @@ imagePullSecrets: []
 
 env:
   CPL_TMPDIR: /tmp
-  GDAL_CACHEMAX: 200  # 200 mb
-  VSI_CACHE: "TRUE" # Enable VSI cache
-  VSI_CACHE_SIZE: 5000000  # 5 MB (per file-handle)
-  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR" # Disable directory listing
-  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES" # Merge consecutive ranges
-  GDAL_HTTP_MULTIPLEX: "YES" # Enable multiplexing
-  GDAL_HTTP_VERSION: 2 # Use HTTP/2
+  GDAL_CACHEMAX: 200    # 200 mb
+  VSI_CACHE: "TRUE"    # Enable VSI cache
+  VSI_CACHE_SIZE: 5000000    # 5 MB (per file-handle)
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"    # Disable directory listing
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"    # Merge consecutive ranges
+  GDAL_HTTP_MULTIPLEX: "YES"    # Enable multiplexing
+  GDAL_HTTP_VERSION: 2    # Use HTTP/2
   PYTHONWARNINGS: "ignore"
   TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
 
