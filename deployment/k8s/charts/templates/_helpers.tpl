@@ -56,9 +56,9 @@ Database URL construction helper
 */}}
 {{- define "database.url" -}}
 {{- if eq .Values.database.type "json" -}}
-file://{{ .Values.database.json.path }}
+{{ .Values.database.json.path }}
 {{- else if eq .Values.database.type "duckdb" -}}
-duckdb://{{ .Values.database.duckdb.path }}
+{{ .Values.database.duckdb.path }}
 {{- else if eq .Values.database.type "postgresql" -}}
 {{- if .Values.database.external.enabled -}}
 {{- $externalPassword := .Values.database.external.password -}}
