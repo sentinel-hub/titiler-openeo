@@ -19,7 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
-      {{- if and .Values.persistence.enabled .Values.persistence.localStoreSeed }}
+      {{- if and .Values.database.persistence.enabled (eq .Values.database.type "json") }}
         - name: init-store
           image: busybox
           command:
@@ -27,15 +27,15 @@ spec:
             - -c
             - |
               if [ -f "/config/init_store.json" ]; then
-                echo "Initializing local_store.json from init_store.json..."
-                cp /config/init_store.json /data/local_store.json
-                echo "Initialization complete."
+                echo "Initializing JSON store from init_store.json..."
+                mkdir -p "$(dirname {{ .Values.database.json.path }})" && cp /config/init_store.json {{ .Values.database.json.path }}
+                echo "JSON store initialization complete."
               else
                 echo "No init_store.json found in configmap, skipping initialization."
               fi
           volumeMounts:
             - name: data
-              mountPath: /data
+              mountPath: /mnt/data
             - name: config-volume
               mountPath: /config
       {{- end }}
@@ -55,11 +55,7 @@ spec:
           {{- end }}
           env:
             - name: TITILER_OPENEO_SERVICE_STORE_URL
-              {{- if .Values.externalDatabase.enabled }}
-              value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host (.Values.externalDatabase.port | int)  .Values.externalDatabase.database | quote }}
-              {{- else }}
-              value: {{ printf "%s/%s" "/data" .Values.persistence.localStoreFile | quote }}
-              {{- end }}
+              value: {{ include "database.url" . | quote }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
             - name: {{ $key }}
@@ -93,9 +89,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
-            {{- if .Values.persistence.enabled }}
+            {{- if and (or (eq .Values.database.type "json") (eq .Values.database.type "duckdb")) .Values.database.persistence.enabled }}
             - name: data
-              mountPath: /data
+              mountPath: /mnt/data
             {{- end }}
             - name: config-volume
               mountPath: /config
@@ -111,11 +107,11 @@ spec:
         - name: config-volume
           configMap:
             name: {{ include "titiler.fullname" . }}-configmap
-        {{- if .Values.persistence.enabled }}
+        {{- if and (or (eq .Values.database.type "json") (eq .Values.database.type "duckdb")) .Values.database.persistence.enabled }}
         - name: data
-          {{- if .Values.persistence.existingClaim }}
+          {{- if .Values.database.persistence.existingClaim }}
           persistentVolumeClaim:
-            claimName: {{ .Values.persistence.existingClaim }}
+            claimName: {{ .Values.database.persistence.existingClaim }}
           {{- else }}
           persistentVolumeClaim:
             claimName: {{ include "titiler.fullname" . }}-data
