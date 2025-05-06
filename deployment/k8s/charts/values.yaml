@@ -109,6 +109,8 @@ postgresql:
 database:
   # Type of database to use: "json", "duckdb", "postgresql"
   type: "json"
+  # Default services configuration file path
+  defaultServices: ""  # Path to default services configuration file (like files/copernicus.json)
 
   # File-based storage configuration (for JSON and DuckDB)
   persistence:

@@ -112,6 +112,7 @@ def create_app():
         stac_client=stac_client,
         process_registry=process_registry,
         auth=auth,
+        default_services_file=backend_settings.default_services_file,
     )
     app.include_router(endpoints.router)
     app.endpoints = endpoints

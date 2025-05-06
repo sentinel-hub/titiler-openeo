@@ -35,6 +35,7 @@ class EndpointsFactory(BaseFactory):
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth
+    default_services_file: Optional[str] = None
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -440,6 +441,36 @@ class EndpointsFactory(BaseFactory):
         def openeo_services(request: Request, user=Depends(self.auth.validate)):
             """Lists all secondary web services."""
             services = self.services_store.get_user_services(user.user_id)
+
+            # If services list is empty and default_services_file is configured, load default services
+            if not services and self.default_services_file:
+                try:
+                    import json
+                    import os
+                    
+                    # Check if the file exists
+                    if os.path.exists(self.default_services_file):
+                        with open(self.default_services_file, 'r') as f:
+                            default_services_config = json.load(f)
+                        
+                        # Create each service using the service configuration
+                        for _, service_data in default_services_config.items():
+                            # Extract just the service configuration, ignoring id and user_id
+                            service_config = service_data.get("service", {})
+                            if "id" in service_config:
+                                del service_config["id"]  # Remove the id as it will be generated
+                            
+                            # Create the service
+                            body = models.ServiceInput(**service_config)
+                            self.services_store.add_service(user.user_id, body.model_dump())
+                        
+                        # Reload services after adding defaults
+                        services = self.services_store.get_user_services(user.user_id)
+                except Exception as e:
+                    # Log the error but continue without default services
+                    import logging
+                    logging.error(f"Failed to load default services: {str(e)}")
+
             return {
                 "services": [
                     {
