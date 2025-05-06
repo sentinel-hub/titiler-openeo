@@ -1,0 +1,33 @@
+{{- if .Values.cloudferro.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "titiler.fullname" . }}-cloudferro
+  labels:
+    {{- include "titiler.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "titiler.fullname" . }}-cloudferro
+  labels:
+    {{- include "titiler.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "patch", "get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "titiler.fullname" . }}-cloudferro
+  labels:
+    {{- include "titiler.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "titiler.fullname" . }}-cloudferro
+subjects:
+- kind: ServiceAccount
+  name: {{ include "titiler.fullname" . }}-cloudferro
+{{- end }}

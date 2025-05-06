@@ -88,6 +88,10 @@ tolerations: []
 
 affinity: {}
 
+# CloudFerro S3 configuration
+cloudferro:
+  enabled: false  # Set to true to enable cloudferro S3 credentials
+
 # logging configuration
 logging:
   configFile: "files/log_config.yaml"

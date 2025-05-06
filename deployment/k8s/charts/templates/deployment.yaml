@@ -54,6 +54,23 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
+            {{- if .Values.cloudferro.enabled }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "titiler.fullname" . }}-cloudferro-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "titiler.fullname" . }}-cloudferro-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "titiler.fullname" . }}-cloudferro-credentials
+                  key: AWS_S3_ENDPOINT
+            {{- end }}
             - name: TITILER_OPENEO_SERVICE_STORE_URL
               {{- if .Values.externalDatabase.enabled }}
               value: {{ printf "postgresql://%s:%s@%s:%d/%s" .Values.externalDatabase.user (.Values.externalDatabase.password | urlquery) .Values.externalDatabase.host (.Values.externalDatabase.port | int)  .Values.externalDatabase.database | quote }}
