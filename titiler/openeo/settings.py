@@ -160,7 +160,9 @@ class BackendSettings(BaseSettings):
 
     stac_api_url: Union[AnyHttpUrl, PostgresDsn]
     service_store_url: Union[AnyHttpUrl, str]
-    default_services_file: Optional[str] = None  # Path to default services configuration file
+    default_services_file: Optional[str] = (
+        None  # Path to default services configuration file
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_",
