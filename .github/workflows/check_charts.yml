@@ -36,6 +36,10 @@ jobs:
         with:
           version: v3.9.2
 
+      # add bitnami repo to get the postgresql chart
+      - name: Add Bitnami repo
+        run: helm repo add bitnami https://charts.bitnami.com/bitnami
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'

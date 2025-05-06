@@ -1,6 +1,5 @@
 # Default values for titiler-openeo.
 
-
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
   tag: "dev"
@@ -14,8 +13,8 @@ image:
     - "80"
     - "--workers"
     - "4"
-    - "--forwarded-allow-ips"  # to make sure it works behind a reverse proxy
-    - "*"  # Allow all
+    - "--forwarded-allow-ips"   # to make sure it works behind a reverse proxy
+    - "*"   # Allow all
     - "--log-config"
     - "/config/log_config.yaml"
 
@@ -30,7 +29,9 @@ service:
 
 ingress:
   enabled: false
-  annotations: {}
+  className: ""
+  annotations:
+    {}
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
@@ -51,7 +52,8 @@ autoscaling:
 
 replicaCount: 1
 
-extraHostPathMounts: []
+extraHostPathMounts:
+  []
   # - name: map-sources
   #   mountPath: /map-sources/
   #   hostPath: /home/ubuntu/map-sources
@@ -62,13 +64,13 @@ imagePullSecrets: []
 
 env:
   CPL_TMPDIR: /tmp
-  GDAL_CACHEMAX: 200  # 200 mb
-  VSI_CACHE: "TRUE"
-  VSI_CACHE_SIZE: 5000000  # 5 MB (per file-handle)
-  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
-  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"
-  GDAL_HTTP_MULTIPLEX: "YES"
-  GDAL_HTTP_VERSION: 2
+  GDAL_CACHEMAX: 200   # 200 mb
+  VSI_CACHE: "TRUE"   # Enable VSI cache
+  VSI_CACHE_SIZE: 5000000   # 5 MB (per file-handle)
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"   # Disable directory listing
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"   # Merge consecutive ranges
+  GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
+  GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
   TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
 
@@ -92,29 +94,58 @@ affinity: {}
 logging:
   configFile: "files/log_config.yaml"
 
-# Persistent storage configuration for the local database file
-persistence:
-  enabled: true
-  storageClassName: ""
-  accessModes:
-    - ReadWriteOnce
-  size: 1Gi
-  annotations: {}
-  # existingClaim: ""
-  localStoreFile: "local_store.json"
-  localStoreSeed: "files/eoapi.json"
-
-# Configuration for the external database
-# PostgreSQL only supported for now
-externalDatabase:
+# PostgreSQL subchart configuration
+postgresql:
   enabled: false
-  host: "172.16.4.5"
-  port: 5432
-  user: openeo
-  database: openeo
-  password: "secret"
+  auth:
+    database: openeo
+    username: openeo
+    password: "8472387r4_$78-b9"
+  primary:
+    persistence:
+      size: 8Gi
 
-securityContext: {}
+# Database configuration
+database:
+  # Type of database to use: "json", "duckdb", "postgresql"
+  type: "json"
+
+  # File-based storage configuration (for JSON and DuckDB)
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+    existingClaim: ""
+
+  # JSON file configuration
+  json:
+    # Will be used if type is "json"
+    enabled: true
+    path: "/mnt/data/store.json"
+    seed: "files/eoapi.json"   # Initial data to populate the JSON store
+
+  # DuckDB configuration
+  duckdb:
+    # Will be used if type is "duckdb"
+    enabled: false
+    path: "/mnt/data/store.db"
+
+  # PostgreSQL connection configuration (when not using subchart)
+  external:
+    enabled: false
+    host: ""
+    port: 5432
+    user: openeo
+    database: openeo
+    password: ""
+    existingSecret: ""   # Name of existing secret containing password
+    existingSecretKey: "password"   # Key in the existing secret
+
+securityContext:
+  {}
   # capabilities:
   #   drop:
   #     - ALL
