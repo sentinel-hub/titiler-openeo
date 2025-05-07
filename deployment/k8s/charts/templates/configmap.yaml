@@ -12,3 +12,7 @@ data:
   init_store.json: |-
     {{ .Files.Get .Values.database.json.seed | nindent 4 }}
   {{- end }}
+  {{- if .Values.database.defaultServices }}
+  default_services.json: |-
+    {{ .Files.Get .Values.database.defaultServices | nindent 4 }}
+  {{- end }}
