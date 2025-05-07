@@ -21,7 +21,7 @@ def get_store(store_uri: str) -> ServicesStore:
 
         return DuckDBStore(store=store_uri)
 
-    if parsed.scheme == "sqlalchemy":
+    if parsed.scheme == "sqlalchemy" or parsed.scheme.startswith("postgresql"):
         from .sqlalchemy import SQLAlchemyStore  # noqa
 
         return SQLAlchemyStore(store=store_uri)

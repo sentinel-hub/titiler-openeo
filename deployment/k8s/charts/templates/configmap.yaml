@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "titiler.fullname" . }}-configmap
+data:
+  {{- if .Values.netrc }}
+  netrc: {{ tpl (.Values.netrc) . | quote }}
+  {{- end }}
+  log_config.yaml: |-
+    {{ .Files.Get .Values.logging.configFile | nindent 4 }}
+  {{- if and (eq .Values.database.type "json") .Values.database.json.seed }}
+  init_store.json: |-
+    {{ .Files.Get .Values.database.json.seed | nindent 4 }}
+  {{- end }}
+  {{- if .Values.database.defaultServices }}
+  default_services.json: |-
+    {{ .Files.Get .Values.database.defaultServices | nindent 4 }}
+  {{- end }}

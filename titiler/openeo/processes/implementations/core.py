@@ -264,6 +264,7 @@ def process(f):
             "keepdims",
             "context",
             "dim_labels",
+            "data",
         ]
         # Remove 'axis' and keepdims parameter if not expected in function signature.
         for arg in special_args:
@@ -272,7 +273,6 @@ def process(f):
 
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
         if hasattr(f, "__name__"):
-            logger.info(f"Running process {f.__name__}")
             logger.debug(
                 f"Running process {f.__name__} with resolved parameters: {pretty_args}"
             )

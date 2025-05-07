@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
+import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
@@ -15,21 +16,20 @@ from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
-from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
-from rio_tiler.tasks import create_tasks, filter_tasks
-from rio_tiler.types import BBox
+from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
 from .errors import NoDataAvailable, TemporalExtentEmpty
-from .processes.implementations.data_model import RasterStack
+from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
-from .reader import SimpleSTACReader
-from .settings import CacheSettings, PySTACSettings
+from .reader import _estimate_output_dimensions, _reader
+from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
 pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
+processing_settings = ProcessingSettings()
 
 
 @define
@@ -37,18 +37,20 @@ class stacApiBackend:
     """PySTAC-Client Backend."""
 
     url: str = field()
-    client: Client = field(default=None)
+    _client_cache: Client = field(default=None, init=False)
 
-    def __attrs_post_init__(self) -> None:
-        """Create Client."""
-        if not self.client:
+    @property
+    def client(self) -> Client:
+        """Return a PySTAC-Client."""
+        if not self._client_cache:
             stac_api_io = StacApiIO(
                 max_retries=Retry(
                     total=pystac_settings.retry,
                     backoff_factor=pystac_settings.retry_factor,
                 ),
             )
-            self.client = Client.open(self.url, stac_io=stac_api_io)
+            self._client_cache = Client.open(self.url, stac_io=stac_api_io)
+        return self._client_cache
 
     @cached(  # type: ignore
         TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),
@@ -122,18 +124,12 @@ class stacApiBackend:
                 }
             )
 
-        # Spectral bands
-        # TEMP FIX: The item_assets in core collection is not supported in PySTAC yet.
-        if (
-            eo.EOExtension.has_extension(collection)
-            and "item_assets" in collection.extra_fields
-        ):
+        # bands
+        if "item_assets" in collection.extra_fields:
             ia.ItemAssetsExtension.add_to(collection)
             bands_name = set()
             for key, asset in collection.ext.item_assets.items():
-                if asset.properties.get("bands", None) or asset.properties.get(
-                    "eo:common_name", None
-                ):
+                if "data" in asset.properties.get("roles", []):
                     bands_name.add(key)
             if len(bands_name) > 0:
                 dims["spectral"] = dc.Dimension.from_dict(
@@ -261,16 +257,219 @@ class LoadCollection:
                 end_date = str(temporal_extent[1].to_numpy())
 
             if not end_date and not start_date:
-                raise TemporalExtentEmpty(
-                    "The temporal extent is empty. The second instant in time must always be greater/later than the first instant in time."
-                )
+                raise TemporalExtentEmpty()
 
-            query_params["datetime"] = [start_date, end_date]
+            # Create datetime string in the format "start_date/end_date"
+            if start_date and end_date:
+                query_params["datetime"] = f"{start_date}/{end_date}"
+            elif start_date:
+                query_params["datetime"] = f"{start_date}/.."
+            elif end_date:
+                query_params["datetime"] = f"../{end_date}"
 
         if properties is not None:
-            query_params["query"] = properties
+            # Convert OpenEO process graphs to STAC CQL2-JSON format
+            filter_expr = self._convert_process_graph_to_cql2(properties)
+            query_params["filter"] = filter_expr
+            query_params["filter_lang"] = "cql2-json"
 
         return self.stac_api.get_items(**query_params)
+
+    def _handle_comparison_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
+        """Handle comparison operators like eq, lt, gt, etc."""
+        operators = {
+            "eq": "=",
+            "neq": "<>",
+            "lt": "<",
+            "lte": "<=",
+            "gt": ">",
+            "gte": ">=",
+        }
+
+        if process_id in operators:
+            return {
+                "op": operators[process_id],
+                "args": [{"property": f"{prop_name}"}, args.get("y")],
+            }
+
+        if process_id == "between":
+            return {
+                "op": "between",
+                "args": [
+                    {"property": f"{prop_name}"},
+                    args.get("min"),
+                    args.get("max"),
+                ],
+            }
+
+        return None
+
+    def _handle_array_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
+        """Handle array operators like in, array_contains."""
+        if process_id in ["in", "array_contains"]:
+            return {
+                "op": "in",
+                "args": [
+                    {"property": f"{prop_name}"},
+                    {"array": args.get("values", [])},
+                ],
+            }
+        return None
+
+    def _handle_pattern_operator(
+        self, process_id: str, prop_name: str, args: dict
+    ) -> Optional[Dict]:
+        """Handle pattern matching operators like starts_with, ends_with, contains."""
+        if process_id == "starts_with":
+            pattern = args.get("y", "") + "%"
+            return {
+                "op": "like",
+                "args": [{"property": f"{prop_name}"}, pattern],
+            }
+        elif process_id == "ends_with":
+            pattern = "%" + args.get("y", "")
+            return {
+                "op": "like",
+                "args": [{"property": f"{prop_name}"}, pattern],
+            }
+        elif process_id == "contains":
+            pattern = "%" + args.get("y", "") + "%"
+            return {
+                "op": "like",
+                "args": [{"property": f"{prop_name}"}, pattern],
+            }
+        return None
+
+    def _handle_null_check(self, process_id: str, prop_name: str) -> Optional[Dict]:
+        """Handle null check operators."""
+        if process_id == "is_null":
+            return {
+                "op": "isNull",
+                "args": [{"property": f"{prop_name}"}],
+            }
+        return None
+
+    def _handle_logical_operator(
+        self, process_id: str, prop_name: str, args: dict, node_id: str
+    ) -> Optional[Dict]:
+        """Handle logical operators like and, or, not."""
+        if process_id not in ["and", "or", "not"]:
+            return None
+
+        if process_id in ["and", "or"]:
+            sub_conditions = []
+            for sub_arg in args.get("expressions", []):
+                # Recursively process sub-conditions
+                sub_pg = {"process_graph": {f"sub_{node_id}": sub_arg}}
+                sub_condition = self._convert_process_graph_to_cql2({prop_name: sub_pg})
+                if sub_condition:
+                    sub_conditions.append(sub_condition)
+
+            if sub_conditions:
+                return {"op": process_id, "args": sub_conditions}
+
+        elif process_id == "not":
+            # Recursively process the negated condition
+            sub_pg = {"process_graph": {f"sub_{node_id}": args.get("expression")}}
+            sub_condition = self._convert_process_graph_to_cql2({prop_name: sub_pg})
+            if sub_condition:
+                return {"op": "not", "args": [sub_condition]}
+
+        return None
+
+    def _handle_default_operator(self, prop_name: str, args: dict) -> Optional[Dict]:
+        """Handle default case for unmatched processes."""
+        # Try to extract target value from arguments
+        target_value = None
+        for _, arg_value in args.items():
+            if (
+                isinstance(arg_value, dict)
+                and arg_value.get("from_parameter") == "value"
+            ):
+                continue
+            else:
+                target_value = arg_value
+                break
+
+        if target_value is not None:
+            return {
+                "op": "=",
+                "args": [{"property": f"properties.{prop_name}"}, target_value],
+            }
+        return None
+
+    def _handle_direct_value(self, prop_name: str, value) -> Dict:
+        """Handle non-process graph case (direct value)."""
+        return {"op": "=", "args": [{"property": f"{prop_name}"}, value]}
+
+    def _process_single_property(self, prop_name: str, process_graph) -> Optional[Dict]:
+        """Process a single property in the process graph."""
+        # Handle non-process graph case (direct value)
+        if not isinstance(process_graph, dict) or "process_graph" not in process_graph:
+            return self._handle_direct_value(prop_name, process_graph)
+
+        # Extract process graph
+        pg = process_graph["process_graph"]
+        if not pg:
+            return None
+
+        # Get the node ID and node
+        node_id = next(iter(pg.keys()))
+        node = pg[node_id]
+        process_id = node.get("process_id")
+        args = node.get("arguments", {})
+
+        # Try each operator type handler
+        handlers = [
+            self._handle_comparison_operator,
+            self._handle_array_operator,
+            self._handle_pattern_operator,
+            self._handle_null_check,
+            lambda p_id, p_name, a: self._handle_logical_operator(
+                p_id, p_name, a, node_id
+            ),
+        ]
+
+        for handler in handlers:
+            # Call handler without checking process_id type first
+            condition = handler(process_id, prop_name, args)  # type: ignore
+            if condition:
+                return condition
+
+        # Try default handler as fallback
+        return self._handle_default_operator(prop_name, args)
+
+    def _convert_process_graph_to_cql2(self, properties: dict) -> dict:
+        """
+        Convert OpenEO process graph properties to STAC CQL2-JSON format.
+
+        Args:
+            properties: Dictionary of property name to OpenEO process graph
+
+        Returns:
+            Dictionary in CQL2-JSON format following the STAC API Filter Extension spec
+        """
+        if not properties:
+            return {}
+
+        # For single property we return the condition directly
+        if len(properties) == 1:
+            prop_name = next(iter(properties.keys()))
+            condition = self._process_single_property(prop_name, properties[prop_name])
+            return condition if condition else {}
+
+        # For multiple properties, combine with AND
+        cql2_filter: Dict[str, Any] = {"op": "and", "args": []}
+        for prop_name, process_graph in properties.items():
+            condition = self._process_single_property(prop_name, process_graph)
+            if condition:
+                cql2_filter["args"].append(condition)
+
+        return cql2_filter
 
     def load_collection(
         self,
@@ -294,45 +493,54 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # TODO:
-        # - Get PROJ information about the Items
-        # - Estimate output size in Pixel and raise issue if too big
-
-        if spatial_extent:
-
-            def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(bbox, **kwargs)
-
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            tasks = create_tasks(
-                _reader,
-                items,
-                MAX_THREADS,
-                bbox,
-                assets=bands,
-                bounds_crs=crs,
-                dst_crs=crs,
-                width=int(width) if width else width,
-                height=int(height) if height else height,
-                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        # Check the items limit
+        if len(items) > processing_settings.max_items:
+            raise ValueError(
+                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
-            return {
-                _props_to_datename(asset["properties"]): val
-                for val, asset in filter_tasks(
-                    tasks, allowed_exceptions=(TileOutsideBounds,)
-                )
-            }
 
-        raise NotImplementedError("Can't use this backend without spatial extent")
+        # Check pixel limit before calling _estimate_output_dimensions
+        # For test_load_collection_pixel_threshold
+        if width and height and (width * height) > processing_settings.max_pixels:
+            raise ValueError(
+                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+            )
+
+        # If bands parameter is missing, use the first asset from the first item
+        if bands is None and items and "assets" in items[0]:
+            bands = list(items[0]["assets"].keys())[
+                :1
+            ]  # Take the first asset as default
+
+        # Estimate dimensions based on items and spatial extent
+        dimensions = _estimate_output_dimensions(
+            items, spatial_extent, bands, width, height
+        )
+
+        # Extract values from the result
+        width = dimensions["width"]
+        height = dimensions["height"]
+        bbox = dimensions["bbox"]
+        crs = dimensions["crs"]
+
+        tasks = create_tasks(
+            _reader,
+            items,
+            MAX_THREADS,
+            bbox,
+            assets=bands,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=width if width else width,
+            height=height if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        )
+        # Return a LazyRasterStack that will only execute the tasks when accessed
+        return LazyRasterStack(
+            tasks=tasks,
+            date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+            allowed_exceptions=(TileOutsideBounds,),
+        )
 
     def load_collection_and_reduce(
         self,
@@ -346,7 +554,7 @@ class LoadCollection:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
-    ) -> ImageData:
+    ) -> RasterStack:
         """Load Collection and return image."""
         items = self._get_items(
             id,
@@ -357,40 +565,341 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # TODO #18:
-        # - Get PROJ information about the Items
-        # - Estimate output size in Pixel and raise issue if too big
-
-        if spatial_extent:
-
-            def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-                with SimpleSTACReader(item) as src_dst:
-                    return src_dst.part(
-                        bbox,
-                        assets=bands or list(items[0]["assets"]),
-                        **kwargs,
-                    )
-
-            bbox = [
-                spatial_extent.west,
-                spatial_extent.south,
-                spatial_extent.east,
-                spatial_extent.north,
-            ]
-            projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
-            crs = to_rasterio_crs(projcrs)
-
-            img, _ = mosaic_reader(
-                items,
-                _reader,
-                bbox,
-                bounds_crs=crs,
-                dst_crs=crs,
-                width=int(width) if width else width,
-                height=int(height) if height else height,
-                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-                pixel_selection=PixelSelectionMethod[pixel_selection].value(),
+        # Check the items limit
+        if len(items) > processing_settings.max_items:
+            raise ValueError(
+                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
             )
-            return img
 
-        raise NotImplementedError("Can't use this backend without spatial extent")
+        # Check pixel limit before calling _estimate_output_dimensions
+        # For test_load_collection_and_reduce_pixel_threshold
+        if width and height and (width * height) > processing_settings.max_pixels:
+            raise ValueError(
+                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+            )
+
+        # If bands parameter is missing, use the first asset from the first item
+        if bands is None and items and "assets" in items[0]:
+            bands = list(items[0]["assets"].keys())[
+                :1
+            ]  # Take the first asset as default
+
+        # Estimate dimensions based on items and spatial extent
+        dimensions = _estimate_output_dimensions(
+            items, spatial_extent, bands, width, height
+        )
+
+        # Extract values from the result
+        width = dimensions["width"]
+        height = dimensions["height"]
+        bbox = dimensions["bbox"]
+        crs = dimensions["crs"]
+
+        img, _ = mosaic_reader(
+            items,
+            _reader,
+            bbox,
+            bounds_crs=crs,
+            assets=bands,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            pixel_selection=PixelSelectionMethod[pixel_selection or "first"].value(),
+        )
+        # Return a RasterStack with a single entry
+        # Use a consistent key naming approach
+        key = "reduced"
+        if temporal_extent and temporal_extent[0]:
+            key = str(temporal_extent[0].to_numpy())
+        elif items and "properties" in items[0]:
+            key = _props_to_datename(items[0]["properties"])
+
+        return {key: img}
+
+
+@define
+class LoadStac:
+    """Backend Specific STAC loaders."""
+
+    def _load_stac_object(self, url: str) -> pystac.STACObject:
+        """Load a STAC object from a URL.
+
+        Args:
+            url: URL to a static STAC catalog or a STAC API Collection
+
+        Returns:
+            The loaded STAC object
+
+        Raises:
+            ValueError: If the STAC object cannot be loaded
+        """
+        try:
+            return pystac.read_file(url)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to read STAC from URL: {url}. Error: {str(e)}"
+            ) from e
+
+    def _handle_collection_or_catalog(
+        self,
+        stac_obj: Union[pystac.Collection, pystac.Catalog],
+        spatial_extent: Optional[BoundingBox] = None,
+        temporal_extent: Optional[TemporalInterval] = None,
+        bands: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Handle a STAC Collection or Catalog.
+
+        Args:
+            stac_obj: The STAC Collection or Catalog
+            spatial_extent: Optional bounding box to limit the data
+            temporal_extent: Optional temporal interval to limit the data
+            bands: Optional list of band names to include
+            properties: Optional metadata properties to filter by
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A RasterStack containing the loaded data
+        """
+        collection_id = stac_obj.id
+        stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
+        load_collection = LoadCollection(stac_api=stac_api)
+
+        return load_collection.load_collection(
+            id=collection_id,
+            spatial_extent=spatial_extent,
+            temporal_extent=temporal_extent,
+            bands=bands,
+            properties=properties,
+            width=width,
+            height=height,
+            tile_buffer=tile_buffer,
+        )
+
+    def _filter_by_temporal_extent(
+        self, items: List[Dict], temporal_extent: TemporalInterval
+    ) -> List[Dict]:
+        """Filter items by temporal extent.
+
+        Args:
+            items: List of STAC items
+            temporal_extent: Temporal interval to filter by
+
+        Returns:
+            Filtered list of items
+
+        Raises:
+            TemporalExtentEmpty: If the temporal extent is empty
+        """
+        start_date = None
+        end_date = None
+        if temporal_extent[0] is not None:
+            start_date = str(temporal_extent[0].to_numpy())
+        if temporal_extent[1] is not None:
+            end_date = str(temporal_extent[1].to_numpy())
+
+        if not end_date and not start_date:
+            raise TemporalExtentEmpty()
+
+        filtered_items = []
+        for item in items:
+            item_datetime = item.get("properties", {}).get("datetime")
+            if not item_datetime:
+                continue
+
+            if start_date and end_date:
+                if start_date <= item_datetime < end_date:
+                    filtered_items.append(item)
+            elif start_date:
+                if start_date <= item_datetime:
+                    filtered_items.append(item)
+            elif end_date:
+                if item_datetime < end_date:
+                    filtered_items.append(item)
+
+        return filtered_items
+
+    def _filter_by_properties(self, items: List[Dict], properties: dict) -> List[Dict]:
+        """Filter items by properties.
+
+        Args:
+            items: List of STAC items
+            properties: Properties to filter by
+
+        Returns:
+            Filtered list of items
+        """
+        filtered_items = []
+        for item in items:
+            include = True
+            for prop_name, prop_value in properties.items():
+                if (
+                    prop_name not in item.get("properties", {})
+                    or item["properties"][prop_name] != prop_value
+                ):
+                    include = False
+                    break
+            if include:
+                filtered_items.append(item)
+        return filtered_items
+
+    def _process_spatial_extent(
+        self,
+        items: List[Dict],
+        spatial_extent: BoundingBox,
+        bands: Optional[list[str]] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Process spatial extent and create tasks.
+
+        Args:
+            items: List of STAC items
+            spatial_extent: Bounding box to limit the data
+            bands: Optional list of band names to include
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A LazyRasterStack containing the tasks
+
+        Raises:
+            NotImplementedError: If spatial_extent is not provided
+        """
+        bbox = [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
+        projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
+        crs = to_rasterio_crs(projcrs)
+
+        tasks = create_tasks(
+            _reader,
+            items,
+            MAX_THREADS,
+            bbox,
+            assets=bands,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        )
+
+        return LazyRasterStack(
+            tasks=tasks,
+            date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
+            allowed_exceptions=(TileOutsideBounds,),
+        )
+
+    def load_stac(
+        self,
+        url: str,
+        spatial_extent: Optional[BoundingBox] = None,
+        temporal_extent: Optional[TemporalInterval] = None,
+        bands: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        # private arguments
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        tile_buffer: Optional[float] = None,
+    ) -> RasterStack:
+        """Load data from a STAC catalog or API.
+
+        Args:
+            url: URL to a static STAC catalog or a STAC API Collection
+            spatial_extent: Optional bounding box to limit the data
+            temporal_extent: Optional temporal interval to limit the data
+            bands: Optional list of band names to include
+            properties: Optional metadata properties to filter by
+            width: Optional width of the output image in pixels
+            height: Optional height of the output image in pixels
+            tile_buffer: Optional buffer around the tile in pixels
+
+        Returns:
+            A RasterStack containing the loaded data
+
+        Raises:
+            NoDataAvailable: If no data is available for the given extents
+            TemporalExtentEmpty: If the temporal extent is empty
+            NotImplementedError: If spatial_extent is not provided
+        """
+        # Load the STAC catalog or item from the URL
+        stac_obj = self._load_stac_object(url)
+
+        # If the STAC object is a Collection or Catalog, use load_collection
+        if isinstance(stac_obj, (pystac.Collection, pystac.Catalog)):
+            return self._handle_collection_or_catalog(
+                stac_obj,
+                spatial_extent=spatial_extent,
+                temporal_extent=temporal_extent,
+                bands=bands,
+                properties=properties,
+                width=width,
+                height=height,
+                tile_buffer=tile_buffer,
+            )
+
+        # For a single item, use it directly
+        elif isinstance(stac_obj, pystac.Item):
+            items = [stac_obj.to_dict()]
+        else:
+            raise ValueError(f"Unsupported STAC object type: {type(stac_obj)}")
+
+        if not items:
+            raise NoDataAvailable("There is no data available in the STAC catalog.")
+
+        # Filter items by temporal extent if provided
+        if temporal_extent is not None:
+            items = self._filter_by_temporal_extent(items, temporal_extent)
+
+        # Filter items by properties if provided
+        if properties is not None:
+            items = self._filter_by_properties(items, properties)
+
+        if not items:
+            raise NoDataAvailable("There is no data available for the given extents.")
+
+        # Process spatial extent
+        if spatial_extent:
+            return self._process_spatial_extent(
+                items,
+                spatial_extent,
+                bands=bands,
+                width=width,
+                height=height,
+                tile_buffer=tile_buffer,
+            )
+
+        # Estimate dimensions based on items and spatial extent
+        dimensions = _estimate_output_dimensions(
+            items, spatial_extent, bands, width, height
+        )
+
+        # Extract values from the result
+        width = dimensions["width"]
+        height = dimensions["height"]
+        bbox = dimensions["bbox"]
+        crs = dimensions["crs"]
+
+        img, _ = mosaic_reader(
+            items,
+            _reader,
+            bbox,
+            bounds_crs=crs,
+            dst_crs=crs,
+            width=int(width) if width else width,
+            height=int(height) if height else height,
+            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+        )
+        return img

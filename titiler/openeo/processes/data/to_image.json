@@ -1,7 +1,7 @@
 {
   "id": "to_image",
-  "summary": "Convert array to ImageData.",
-  "description": "Convert a 2 or 3 dimensional array to an ImageData object.",
+  "summary": "Convert array to datacube.",
+  "description": "Convert a 2 or 3 dimensional array to a datacube.",
   "categories": [
     "images",
     "arrays"
@@ -9,17 +9,17 @@
   "parameters": [
     {
       "name": "data",
-      "description": "The array from the ImageData object.",
+      "description": "The array to convert to a datacube.",
       "schema": {
         "type": "array"
       }
     }
   ],
   "returns": {
-    "description": "An ImageData object.",
+    "description": "A datacube.",
     "schema": {
       "type": "object",
-      "subtype": "imagedata"
+      "subtype": "datacube"
     }
   },
   "exceptions": {},
