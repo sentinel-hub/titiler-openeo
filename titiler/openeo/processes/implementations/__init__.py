@@ -1,5 +1,6 @@
 """titiler.openeo.processes."""
 
+from .debug_tile import debug_tile  # noqa
 from .apply import *  # noqa
 from .arrays import *  # noqa
 from .data_model import LazyRasterStack, RasterStack  # noqa

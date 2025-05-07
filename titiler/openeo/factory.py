@@ -875,25 +875,32 @@ class EndpointsFactory(BaseFactory):
 
             process = deepcopy(service["process"])
 
-            load_collection_nodes = get_load_collection_nodes(process["process_graph"])
-            # Check there is at least one load_collection process
-            assert (
-                load_collection_nodes
-            ), "Could not find any `load_collection process in service's process-graph"
-
-            # Check that nodes have spatial-extent
-            assert all(
-                node["arguments"].get("spatial_extent")
-                for node in load_collection_nodes
-            ), "Invalid load_collection process, Missing spatial_extent"
-
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
+            
+            # For regular collection-based services
+            load_collection_nodes = get_load_collection_nodes(process["process_graph"])
+            if load_collection_nodes:
+                # Check that nodes have spatial-extent
+                assert all(
+                    node["arguments"].get("spatial_extent")
+                    for node in load_collection_nodes
+                ), "Invalid load_collection process, Missing spatial_extent"
+
+                # Add tile parameters to load_collection nodes
+                for node in load_collection_nodes:
+                    node["arguments"]["width"] = int(tile_size)
+                    node["arguments"]["height"] = int(tile_size)
+                    if tile_buffer:
+                        node["arguments"]["tile_buffer"] = tile_buffer
             args = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                "x": x,
+                "y": y,
+                "z": z,
             }
 
             if service_extent := configuration.get("extent"):
@@ -915,15 +922,8 @@ class EndpointsFactory(BaseFactory):
                         f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
                     )
 
-            for node in load_collection_nodes:
-                # Adapt spatial extent with tile bounds
-                resolves_process_graph_parameters(process["process_graph"], args)
-
-                # We also add Width/Height/TileBuffer to the load_collection process
-                node["arguments"]["width"] = int(tile_size)
-                node["arguments"]["height"] = int(tile_size)
-                if tile_buffer:
-                    node["arguments"]["tile_buffer"] = tile_buffer
+            # Adapt parameters for all processes
+            resolves_process_graph_parameters(process["process_graph"], args)
 
             media_type = _get_media_type(process["process_graph"])
 

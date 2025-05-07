@@ -1,0 +1,84 @@
+{
+    "id": "debug_tile",
+    "summary": "Create a debug tile showing X/Y/Z coordinates",
+    "description": "Creates a semi-transparent tile with the tile coordinates (X/Y/Z) displayed in the center.",
+    "categories": [
+        "debugging",
+        "tiles"
+    ],
+    "parameters": [
+        {
+            "name": "x",
+            "description": "Tile X coordinate",
+            "schema": {
+                "type": "integer"
+            },
+            "required": true
+        },
+        {
+            "name": "y",
+            "description": "Tile Y coordinate",
+            "schema": {
+                "type": "integer"
+            },
+            "required": true
+        },
+        {
+            "name": "z",
+            "description": "Tile Z coordinate (zoom level)",
+            "schema": {
+                "type": "integer"
+            },
+            "required": true
+        },
+        {
+            "name": "width",
+            "description": "Tile width in pixels",
+            "schema": {
+                "type": "integer",
+                "default": 256,
+                "minimum": 1
+            },
+            "required": false
+        },
+        {
+            "name": "height",
+            "description": "Tile height in pixels",
+            "schema": {
+                "type": "integer",
+                "default": 256,
+                "minimum": 1
+            },
+            "required": false
+        }
+    ],
+    "returns": {
+        "description": "A rasterstack with RGBA bands containing the debug tile image",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "4-band raster data (RGBA)",
+                    "type": "array"
+                },
+                "bands": {
+                    "description": "Band names",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    },
+    "examples": [
+        {
+            "title": "Create a debug tile for X=1, Y=2, Z=3",
+            "arguments": {
+                "x": 1,
+                "y": 2,
+                "z": 3
+            }
+        }
+    ]
+}
