@@ -912,7 +912,7 @@ class EndpointsFactory(BaseFactory):
             process = deepcopy(service["process"])
 
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
-            
+
             # For regular collection-based services
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
             if load_collection_nodes:
