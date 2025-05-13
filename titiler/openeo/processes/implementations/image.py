@@ -11,6 +11,170 @@ import colour
 
 from .data_model import ImageData, RasterStack
 
+__all__ = [
+    "image_indexes",
+    "to_array",
+    "color_formula",
+    "colormap",
+    "get_colormap",
+    "legofication",
+]
+
+def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
+    """Select indexes from a single ImageData."""
+    if not all(v > 0 for v in indexes):
+        raise IndexError(f"Indexes value must be >= 1, {indexes}")
+
+    if not all(v <= data.count + 1 for v in indexes):
+        raise IndexError(f"Indexes value must be =< {data.count + 1}, {indexes}")
+
+    stats = None
+    if stats := data.dataset_statistics:
+        stats = [stats[ix - 1] for ix in indexes]
+
+    return ImageData(
+        data.array[[idx - 1 for idx in indexes]],
+        assets=data.assets,
+        crs=data.crs,
+        bounds=data.bounds,
+        band_names=[data.band_names[ix - 1] for ix in indexes],
+        metadata=data.metadata,
+        dataset_statistics=stats,
+        cutline_mask=data.cutline_mask,
+    )
+
+
+def image_indexes(data: RasterStack, indexes: Sequence[int]) -> RasterStack:
+    """Select indexes from a RasterStack.
+
+    Args:
+        data: RasterStack to process
+        indexes: Sequence of band indexes to select (1-based)
+
+    Returns:
+        RasterStack with selected indexes
+    """
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_image_indexes(img_data, indexes)
+    return result
+
+
+def to_array(
+    data: RasterStack,
+) -> Dict[str, numpy.ma.MaskedArray]:
+    """Convert RasterStack to array(s).
+
+    Args:
+        data: RasterStack to convert
+
+    Returns:
+        Dictionary mapping keys to numpy.ma.MaskedArray
+    """
+    # Convert each item to array
+    return {key: img_data.array for key, img_data in data.items()}
+
+
+def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
+    """Apply color formula to a single ImageData."""
+    return data.apply_color_formula(formula)
+
+
+def color_formula(data: RasterStack, formula: str) -> RasterStack:
+    """Apply color formula to RasterStack.
+
+    Args:
+        data: RasterStack to process
+        formula: Color formula to apply
+
+    Returns:
+        RasterStack with color formula applied
+    """
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _apply_color_formula(img_data, formula)
+    return result
+
+
+def get_colormap(name: str) -> ColorMapType:
+    """Return rio-tiler colormap."""
+    return default_cmap.get(name)
+
+
+def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
+    """Apply colormap to a single ImageData."""
+    return data.apply_colormap(colormap)
+
+
+def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
+    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects."""
+
+    def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
+        min_side = min(img.array.shape[-2:])
+        new_shape = numpy.round(
+            numpy.array(img.array.shape[-2:]) / min_side * nbbricks
+        ).astype(int)
+        return img.resize(new_shape[0], new_shape[1], resampling_method="bilinear")
+
+    def _upscale(img: ImageData, bricksize: int = 16) -> ImageData:
+        new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
+        return img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
+
+    def _legofication(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
+        nmin = numpy.min(nblocks)
+        d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
+
+        for i in range(nblocks[0]):
+            for j in range(nblocks[1]):
+                xc = round(d + 2 * d * i)
+                yc = round(d + 2 * d * j)
+                cur_values = img.array.data[:, xc, yc].copy()
+
+                # draw lego bricks
+                # light the bricks on top left
+                rr, cc = disk(
+                    (xc - 2, yc - 2), 0.6 * d, shape=img.array.data.shape[::-1]
+                )
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = (
+                        img.array.data[b, rr, cc] * 0.5 + 200 * 0.5
+                    ).astype(img.array.data.dtype)
+
+                # dark the bricks on bottom right
+                rr, cc = disk(
+                    (xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1]
+                )
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = (
+                        img.array.data[b, rr, cc] * 0.5 + 10 * 0.5
+                    ).astype(img.array.data.dtype)
+
+                # draw the studs
+                rr, cc = disk((xc, yc), 0.6 * d, shape=img.array.data.shape[::-1])
+                for b in range(img.array.data.shape[0]):
+                    img.array.data[b, rr, cc] = cur_values[b]
+
+        return img
+
+    # Compress the image
+    small_img = _compress(data, nbbricks)
+
+    # Map each pixel to the closest LEGO color
+    rgb_data = small_img.array.data
+    shape = rgb_data.shape
+    if shape[0] == 3:  # Only process RGB images
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                rgb_pixel = rgb_data[:, i, j]
+                lego_rgb = find_best_lego_color(rgb_pixel)
+                rgb_data[:, i, j] = lego_rgb[1]
+
+    # Upscale and add brick effects
+    lego_img = _upscale(small_img, bricksize)
+    return _legofication(lego_img, small_img.array.shape[-2:])
+
 # LEGO colors dictionary with HSL values
 lego_colors = {
     "White": {
@@ -310,172 +474,6 @@ def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
     return (best_color, lego_colors[best_color]["rgb"])
 
 
-__all__ = [
-    "image_indexes",
-    "to_array",
-    "color_formula",
-    "colormap",
-    "get_colormap",
-    "legofication",
-]
-
-
-def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
-    """Select indexes from a single ImageData."""
-    if not all(v > 0 for v in indexes):
-        raise IndexError(f"Indexes value must be >= 1, {indexes}")
-
-    if not all(v <= data.count + 1 for v in indexes):
-        raise IndexError(f"Indexes value must be =< {data.count + 1}, {indexes}")
-
-    stats = None
-    if stats := data.dataset_statistics:
-        stats = [stats[ix - 1] for ix in indexes]
-
-    return ImageData(
-        data.array[[idx - 1 for idx in indexes]],
-        assets=data.assets,
-        crs=data.crs,
-        bounds=data.bounds,
-        band_names=[data.band_names[ix - 1] for ix in indexes],
-        metadata=data.metadata,
-        dataset_statistics=stats,
-        cutline_mask=data.cutline_mask,
-    )
-
-
-def image_indexes(data: RasterStack, indexes: Sequence[int]) -> RasterStack:
-    """Select indexes from a RasterStack.
-
-    Args:
-        data: RasterStack to process
-        indexes: Sequence of band indexes to select (1-based)
-
-    Returns:
-        RasterStack with selected indexes
-    """
-    # Apply to each item in the RasterStack
-    result: Dict[str, ImageData] = {}
-    for key, img_data in data.items():
-        result[key] = _apply_image_indexes(img_data, indexes)
-    return result
-
-
-def to_array(
-    data: RasterStack,
-) -> Dict[str, numpy.ma.MaskedArray]:
-    """Convert RasterStack to array(s).
-
-    Args:
-        data: RasterStack to convert
-
-    Returns:
-        Dictionary mapping keys to numpy.ma.MaskedArray
-    """
-    # Convert each item to array
-    return {key: img_data.array for key, img_data in data.items()}
-
-
-def _apply_color_formula(data: ImageData, formula: str) -> ImageData:
-    """Apply color formula to a single ImageData."""
-    return data.apply_color_formula(formula)
-
-
-def color_formula(data: RasterStack, formula: str) -> RasterStack:
-    """Apply color formula to RasterStack.
-
-    Args:
-        data: RasterStack to process
-        formula: Color formula to apply
-
-    Returns:
-        RasterStack with color formula applied
-    """
-    # Apply to each item in the RasterStack
-    result: Dict[str, ImageData] = {}
-    for key, img_data in data.items():
-        result[key] = _apply_color_formula(img_data, formula)
-    return result
-
-
-def get_colormap(name: str) -> ColorMapType:
-    """Return rio-tiler colormap."""
-    return default_cmap.get(name)
-
-
-def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
-    """Apply colormap to a single ImageData."""
-    return data.apply_colormap(colormap)
-
-
-def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
-    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects."""
-
-    def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
-        min_side = min(img.array.shape[-2:])
-        new_shape = numpy.round(
-            numpy.array(img.array.shape[-2:]) / min_side * nbbricks
-        ).astype(int)
-        return img.resize(new_shape[0], new_shape[1], resampling_method="bilinear")
-
-    def _upscale(img: ImageData, bricksize: int = 16) -> ImageData:
-        new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
-        return img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
-
-    def _legofication(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
-        nmin = numpy.min(nblocks)
-        d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
-
-        for i in range(nblocks[0]):
-            for j in range(nblocks[1]):
-                xc = round(d + 2 * d * i)
-                yc = round(d + 2 * d * j)
-                cur_values = img.array.data[:, xc, yc].copy()
-
-                # draw lego bricks
-                # light the bricks on top left
-                rr, cc = disk(
-                    (xc - 2, yc - 2), 0.6 * d, shape=img.array.data.shape[::-1]
-                )
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = (
-                        img.array.data[b, rr, cc] * 0.5 + 200 * 0.5
-                    ).astype(img.array.data.dtype)
-
-                # dark the bricks on bottom right
-                rr, cc = disk(
-                    (xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1]
-                )
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = (
-                        img.array.data[b, rr, cc] * 0.5 + 10 * 0.5
-                    ).astype(img.array.data.dtype)
-
-                # draw the studs
-                rr, cc = disk((xc, yc), 0.6 * d, shape=img.array.data.shape[::-1])
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = cur_values[b]
-
-        return img
-
-    # Compress the image
-    small_img = _compress(data, nbbricks)
-
-    # Map each pixel to the closest LEGO color
-    rgb_data = small_img.array.data
-    shape = rgb_data.shape
-    if shape[0] == 3:  # Only process RGB images
-        for i in range(shape[1]):
-            for j in range(shape[2]):
-                rgb_pixel = rgb_data[:, i, j]
-                lego_rgb = find_best_lego_color(rgb_pixel)
-                rgb_data[:, i, j] = lego_rgb[1]
-
-    # Upscale and add brick effects
-    lego_img = _upscale(small_img, bricksize)
-    return _legofication(lego_img, small_img.array.shape[-2:])
-
-
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
 
@@ -491,3 +489,5 @@ def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     for key, img_data in data.items():
         result[key] = _apply_colormap(img_data, colormap)
     return result
+
+
