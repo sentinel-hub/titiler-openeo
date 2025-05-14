@@ -25,11 +25,11 @@ try:
         _WATER_MASK = ds[var_name].values
 
         # Store coordinate information for proper lat/lon conversion
-        _LAT_START = -90 # float(ds.lat.values.min())  # Should be -89.95
+        _LAT_START = float(ds.lat.values.min())  # Should be -89.95
         _LAT_RES = 0.1
         _LAT_SIZE = len(ds.lat)
 
-        _LON_START = 0 # float(ds.lon.values.min())  # Should be -0.05
+        _LON_START = float(ds.lon.values.min())  # Should be -0.05
         _LON_RES = 0.1
         _LON_SIZE = len(ds.lon)
 except Exception as e:
@@ -317,78 +317,62 @@ def _get_water_mask_for_bounds(bounds, crs, shape):
         if mask.dtype != numpy.float32:
             mask = mask.astype(numpy.float32)
 
-        # Resize to the target shape with binary water/land classification
-        # Use a majority vote approach: if most pixels are water, classify as 100% water
-        # Otherwise, classify as 0% land
+        # Resize to the target shape with a custom approach that favors land over water
+        # For coastal pixels, we'll use a max pooling then bilinear resample approach
+        # that will bias the result toward land values (lower values in the mask)
         from PIL import Image
-        import numpy as np
-        from scipy import ndimage
+        import scipy.ndimage as ndimage
 
-        # Define the water threshold for binary classification
-        # This is typically around 75-90 in the IMERG mask for water
-        water_threshold = 75.0  # Adjust if needed based on your mask values
-        
-        # Create a binary result at the target shape
-        result = numpy.zeros(shape, dtype=numpy.float32)
-        
-        # If the mask is already smaller than the target, just resize it
-        if mask.shape[0] <= shape[0] and mask.shape[1] <= shape[1]:
-            # Resize using nearest neighbor to avoid introducing intermediate values
-            resized = numpy.array(
-                Image.fromarray(mask).resize(
-                    (shape[1], shape[0]), resample=Image.Resampling.NEAREST
-                )
-            )
-            # Apply binary rule to resized data
-            result = numpy.where(resized > water_threshold, 100.0, 0.0)
-            return result
+        # First, ensure higher values are water (expected in the IMERG mask)
+        # Lower values are land, which we want to preserve in coastal regions
+
+        # Apply max pooling to get the maximum water value in each neighborhood
+        # Then invert the pooling result using min pooling to favor land
+        # This keeps land information (lower values) intact across coastal boundaries
+
+        # Step 1: Perform minimal downsampling with land preserving approach
+        # For downsampling, we use minimum filter to preserve land values
+        if mask.shape[0] > shape[0] or mask.shape[1] > shape[1]:
+            # Calculate the factor by which we need to downsample
+            factor_y = max(1, mask.shape[0] // shape[0])
+            factor_x = max(1, mask.shape[1] // shape[1])
+
+            # Apply minimum filter which will preserve land values (lower values)
+            # This ensures coastal pixels with even a small amount of land are preserved as land
+            downsampled = ndimage.minimum_filter(mask, size=(factor_y, factor_x))
             
-        # For downsampling, we use block reduction with majority voting
-        # Calculate block sizes
-        block_y = max(1, mask.shape[0] // shape[0])
-        block_x = max(1, mask.shape[1] // shape[1])
-        
-        # Calculate how many blocks we can fully fit
-        full_blocks_y = mask.shape[0] // block_y
-        full_blocks_x = mask.shape[1] // block_x
-        
-        # Create output at the appropriate size
-        output_y = min(shape[0], full_blocks_y)
-        output_x = min(shape[1], full_blocks_x)
-        binmask = numpy.zeros((output_y, output_x), dtype=numpy.float32)
-        
-        # Process each block with majority voting
-        for i in range(output_y):
-            for j in range(output_x):
-                # Extract this block
-                block = mask[
-                    i * block_y : (i + 1) * block_y,
-                    j * block_x : (j + 1) * block_x
-                ]
-                
-                # Count water pixels in the block
-                water_count = numpy.sum(block > water_threshold)
-                total_pixels = block.size
-                
-                # Apply majority rule (Rule 1 & 2 from user requirements)
-                # If majority are water (>50%), set to 100% water, else 0%
-                if water_count > total_pixels / 2:
-                    binmask[i, j] = 100.0  # 100% water
-                else:
-                    binmask[i, j] = 0.0  # 0% water (land)
-        
-        # Final resize to exact target shape if needed
-        if binmask.shape != shape:
-            # Use nearest neighbor to preserve the binary values
-            result = numpy.array(
-                Image.fromarray(binmask).resize(
-                    (shape[1], shape[0]), resample=Image.Resampling.NEAREST
-                )
-            )
-        else:
-            result = binmask
+            # Use the downsampled data directly instead of block reducing again
+            # This preserves the land values from the minimum filter
+            mask = downsampled
             
-        return result
+            # If we need to downsample further, use block reduction
+            if downsampled.shape[0] > shape[0] or downsampled.shape[1] > shape[1]:
+                # Block reduce by taking the minimum of each block
+                # This further ensures land values are preserved
+                y_blocks = downsampled.shape[0] // (shape[0] or 1)
+                x_blocks = downsampled.shape[1] // (shape[1] or 1)
+                if y_blocks > 1 and x_blocks > 1:
+                    reduced = numpy.zeros((downsampled.shape[0] // y_blocks, 
+                                          downsampled.shape[1] // x_blocks), 
+                                          dtype=downsampled.dtype)
+                    for i in range(reduced.shape[0]):
+                        for j in range(reduced.shape[1]):
+                            block = downsampled[
+                                i * y_blocks : min((i + 1) * y_blocks, downsampled.shape[0]),
+                                j * x_blocks : min((j + 1) * x_blocks, downsampled.shape[1]),
+                            ]
+                            reduced[i, j] = numpy.min(block)  # Use min to favor land
+                    mask = reduced
+
+        # Step 2: Final resize using bilinear interpolation
+        # For any remaining resizing needed
+        resized = numpy.array(
+            Image.fromarray(mask).resize(
+                (shape[1], shape[0]), resample=Image.Resampling.BILINEAR
+            )
+        )
+
+        return resized
 
     except Exception as e:
         print(f"Error processing water mask: {e}")
