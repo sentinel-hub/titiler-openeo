@@ -3,6 +3,8 @@ from PIL import Image
 from io import BytesIO
 import numpy as np
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Tuple, Dict
 
 # using the following url https://openeo.ds.io/services/xyz/94937ec8-6669-4dba-a4df-52e217a02ea9/tiles/7/60/45
 # create a mosaic of the tiles for making a map of europe
@@ -12,12 +14,14 @@ output_dir = "europe_tiles"
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
+# Configuration parameters
 zoom = 7
+max_workers = 5  # Number of concurrent downloads (adjust as needed)
 
-# European sptial
+# European spatial
 spatial_extent_east = 40.0
-spatial_extent_west = -20.0
-spatial_extent_north = 70.0
+spatial_extent_west = -25.0
+spatial_extent_north = 72.0
 spatial_extent_south = 30.0
 
 def lat_lon_to_tile(lat, lon, zoom):
@@ -55,10 +59,8 @@ grid_height = max_y - min_y + 1
 print(f"Grid dimensions: {grid_width} x {grid_height}")
 print(f"Tile numbers: {tile_numbers}")
 
-# Download and store tiles
-tiles = {}
-print(f"Processing tiles for zoom level {zoom}...")
-for tile_number in tile_numbers:
+def download_tile(tile_number: Tuple[int, int], zoom: int, output_dir: str) -> Tuple[Tuple[int, int], Image.Image]:
+    """Download a single tile and return it with its coordinates"""
     x, y = tile_number
     tile_path = os.path.join(output_dir, f"tile_{x}_{y}.png")
     
@@ -66,32 +68,38 @@ for tile_number in tile_numbers:
         print(f"Loading existing tile: {x}, {y}")
         try:
             img = Image.open(tile_path)
-            tiles[(x, y)] = img
-            continue
+            return (x, y), img
         except Exception as e:
             print(f"Error loading existing tile {x}, {y}: {e}")
             # If loading fails, we'll try downloading it again
     
     print(f"Downloading tile: {x}, {y}")
-    # Get the tile URL
     tile_url = f"https://openeo.ds.io/services/xyz/b05010db-cecd-4de9-97bf-4c9a988468cc/tiles/{zoom}/{x}/{y}"
     
     try:
-        # Download the tile
         response = requests.get(tile_url)
         response.raise_for_status()
-        
-        # Convert to PIL Image
         img = Image.open(BytesIO(response.content))
-        
-        # Store the image
-        tiles[(x, y)] = img
-        
-        # Save individual tile
         img.save(tile_path)
-        
+        return (x, y), img
     except Exception as e:
         print(f"Error downloading tile {x}, {y}: {e}")
+        return (x, y), None
+
+# Download and store tiles with concurrent processing
+tiles: Dict[Tuple[int, int], Image.Image] = {}
+print(f"Processing tiles for zoom level {zoom} with {max_workers} concurrent downloads...")
+
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    future_to_tile = {
+        executor.submit(download_tile, tile_number, zoom, output_dir): tile_number
+        for tile_number in tile_numbers
+    }
+    
+    for future in as_completed(future_to_tile):
+        coords, img = future.result()
+        if img is not None:
+            tiles[coords] = img
 
 # Get tile dimensions (assuming all tiles are the same size)
 tile_width, tile_height = next(iter(tiles.values())).size

@@ -13,7 +13,7 @@ from PIL import Image
 
 # Path to the EEA Coastline shapefile zip
 COASTLINE_ZIP_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "EEA_Coastline_Polygon_Shape_simplified.zip"
+    os.path.dirname(__file__), "..", "..", "data", "simplified-land-polygons-complete-3857.zip"
 )
 
 # Initialize coastline shapefile data
@@ -24,7 +24,7 @@ try:
 
     # Load the EEA coastline shapefile directly from the zip file
     # The path format for zip files is: zip://path/to/zip/file.zip!path/inside/zip/file.shp
-    zip_path = f"zip://{COASTLINE_ZIP_PATH}!coastline_simplified.shp"
+    zip_path = f"zip://{COASTLINE_ZIP_PATH}!simplified-land-polygons-complete-3857/simplified_land_polygons.shp"
     _COASTLINE_GDF = gpd.read_file(zip_path)
     
     # Convert to a CRS that's suitable for point-in-polygon tests (WGS84)
@@ -412,45 +412,53 @@ def _legofication(
                 # Different rendering for transparent water bricks
                 if is_water:
                     # For transparent bricks:
-                    # 1. Make the brick more "glassy" by brightening it
-                    # 2. Add stronger specular highlights
-                    # 3. Reduce the contrast of shading
+                    # 1. Make the brick more "glassy" by applying subtle highlights
+                    # 2. Add softer specular highlights
+                    # 3. Create a more realistic glass-like appearance
 
-                    # Light the top-left edge with a stronger specular highlight
+                    # Add a subtle overall brightness to simulate transparency
+                    rr, cc = disk((xc, yc), 0.9 * d, shape=img.array.data.shape[::-1])
+                    for b in range(img.array.data.shape[0]):
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.85 + 40 * 0.15
+                        ).astype(img.array.data.dtype)
+
+                    # Light the top-left edge with a soft specular highlight
                     rr, cc = disk(
                         (xc - 2, yc - 2), 0.7 * d, shape=img.array.data.shape[::-1]
                     )
                     for b in range(img.array.data.shape[0]):
-                        # Stronger highlight for transparent bricks (75% white)
+                        # Softer highlight for transparent bricks (40% white)
                         img.array.data[b, rr, cc] = (
-                            img.array.data[b, rr, cc] * 0.25 + 220 * 0.75
+                            img.array.data[b, rr, cc] * 0.6 + 200 * 0.4
                         ).astype(img.array.data.dtype)
 
                     # Add subtle internal reflection on bottom-right
                     rr, cc = disk(
-                        (xc + 2, yc + 2), 0.5 * d, shape=img.array.data.shape[::-1]
+                        (xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1]
                     )
                     for b in range(img.array.data.shape[0]):
-                        # Less darkening for transparent bricks
+                        # Gentle darkening for depth
                         img.array.data[b, rr, cc] = (
-                            img.array.data[b, rr, cc] * 0.7 + 40 * 0.3
+                            img.array.data[b, rr, cc] * 0.8 + 20 * 0.2
                         ).astype(img.array.data.dtype)
 
-                    # Make the stud more reflective/transparent
+                    # Make the stud more glass-like
                     rr, cc = disk((xc, yc), 0.65 * d, shape=img.array.data.shape[::-1])
                     for b in range(img.array.data.shape[0]):
-                        # Lighten the stud color to make it look glassy
+                        # Subtle brightening of the stud
                         img.array.data[b, rr, cc] = (
-                            cur_values[b] * 0.7 + 180 * 0.3
+                            cur_values[b] * 0.8 + 120 * 0.2
                         ).astype(img.array.data.dtype)
 
-                    # Add a bright specular highlight to the stud
+                    # Add a soft specular highlight to the stud
                     rr, cc = disk(
-                        (xc - 1, yc - 1), 0.2 * d, shape=img.array.data.shape[::-1]
+                        (xc - 1, yc - 1), 0.25 * d, shape=img.array.data.shape[::-1]
                     )
                     for b in range(img.array.data.shape[0]):
+                        # Softer highlight (45% white)
                         img.array.data[b, rr, cc] = (
-                            img.array.data[b, rr, cc] * 0.2 + 250 * 0.8
+                            img.array.data[b, rr, cc] * 0.55 + 200 * 0.45
                         ).astype(img.array.data.dtype)
 
                 else:
