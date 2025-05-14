@@ -173,7 +173,7 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
-def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
+def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
     """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects."""
 
     def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
@@ -187,7 +187,7 @@ def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> Im
         new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
         return img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
 
-    def _legofication(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
+    def _brickification(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
         nmin = numpy.min(nblocks)
         d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
 
@@ -238,7 +238,7 @@ def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> Im
 
     # Upscale and add brick effects
     lego_img = _upscale(small_img, bricksize)
-    return _legofication(lego_img, small_img.array.shape[-2:])
+    return _brickification(lego_img, small_img.array.shape[-2:])
 
 
 # LEGO colors dictionary with HSL values
@@ -539,6 +539,23 @@ def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
 
     return (best_color, lego_colors[best_color]["rgb"])
 
+
+def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16) -> RasterStack:
+    """Apply legofication to RasterStack by converting images to LEGO colors and adding brick effects.
+
+    Args:
+        data: RasterStack to process
+        nbbricks: Number of LEGO bricks for the smallest image dimension
+        bricksize: Size of each LEGO brick in pixels
+
+    Returns:
+        RasterStack with legofication applied
+    """
+    # Apply to each item in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _legofication(img_data, nbbricks, bricksize)
+    return result
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
