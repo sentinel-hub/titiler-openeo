@@ -10,73 +10,56 @@ from rio_tiler.types import ColorMapType
 from skimage.draw import disk
 import colour
 from PIL import Image
-import xarray
 
-# Load the IMERG water mask from NetCDF file
-WATER_MASK_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "IMERG_land_sea_mask.nc.gz"
+# Path to the EEA Coastline shapefile zip
+COASTLINE_ZIP_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "EEA_Coastline_Polygon_Shape_simplified.zip"
 )
 
+# Initialize coastline shapefile data
 try:
-    # Open the NetCDF file and extract the water mask data
-    with xarray.open_dataset(WATER_MASK_PATH) as ds:
-        # Get the water mask variable (landseamask)
-        var_name = list(ds.data_vars)[0]  # Should be 'landseamask'
-        _WATER_MASK = ds[var_name].values
+    import geopandas as gpd
+    import shapely.geometry
+    from shapely.prepared import prep
 
-        # Store coordinate information for proper lat/lon conversion
-        _LAT_START = float(ds.lat.values.min())  # Should be -89.95
-        _LAT_RES = 0.1
-        _LAT_SIZE = len(ds.lat)
-
-        _LON_START = float(ds.lon.values.min())  # Should be -0.05
-        _LON_RES = 0.1
-        _LON_SIZE = len(ds.lon)
+    # Load the EEA coastline shapefile directly from the zip file
+    # The path format for zip files is: zip://path/to/zip/file.zip!path/inside/zip/file.shp
+    zip_path = f"zip://{COASTLINE_ZIP_PATH}!coastline_simplified.shp"
+    _COASTLINE_GDF = gpd.read_file(zip_path)
+    
+    # Convert to a CRS that's suitable for point-in-polygon tests (WGS84)
+    if _COASTLINE_GDF.crs != "EPSG:4326":
+        _COASTLINE_GDF = _COASTLINE_GDF.to_crs("EPSG:4326")
+    
+    # Create a unified geometry from all polygons for faster checks
+    _COASTLINE_GEOMETRY = _COASTLINE_GDF.geometry.unary_union
+    
+    # Prepare geometry for efficient containment tests
+    _PREPARED_COASTLINE = prep(_COASTLINE_GEOMETRY)
+    
+    print(f"Loaded coastline shapefile with {len(_COASTLINE_GDF)} features")
+    _COASTLINE_LOADED = True
 except Exception as e:
-    print(f"Error loading water mask: {e}")
-    # Fallback empty water mask if file not found
-    _WATER_MASK = numpy.zeros((1800, 3600), dtype=numpy.float32)
-    _LAT_START = -90
-    _LAT_RES = 0.1
-    _LAT_SIZE = 1800
-    _LON_START = 0
-    _LON_RES = 0.1
-    _LON_SIZE = 3600
+    print(f"Error loading coastline shapefile: {e}")
+    _COASTLINE_LOADED = False
 
 
-def lat_to_index(lat):
-    """Convert latitude to array index in the water mask.
-
-    Args:
-        lat: Latitude in degrees (-90 to 90)
-
-    Returns:
-        Index in the array
-    """
-    # Calculate index (from south to north, -90 to 90)
-    idx = int(round((lat - _LAT_START) / _LAT_RES))
-    # Ensure within bounds
-    return max(0, min(idx, _LAT_SIZE - 1))
-
-
-def lon_to_index(lon):
-    """Convert longitude to array index in the water mask.
-
+def is_land(lon, lat):
+    """Check if a point is land (inside coastline) or water.
+    
     Args:
         lon: Longitude in degrees (-180 to 180)
-
+        lat: Latitude in degrees (-90 to 90)
+        
     Returns:
-        Index in the array
+        Boolean: True if point is land, False if water
     """
-    # First normalize longitude to 0-360 range
-    lon_360 = lon % 360 if lon >= 0 else (lon + 360)
-    # Calculate index
-    idx = int(round((lon_360 - _LON_START) / _LON_RES))
-    # Handle edge case for longitude 359.95
-    if idx >= _LON_SIZE:
-        idx = 0
-    # Ensure within bounds
-    return max(0, min(idx, _LON_SIZE - 1))
+    # Use the coastline shapefile for land/water determination in Europe
+    # Create a point geometry
+    point = shapely.geometry.Point(lon, lat)
+    
+    # Check if the point is inside the coastline (land)
+    return _PREPARED_COASTLINE.contains(point)
 
 
 from .data_model import ImageData, RasterStack
@@ -241,18 +224,22 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
-def _get_water_mask_for_bounds(bounds, crs, shape):
-    """Get water mask for the given bounds, converting from the source CRS to lat/lon.
+def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20):
+    """Get water mask for the given bounds, using coastline shapefile for high accuracy.
 
     Args:
         bounds: Bounds in the source CRS (minx, miny, maxx, maxy) or (left, bottom, right, top)
         crs: Source coordinate reference system
         shape: Shape of the target mask (height, width)
+        intersection_threshold: Threshold for determining if a cell is land (default 0.20)
+                               If the intersection area is > 20% of the cell area, it's considered land
 
     Returns:
         Water mask array resampled to the target shape
     """
     import pyproj
+    import numpy as np
+    from shapely.geometry import Point, box
 
     try:
         # Unpack bounds
@@ -287,104 +274,66 @@ def _get_water_mask_for_bounds(bounds, crs, shape):
             # If no CRS provided, assume bounds are already in lat/lon
             west, south, east, north = minx, miny, maxx, maxy
 
-        # Get indices in the water mask array
-        # Remember: water mask is oriented with origin at top-left (-90°, 0°)
-        north_idx = lat_to_index(north)
-        south_idx = lat_to_index(south)
-        west_idx = lon_to_index(west)
-        east_idx = lon_to_index(east)
-
-        # Ensure south_idx is always greater than north_idx (since array has origin at top)
-        if south_idx < north_idx:
-            south_idx, north_idx = north_idx, south_idx
-
-        # Handle bounds that cross the antimeridian (international date line)
-        if west_idx > east_idx:
-            # Get two portions of the water mask (one on each side of 180/-180)
-            west_portion = _WATER_MASK[north_idx:south_idx, west_idx:]
-            east_portion = _WATER_MASK[north_idx:south_idx, :east_idx]
-            mask = numpy.concatenate([west_portion, east_portion], axis=1)
-        else:
-            # Get the water mask for the requested region
-            mask = _WATER_MASK[north_idx:south_idx, west_idx:east_idx]
-
-        # Ensure we have a valid mask with at least 1 pixel
-        if mask.shape[0] == 0 or mask.shape[1] == 0:
-            print(f"Warning: Empty mask region ({mask.shape}), returning zeros")
-            return numpy.zeros(shape, dtype=numpy.float32)
-
-        # Convert mask to float32 if needed
-        if mask.dtype != numpy.float32:
-            mask = mask.astype(numpy.float32)
-
-        # Resize to the target shape with a custom approach that favors land over water
-        # For coastal pixels, we'll use a max pooling then bilinear resample approach
-        # that will bias the result toward land values (lower values in the mask)
-        from PIL import Image
-        import scipy.ndimage as ndimage
-
-        # First, ensure higher values are water (expected in the IMERG mask)
-        # Lower values are land, which we want to preserve in coastal regions
-
-        # Apply max pooling to get the maximum water value in each neighborhood
-        # Then invert the pooling result using min pooling to favor land
-        # This keeps land information (lower values) intact across coastal boundaries
-
-        # Step 1: Perform minimal downsampling with land preserving approach
-        # For downsampling, we use minimum filter to preserve land values
-        if mask.shape[0] > shape[0] or mask.shape[1] > shape[1]:
-            # Calculate the factor by which we need to downsample
-            factor_y = max(1, mask.shape[0] // shape[0])
-            factor_x = max(1, mask.shape[1] // shape[1])
-
-            # Apply minimum filter which will preserve land values (lower values)
-            # This ensures coastal pixels with even a small amount of land are preserved as land
-            downsampled = ndimage.minimum_filter(mask, size=(factor_y, factor_x))
-            
-            # Use the downsampled data directly instead of block reducing again
-            # This preserves the land values from the minimum filter
-            mask = downsampled
-            
-            # If we need to downsample further, use block reduction
-            if downsampled.shape[0] > shape[0] or downsampled.shape[1] > shape[1]:
-                # Block reduce by taking the minimum of each block
-                # This further ensures land values are preserved
-                y_blocks = downsampled.shape[0] // (shape[0] or 1)
-                x_blocks = downsampled.shape[1] // (shape[1] or 1)
-                if y_blocks > 1 and x_blocks > 1:
-                    reduced = numpy.zeros((downsampled.shape[0] // y_blocks, 
-                                          downsampled.shape[1] // x_blocks), 
-                                          dtype=downsampled.dtype)
-                    for i in range(reduced.shape[0]):
-                        for j in range(reduced.shape[1]):
-                            block = downsampled[
-                                i * y_blocks : min((i + 1) * y_blocks, downsampled.shape[0]),
-                                j * x_blocks : min((j + 1) * x_blocks, downsampled.shape[1]),
-                            ]
-                            reduced[i, j] = numpy.min(block)  # Use min to favor land
-                    mask = reduced
-
-        # Step 2: Final resize using bilinear interpolation
-        # For any remaining resizing needed
-        resized = numpy.array(
-            Image.fromarray(mask).resize(
-                (shape[1], shape[0]), resample=Image.Resampling.BILINEAR
-            )
+        # Create an empty water mask (1 = water, 0 = land)
+        water_mask = np.ones(shape, dtype=np.float32)
+        
+        # Check if the bounds are within Europe where EEA coastline data is valid
+        # The EEA coastline covers roughly -30° to 50° longitude and 30° to 72° latitude
+        is_europe_region = (
+            (-30 <= west <= 50 or -30 <= east <= 50) and 
+            (30 <= south <= 72 or 30 <= north <= 72) and
+            _COASTLINE_LOADED
         )
-
-        return resized
+        
+        if not is_europe_region:
+            # If not in Europe or coastline data unavailable, return all water
+            return water_mask
+        
+        # Calculate the grid of lat/lon points to check using coastline data
+        y_steps = np.linspace(north, south, shape[0])
+        x_steps = np.linspace(west, east, shape[1])
+        
+        # Calculate cell size
+        cell_height = (north - south) / shape[0]
+        cell_width = (east - west) / shape[1]
+        
+        # Create grid of points and check each cell
+        for i, lat in enumerate(y_steps):
+            for j, lon in enumerate(x_steps):
+                # Instead of just checking the center point, create a small box for each cell
+                # This ensures coastlines are properly detected
+                cell_minx = lon - cell_width/2
+                cell_miny = lat - cell_height/2
+                cell_maxx = lon + cell_width/2
+                cell_maxy = lat + cell_height/2
+                
+                # Create a box geometry for this cell
+                cell_box = box(cell_minx, cell_miny, cell_maxx, cell_maxy)
+                
+                # Check if this cell intersects with land
+                # If the intersection area is > threshold of the cell area, mark it as land
+                if _PREPARED_COASTLINE.intersects(cell_box):
+                    # For more precise detection, calculate the intersection area
+                    intersection = _COASTLINE_GEOMETRY.intersection(cell_box)
+                    intersection_area = intersection.area
+                    
+                    # If the intersection area is > threshold of the cell area, mark it as land
+                    if intersection_area > intersection_threshold:
+                        water_mask[i, j] = 0  # Set to 0 for land
+                
+        return water_mask
 
     except Exception as e:
         print(f"Error processing water mask: {e}")
-        # Return zeros array as fallback
-        return numpy.zeros(shape, dtype=numpy.float32)
+        # Return all water as fallback
+        return numpy.ones(shape, dtype=numpy.float32)
 
 
 def _legofication(
     data: ImageData,
     nbbricks: int = 16,
     bricksize: int = 16,
-    water_threshold: float = 75.0,
+    water_threshold: float = 0.20,
 ) -> ImageData:
     """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects.
 
@@ -392,7 +341,8 @@ def _legofication(
         data: ImageData to process
         nbbricks: Number of LEGO bricks for the smallest image dimension
         bricksize: Size of each LEGO brick in pixels
-        water_threshold: Percentage threshold for water classification (default 75%)
+        water_threshold: Threshold for water classification (0-1.0, default 0.75)
+                        If the intersection area is > 75% of the cell area, it's considered land
     """
 
     def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
@@ -440,10 +390,6 @@ def _legofication(
             # Attach the upscaled water pixels to the new image
             upscaled_img.array._water_pixels = upscaled_water_pixels
 
-            # Debug information
-            print(f"Original water pixels: {len(water_pixels)}")
-            print(f"Upscaled water pixels: {len(upscaled_water_pixels)}")
-
         return upscaled_img
 
     def _brickification(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
@@ -460,34 +406,8 @@ def _legofication(
                 yc = round(d + 2 * d * j)
                 cur_values = img.array.data[:, xc, yc].copy()
 
-                # Calculate the actual pixel coordinates in the upscaled image
-                # to check against water_pixels
+                # Check if this is a water area that should use transparent bricks
                 is_water = (xc, yc) in water_pixels
-
-                # Debug info - print some water pixels if available
-                if i == 0 and j == 0 and water_pixels:
-                    print(f"First few water pixels: {list(water_pixels)[:5]}")
-                    print(f"Current coordinates: ({xc}, {yc}), is_water: {is_water}")
-
-                    # Check a range around this pixel
-                    water_found = False
-                    for y_check in range(
-                        max(0, xc - 10), min(img.array.data.shape[1], xc + 10)
-                    ):
-                        for x_check in range(
-                            max(0, yc - 10), min(img.array.data.shape[2], yc + 10)
-                        ):
-                            if (y_check, x_check) in water_pixels:
-                                water_found = True
-                                print(
-                                    f"Found water pixel near current brick: ({y_check}, {x_check})"
-                                )
-                                break
-                        if water_found:
-                            break
-
-                    if not water_found:
-                        print("No water pixels found near this brick")
 
                 # Different rendering for transparent water bricks
                 if is_water:
@@ -572,13 +492,14 @@ def _legofication(
             bounds=data.bounds,
             crs=data.crs,
             shape=(shape[1], shape[2]),  # Height, width
+            intersection_threshold=water_threshold
         )
 
         for i in range(shape[1]):
             for j in range(shape[2]):
                 rgb_pixel = rgb_data[:, i, j]
                 # Check if this is a water area that should use transparent bricks
-                is_water = water_mask[i, j] > water_threshold
+                is_water = water_mask[i, j]
 
                 # Get the appropriate LEGO color for this pixel
                 lego_color_name, lego_rgb = find_best_lego_color(rgb_pixel, is_water)
@@ -674,108 +595,126 @@ lego_colors = {
         "rgb": [104, 129, 151],
         "pantone": "2165 C",
         "hex": "#688197",
+        "transparent": False,
     },
     "Coral (Vibrant Coral)": {
         "hsl": [354, 100, 67],
         "rgb": [255, 88, 105],
         "pantone": "2346 C",
         "hex": "#FF5869",
+        "transparent": False,
     },
     "Red (Bright Red)": {
         "hsl": [352, 100, 40],
         "rgb": [205, 0, 26],
         "pantone": "3546 C",
         "hex": "#CD001A",
+        "transparent": False,
     },
     "Dark Red (New Dark Red)": {
         "hsl": [0, 53, 36],
         "rgb": [138, 43, 43],
         "pantone": "7623 C",
         "hex": "#8A2B2B",
+        "transparent": False,
     },
     "Reddish Brown": {
         "hsl": [10, 47, 33],
         "rgb": [124, 58, 45],
         "pantone": "7594 C",
         "hex": "#7C3A2D",
+        "transparent": False,
     },
     "Dark Brown": {
         "hsl": [358, 33, 19],
         "rgb": [63, 32, 33],
         "pantone": "4975 C",
         "hex": "#3F2021",
+        "transparent": False,
     },
     "Light Nougat": {
         "hsl": [18, 60, 81],
         "rgb": [236, 195, 178],
         "pantone": "489 C",
         "hex": "#ECC3B2",
+        "transparent": False,
     },
     "Medium Tan (Warm Tan)": {
         "hsl": [32, 100, 74],
         "rgb": [255, 194, 123],
         "pantone": "149 C",
         "hex": "#FFC27B",
+        "transparent": False,
     },
     "Nougat": {
         "hsl": [25, 70, 66],
         "rgb": [229, 158, 109],
         "pantone": "472 C",
         "hex": "#E59E6D",
+        "transparent": False,
     },
     "Medium Nougat": {
         "hsl": [29, 55, 52],
         "rgb": [200, 130, 66],
         "pantone": "722 C",
         "hex": "#C88242",
+        "transparent": False,
     },
     "Orange (Bright Orange)": {
         "hsl": [31, 100, 50],
         "rgb": [255, 130, 0],
         "pantone": "151 C",
         "hex": "#FF8200",
+        "transparent": False,
     },
     "Dark Orange": {
         "hsl": [27, 100, 37],
         "rgb": [190, 84, 0],
         "pantone": "2020 C",
         "hex": "#BE5400",
+        "transparent": False,
     },
     "Medium Brown": {
         "hsl": [25, 38, 33],
         "rgb": [120, 81, 53],
         "pantone": "7568 C",
         "hex": "#785135",
+        "transparent": False,
     },
     "Bright Light Yellow (Cool Yellow)": {
         "hsl": [48, 91, 73],
         "rgb": [249, 226, 125],
         "pantone": "2002 C",
         "hex": "#F9E27D",
+        "transparent": False,
     },
     "Yellow (Bright Yellow)": {
         "hsl": [48, 100, 50],
         "rgb": [255, 205, 0],
         "pantone": "116 C",
         "hex": "#FFCD00",
+        "transparent": False,
     },
     "Bright Light Orange (Flame Yellowish Orange)": {
         "hsl": [43, 100, 50],
         "rgb": [255, 182, 0],
         "pantone": "2010 C",
         "hex": "#FFB600",
+        "transparent": False,
     },
     "Neon Yellow (Vibrant Yellow)": {
         "hsl": [59, 100, 50],
         "rgb": [255, 252, 0],
         "pantone": "TBC",
         "hex": "#FFFC00",
+        "transparent": False,
     },
     "Yellowish Green (Spring Yellowish Green)": {
         "hsl": [76, 72, 71],
         "rgb": [205, 234, 128],
         "pantone": "373 C",
         "hex": "#CDEA80",
+        "transparent": False,
     },
     "Lime (Bright Yellowish Green)": {
         "hsl": [70, 100, 41],
@@ -932,7 +871,7 @@ def legofication(
     data: RasterStack,
     nbbricks: int = 16,
     bricksize: int = 16,
-    water_threshold: float = 75.0,
+    water_threshold: float = 0.20,
 ) -> RasterStack:
     """Apply legofication to RasterStack by converting images to LEGO colors and adding brick effects.
 
@@ -940,7 +879,7 @@ def legofication(
         data: RasterStack to process
         nbbricks: Number of LEGO bricks for the smallest image dimension
         bricksize: Size of each LEGO brick in pixels
-        water_threshold: Percentage threshold for water classification (default 75%)
+        water_threshold: Percentage threshold for water classification (default 20%)
 
     Returns:
         RasterStack with legofication applied

@@ -74,7 +74,7 @@ for tile_number in tile_numbers:
     
     print(f"Downloading tile: {x}, {y}")
     # Get the tile URL
-    tile_url = f"https://openeo.ds.io/services/xyz/e6334e0a-a55c-47c0-b974-2528c3b9717f/tiles/{zoom}/{x}/{y}"
+    tile_url = f"https://openeo.ds.io/services/xyz/b05010db-cecd-4de9-97bf-4c9a988468cc/tiles/{zoom}/{x}/{y}"
     
     try:
         # Download the tile
