@@ -72,6 +72,7 @@ __all__ = [
     "get_colormap",
     "legofication",
     "generate_subtiles_ref",
+    "generate_lego_instructions",
 ]
 
 
@@ -924,6 +925,152 @@ def legofication(
         result[key] = _legofication(img_data, nbbricks, bricksize, water_threshold)
     return result
 
+
+def generate_lego_instructions(
+    data: RasterStack,
+    grid_size: int = 50,
+    include_legend: bool = True,
+) -> RasterStack:
+    """Generate building instructions for a legofied image.
+
+    Args:
+        data: RasterStack containing legofied image with brick information
+        grid_size: Size of each grid cell in pixels
+        include_legend: Whether to include a color legend with brick counts
+
+    Returns:
+        RasterStack containing the instruction image
+    """
+    def _generate_instruction_image(img_data: ImageData) -> ImageData:
+        if 'brick_info' not in img_data.metadata:
+            raise ValueError("Input image must be legofied with brick information in metadata")
+
+        brick_info = img_data.metadata['brick_info']
+        grid_dims = brick_info['grid_dimensions']
+        
+        # Calculate image dimensions
+        legend_width = 300 if include_legend else 0
+        img_width = grid_dims[1] * grid_size + legend_width
+        img_height = grid_dims[0] * grid_size
+        
+        # Create a blank white image
+        instruction_img = Image.new('RGB', (img_width, img_height), 'white')
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(instruction_img)
+        
+        # Try to load a font, fall back to default if not available
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size=int(grid_size/4))
+        except:
+            font = ImageFont.load_default()
+        
+        # Draw grid lines
+        for i in range(grid_dims[0] + 1):
+            y = i * grid_size
+            draw.line([(0, y), (grid_dims[1] * grid_size, y)], fill='gray', width=1)
+        for j in range(grid_dims[1] + 1):
+            x = j * grid_size
+            draw.line([(x, 0), (x, grid_dims[0] * grid_size)], fill='gray', width=1)
+        
+        # Track brick colors for the legend
+        color_counts = {}
+        
+        # Draw bricks
+        for tile_key, tile_info in brick_info['tiles'].items():
+            i, j = tile_info['position']
+            color_name = tile_info['color_name']
+            is_water = tile_info['is_water']
+            
+            # Get RGB color
+            rgb_color = lego_colors[color_name]['rgb']
+            hex_color = lego_colors[color_name]['hex']
+            
+            # Update color count
+            color_counts[color_name] = color_counts.get(color_name, 0) + 1
+            
+            # Calculate cell position
+            x = j * grid_size
+            y = i * grid_size
+            
+            # Draw filled rectangle for the brick
+            draw.rectangle([x+2, y+2, x+grid_size-2, y+grid_size-2], 
+                         fill=hex_color)
+            
+            # Add brick coordinates
+            text = f"{i},{j}"
+            # Get text size for centering
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            
+            # Center text in cell
+            text_x = x + (grid_size - text_width) // 2
+            text_y = y + (grid_size - text_height) // 2
+            
+            # Draw text with outline for better visibility
+            text_color = 'white' if sum(rgb_color) < 384 else 'black'
+            draw.text((text_x, text_y), text, font=font, fill=text_color)
+            
+            # Add indicator for transparent/water bricks
+            if is_water:
+                draw.rectangle([x+2, y+2, x+grid_size-2, y+grid_size-2], 
+                             outline='cyan', width=2)
+        
+        # Add legend if requested
+        if include_legend and color_counts:
+            legend_x = grid_dims[1] * grid_size + 10
+            legend_y = 10
+            legend_square_size = int(grid_size/2)
+            
+            # Draw legend title
+            draw.text((legend_x, legend_y), "Brick Colors:", font=font, fill='black')
+            legend_y += int(grid_size/2)
+            
+            # Sort colors by count
+            sorted_colors = sorted(color_counts.items(), 
+                                 key=lambda x: (-x[1], x[0]))
+            
+            for color_name, count in sorted_colors:
+                hex_color = lego_colors[color_name]['hex']
+                
+                # Draw color square
+                draw.rectangle([legend_x, legend_y, 
+                              legend_x + legend_square_size, 
+                              legend_y + legend_square_size], 
+                             fill=hex_color)
+                
+                # Draw text
+                text = f"{color_name}: {count}"
+                draw.text((legend_x + legend_square_size + 5, legend_y), 
+                         text, font=font, fill='black')
+                
+                legend_y += legend_square_size + 5
+        
+        # Convert PIL Image to numpy array
+        instruction_array = numpy.array(instruction_img)
+        # Convert from HxWxC to CxHxW format
+        instruction_array = numpy.transpose(instruction_array, (2, 0, 1))
+        
+        # Create new ImageData object with the instruction image
+        return ImageData(
+            instruction_array,
+            bounds=img_data.bounds,
+            crs=img_data.crs,
+            band_names=['R', 'G', 'B'],
+            metadata={
+                'instruction_metadata': {
+                    'grid_size': grid_size,
+                    'total_bricks': sum(color_counts.values()),
+                    'color_counts': color_counts
+                }
+            }
+        )
+
+    # Process each image in the RasterStack
+    result: Dict[str, ImageData] = {}
+    for key, img_data in data.items():
+        result[key] = _generate_instruction_image(img_data)
+    return result
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
