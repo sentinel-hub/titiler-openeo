@@ -1,15 +1,21 @@
 """titiler.openeo.processes.implementations image methods."""
 
 from typing import Dict, Sequence, Tuple, Any
-
-import morecantile
+import os
+import gzip
 import numpy
 from numpy.typing import ArrayLike
+import morecantile
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
-
 from skimage.draw import disk
 import colour
+from PIL import Image
+
+# Load and decompress the water mask
+WATER_MASK_PATH = os.path.join(os.path.dirname(__file__), "surfrac0.1.PPS.gz")
+with gzip.open(WATER_MASK_PATH, 'rb') as f:
+    _WATER_MASK = numpy.frombuffer(f.read(), dtype='>f4').reshape(1800, 3600)
 
 from .data_model import ImageData, RasterStack
 
@@ -173,8 +179,15 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
-def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> ImageData:
-    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects."""
+def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, water_threshold: float = 75.0) -> ImageData:
+    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects.
+    
+    Args:
+        data: ImageData to process
+        nbbricks: Number of LEGO bricks for the smallest image dimension
+        bricksize: Size of each LEGO brick in pixels
+        water_threshold: Percentage threshold for water classification (default 75%)
+    """
 
     def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
         min_side = min(img.array.shape[-2:])
@@ -230,10 +243,24 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> I
     rgb_data = small_img.array.data
     shape = rgb_data.shape
     if shape[0] == 3:  # Only process RGB images
+        # Calculate water mask for current image bounds
+        bounds = data.bounds
+        lon_idx = ((numpy.array([bounds[0], bounds[2]]) + 180) * 10).astype(int)
+        lat_idx = ((90 - numpy.array([bounds[3], bounds[1]])) * 10).astype(int)
+        
+        # Extract and resize water mask to match image dimensions
+        water_mask = _WATER_MASK[lat_idx[0]:lat_idx[1], lon_idx[0]:lon_idx[1]]
+        water_mask = numpy.array(Image.fromarray(water_mask).resize(
+            (shape[2], shape[1]), 
+            resample=Image.BILINEAR
+        ))
+
         for i in range(shape[1]):
             for j in range(shape[2]):
                 rgb_pixel = rgb_data[:, i, j]
-                lego_rgb = find_best_lego_color(rgb_pixel)
+                # Use transparent colors for water areas
+                use_transparent = water_mask[i, j] > water_threshold
+                lego_rgb = find_best_lego_color(rgb_pixel, use_transparent)
                 rgb_data[:, i, j] = lego_rgb[1]
 
     # Upscale and add brick effects
@@ -241,13 +268,30 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> I
     return _brickification(lego_img, small_img.array.shape[-2:])
 
 
-# LEGO colors dictionary with HSL values
+# LEGO colors dictionary with HSL values and transparency information
 lego_colors = {
+    # Add transparent water colors
+    "Transparent Water Blue Light": {
+        "hsl": [200, 80, 60],
+        "rgb": [51, 153, 204],
+        "pantone": "2915 C",
+        "hex": "#3399CC",
+        "transparent": True
+    },
+    "Transparent Water Blue Dark": {
+        "hsl": [210, 90, 30],
+        "rgb": [8, 45, 82],
+        "pantone": "534 C",
+        "hex": "#082D52",
+        "transparent": True
+    },
+    # Regular colors
     "White": {
         "hsl": [0, 0, 96],
         "rgb": [244, 244, 244],
         "pantone": "TBC",
         "hex": "#F4F4F4",
+        "transparent": False
     },
     "Light Bluish Grey (Medium Stone Grey)": {
         "hsl": [196, 6, 66],
@@ -510,11 +554,12 @@ lego_colors = {
 }
 
 
-def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
+def find_best_lego_color(rgb: numpy.ndarray, use_transparent: bool = False) -> Tuple[str, numpy.ndarray]:
     """Find the best matching LEGO color for an RGB value using colour-science.
 
     Args:
         rgb: RGB values as numpy array with shape (3,) and values in range [0, 255]
+        use_transparent: Whether to use transparent colors for water areas
 
     Returns:
         Tuple with the best LEGO color name and RGB values as numpy array with shape (3,)
@@ -526,8 +571,14 @@ def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
     min_distance = float("inf")
     best_color = None
 
+    # Filter colors based on transparency preference
+    available_colors = {
+        name: info for name, info in lego_colors.items()
+        if info.get("transparent", False) == use_transparent
+    }
+
     # Find closest LEGO color using CIEDE2000 color difference
-    for color_name, color_info in lego_colors.items():
+    for color_name, color_info in available_colors.items():
         rgb_lego = numpy.array(color_info["rgb"], dtype=float) / 255.0
         lab_lego = colour.XYZ_to_Lab(colour.sRGB_to_XYZ(rgb_lego))
 
@@ -540,13 +591,14 @@ def find_best_lego_color(rgb: numpy.ndarray) -> Tuple[str, numpy.ndarray]:
     return (best_color, lego_colors[best_color]["rgb"])
 
 
-def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16) -> RasterStack:
+def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16, water_threshold: float = 75.0) -> RasterStack:
     """Apply legofication to RasterStack by converting images to LEGO colors and adding brick effects.
 
     Args:
         data: RasterStack to process
         nbbricks: Number of LEGO bricks for the smallest image dimension
         bricksize: Size of each LEGO brick in pixels
+        water_threshold: Percentage threshold for water classification (default 75%)
 
     Returns:
         RasterStack with legofication applied
@@ -554,7 +606,7 @@ def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16) -> 
     # Apply to each item in the RasterStack
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
-        result[key] = _legofication(img_data, nbbricks, bricksize)
+        result[key] = _legofication(img_data, nbbricks, bricksize, water_threshold)
     return result
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:

@@ -33,6 +33,24 @@
                 "minimum": 8,
                 "default": 16
             }
+        },
+        {
+            "name": "water_threshold",
+            "description": "The water threshold percentage for the image.",
+            "schema":  {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "default": 75
+            }
+        },
+        {
+            "name": "background",
+            "description": "The background color of the image.",
+            "schema":  {
+                "type": "string",
+                "default": "#FFFFFF"
+            }
         }
     ],
     "returns": {
