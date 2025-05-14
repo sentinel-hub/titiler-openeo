@@ -350,42 +350,150 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
         return img.resize(new_shape[0], new_shape[1], resampling_method="bilinear")
 
     def _upscale(img: ImageData, bricksize: int = 16) -> ImageData:
+        # Store water pixels information before resizing
+        water_pixels = getattr(img.array, '_water_pixels', set())
+        
+        # Calculate new dimensions
         new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
-        return img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
+        
+        # Resize the image
+        upscaled_img = img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
+        
+        # Transfer water pixel information to the new image with scaling
+        if water_pixels:
+            # Create a new set to hold scaled water pixel coordinates
+            upscaled_water_pixels = set()
+            
+            # Scale factor between original and upscaled image
+            scale_y = new_shape[0] / img.array.shape[-2]
+            scale_x = new_shape[1] / img.array.shape[-1]
+            
+            # For each water pixel in the original image, calculate the corresponding
+            # block of pixels in the upscaled image
+            for y, x in water_pixels:
+                # Calculate bounds of the upscaled block
+                y_start = int(y * scale_y)
+                y_end = int((y + 1) * scale_y)
+                x_start = int(x * scale_x)
+                x_end = int((x + 1) * scale_x)
+                
+                # Add all pixels in this block to the set of upscaled water pixels
+                for new_y in range(y_start, y_end):
+                    for new_x in range(x_start, x_end):
+                        upscaled_water_pixels.add((new_y, new_x))
+            
+            # Attach the upscaled water pixels to the new image
+            upscaled_img.array._water_pixels = upscaled_water_pixels
+            
+            # Debug information
+            print(f"Original water pixels: {len(water_pixels)}")
+            print(f"Upscaled water pixels: {len(upscaled_water_pixels)}")
+        
+        return upscaled_img
 
     def _brickification(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
         nmin = numpy.min(nblocks)
         d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
-
+        
+        # Track water pixels (they're already in upscaled coordinates after _upscale)
+        water_pixels = getattr(img.array, '_water_pixels', set())
+        
+        # Calculate center coordinates for each brick in upscaled image
         for i in range(nblocks[0]):
             for j in range(nblocks[1]):
                 xc = round(d + 2 * d * i)
                 yc = round(d + 2 * d * j)
                 cur_values = img.array.data[:, xc, yc].copy()
+                
+                # Calculate the actual pixel coordinates in the upscaled image
+                # to check against water_pixels
+                is_water = (xc, yc) in water_pixels
+                
+                # Debug info - print some water pixels if available
+                if i == 0 and j == 0 and water_pixels:
+                    print(f"First few water pixels: {list(water_pixels)[:5]}")
+                    print(f"Current coordinates: ({xc}, {yc}), is_water: {is_water}")
+                    
+                    # Check a range around this pixel
+                    water_found = False
+                    for y_check in range(max(0, xc-10), min(img.array.data.shape[1], xc+10)):
+                        for x_check in range(max(0, yc-10), min(img.array.data.shape[2], yc+10)):
+                            if (y_check, x_check) in water_pixels:
+                                water_found = True
+                                print(f"Found water pixel near current brick: ({y_check}, {x_check})")
+                                break
+                        if water_found:
+                            break
+                    
+                    if not water_found:
+                        print("No water pixels found near this brick")
+                
+                # Different rendering for transparent water bricks
+                if is_water:
+                    # For transparent bricks:
+                    # 1. Make the brick more "glassy" by brightening it
+                    # 2. Add stronger specular highlights
+                    # 3. Reduce the contrast of shading
+                    
+                    # Light the top-left edge with a stronger specular highlight
+                    rr, cc = disk(
+                        (xc - 2, yc - 2), 0.7 * d, shape=img.array.data.shape[::-1]
+                    )
+                    for b in range(img.array.data.shape[0]):
+                        # Stronger highlight for transparent bricks (75% white)
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.25 + 220 * 0.75
+                        ).astype(img.array.data.dtype)
+                    
+                    # Add subtle internal reflection on bottom-right
+                    rr, cc = disk(
+                        (xc + 2, yc + 2), 0.5 * d, shape=img.array.data.shape[::-1]
+                    )
+                    for b in range(img.array.data.shape[0]):
+                        # Less darkening for transparent bricks
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.7 + 40 * 0.3
+                        ).astype(img.array.data.dtype)
+                    
+                    # Make the stud more reflective/transparent
+                    rr, cc = disk((xc, yc), 0.65 * d, shape=img.array.data.shape[::-1])
+                    for b in range(img.array.data.shape[0]):
+                        # Lighten the stud color to make it look glassy
+                        img.array.data[b, rr, cc] = (
+                            cur_values[b] * 0.7 + 180 * 0.3
+                        ).astype(img.array.data.dtype)
+                    
+                    # Add a bright specular highlight to the stud
+                    rr, cc = disk((xc-1, yc-1), 0.2 * d, shape=img.array.data.shape[::-1])
+                    for b in range(img.array.data.shape[0]):
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.2 + 250 * 0.8
+                        ).astype(img.array.data.dtype)
+                    
+                else:
+                    # Regular brick rendering for land
+                    # Light the bricks on top left
+                    rr, cc = disk(
+                        (xc - 2, yc - 2), 0.6 * d, shape=img.array.data.shape[::-1]
+                    )
+                    for b in range(img.array.data.shape[0]):
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.5 + 200 * 0.5
+                        ).astype(img.array.data.dtype)
 
-                # draw lego bricks
-                # light the bricks on top left
-                rr, cc = disk(
-                    (xc - 2, yc - 2), 0.6 * d, shape=img.array.data.shape[::-1]
-                )
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = (
-                        img.array.data[b, rr, cc] * 0.5 + 200 * 0.5
-                    ).astype(img.array.data.dtype)
+                    # Dark the bricks on bottom right
+                    rr, cc = disk(
+                        (xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1]
+                    )
+                    for b in range(img.array.data.shape[0]):
+                        img.array.data[b, rr, cc] = (
+                            img.array.data[b, rr, cc] * 0.5 + 10 * 0.5
+                        ).astype(img.array.data.dtype)
 
-                # dark the bricks on bottom right
-                rr, cc = disk(
-                    (xc + 2, yc + 2), 0.6 * d, shape=img.array.data.shape[::-1]
-                )
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = (
-                        img.array.data[b, rr, cc] * 0.5 + 10 * 0.5
-                    ).astype(img.array.data.dtype)
-
-                # draw the studs
-                rr, cc = disk((xc, yc), 0.6 * d, shape=img.array.data.shape[::-1])
-                for b in range(img.array.data.shape[0]):
-                    img.array.data[b, rr, cc] = cur_values[b]
+                    # Draw the studs
+                    rr, cc = disk((xc, yc), 0.6 * d, shape=img.array.data.shape[::-1])
+                    for b in range(img.array.data.shape[0]):
+                        img.array.data[b, rr, cc] = cur_values[b]
 
         return img
 
@@ -406,10 +514,25 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
         for i in range(shape[1]):
             for j in range(shape[2]):
                 rgb_pixel = rgb_data[:, i, j]
-                # Use transparent colors for water areas
-                use_transparent = water_mask[i, j] > water_threshold
-                lego_rgb = find_best_lego_color(rgb_pixel, use_transparent)
-                rgb_data[:, i, j] = lego_rgb[1]
+                # Check if this is a water area that should use transparent bricks
+                is_water = water_mask[i, j] > water_threshold
+                
+                # Get the appropriate LEGO color for this pixel
+                lego_color_name, lego_rgb = find_best_lego_color(rgb_pixel, is_water)
+                
+                # Store information about transparent bricks for later processing
+                if is_water:
+                    # For water areas, store the water percentage to control transparency effect
+                    # Higher water percentage = more transparent
+                    rgb_data[:, i, j] = lego_rgb
+                    # Tag this pixel as water/transparent in the alpha channel metadata
+                    # We'll store this in the mask of the array later
+                    if not hasattr(small_img.array, '_water_pixels'):
+                        small_img.array._water_pixels = set()
+                    small_img.array._water_pixels.add((i, j))
+                else:
+                    # For land areas, use normal color
+                    rgb_data[:, i, j] = lego_rgb
 
     # Upscale and add brick effects
     lego_img = _upscale(small_img, bricksize)
