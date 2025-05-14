@@ -169,3 +169,5 @@ cdk.context.json
 *.nc
 .claud*
 openapi.json
+europe_tiles/
+europe_map.png
