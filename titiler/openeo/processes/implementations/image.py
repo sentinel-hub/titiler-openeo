@@ -2,7 +2,6 @@
 
 from typing import Dict, Sequence, Tuple, Any
 import os
-import gzip
 import numpy
 from numpy.typing import ArrayLike
 import morecantile
@@ -11,11 +10,72 @@ from rio_tiler.types import ColorMapType
 from skimage.draw import disk
 import colour
 from PIL import Image
+import xarray
 
-# Load and decompress the water mask
-WATER_MASK_PATH = os.path.join(os.path.dirname(__file__), "surfrac0.1.PPS.gz")
-with gzip.open(WATER_MASK_PATH, 'rb') as f:
-    _WATER_MASK = numpy.frombuffer(f.read(), dtype='>f4').reshape(1800, 3600)
+# Load the IMERG water mask from NetCDF file
+WATER_MASK_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", 
+                               "notebooks", "IMERG_land_sea_mask.nc.gz")
+
+try:
+    # Open the NetCDF file and extract the water mask data
+    with xarray.open_dataset(WATER_MASK_PATH) as ds:
+        # Get the water mask variable (landseamask)
+        var_name = list(ds.data_vars)[0]  # Should be 'landseamask'
+        _WATER_MASK = ds[var_name].values
+        
+        # Store coordinate information for proper lat/lon conversion
+        _LAT_START = float(ds.lat.values.min())  # Should be -89.95
+        _LAT_RES = 0.1
+        _LAT_SIZE = len(ds.lat)
+        
+        _LON_START = float(ds.lon.values.min())  # Should be -0.05
+        _LON_RES = 0.1
+        _LON_SIZE = len(ds.lon)
+except Exception as e:
+    print(f"Error loading water mask: {e}")
+    # Fallback empty water mask if file not found
+    _WATER_MASK = numpy.zeros((1800, 3600), dtype=numpy.float32)
+    _LAT_START = -89.95
+    _LAT_RES = 0.1
+    _LAT_SIZE = 1800
+    _LON_START = -0.05
+    _LON_RES = 0.1
+    _LON_SIZE = 3600
+
+
+def lat_to_index(lat):
+    """Convert latitude to array index in the water mask.
+    
+    Args:
+        lat: Latitude in degrees (-90 to 90)
+    
+    Returns:
+        Index in the array
+    """
+    # Calculate index (from south to north, -90 to 90)
+    idx = int(round((lat - _LAT_START) / _LAT_RES))
+    # Ensure within bounds
+    return max(0, min(idx, _LAT_SIZE - 1))
+
+
+def lon_to_index(lon):
+    """Convert longitude to array index in the water mask.
+    
+    Args:
+        lon: Longitude in degrees (-180 to 180)
+    
+    Returns:
+        Index in the array
+    """
+    # First normalize longitude to 0-360 range
+    lon_360 = lon % 360 if lon >= 0 else (lon + 360)
+    # Calculate index
+    idx = int(round((lon_360 - _LON_START) / _LON_RES))
+    # Handle edge case for longitude 359.95
+    if idx >= _LON_SIZE:
+        idx = 0
+    # Ensure within bounds
+    return max(0, min(idx, _LON_SIZE - 1))
 
 from .data_model import ImageData, RasterStack
 
@@ -179,6 +239,99 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     return data.apply_colormap(colormap)
 
 
+def _get_water_mask_for_bounds(bounds, crs, shape):
+    """Get water mask for the given bounds, converting from the source CRS to lat/lon.
+    
+    Args:
+        bounds: Bounds in the source CRS (minx, miny, maxx, maxy) or (left, bottom, right, top)
+        crs: Source coordinate reference system
+        shape: Shape of the target mask (height, width)
+        
+    Returns:
+        Water mask array resampled to the target shape
+    """
+    import pyproj
+    
+    try:
+        # Unpack bounds
+        minx, miny, maxx, maxy = bounds
+        
+        # Create transformers for coordinate conversion
+        if crs:
+            # If source CRS is already EPSG:4326, no need to transform
+            if str(crs).upper() == "EPSG:4326":
+                # Bounds are already in lat/lon
+                west, south, east, north = minx, miny, maxx, maxy
+            else:
+                # Create transformer to convert from source CRS to WGS84 (lat/lon)
+                transformer = pyproj.Transformer.from_crs(
+                    crs, "EPSG:4326", always_xy=True
+                )
+                
+                # Convert corners to lat/lon
+                west, south = transformer.transform(minx, miny)
+                east, north = transformer.transform(maxx, maxy)
+                
+                # Check if we need to handle corners (for some projections)
+                nw_lon, nw_lat = transformer.transform(minx, maxy)
+                se_lon, se_lat = transformer.transform(maxx, miny)
+                
+                # Adjust bounds if needed
+                west = min(west, nw_lon)
+                east = max(east, se_lon)
+                south = min(south, se_lat)
+                north = max(north, nw_lat)
+        else:
+            # If no CRS provided, assume bounds are already in lat/lon
+            west, south, east, north = minx, miny, maxx, maxy
+        
+        # Get indices in the water mask array
+        # Remember: water mask is oriented with origin at top-left (-90°, 0°)
+        north_idx = lat_to_index(north)
+        south_idx = lat_to_index(south)
+        west_idx = lon_to_index(west)
+        east_idx = lon_to_index(east)
+        
+        # Ensure south_idx is always greater than north_idx (since array has origin at top)
+        if south_idx < north_idx:
+            south_idx, north_idx = north_idx, south_idx
+    
+        # Debug info
+        print(f"Bounds in lat/lon: {west}, {south}, {east}, {north}")
+        print(f"Indices: north={north_idx}, south={south_idx}, west={west_idx}, east={east_idx}")
+            
+        # Handle bounds that cross the antimeridian (international date line)
+        if west_idx > east_idx:
+            # Get two portions of the water mask (one on each side of 180/-180)
+            west_portion = _WATER_MASK[north_idx:south_idx, west_idx:]
+            east_portion = _WATER_MASK[north_idx:south_idx, :east_idx]
+            mask = numpy.concatenate([west_portion, east_portion], axis=1)
+        else:
+            # Get the water mask for the requested region
+            mask = _WATER_MASK[north_idx:south_idx, west_idx:east_idx]
+    
+        # Ensure we have a valid mask with at least 1 pixel
+        if mask.shape[0] == 0 or mask.shape[1] == 0:
+            print(f"Warning: Empty mask region ({mask.shape}), returning zeros")
+            return numpy.zeros(shape, dtype=numpy.float32)
+        
+        # Convert mask to float32 if needed
+        if mask.dtype != numpy.float32:
+            mask = mask.astype(numpy.float32)
+        
+        # Resize to the target shape
+        from PIL import Image
+        return numpy.array(Image.fromarray(mask).resize(
+            (shape[1], shape[0]), 
+            resample=Image.BILINEAR
+        ))
+    
+    except Exception as e:
+        print(f"Error processing water mask: {e}")
+        # Return zeros array as fallback
+        return numpy.zeros(shape, dtype=numpy.float32)
+
+
 def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, water_threshold: float = 75.0) -> ImageData:
     """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects.
     
@@ -243,17 +396,12 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
     rgb_data = small_img.array.data
     shape = rgb_data.shape
     if shape[0] == 3:  # Only process RGB images
-        # Calculate water mask for current image bounds
-        bounds = data.bounds
-        lon_idx = ((numpy.array([bounds[0], bounds[2]]) + 180) * 10).astype(int)
-        lat_idx = ((90 - numpy.array([bounds[3], bounds[1]])) * 10).astype(int)
-        
-        # Extract and resize water mask to match image dimensions
-        water_mask = _WATER_MASK[lat_idx[0]:lat_idx[1], lon_idx[0]:lon_idx[1]]
-        water_mask = numpy.array(Image.fromarray(water_mask).resize(
-            (shape[2], shape[1]), 
-            resample=Image.BILINEAR
-        ))
+        # Get water mask for the image's bounds with proper CRS handling
+        water_mask = _get_water_mask_for_bounds(
+            bounds=data.bounds,
+            crs=data.crs,
+            shape=(shape[1], shape[2])  # Height, width
+        )
 
         for i in range(shape[1]):
             for j in range(shape[2]):
