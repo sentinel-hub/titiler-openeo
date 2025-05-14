@@ -1,0 +1,31 @@
+{
+    "id": "get_brick_quantities",
+    "summary": "Get quantities of LEGO bricks needed for a legofied image.",
+    "description": "Creates a CSV-compatible data structure containing brick quantities and details for a legofied image.",
+    "categories": [
+        "lego",
+        "data"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "A legofied image with brick information in metadata.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        }
+    ],
+    "returns": {
+        "description": "FeatureCollection containing brick quantities and details.",
+        "schema": {
+            "type": "object",
+            "subtype": "featurecollection"
+        }
+    },
+    "exceptions": {
+        "InvalidInput": {
+            "message": "The input image must be legofied with brick information in metadata."
+        }
+    }
+}

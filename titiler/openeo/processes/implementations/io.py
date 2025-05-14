@@ -100,17 +100,36 @@ def _save_single_result(
             output = io.StringIO()
             writer = csv.writer(output)
 
-            # Write header
-            writer.writerow(["date", "feature_index", "value"])
+            # Check if this is brick quantity data
+            sample_feature = features[0] if features else {}
+            is_brick_data = "color" in sample_feature.get("properties", {})
 
-            # Write data rows
-            for idx, feature in enumerate(features):
-                properties = feature.get("properties", {})
-                values_dict = properties.get("values", {})
+            if is_brick_data:
+                # Write header for brick data
+                writer.writerow(["color", "quantity", "pantone", "hex", "transparent"])
 
-                # For each date-value pair in the values dictionary
-                for date, value in values_dict.items():
-                    writer.writerow([date, idx, value])
+                # Write data rows for brick quantities
+                for feature in features:
+                    properties = feature.get("properties", {})
+                    values = properties.get("values", {})
+                    
+                    writer.writerow([
+                        properties.get("color", ""),
+                        values.get("quantity", 0),
+                        properties.get("pantone", ""),
+                        properties.get("hex", ""),
+                        properties.get("transparent", False)
+                    ])
+            else:
+                # Original behavior for other data types
+                writer.writerow(["date", "feature_index", "value"])
+                
+                for idx, feature in enumerate(features):
+                    properties = feature.get("properties", {})
+                    values_dict = properties.get("values", {})
+
+                    for date, value in values_dict.items():
+                        writer.writerow([date, idx, value])
 
             # Convert to bytes
             csv_bytes = output.getvalue().encode("utf-8")

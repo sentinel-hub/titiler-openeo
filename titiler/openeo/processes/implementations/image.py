@@ -73,6 +73,7 @@ __all__ = [
     "legofication",
     "generate_subtiles_ref",
     "generate_lego_instructions",
+    "get_brick_quantities",
 ]
 
 
@@ -1070,6 +1071,57 @@ def generate_lego_instructions(
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _generate_instruction_image(img_data)
+    return result
+
+def get_brick_quantities(data: RasterStack) -> Dict:
+    """Get quantities of LEGO bricks needed for a legofied image.
+
+    Args:
+        data: RasterStack containing legofied image with brick information
+
+    Returns:
+        Dictionary with FeatureCollection containing brick quantities and details
+    """
+    def _get_brick_quantities(img_data: ImageData) -> Dict:
+        if 'brick_info' not in img_data.metadata:
+            raise ValueError("Input image must be legofied with brick information in metadata")
+
+        # Collect brick counts from metadata
+        brick_counts: Dict[str, int] = {}
+        for tile_info in img_data.metadata['brick_info']['tiles'].values():
+            color_name = tile_info['color_name']
+            brick_counts[color_name] = brick_counts.get(color_name, 0) + 1
+        
+        # Create a FeatureCollection for brick quantities
+        features = []
+        for color_name, count in sorted(brick_counts.items()):
+            feature = {
+                "type": "Feature",
+                "properties": {
+                    "color": color_name,
+                    "pantone": lego_colors[color_name]["pantone"],
+                    "hex": lego_colors[color_name]["hex"],
+                    "transparent": lego_colors[color_name].get("transparent", False),
+                    "values": {
+                        "quantity": count
+                    }
+                }
+            }
+            features.append(feature)
+        
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+    # Process each image in the RasterStack
+    result = {}
+    for key, img_data in data.items():
+        result[key] = _get_brick_quantities(img_data)
+    
+    # If there's only one image, return just that result
+    if len(result) == 1:
+        return next(iter(result.values()))
     return result
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
