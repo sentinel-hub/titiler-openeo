@@ -13,8 +13,9 @@ from PIL import Image
 import xarray
 
 # Load the IMERG water mask from NetCDF file
-WATER_MASK_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", 
-                               "notebooks", "IMERG_land_sea_mask.nc.gz")
+WATER_MASK_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "IMERG_land_sea_mask.nc.gz"
+)
 
 try:
     # Open the NetCDF file and extract the water mask data
@@ -22,33 +23,33 @@ try:
         # Get the water mask variable (landseamask)
         var_name = list(ds.data_vars)[0]  # Should be 'landseamask'
         _WATER_MASK = ds[var_name].values
-        
+
         # Store coordinate information for proper lat/lon conversion
-        _LAT_START = float(ds.lat.values.min())  # Should be -89.95
+        _LAT_START = -90 # float(ds.lat.values.min())  # Should be -89.95
         _LAT_RES = 0.1
         _LAT_SIZE = len(ds.lat)
-        
-        _LON_START = float(ds.lon.values.min())  # Should be -0.05
+
+        _LON_START = 0 # float(ds.lon.values.min())  # Should be -0.05
         _LON_RES = 0.1
         _LON_SIZE = len(ds.lon)
 except Exception as e:
     print(f"Error loading water mask: {e}")
     # Fallback empty water mask if file not found
     _WATER_MASK = numpy.zeros((1800, 3600), dtype=numpy.float32)
-    _LAT_START = -89.95
+    _LAT_START = -90
     _LAT_RES = 0.1
     _LAT_SIZE = 1800
-    _LON_START = -0.05
+    _LON_START = 0
     _LON_RES = 0.1
     _LON_SIZE = 3600
 
 
 def lat_to_index(lat):
     """Convert latitude to array index in the water mask.
-    
+
     Args:
         lat: Latitude in degrees (-90 to 90)
-    
+
     Returns:
         Index in the array
     """
@@ -60,10 +61,10 @@ def lat_to_index(lat):
 
 def lon_to_index(lon):
     """Convert longitude to array index in the water mask.
-    
+
     Args:
         lon: Longitude in degrees (-180 to 180)
-    
+
     Returns:
         Index in the array
     """
@@ -76,6 +77,7 @@ def lon_to_index(lon):
         idx = 0
     # Ensure within bounds
     return max(0, min(idx, _LON_SIZE - 1))
+
 
 from .data_model import ImageData, RasterStack
 
@@ -110,6 +112,7 @@ def _get_tiles(x, y, z, zoom):
             )
     return tile_numbers
 
+
 class TileRef:
     """Tile reference class."""
 
@@ -123,8 +126,7 @@ class TileRef:
 
     def __str__(self) -> str:
         return f"{self.array.x}_{self.array.y}_{self.array.z}"
-    
-    
+
 
 def generate_subtiles_ref(x: int, y: int, z: int, zoom: int) -> ArrayLike:
     """Generate subtiles reference for a given tile (XYZ) necessary to make a mosaic and form the complete tile.
@@ -241,21 +243,21 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
 
 def _get_water_mask_for_bounds(bounds, crs, shape):
     """Get water mask for the given bounds, converting from the source CRS to lat/lon.
-    
+
     Args:
         bounds: Bounds in the source CRS (minx, miny, maxx, maxy) or (left, bottom, right, top)
         crs: Source coordinate reference system
         shape: Shape of the target mask (height, width)
-        
+
     Returns:
         Water mask array resampled to the target shape
     """
     import pyproj
-    
+
     try:
         # Unpack bounds
         minx, miny, maxx, maxy = bounds
-        
+
         # Create transformers for coordinate conversion
         if crs:
             # If source CRS is already EPSG:4326, no need to transform
@@ -267,15 +269,15 @@ def _get_water_mask_for_bounds(bounds, crs, shape):
                 transformer = pyproj.Transformer.from_crs(
                     crs, "EPSG:4326", always_xy=True
                 )
-                
+
                 # Convert corners to lat/lon
                 west, south = transformer.transform(minx, miny)
                 east, north = transformer.transform(maxx, maxy)
-                
+
                 # Check if we need to handle corners (for some projections)
                 nw_lon, nw_lat = transformer.transform(minx, maxy)
                 se_lon, se_lat = transformer.transform(maxx, miny)
-                
+
                 # Adjust bounds if needed
                 west = min(west, nw_lon)
                 east = max(east, se_lon)
@@ -284,22 +286,18 @@ def _get_water_mask_for_bounds(bounds, crs, shape):
         else:
             # If no CRS provided, assume bounds are already in lat/lon
             west, south, east, north = minx, miny, maxx, maxy
-        
+
         # Get indices in the water mask array
         # Remember: water mask is oriented with origin at top-left (-90°, 0°)
         north_idx = lat_to_index(north)
         south_idx = lat_to_index(south)
         west_idx = lon_to_index(west)
         east_idx = lon_to_index(east)
-        
+
         # Ensure south_idx is always greater than north_idx (since array has origin at top)
         if south_idx < north_idx:
             south_idx, north_idx = north_idx, south_idx
-    
-        # Debug info
-        print(f"Bounds in lat/lon: {west}, {south}, {east}, {north}")
-        print(f"Indices: north={north_idx}, south={south_idx}, west={west_idx}, east={east_idx}")
-            
+
         # Handle bounds that cross the antimeridian (international date line)
         if west_idx > east_idx:
             # Get two portions of the water mask (one on each side of 180/-180)
@@ -309,32 +307,103 @@ def _get_water_mask_for_bounds(bounds, crs, shape):
         else:
             # Get the water mask for the requested region
             mask = _WATER_MASK[north_idx:south_idx, west_idx:east_idx]
-    
+
         # Ensure we have a valid mask with at least 1 pixel
         if mask.shape[0] == 0 or mask.shape[1] == 0:
             print(f"Warning: Empty mask region ({mask.shape}), returning zeros")
             return numpy.zeros(shape, dtype=numpy.float32)
-        
+
         # Convert mask to float32 if needed
         if mask.dtype != numpy.float32:
             mask = mask.astype(numpy.float32)
-        
-        # Resize to the target shape
+
+        # Resize to the target shape with binary water/land classification
+        # Use a majority vote approach: if most pixels are water, classify as 100% water
+        # Otherwise, classify as 0% land
         from PIL import Image
-        return numpy.array(Image.fromarray(mask).resize(
-            (shape[1], shape[0]), 
-            resample=Image.BILINEAR
-        ))
-    
+        import numpy as np
+        from scipy import ndimage
+
+        # Define the water threshold for binary classification
+        # This is typically around 75-90 in the IMERG mask for water
+        water_threshold = 75.0  # Adjust if needed based on your mask values
+        
+        # Create a binary result at the target shape
+        result = numpy.zeros(shape, dtype=numpy.float32)
+        
+        # If the mask is already smaller than the target, just resize it
+        if mask.shape[0] <= shape[0] and mask.shape[1] <= shape[1]:
+            # Resize using nearest neighbor to avoid introducing intermediate values
+            resized = numpy.array(
+                Image.fromarray(mask).resize(
+                    (shape[1], shape[0]), resample=Image.Resampling.NEAREST
+                )
+            )
+            # Apply binary rule to resized data
+            result = numpy.where(resized > water_threshold, 100.0, 0.0)
+            return result
+            
+        # For downsampling, we use block reduction with majority voting
+        # Calculate block sizes
+        block_y = max(1, mask.shape[0] // shape[0])
+        block_x = max(1, mask.shape[1] // shape[1])
+        
+        # Calculate how many blocks we can fully fit
+        full_blocks_y = mask.shape[0] // block_y
+        full_blocks_x = mask.shape[1] // block_x
+        
+        # Create output at the appropriate size
+        output_y = min(shape[0], full_blocks_y)
+        output_x = min(shape[1], full_blocks_x)
+        binmask = numpy.zeros((output_y, output_x), dtype=numpy.float32)
+        
+        # Process each block with majority voting
+        for i in range(output_y):
+            for j in range(output_x):
+                # Extract this block
+                block = mask[
+                    i * block_y : (i + 1) * block_y,
+                    j * block_x : (j + 1) * block_x
+                ]
+                
+                # Count water pixels in the block
+                water_count = numpy.sum(block > water_threshold)
+                total_pixels = block.size
+                
+                # Apply majority rule (Rule 1 & 2 from user requirements)
+                # If majority are water (>50%), set to 100% water, else 0%
+                if water_count > total_pixels / 2:
+                    binmask[i, j] = 100.0  # 100% water
+                else:
+                    binmask[i, j] = 0.0  # 0% water (land)
+        
+        # Final resize to exact target shape if needed
+        if binmask.shape != shape:
+            # Use nearest neighbor to preserve the binary values
+            result = numpy.array(
+                Image.fromarray(binmask).resize(
+                    (shape[1], shape[0]), resample=Image.Resampling.NEAREST
+                )
+            )
+        else:
+            result = binmask
+            
+        return result
+
     except Exception as e:
         print(f"Error processing water mask: {e}")
         # Return zeros array as fallback
         return numpy.zeros(shape, dtype=numpy.float32)
 
 
-def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, water_threshold: float = 75.0) -> ImageData:
+def _legofication(
+    data: ImageData,
+    nbbricks: int = 16,
+    bricksize: int = 16,
+    water_threshold: float = 75.0,
+) -> ImageData:
     """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects.
-    
+
     Args:
         data: ImageData to process
         nbbricks: Number of LEGO bricks for the smallest image dimension
@@ -351,23 +420,25 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
 
     def _upscale(img: ImageData, bricksize: int = 16) -> ImageData:
         # Store water pixels information before resizing
-        water_pixels = getattr(img.array, '_water_pixels', set())
-        
+        water_pixels = getattr(img.array, "_water_pixels", set())
+
         # Calculate new dimensions
         new_shape = (bricksize * numpy.array(img.array.shape[-2:])).astype(int)
-        
+
         # Resize the image
-        upscaled_img = img.resize(new_shape[0], new_shape[1], resampling_method="nearest")
-        
+        upscaled_img = img.resize(
+            new_shape[0], new_shape[1], resampling_method="nearest"
+        )
+
         # Transfer water pixel information to the new image with scaling
         if water_pixels:
             # Create a new set to hold scaled water pixel coordinates
             upscaled_water_pixels = set()
-            
+
             # Scale factor between original and upscaled image
             scale_y = new_shape[0] / img.array.shape[-2]
             scale_x = new_shape[1] / img.array.shape[-1]
-            
+
             # For each water pixel in the original image, calculate the corresponding
             # block of pixels in the upscaled image
             for y, x in water_pixels:
@@ -376,65 +447,71 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                 y_end = int((y + 1) * scale_y)
                 x_start = int(x * scale_x)
                 x_end = int((x + 1) * scale_x)
-                
+
                 # Add all pixels in this block to the set of upscaled water pixels
                 for new_y in range(y_start, y_end):
                     for new_x in range(x_start, x_end):
                         upscaled_water_pixels.add((new_y, new_x))
-            
+
             # Attach the upscaled water pixels to the new image
             upscaled_img.array._water_pixels = upscaled_water_pixels
-            
+
             # Debug information
             print(f"Original water pixels: {len(water_pixels)}")
             print(f"Upscaled water pixels: {len(upscaled_water_pixels)}")
-        
+
         return upscaled_img
 
     def _brickification(img: ImageData, nblocks: Tuple[int, int]) -> ImageData:
         nmin = numpy.min(nblocks)
         d = (numpy.min(numpy.array(img.array.data.shape[-2:])) // nmin) / 2
-        
+
         # Track water pixels (they're already in upscaled coordinates after _upscale)
-        water_pixels = getattr(img.array, '_water_pixels', set())
-        
+        water_pixels = getattr(img.array, "_water_pixels", set())
+
         # Calculate center coordinates for each brick in upscaled image
         for i in range(nblocks[0]):
             for j in range(nblocks[1]):
                 xc = round(d + 2 * d * i)
                 yc = round(d + 2 * d * j)
                 cur_values = img.array.data[:, xc, yc].copy()
-                
+
                 # Calculate the actual pixel coordinates in the upscaled image
                 # to check against water_pixels
                 is_water = (xc, yc) in water_pixels
-                
+
                 # Debug info - print some water pixels if available
                 if i == 0 and j == 0 and water_pixels:
                     print(f"First few water pixels: {list(water_pixels)[:5]}")
                     print(f"Current coordinates: ({xc}, {yc}), is_water: {is_water}")
-                    
+
                     # Check a range around this pixel
                     water_found = False
-                    for y_check in range(max(0, xc-10), min(img.array.data.shape[1], xc+10)):
-                        for x_check in range(max(0, yc-10), min(img.array.data.shape[2], yc+10)):
+                    for y_check in range(
+                        max(0, xc - 10), min(img.array.data.shape[1], xc + 10)
+                    ):
+                        for x_check in range(
+                            max(0, yc - 10), min(img.array.data.shape[2], yc + 10)
+                        ):
                             if (y_check, x_check) in water_pixels:
                                 water_found = True
-                                print(f"Found water pixel near current brick: ({y_check}, {x_check})")
+                                print(
+                                    f"Found water pixel near current brick: ({y_check}, {x_check})"
+                                )
                                 break
                         if water_found:
                             break
-                    
+
                     if not water_found:
                         print("No water pixels found near this brick")
-                
+
                 # Different rendering for transparent water bricks
                 if is_water:
                     # For transparent bricks:
                     # 1. Make the brick more "glassy" by brightening it
                     # 2. Add stronger specular highlights
                     # 3. Reduce the contrast of shading
-                    
+
                     # Light the top-left edge with a stronger specular highlight
                     rr, cc = disk(
                         (xc - 2, yc - 2), 0.7 * d, shape=img.array.data.shape[::-1]
@@ -444,7 +521,7 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                         img.array.data[b, rr, cc] = (
                             img.array.data[b, rr, cc] * 0.25 + 220 * 0.75
                         ).astype(img.array.data.dtype)
-                    
+
                     # Add subtle internal reflection on bottom-right
                     rr, cc = disk(
                         (xc + 2, yc + 2), 0.5 * d, shape=img.array.data.shape[::-1]
@@ -454,7 +531,7 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                         img.array.data[b, rr, cc] = (
                             img.array.data[b, rr, cc] * 0.7 + 40 * 0.3
                         ).astype(img.array.data.dtype)
-                    
+
                     # Make the stud more reflective/transparent
                     rr, cc = disk((xc, yc), 0.65 * d, shape=img.array.data.shape[::-1])
                     for b in range(img.array.data.shape[0]):
@@ -462,14 +539,16 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                         img.array.data[b, rr, cc] = (
                             cur_values[b] * 0.7 + 180 * 0.3
                         ).astype(img.array.data.dtype)
-                    
+
                     # Add a bright specular highlight to the stud
-                    rr, cc = disk((xc-1, yc-1), 0.2 * d, shape=img.array.data.shape[::-1])
+                    rr, cc = disk(
+                        (xc - 1, yc - 1), 0.2 * d, shape=img.array.data.shape[::-1]
+                    )
                     for b in range(img.array.data.shape[0]):
                         img.array.data[b, rr, cc] = (
                             img.array.data[b, rr, cc] * 0.2 + 250 * 0.8
                         ).astype(img.array.data.dtype)
-                    
+
                 else:
                     # Regular brick rendering for land
                     # Light the bricks on top left
@@ -508,7 +587,7 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
         water_mask = _get_water_mask_for_bounds(
             bounds=data.bounds,
             crs=data.crs,
-            shape=(shape[1], shape[2])  # Height, width
+            shape=(shape[1], shape[2]),  # Height, width
         )
 
         for i in range(shape[1]):
@@ -516,10 +595,10 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                 rgb_pixel = rgb_data[:, i, j]
                 # Check if this is a water area that should use transparent bricks
                 is_water = water_mask[i, j] > water_threshold
-                
+
                 # Get the appropriate LEGO color for this pixel
                 lego_color_name, lego_rgb = find_best_lego_color(rgb_pixel, is_water)
-                
+
                 # Store information about transparent bricks for later processing
                 if is_water:
                     # For water areas, store the water percentage to control transparency effect
@@ -527,7 +606,7 @@ def _legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16, wate
                     rgb_data[:, i, j] = lego_rgb
                     # Tag this pixel as water/transparent in the alpha channel metadata
                     # We'll store this in the mask of the array later
-                    if not hasattr(small_img.array, '_water_pixels'):
+                    if not hasattr(small_img.array, "_water_pixels"):
                         small_img.array._water_pixels = set()
                     small_img.array._water_pixels.add((i, j))
                 else:
@@ -547,14 +626,14 @@ lego_colors = {
         "rgb": [51, 153, 204],
         "pantone": "2915 C",
         "hex": "#3399CC",
-        "transparent": True
+        "transparent": True,
     },
     "Transparent Water Blue Dark": {
         "hsl": [210, 90, 30],
         "rgb": [8, 45, 82],
         "pantone": "534 C",
         "hex": "#082D52",
-        "transparent": True
+        "transparent": True,
     },
     # Regular colors
     "White": {
@@ -562,7 +641,7 @@ lego_colors = {
         "rgb": [244, 244, 244],
         "pantone": "TBC",
         "hex": "#F4F4F4",
-        "transparent": False
+        "transparent": False,
     },
     "Light Bluish Grey (Medium Stone Grey)": {
         "hsl": [196, 6, 66],
@@ -825,7 +904,9 @@ lego_colors = {
 }
 
 
-def find_best_lego_color(rgb: numpy.ndarray, use_transparent: bool = False) -> Tuple[str, numpy.ndarray]:
+def find_best_lego_color(
+    rgb: numpy.ndarray, use_transparent: bool = False
+) -> Tuple[str, numpy.ndarray]:
     """Find the best matching LEGO color for an RGB value using colour-science.
 
     Args:
@@ -844,7 +925,8 @@ def find_best_lego_color(rgb: numpy.ndarray, use_transparent: bool = False) -> T
 
     # Filter colors based on transparency preference
     available_colors = {
-        name: info for name, info in lego_colors.items()
+        name: info
+        for name, info in lego_colors.items()
         if info.get("transparent", False) == use_transparent
     }
 
@@ -862,7 +944,12 @@ def find_best_lego_color(rgb: numpy.ndarray, use_transparent: bool = False) -> T
     return (best_color, lego_colors[best_color]["rgb"])
 
 
-def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16, water_threshold: float = 75.0) -> RasterStack:
+def legofication(
+    data: RasterStack,
+    nbbricks: int = 16,
+    bricksize: int = 16,
+    water_threshold: float = 75.0,
+) -> RasterStack:
     """Apply legofication to RasterStack by converting images to LEGO colors and adding brick effects.
 
     Args:
@@ -879,6 +966,7 @@ def legofication(data: RasterStack, nbbricks: int = 16, bricksize: int = 16, wat
     for key, img_data in data.items():
         result[key] = _legofication(img_data, nbbricks, bricksize, water_threshold)
     return result
+
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
