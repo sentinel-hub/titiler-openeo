@@ -16,10 +16,10 @@ if not os.path.exists(output_dir):
 
 # Configuration parameters
 zoom = 7
-max_workers = 5  # Number of concurrent downloads (adjust as needed)
+max_workers = 3  # Number of concurrent downloads (adjust as needed)
 
 # European spatial
-spatial_extent_east = 40.0
+spatial_extent_east = 45.0
 spatial_extent_west = -25.0
 spatial_extent_north = 72.0
 spatial_extent_south = 30.0
@@ -74,7 +74,7 @@ def download_tile(tile_number: Tuple[int, int], zoom: int, output_dir: str) -> T
             # If loading fails, we'll try downloading it again
     
     print(f"Downloading tile: {x}, {y}")
-    tile_url = f"https://openeo.ds.io/services/xyz/b05010db-cecd-4de9-97bf-4c9a988468cc/tiles/{zoom}/{x}/{y}"
+    tile_url = f"https://openeo.ds.io/services/xyz/c0f8f010-f939-440c-9f40-36830959bf91/tiles/{zoom}/{x}/{y}"
     
     try:
         response = requests.get(tile_url)

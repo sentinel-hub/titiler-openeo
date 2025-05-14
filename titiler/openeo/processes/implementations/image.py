@@ -343,6 +343,18 @@ def _legofication(
         bricksize: Size of each LEGO brick in pixels
         water_threshold: Threshold for water classification (0-1.0, default 0.75)
                         If the intersection area is > 75% of the cell area, it's considered land
+
+    Returns:
+        ImageData with legofication applied and brick information stored in metadata
+    """
+    """Apply legofication to ImageData by converting the image to LEGO colors and adding brick effects.
+
+    Args:
+        data: ImageData to process
+        nbbricks: Number of LEGO bricks for the smallest image dimension
+        bricksize: Size of each LEGO brick in pixels
+        water_threshold: Threshold for water classification (0-1.0, default 0.75)
+                        If the intersection area is > 75% of the cell area, it's considered land
     """
 
     def _compress(img: ImageData, nbbricks: int = 16) -> ImageData:
@@ -512,19 +524,33 @@ def _legofication(
                 # Get the appropriate LEGO color for this pixel
                 lego_color_name, lego_rgb = find_best_lego_color(rgb_pixel, is_water)
 
+                # Initialize brick information in metadata if not present
+                if 'brick_info' not in small_img.metadata:
+                    small_img.metadata['brick_info'] = {'tiles': {}}
+
+                # Store brick information including position, color name, and whether it's water
+                tile_key = f"{i}_{j}"
+                small_img.metadata['brick_info']['tiles'][tile_key] = {
+                    'position': (i, j),
+                    'color_name': lego_color_name,
+                    'is_water': is_water
+                }
+
                 # Store information about transparent bricks for later processing
                 if is_water:
                     # For water areas, store the water percentage to control transparency effect
                     # Higher water percentage = more transparent
                     rgb_data[:, i, j] = lego_rgb
                     # Tag this pixel as water/transparent in the alpha channel metadata
-                    # We'll store this in the mask of the array later
                     if not hasattr(small_img.array, "_water_pixels"):
                         small_img.array._water_pixels = set()
                     small_img.array._water_pixels.add((i, j))
                 else:
                     # For land areas, use normal color
                     rgb_data[:, i, j] = lego_rgb
+
+                # Store overall brick grid dimensions for later reference
+                small_img.metadata['brick_info']['grid_dimensions'] = (shape[1], shape[2])
 
     # Upscale and add brick effects
     lego_img = _upscale(small_img, bricksize)
