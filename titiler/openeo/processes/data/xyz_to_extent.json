@@ -1,0 +1,32 @@
+{
+  "id": "xyz_to_extent",
+  "summary": "Apply a process to each value as a service XYZ call",
+  "description": "Applies a process to each value in the array.",
+  "categories": ["array"],
+  "parameters": [
+    {
+      "name": "x",
+      "description": "An array.",
+      "schema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "context",
+      "description": "Additional data to be passed to the process.",
+      "schema": {
+        "description": "Any data type."
+      },
+      "optional": true,
+      "default": null
+    }
+  ],
+  "returns": {
+    "description": "A data cube with the newly computed values and the same dimensions. The dimension properties (name, type, labels, reference system and resolution) remain unchanged.",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube"
+    }
+  },
+  "links": []
+}

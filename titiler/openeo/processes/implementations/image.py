@@ -2,7 +2,9 @@
 
 from typing import Dict, Sequence, Tuple, Any
 
+import morecantile
 import numpy
+from numpy.typing import ArrayLike
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
 
@@ -18,7 +20,70 @@ __all__ = [
     "colormap",
     "get_colormap",
     "legofication",
+    "generate_subtiles_ref",
 ]
+
+
+def _get_tiles(x, y, z, zoom):
+    """Get the subtiles numbers for a given tile (XYZ) necessary to make a mosaic and form the complete tile.
+    Args:
+        x: X coordinate of the tile
+        y: Y coordinate of the tile
+        z: Zoom level of the tile
+        zoom: Zoom level to generate subtiles for
+    Returns:
+        List of tuples containing the X and Y coordinates of the subtiles
+    """
+
+    # Calculate the tile numbers
+    tile_numbers = []
+    for i in range(0, 2 ** int(zoom - z)):
+        for j in range(0, 2 ** int(zoom - z)):
+            tile_numbers.append(
+                (x * 2 ** int(zoom - z) + i, y * 2 ** int(zoom - z) + j)
+            )
+    return tile_numbers
+
+class TileRef:
+    """Tile reference class."""
+
+    array: morecantile.Tile = None
+
+    def __init__(self, x: int, y: int, z: int):
+        self.array = morecantile.Tile(x=x, y=y, z=z)
+
+    def __repr__(self) -> str:
+        return f"TileRef(x={self.array.x}, y={self.array.y}, z={self.array.z})"
+
+    def __str__(self) -> str:
+        return f"{self.array.x}_{self.array.y}_{self.array.z}"
+    
+    
+
+def generate_subtiles_ref(x: int, y: int, z: int, zoom: int) -> ArrayLike:
+    """Generate subtiles reference for a given tile (XYZ) necessary to make a mosaic and form the complete tile.
+
+    Args:
+        x: X coordinate of the tile
+        y: Y coordinate of the tile
+        z: Zoom level of the tile
+        zoom: Zoom level to generate subtiles for
+
+    Returns:
+        Dictionary mapping subtiles to ImageData objects
+    """
+    # Get the subtiles numbers
+    subtiles = _get_tiles(x, y, z, zoom)
+
+    # Create an array of tuples containing all the subtiles references
+    # Each subtiles reference is a tuple of (x, y, z)
+    subtiles_ref = {
+        f"{tile[0]}_{tile[1]}_{zoom}": TileRef(tile[0], tile[1], zoom)
+        for tile in subtiles
+    }
+    # Create a dictionary mapping subtiles to ImageData objects
+    return subtiles_ref
+
 
 def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
     """Select indexes from a single ImageData."""
@@ -174,6 +239,7 @@ def legofication(data: ImageData, nbbricks: int = 16, bricksize: int = 16) -> Im
     # Upscale and add brick effects
     lego_img = _upscale(small_img, bricksize)
     return _legofication(lego_img, small_img.array.shape[-2:])
+
 
 # LEGO colors dictionary with HSL values
 lego_colors = {
@@ -489,5 +555,3 @@ def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     for key, img_data in data.items():
         result[key] = _apply_colormap(img_data, colormap)
     return result
-
-
