@@ -605,6 +605,13 @@ class EndpointsFactory(BaseFactory):
             # except Exception as e:
             #     raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
 
+            # Check process and type are present
+            if not body.process or not body.type:
+                raise HTTPException(
+                    422,
+                    detail="Both 'process' and 'type' fields are required.",
+                )
+
             service_id = self.services_store.add_service(
                 user.user_id, body.model_dump()
             )
@@ -689,8 +696,32 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Updates an existing secondary web service."""
+            # Get existing service
+            existing = self.services_store.get_service(service_id)
+            if not existing:
+                raise HTTPException(404, f"Could not find service: {service_id}")
+                
+            # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
+            if body:
+                update_data = {}
+                # Only include non-None fields from the update
+                body_data = body.model_dump(exclude_none=True)
+                
+                # Start with existing service data
+                update_data = existing.copy()
+                # Remove id since it's a special field from get_service
+                if "id" in update_data:
+                    del update_data["id"]
+                    
+                # Update with any new values provided
+                update_data.update(body_data)
+            else:
+                update_data = existing
+                if "id" in update_data:
+                    del update_data["id"]
+                
             self.services_store.update_service(
-                user.user_id, service_id, body.model_dump() if body else {}
+                user.user_id, service_id, update_data
             )
             return Response(status_code=204)
 

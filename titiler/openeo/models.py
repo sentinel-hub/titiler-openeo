@@ -1613,11 +1613,11 @@ class ServiceInput(BaseModel):
     """Service creation/update input model."""
 
     process: ProcessGraphWithMetadata = Field(
-        ...,
+        None,
         description="A process graph defines the data processing that should be applied to EO data.",
     )
     type: str = Field(
-        ...,
+        None,
         description="The type of service to be created.",
     )
     title: Optional[str] = Field(

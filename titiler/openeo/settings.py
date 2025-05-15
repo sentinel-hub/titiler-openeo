@@ -134,7 +134,7 @@ class ApiSettings(BaseSettings):
 
     name: str = "TiTiler-OpenEO"
     cors_origins: str = "*"
-    cors_allow_methods: str = "GET,POST,DELETE,OPTIONS"
+    cors_allow_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     cachecontrol: str = "public, max-age=3600"
     root_path: str = ""
 
