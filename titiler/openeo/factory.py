@@ -865,9 +865,9 @@ class EndpointsFactory(BaseFactory):
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry
+                process_registry=self.process_registry,
             )
-            result = pg_callable()
+            result = pg_callable(named_parameters={"user": user})
 
             # if the result is not a SaveResultData object, convert it to one
             if not isinstance(result, SaveResultData):
