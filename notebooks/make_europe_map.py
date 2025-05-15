@@ -74,7 +74,7 @@ def download_tile(tile_number: Tuple[int, int], zoom: int, output_dir: str) -> T
             # If loading fails, we'll try downloading it again
     
     print(f"Downloading tile: {x}, {y}")
-    tile_url = f"https://openeo.ds.io/services/xyz/4eaaae8e-dd64-4c20-a595-619978bff64c/tiles/{zoom}/{x}/{y}"
+    tile_url = f"https://openeo.ds.io/services/xyz/5fe543d9-50e0-4851-a3f7-0a9d6a8bd756/tiles/{zoom}/{x}/{y}"
     
     try:
         response = requests.get(tile_url)
