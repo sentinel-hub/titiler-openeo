@@ -1,8 +1,7 @@
 """Cache control middleware for titiler-openeo."""
 
-from typing import Optional, Sequence
+from typing import Sequence
 
-from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from titiler.openeo.settings import ApiSettings
@@ -15,7 +14,13 @@ class DynamicCacheControlMiddleware:
         self,
         app: ASGIApp,
         static_paths: Sequence[str] = ("/static/",),
-        dynamic_paths: Sequence[str] = ("/processes/", "/jobs/", "/collections/", "/services/", "/results/")
+        dynamic_paths: Sequence[str] = (
+            "/processes/",
+            "/jobs/",
+            "/collections/",
+            "/services/",
+            "/results/",
+        ),
     ) -> None:
         """Initialize middleware.
 
@@ -56,10 +61,7 @@ class DynamicCacheControlMiddleware:
             await self.app(scope, receive, send)
             return
 
-        headers = Headers(scope=scope)
-        path = scope["path"]
-
-        cache_header = self.get_cache_header(path)
+        cache_header = self.get_cache_header(scope["path"])
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
