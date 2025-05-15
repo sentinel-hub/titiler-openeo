@@ -135,7 +135,10 @@ class ApiSettings(BaseSettings):
     name: str = "TiTiler-OpenEO"
     cors_origins: str = "*"
     cors_allow_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    cachecontrol: str = "public, max-age=3600"
+    # Cache settings for different endpoint types
+    cache_static: str = "public, max-age=3600"  # For static resources
+    cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
+    cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""
 
     debug: bool = False
