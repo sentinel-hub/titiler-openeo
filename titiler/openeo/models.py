@@ -1610,14 +1610,14 @@ class ServiceTypes(RootModel):
 
 
 class ServiceInput(BaseModel):
-    """Service creation/update input model."""
+    """Service creation input model."""
 
     process: ProcessGraphWithMetadata = Field(
-        None,
+        ...,
         description="A process graph defines the data processing that should be applied to EO data.",
     )
     type: str = Field(
-        None,
+        ...,
         description="The type of service to be created.",
     )
     title: Optional[str] = Field(
@@ -1630,6 +1630,35 @@ class ServiceInput(BaseModel):
     )
     enabled: Optional[bool] = Field(
         True,
+        description="Indicates whether the service is enabled or not.",
+    )
+    configuration: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Configuration parameters for the service.",
+    )
+
+
+class ServiceUpdateInput(BaseModel):
+    """Service update input model for PATCH operations."""
+
+    process: Optional[ProcessGraphWithMetadata] = Field(
+        None,
+        description="A process graph defines the data processing that should be applied to EO data.",
+    )
+    type: Optional[str] = Field(
+        None,
+        description="The type of service.",
+    )
+    title: Optional[str] = Field(
+        None,
+        description="A title for the service.",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="A description for the service.",
+    )
+    enabled: Optional[bool] = Field(
+        None,
         description="Indicates whether the service is enabled or not.",
     )
     configuration: Optional[Dict[str, Any]] = Field(

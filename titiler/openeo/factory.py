@@ -19,7 +19,7 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
-from titiler.openeo.models import OPENEO_VERSION, ServiceInput
+from titiler.openeo.models import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
 from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 from titiler.openeo.services import ServicesStore
 from titiler.openeo.stacapi import stacApiBackend
@@ -689,10 +689,10 @@ class EndpointsFactory(BaseFactory):
             tags=["Secondary Services"],
         )
         def openeo_service_update(
+            body: ServiceUpdateInput,
             service_id: str = Path(
                 description="A per-backend unique identifier of the secondary web service.",
             ),
-            body: Optional[ServiceInput] = None,
             user=Depends(self.auth.validate),
         ):
             """Updates an existing secondary web service."""
@@ -700,29 +700,27 @@ class EndpointsFactory(BaseFactory):
             existing = self.services_store.get_service(service_id)
             if not existing:
                 raise HTTPException(404, f"Could not find service: {service_id}")
-                
+
             # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
             if body:
                 update_data = {}
                 # Only include non-None fields from the update
                 body_data = body.model_dump(exclude_none=True)
-                
+
                 # Start with existing service data
                 update_data = existing.copy()
                 # Remove id since it's a special field from get_service
                 if "id" in update_data:
                     del update_data["id"]
-                    
+
                 # Update with any new values provided
                 update_data.update(body_data)
             else:
                 update_data = existing
                 if "id" in update_data:
                     del update_data["id"]
-                
-            self.services_store.update_service(
-                user.user_id, service_id, update_data
-            )
+
+            self.services_store.update_service(user.user_id, service_id, update_data)
             return Response(status_code=204)
 
         @self.router.get(
