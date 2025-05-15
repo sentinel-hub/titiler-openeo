@@ -60,6 +60,10 @@ spec:
             - name: TITILER_OPENEO_DEFAULT_SERVICES_FILE
               value: "/config/default_services.json"
             {{- end }}
+            {{- if .Values.lego.colors.configFile }}
+            - name: TITILER_OPENEO_LEGO_COLORS_FILE
+              value: "/config/lego_colors.json"
+            {{- end }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
             - name: {{ $key }}

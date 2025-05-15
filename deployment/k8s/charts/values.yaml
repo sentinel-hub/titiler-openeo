@@ -92,6 +92,12 @@ affinity: {}
 logging:
   configFile: "files/log_config.yaml"
 
+# LEGO configuration
+lego:
+  colors:
+    configFile: "files/lego_colors.json"  # Path to the colors configuration file to use
+    mountPath: "/config/lego_colors.json"  # Path where the config will be mounted in the container
+
 # PostgreSQL subchart configuration
 postgresql:
   enabled: false

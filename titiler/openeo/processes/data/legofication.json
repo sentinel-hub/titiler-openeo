@@ -45,11 +45,11 @@
             }
         },
         {
-            "name": "background",
-            "description": "The background color of the image.",
-            "schema":  {
+            "name": "colors_config",
+            "description": "Path to a custom LEGO colors configuration file (JSON). If not provided, uses the default configuration.",
+            "schema": {
                 "type": "string",
-                "default": "#FFFFFF"
+                "optional": true
             }
         }
     ],
