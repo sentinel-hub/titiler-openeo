@@ -10,3 +10,4 @@ from .io import *  # noqa
 from .math import *  # noqa
 from .reduce import *  # noqa
 from .spatial import *  # noqa
+from .tile_assignment import *  # noqa
