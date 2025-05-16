@@ -4,17 +4,24 @@ import random
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
-from sqlalchemy import Column, DateTime, Integer, String, UniqueConstraint, create_engine, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    select,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 from .base import (
     NoTileAvailableError,
     TileAlreadyLockedError,
-    TileAssignmentError,
     TileAssignmentStore,
     TileNotAssignedError,
 )
-from .sqlalchemy import Base, SQLAlchemyStore
+from .sqlalchemy import Base
 
 
 class TileAssignment(Base):
@@ -41,7 +48,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
     def __init__(self, store: str):
         """Initialize the store.
-        
+
         Args:
             store: SQLAlchemy connection string
         """
@@ -52,9 +59,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
         # Ensure tile_assignments table exists
         Base.metadata.create_all(self._engine)
 
-    def get_user_tile(
-        self, service_id: str, user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_user_tile(self, service_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get a user's currently assigned tile."""
         with Session(self._engine) as session:
             result = session.execute(
@@ -90,16 +95,20 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
         with Session(self._engine) as session:
             # Get all assigned tiles within the ranges
-            assigned_tiles = session.execute(
-                select(TileAssignment).where(
-                    TileAssignment.service_id == service_id,
-                    TileAssignment.z == zoom,
-                    TileAssignment.x >= x_range[0],
-                    TileAssignment.x <= x_range[1],
-                    TileAssignment.y >= y_range[0],
-                    TileAssignment.y <= y_range[1],
+            assigned_tiles = (
+                session.execute(
+                    select(TileAssignment).where(
+                        TileAssignment.service_id == service_id,
+                        TileAssignment.z == zoom,
+                        TileAssignment.x >= x_range[0],
+                        TileAssignment.x <= x_range[1],
+                        TileAssignment.y >= y_range[0],
+                        TileAssignment.y <= y_range[1],
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             # Create set of assigned coordinates
             assigned_coords = {(tile.x, tile.y) for tile in assigned_tiles}

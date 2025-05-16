@@ -1,8 +1,9 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
-from typing import Dict, Any, Tuple
-from .core import process
+from typing import Any, Dict, Tuple
+
 from ...services.base import TileAssignmentStore
+from .core import process
 
 __all__ = ["tile_assignment"]
 
@@ -18,7 +19,7 @@ def tile_assignment(
     user_id: str,  # Injected by the framework
 ) -> Dict[str, Any]:
     """Assign XYZ tiles to users.
-    
+
     Args:
         zoom: Fixed zoom level
         x_range: Range of X values [min, max]
@@ -27,10 +28,10 @@ def tile_assignment(
         store: Tile assignment store instance
         service_id: Current service ID
         user_id: Current user ID
-        
+
     Returns:
         Dict containing x, y, z coordinates and stage
-        
+
     Raises:
         ValueError: When stage is invalid
         NoTileAvailableError: When no tiles are available for claiming

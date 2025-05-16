@@ -32,13 +32,13 @@ def get_store(store_uri: str) -> ServicesStore:
 
 def get_tile_store(store_uri: str) -> TileAssignmentStore:
     """Return Tile Assignment Store.
-    
+
     Args:
         store_uri: URI for the store
-        
+
     Returns:
         TileAssignmentStore implementation
-        
+
     Raises:
         ValueError: When store type is not supported
     """

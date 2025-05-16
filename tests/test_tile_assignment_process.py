@@ -1,13 +1,14 @@
 """Test tile assignment process."""
 
 import pytest
+
+from titiler.openeo.processes.implementations.tile_assignment import tile_assignment
 from titiler.openeo.services.base import (
     NoTileAvailableError,
     TileAlreadyLockedError,
     TileAssignmentStore,
     TileNotAssignedError,
 )
-from titiler.openeo.processes.implementations.tile_assignment import tile_assignment
 
 
 class MockTileStore(TileAssignmentStore):
@@ -23,16 +24,11 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         if key in self.assignments:
             return self.assignments[key]
-        
+
         if x_range[0] > x_range[1] or y_range[0] > y_range[1]:
             raise NoTileAvailableError("Invalid ranges")
 
-        tile = {
-            "x": x_range[0],
-            "y": y_range[0],
-            "z": zoom,
-            "stage": "claimed"
-        }
+        tile = {"x": x_range[0], "y": y_range[0], "z": zoom, "stage": "claimed"}
         self.assignments[key] = tile
         return tile
 
@@ -41,11 +37,11 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         if key not in self.assignments:
             raise TileNotAssignedError("No tile assigned")
-        
+
         tile = self.assignments[key]
         if tile["stage"] == "submitted":
             raise TileAlreadyLockedError("Tile is submitted")
-        
+
         tile = {**tile, "stage": "released"}
         del self.assignments[key]
         return tile
@@ -55,7 +51,7 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         if key not in self.assignments:
             raise TileNotAssignedError("No tile assigned")
-        
+
         tile = self.assignments[key]
         tile["stage"] = "submitted"
         return tile
@@ -81,7 +77,7 @@ def test_claim_tile(store):
         stage="claim",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     assert isinstance(result, dict)
@@ -101,7 +97,7 @@ def test_release_tile(store):
         stage="claim",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     # Then release it
@@ -112,7 +108,7 @@ def test_release_tile(store):
         stage="release",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     assert result["stage"] == "released"
@@ -128,7 +124,7 @@ def test_submit_tile(store):
         stage="claim",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     # Then submit it
@@ -139,7 +135,7 @@ def test_submit_tile(store):
         stage="submit",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     assert result["x"] == claimed["x"]
@@ -158,7 +154,7 @@ def test_invalid_stage(store):
             stage="invalid",
             store=store,
             service_id="test_service",
-            user_id="test_user"
+            user_id="test_user",
         )
 
 
@@ -172,7 +168,7 @@ def test_no_tiles_available(store):
             stage="claim",
             store=store,
             service_id="test_service",
-            user_id="test_user"
+            user_id="test_user",
         )
 
 
@@ -186,7 +182,7 @@ def test_release_not_assigned(store):
             stage="release",
             store=store,
             service_id="test_service",
-            user_id="test_user"
+            user_id="test_user",
         )
 
 
@@ -200,7 +196,7 @@ def test_submit_not_assigned(store):
             stage="submit",
             store=store,
             service_id="test_service",
-            user_id="test_user"
+            user_id="test_user",
         )
 
 
@@ -214,7 +210,7 @@ def test_release_submitted_tile(store):
         stage="claim",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
     tile_assignment(
         zoom=12,
@@ -223,7 +219,7 @@ def test_release_submitted_tile(store):
         stage="submit",
         store=store,
         service_id="test_service",
-        user_id="test_user"
+        user_id="test_user",
     )
 
     # Try to release it
@@ -235,5 +231,5 @@ def test_release_submitted_tile(store):
             stage="release",
             store=store,
             service_id="test_service",
-            user_id="test_user"
+            user_id="test_user",
         )

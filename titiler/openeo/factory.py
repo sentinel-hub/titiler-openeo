@@ -1013,16 +1013,16 @@ class EndpointsFactory(BaseFactory):
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry
             )
-            
+
             # Prepare named parameters
             named_params = {}
             if user:
                 named_params["user"] = user
-            
+
             # Only inject tile_store if configured
             if configuration.get("tile_store", False):
                 named_params["store"] = self.tile_store
-            
+
             img = pg_callable(named_parameters=named_params)
             return Response(img.data, media_type=media_type)
 
