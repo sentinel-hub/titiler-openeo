@@ -1,6 +1,6 @@
 """Test titiler.openeo services."""
 
-from typing import Any
+from typing import Any, Union
 
 from fastapi import Header
 
@@ -337,7 +337,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
 
         def validate_optional(
             self, authorization: str = Header(default=None)
-        ) -> User | None:
+        ) -> Union[User, None]:
             if not authorization:
                 return None
             try:
