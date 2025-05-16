@@ -1,12 +1,12 @@
 """titiler.processes.implementations arrays."""
 
-from typing import Optional, Union, List, Any
+from typing import Optional, Union
 
 import numpy
-from .core import process
 from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
+from .core import process
 from .data_model import LazyRasterStack, RasterStack
 
 __all__ = [
@@ -90,9 +90,9 @@ def array_create(data: Optional[ArrayLike] = None, repeat: int = 1) -> ArrayLike
     # so we cannot repeat it in this function
     if repeat != 1:
         raise ValueError("Cannot repeat a 2D array")
-    
+
     return arr
-    
+
 
 @process
 def create_data_cube() -> RasterStack:
@@ -106,10 +106,7 @@ def create_data_cube() -> RasterStack:
 
 @process
 def add_dimension(
-    data: RasterStack,
-    name: str,
-    label: Union[str, float],
-    type: str = "other"
+    data: RasterStack, name: str, label: Union[str, float], type: str = "other"
 ) -> RasterStack:
     """Adds a new named dimension to the data cube.
 
@@ -130,7 +127,9 @@ def add_dimension(
         raise ValueError(f"A dimension with name '{name}' already exists")
 
     if type == "spatial":
-        raise ValueError("Cannot add spatial dimensions - they are inherent to the raster data")
+        raise ValueError(
+            "Cannot add spatial dimensions - they are inherent to the raster data"
+        )
 
     # For empty data cube, we can add any non-spatial dimension
     if not data:
@@ -139,7 +138,7 @@ def add_dimension(
             numpy.ma.masked_array(array_create()),
             metadata={"dimension": name, "label": label, "type": type},
             bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
-            crs="EPSG:4326"  # Default CRS
+            crs="EPSG:4326",  # Default CRS
         )
         return data
 
@@ -148,14 +147,14 @@ def add_dimension(
     first_image = next(iter(data.values()))
     empty_array = numpy.ma.masked_array(
         numpy.zeros((1, first_image.height, first_image.width)),
-        mask=True  # All values are masked initially
+        mask=True,  # All values are masked initially
     )
-    
+
     data[name] = ImageData(
         empty_array,
         metadata={"dimension": name, "label": label, "type": type},
         crs=first_image.crs,
-        bounds=first_image.bounds
+        bounds=first_image.bounds,
     )
-    
+
     return data

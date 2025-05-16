@@ -793,7 +793,7 @@ class EndpointsFactory(BaseFactory):
                             "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
                             "type": "string",
                             "enum": ["private", "restricted", "public"],
-                            "default": "private"
+                            "default": "private",
                         },
                     },
                     "process_parameters": [
@@ -932,14 +932,18 @@ class EndpointsFactory(BaseFactory):
                 raise HTTPException(404, f"Could not find service: {service_id}")
             configuration = service.get("configuration", {})
             scope = configuration.get("scope", "private")
-            
+
             # Check access rights based on scope
             if scope == "private":
                 if not user or user.user_id != service.get("user_id"):
-                    raise HTTPException(401, "Authentication required for private service")
+                    raise HTTPException(
+                        401, "Authentication required for private service"
+                    )
             elif scope == "restricted":
                 if not user:
-                    raise HTTPException(401, "Authentication required for restricted service")
+                    raise HTTPException(
+                        401, "Authentication required for restricted service"
+                    )
             # For scope == "public", no authentication needed
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")

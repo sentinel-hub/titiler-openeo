@@ -6,10 +6,10 @@ from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.apply import apply
 from titiler.openeo.processes.implementations.arrays import (
-    array_element,
-    array_create,
-    create_data_cube,
     add_dimension,
+    array_create,
+    array_element,
+    create_data_cube,
 )
 from titiler.openeo.processes.implementations.data_model import to_raster_stack
 from titiler.openeo.processes.implementations.dem import hillshade
@@ -215,6 +215,7 @@ def test_hillshade(sample_raster_stack):
         assert img_data.count == 1  # Hillshade is single band
         assert img_data.band_names == ["hillshade"]  # Should be named "hillshade"
 
+
 def test_array_create():
     """Test array_create function."""
     # Test empty array creation
@@ -227,17 +228,19 @@ def test_array_create():
     assert isinstance(result, np.ndarray)
     assert np.array_equal(result, np.array(data))
 
+
 def test_create_data_cube():
     """Test create_data_cube function."""
     result = create_data_cube()
     assert isinstance(result, dict)
     assert len(result) == 0
 
+
 def test_add_dimension():
     """Test add_dimension function."""
     # Test with empty data cube
     cube = create_data_cube()
-    
+
     # Add a temporal dimension to empty cube
     result = add_dimension(data=cube, name="temporal", label="2021-01", type="temporal")
     assert isinstance(result, dict)
@@ -254,7 +257,7 @@ def test_add_dimension():
         mask=np.zeros((1, 10, 10), dtype=bool),
     )
     cube = {"data": ImageData(data)}
-    
+
     # Add a bands dimension
     result = add_dimension(data=cube, name="bands", label="red", type="bands")
     assert "bands" in result
@@ -268,7 +271,9 @@ def test_add_dimension():
 
     # Test error cases
     # Cannot add existing dimension
-    with pytest.raises(ValueError, match="A dimension with name 'bands' already exists"):
+    with pytest.raises(
+        ValueError, match="A dimension with name 'bands' already exists"
+    ):
         add_dimension(data=result, name="bands", label="green", type="bands")
 
     # Cannot add spatial dimension

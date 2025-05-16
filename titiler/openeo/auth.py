@@ -61,7 +61,9 @@ class Auth(metaclass=abc.ABCMeta):
         """Validate Bearer Token."""
         ...
 
-    def validate_optional(self, authorization: str = Header(default=None)) -> Optional[User]:
+    def validate_optional(
+        self, authorization: str = Header(default=None)
+    ) -> Optional[User]:
         """Validate Bearer Token but allow unauthenticated access."""
         if not authorization:
             return None
