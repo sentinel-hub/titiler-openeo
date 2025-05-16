@@ -2,19 +2,36 @@
 
 The tile assignment feature allows services to manage and track XYZ tile assignments to users. This is particularly useful for scenarios where you need to coordinate work across multiple users, ensuring each user works on unique tiles without overlap.
 
-## Configuration
+## Setup
 
-To enable tile assignment for a service, add the `tile_store` configuration option:
+The tile assignment feature requires two levels of configuration:
 
-```json
-{
-  "type": "XYZ",
-  "configuration": {
-    "tile_store": true,
-    ...other configuration options...
-  }
-}
-```
+1. Global Configuration:
+   ```env
+   # Enable tile assignment with SQLAlchemy store
+   TITILER_OPENEO_TILE_STORE_URL=postgresql://user:pass@host/db
+   ```
+
+2. Service Configuration:
+   ```json
+   {
+     "type": "XYZ",
+     "configuration": {
+       "tile_store": true,
+       ...other configuration options...
+     }
+   }
+   ```
+
+The feature will only be active when both:
+- A valid tile store URL is configured at the system level
+- The service has `tile_store: true` in its configuration
+
+### Supported Store Types
+Currently supported tile store implementations:
+- PostgreSQL: `postgresql://user:pass@host/db`
+- SQLite: `sqlite:///path/to/db.sqlite`
+- SQLAlchemy URL: `sqlalchemy://...`
 
 ## Process Parameters
 

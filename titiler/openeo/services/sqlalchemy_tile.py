@@ -73,6 +73,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 return None
 
             return {
+                "service_id": result.service_id,
                 "x": result.x,
                 "y": result.y,
                 "z": result.z,
@@ -144,6 +145,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             session.commit()
 
             return {
+                "service_id": service_id,
                 "x": x,
                 "y": y,
                 "z": zoom,
@@ -212,6 +214,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             session.commit()
 
             return {
+                "service_id": service_id,
                 "x": tile.x,
                 "y": tile.y,
                 "z": tile.z,
