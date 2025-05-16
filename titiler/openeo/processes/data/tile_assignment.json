@@ -1,0 +1,45 @@
+{
+  "id": "tile_assignment",
+  "description": "Manages tile assignments for users in an XYZ grid",
+  "parameters": {
+    "zoom": {
+      "description": "Fixed zoom level for tile assignment",
+      "type": "integer",
+      "required": true
+    },
+    "x_range": {
+      "description": "Range of possible X values [min, max]",
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 2,
+      "maxItems": 2,
+      "required": true
+    },
+    "y_range": {
+      "description": "Range of possible Y values [min, max]",
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 2,
+      "maxItems": 2,
+      "required": true
+    },
+    "stage": {
+      "description": "Stage of tile assignment",
+      "type": "string",
+      "enum": ["claim", "release", "submit"],
+      "required": true
+    }
+  },
+  "returns": {
+    "description": "Assigned tile information",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "x": {"type": "integer"},
+        "y": {"type": "integer"},
+        "z": {"type": "integer"},
+        "stage": {"type": "string"}
+      }
+    }
+  }
+}
