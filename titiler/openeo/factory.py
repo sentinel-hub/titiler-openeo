@@ -789,6 +789,12 @@ class EndpointsFactory(BaseFactory):
                             "type": "number",
                             "minimum": 0,
                         },
+                        "scope": {
+                            "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
+                            "type": "string",
+                            "enum": ["private", "restricted", "public"],
+                            "default": "private"
+                        },
                     },
                     "process_parameters": [
                         {
@@ -916,7 +922,7 @@ class EndpointsFactory(BaseFactory):
                     description="Row (Y) index of the tile on the selected TileMatrix. It cannot exceed the MatrixWidth-1 for the selected TileMatrix.",
                 ),
             ],
-            # user=Depends(self.auth.validate),
+            user=Depends(self.auth.validate_optional),
         ):
             """Create map tile."""
             service = self.services_store.get_service(service_id)
@@ -925,6 +931,16 @@ class EndpointsFactory(BaseFactory):
             if service is None:
                 raise HTTPException(404, f"Could not find service: {service_id}")
             configuration = service.get("configuration", {})
+            scope = configuration.get("scope", "private")
+            
+            # Check access rights based on scope
+            if scope == "private":
+                if not user or user.user_id != service.get("user_id"):
+                    raise HTTPException(401, "Authentication required for private service")
+            elif scope == "restricted":
+                if not user:
+                    raise HTTPException(401, "Authentication required for restricted service")
+            # For scope == "public", no authentication needed
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
@@ -941,10 +957,6 @@ class EndpointsFactory(BaseFactory):
             process = deepcopy(service["process"])
 
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
-            # Check there is at least one load_collection process
-            assert (
-                load_collection_nodes
-            ), "Could not find any `load_collection process in service's process-graph"
 
             # Check that nodes have spatial-extent
             assert all(

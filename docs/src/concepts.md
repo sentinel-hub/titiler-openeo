@@ -48,15 +48,34 @@ Unlike most of the existing openEO implementation, `titiler-openeo` project simp
 ### Raster Data Model
 
 In order to make the processing as light and fast as possible, the backend must manipulate the data in a way that is easy to process and serve.
-There are two primary data structures used in the backend:
+There are three primary data structures used in the backend:
 
-1. **ImageData**: Most processes use [`ImageData`](https://cogeotiff.github.io/rio-tiler/models/#imagedata) objects provided by [rio-tiler](https://cogeotiff.github.io/rio-tiler/) for individual raster operations. This object was initially designed to create slippy map tiles from large raster data sources and render these tiles dynamically on a web map.
+1. **ImageData**: Most processes use [`ImageData`](https://cogeotiff.github.io/rio-tiler/models/#imagedata) objects provided by [rio-tiler](https://cogeotiff.github.io/rio-tiler/) for individual raster operations. This object was initially designed to create slippy map tiles from large raster data sources and render these tiles dynamically on a web map. Each ImageData object inherently has two spatial dimensions (height and width).
 
 ![alt text](img/raster.png)
 
-2. **RasterStack**: A dictionary mapping names/dates to ImageData objects, allowing for consistent handling of multiple raster layers.
+2. **RasterStack**: A dictionary mapping names/dates to ImageData objects, allowing for consistent handling of multiple raster layers. This is our implementation of the openEO data cube concept, with some key characteristics:
+   - An empty data cube is represented as an empty dictionary (`{}`)
+   - When there is at least one raster in the stack, it has a minimum of 2 dimensions (the spatial dimensions from the raster data)
+   - Additional dimensions (like temporal or bands) can be added, but they must be compatible with the existing spatial dimensions
+   - Spatial dimensions are inherent to the raster data and cannot be added separately
 
 3. **LazyRasterStack**: An optimized version of RasterStack that lazily loads data when accessed. This improves performance by only executing processing tasks when the data is actually needed.
+
+### Dimension Handling
+
+The data cube implementation in titiler-openeo follows these principles for dimension handling:
+
+1. **Spatial Dimensions**: Every raster in the stack has two spatial dimensions (height and width) that are inherent to the data. These dimensions cannot be added or removed through processes, as they are fundamental to the raster data structure.
+
+2. **Additional Dimensions**: Non-spatial dimensions can be added to the data cube:
+   - Temporal dimension: For time series data (e.g., "2021-01", "2021-02")
+   - Bands dimension: For spectral bands (e.g., "red", "green", "blue")
+   - Other dimensions: For any other type of categorization
+
+3. **Dimension Compatibility**: When adding dimensions to a non-empty data cube, the new dimension must be compatible with the existing spatial dimensions. This means any ImageData added to the stack must match the height and width of existing rasters.
+
+4. **Empty Data Cubes**: An empty data cube (`{}`) can receive any non-spatial dimension. The first raster data added to the cube will establish the spatial dimensions that all subsequent data must match.
 
 ### Reducing the data
 
