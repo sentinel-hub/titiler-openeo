@@ -32,7 +32,7 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
-    tile_store: TileAssignmentStore
+    tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth
@@ -1019,8 +1019,8 @@ class EndpointsFactory(BaseFactory):
             if user:
                 named_params["user"] = user
 
-            # Only inject tile_store if configured
-            if configuration.get("tile_store", False):
+            # Only inject tile_store if configured at service level
+            if configuration.get("tile_store", False) and self.tile_store:
                 named_params["store"] = self.tile_store
 
             img = pg_callable(named_parameters=named_params)
