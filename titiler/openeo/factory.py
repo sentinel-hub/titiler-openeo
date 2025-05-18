@@ -21,7 +21,7 @@ from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
 from titiler.openeo.processes.implementations.io import SaveResultData, save_result
-from titiler.openeo.services import ServicesStore
+from titiler.openeo.services import ServicesStore, TileAssignmentStore
 from titiler.openeo.stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
@@ -32,6 +32,7 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
+    tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth
@@ -789,6 +790,18 @@ class EndpointsFactory(BaseFactory):
                             "type": "number",
                             "minimum": 0,
                         },
+                        "scope": {
+                            "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
+                            "type": "string",
+                            "enum": ["private", "restricted", "public"],
+                            "default": "private",
+                        },
+                        "authorized_users": {
+                            "description": "List of user IDs authorized to access the service when scope is restricted. If not specified, all authenticated users can access.",
+                            "type": "array",
+                            "items": {"type": "string", "description": "User ID"},
+                            "required": False,
+                        },
                     },
                     "process_parameters": [
                         {
@@ -865,9 +878,9 @@ class EndpointsFactory(BaseFactory):
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry
+                process_registry=self.process_registry,
             )
-            result = pg_callable()
+            result = pg_callable(named_parameters={"user": user})
 
             # if the result is not a SaveResultData object, convert it to one
             if not isinstance(result, SaveResultData):
@@ -916,14 +929,20 @@ class EndpointsFactory(BaseFactory):
                     description="Row (Y) index of the tile on the selected TileMatrix. It cannot exceed the MatrixWidth-1 for the selected TileMatrix.",
                 ),
             ],
-            # user=Depends(self.auth.validate),
+            user=Depends(self.auth.validate_optional),
         ):
             """Create map tile."""
-            service = self.services_store.get_service(service_id)
+            from titiler.openeo.services.auth import ServiceAuthorizationManager
 
-            # SERVICE CONFIGURATION
+            service = self.services_store.get_service(service_id)
             if service is None:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # Authorize service access
+            auth_manager = ServiceAuthorizationManager()
+            auth_manager.authorize(service, user)
+
+            # Get service configuration
             configuration = service.get("configuration", {})
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
@@ -941,10 +960,6 @@ class EndpointsFactory(BaseFactory):
             process = deepcopy(service["process"])
 
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
-            # Check there is at least one load_collection process
-            assert (
-                load_collection_nodes
-            ), "Could not find any `load_collection process in service's process-graph"
 
             # Check that nodes have spatial-extent
             assert all(
@@ -996,7 +1011,17 @@ class EndpointsFactory(BaseFactory):
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry
             )
-            img = pg_callable()
+
+            # Prepare named parameters
+            named_params = {}
+            if user:
+                named_params["user"] = user
+
+            # Only inject tile_store if configured at service level
+            if configuration.get("tile_store", False) and self.tile_store:
+                named_params["store"] = self.tile_store
+
+            img = pg_callable(named_parameters=named_params)
             return Response(img.data, media_type=media_type)
 
 

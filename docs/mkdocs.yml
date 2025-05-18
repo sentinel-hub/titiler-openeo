@@ -38,6 +38,8 @@ nav:
     - Release Notes: "release-notes.md"
   - Concepts:
     - RasterStack Data Model: "raster-stack.md"
+    - Tile Assignment: "tile-assignment.md"
+    - Service Authorization: "authorization.md"
   - Development:
     - Contributing: "contributing.md"
 

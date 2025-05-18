@@ -24,6 +24,7 @@ class LocalStore(ServicesStore):
             return None
         return {
             "id": service_id,
+            "user_id": self.store[service_id]["user_id"],
             **self.store[service_id]["service"],
         }
 
@@ -32,6 +33,7 @@ class LocalStore(ServicesStore):
         return [
             {
                 "id": service_id,
+                "user_id": data["user_id"],
                 **data["service"],
             }
             for service_id, data in self.store.items()
@@ -42,6 +44,7 @@ class LocalStore(ServicesStore):
         services = [
             {
                 "id": service_id,
+                "user_id": data["user_id"],
                 **data["service"],
             }
             for service_id, data in self.store.items()
