@@ -796,6 +796,15 @@ class EndpointsFactory(BaseFactory):
                             "enum": ["private", "restricted", "public"],
                             "default": "private",
                         },
+                        "authorized_users": {
+                            "description": "List of user IDs authorized to access the service when scope is restricted. If not specified, all authenticated users can access.",
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "description": "User ID"
+                            },
+                            "required": False
+                        },
                     },
                     "process_parameters": [
                         {
@@ -944,6 +953,12 @@ class EndpointsFactory(BaseFactory):
                 if not user:
                     raise HTTPException(
                         401, "Authentication required for restricted service"
+                    )
+                # If authorized_users is specified, check if the current user is in the list
+                authorized_users = configuration.get("authorized_users")
+                if authorized_users is not None and user.user_id not in authorized_users:
+                    raise HTTPException(
+                        403, "User not authorized to access this service"
                     )
             # For scope == "public", no authentication needed
             tile_size = configuration.get("tile_size", 256)
