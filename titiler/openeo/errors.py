@@ -12,7 +12,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette import status
 
-
 class OpenEOException(Exception):
     """Base class for OpenEO API exceptions."""
 
@@ -51,7 +50,6 @@ class OpenEOException(Exception):
         if self.url:
             error["url"] = self.url
         return error
-
 
 class ExceptionHandler:
     """Class to handle all OpenEO API exceptions."""
@@ -121,6 +119,16 @@ class ExceptionHandler:
             },
         )
 
+class ProcessParameterInvalid(OpenEOException):
+    """Invalid parameter value or type."""
+
+    def __init__(self, message: str):
+        """Initialize error with invalid process parameter."""
+        super().__init__(
+            message=message,
+            code="ProcessParameterInvalid",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
 class ProcessParameterMissing(OpenEOException):
     """Invalid Parameters."""
@@ -132,7 +140,6 @@ class ProcessParameterMissing(OpenEOException):
             code="ProcessParameterMissing",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
-
 
 class NoDataAvailable(OpenEOException):
     """No data available for the requested extent."""
@@ -147,7 +154,6 @@ class NoDataAvailable(OpenEOException):
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
-
 class InvalidProcessGraph(OpenEOException):
     """The process graph is invalid."""
 
@@ -158,7 +164,6 @@ class InvalidProcessGraph(OpenEOException):
             code="InvalidProcessGraph",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
-
 
 class TemporalExtentEmpty(OpenEOException):
     """Invalid temporal extent."""
@@ -171,7 +176,6 @@ class TemporalExtentEmpty(OpenEOException):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
-
 class AuthenticationRequired(OpenEOException):
     """Authentication is required."""
 
@@ -182,7 +186,6 @@ class AuthenticationRequired(OpenEOException):
             code="AuthenticationRequired",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
-
 
 class AuthenticationFailed(OpenEOException):
     """Authentication failed."""
@@ -195,7 +198,6 @@ class AuthenticationFailed(OpenEOException):
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
-
 class AccessDenied(OpenEOException):
     """Access to the resource is forbidden."""
 
@@ -207,7 +209,6 @@ class AccessDenied(OpenEOException):
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
-
 class ResourceNotFound(OpenEOException):
     """The requested resource was not found."""
 
@@ -218,7 +219,6 @@ class ResourceNotFound(OpenEOException):
             code="ResourceNotFound",
             status_code=status.HTTP_404_NOT_FOUND,
         )
-
 
 class ServiceUnavailable(OpenEOException):
     """The service is temporarily unavailable."""

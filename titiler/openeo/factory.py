@@ -882,11 +882,19 @@ class EndpointsFactory(BaseFactory):
             )
             result = pg_callable(named_parameters={"user": user})
 
-            # if the result is not a SaveResultData object, convert it to one
-            if not isinstance(result, SaveResultData):
-                result = save_result(result, "GTiff")
+            media_type = result.media_type if hasattr(result, "media_type") else None
+            if not media_type and isinstance(result, str):
+                media_type = "text/plain"
+            elif not media_type:
+                media_type = "application/octet-stream"
 
-            return Response(result.data, media_type=result.media_type)
+            data = result.data if hasattr(result, "data") else result
+
+            # if the result is not a SaveResultData object, convert it to one
+            # if not isinstance(result, SaveResultData):
+            #     result = save_result(result, "GTiff")
+
+            return Response(data, media_type=media_type)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",

@@ -206,10 +206,50 @@ logger = logging.getLogger(__name__)
 
 def process(f):
     """
-    The `@process` decorator resolves ParameterReferences and is expected to be wrapped around all processes.
-    This is necessary because openeo_pg_parser_networkx parses and injects raw ParameterReference objects as input to each process node.
-    However the process implementations in openeo-processes-dask cannot handle these and require the actual objects that the ParameterReferences refer to.
-    This decorator ensures that incoming ParameterReferences are resolved to the actual inputs before being passed into the process implementations.
+    The `@process` decorator handles parameter resolution in the OpenEO processing pipeline.
+    
+    This decorator is a crucial component in OpenEO's data processing architecture:
+    
+    1. Parameter Resolution Flow:
+       - OpenEO process graphs are parsed by openeo_pg_parser_networkx which creates ParameterReference objects
+       - These references must be resolved to actual values before process execution
+       - The decorator handles this resolution by mapping references to actual parameters
+    
+    2. Integration with STAC:
+       - When loading data (e.g., via load_collection), parameters get passed through the processing chain
+       - The decorator ensures proper parameter passing between STAC API interactions and process execution
+    
+    3. Parameter Types:
+       - Positional parameters: Used by processes like 'apply' that need position-based arguments
+       - Named parameters: Standard key-value parameter mapping
+       - Special parameters: Handled automatically for compatibility (axis, keepdims, etc.)
+    
+    Parameters
+    ----------
+    positional_parameters : dict, optional
+        Maps parameter positions to names, enabling parent processes to pass
+        positional arguments to child processes
+    named_parameters : dict, optional
+        Maps parameter names to their resolved values
+    
+    Example
+    -------
+    ```python
+    @process
+    def compute_ndvi(red: float, nir: float) -> float:
+        return (nir - red) / (nir + red)
+    
+    # When used in a process graph:
+    result = compute_ndvi(
+        from_parameter="red_band",  # Will be resolved by the decorator
+        from_parameter="nir_band"   # Will be resolved by the decorator
+    )
+    ```
+    
+    Raises
+    ------
+    ProcessParameterMissing
+        If a required parameter reference cannot be resolved
     """
 
     @wraps(f)
@@ -219,26 +259,33 @@ def process(f):
         named_parameters: Optional[dict[str]] = None,
         **kwargs,
     ):
-        # Need to transform this from a tuple to a list to be able to delete from it.
+        # Convert args tuple to list for mutability
+        # This is needed because we might modify the args during parameter resolution
         args = list(args)  # type: ignore
 
-        # Some processes like `apply` cannot pass a parameter for a child-process using kwargs, but only by position.
-        # E.g. `apply` passes the data to apply over as a parameter `x`, but the implementation with `apply_ufunc`
-        # does not allow naming this parameter `x`.
-        # The `positional_parameters` dictionary allows parent ("callback") processes to assign names to positional arguments it passes on.
+        # Initialize parameter dictionaries if not provided
+        # positional_parameters: maps numeric positions to parameter names (e.g., {0: "x"})
+        # named_parameters: maps parameter names to their values (e.g., {"x": 42})
         if positional_parameters is None:
             positional_parameters = {}
-
         if named_parameters is None:
             named_parameters = {}
 
-        resolved_args = []
-        resolved_kwargs = {}
+        # Storage for resolved parameters
+        resolved_args = []    # Will hold resolved positional arguments
+        resolved_kwargs = {}  # Will hold resolved keyword arguments
 
-        # If an arg is specified in positional_parameters, put the correct key-value pair into named_parameters
+        # STEP 1: Handle positional parameters
+        # Some processes (like 'apply') need to pass parameters by position
+        # Example: apply(data, process=lambda x: x*2) needs to map x -> data
+        # The positional_parameters dict helps map positions to names
         for arg_name, i in positional_parameters.items():
             named_parameters[arg_name] = args[i]
 
+        # STEP 2: Resolve positional arguments
+        # Check each positional argument for ParameterReferences
+        # A ParameterReference indicates we need to look up the actual value
+        # Example: compute_ndvi(from_parameter="red_band") -> compute_ndvi(0.5)
         for arg in args:
             if isinstance(arg, ParameterReference):
                 if arg.from_parameter in named_parameters:
@@ -248,6 +295,9 @@ def process(f):
                         f"Error: Process Parameter {arg.from_parameter} was missing for process {f.__name__}"
                     )
 
+        # STEP 3: Resolve keyword arguments
+        # Similar to positional args, but preserves parameter names
+        # Example: compute_ndvi(red=from_parameter("red_band")) -> compute_ndvi(red=0.5)
         for k, arg in kwargs.items():
             if isinstance(arg, ParameterReference):
                 if arg.from_parameter in named_parameters:
@@ -259,24 +309,30 @@ def process(f):
             else:
                 resolved_kwargs[k] = arg
 
+        # STEP 4: Handle special parameters
+        # These are common parameters in the OpenEO ecosystem that might not be
+        # relevant for all processes. Remove them if the target function doesn't expect them.
         special_args = [
-            "axis",
-            "keepdims",
-            "context",
-            "dim_labels",
-            "data",
+            "axis",      # Dimension to operate on
+            "keepdims",  # Whether to preserve dimensions after reduction
+            "context",   # Additional process context
+            "dim_labels", # Labels for dimensions
+            "data",      # Input data reference
         ]
-        # Remove 'axis' and keepdims parameter if not expected in function signature.
+        # Check function signature and remove special args if not expected
         for arg in special_args:
             if arg not in inspect.signature(f).parameters:
                 resolved_kwargs.pop(arg, None)
 
+        # STEP 5: Debug logging
+        # Log the resolved parameters for debugging (truncate long values)
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
         if hasattr(f, "__name__"):
             logger.debug(
                 f"Running process {f.__name__} with resolved parameters: {pretty_args}"
             )
 
+        # STEP 6: Execute the wrapped function with resolved parameters
         return f(*resolved_args, **resolved_kwargs)
 
     return wrapper
