@@ -26,6 +26,13 @@
             }
         },
         {
+            "name": "tile_info",
+            "description": "object containing tile information for the instruction image.",
+            "schema": {
+                "type": "object"
+            }
+        },
+        {
             "name": "include_legend",
             "description": "Whether to include a color legend with brick counts.",
             "schema": {

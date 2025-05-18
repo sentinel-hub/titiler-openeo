@@ -470,11 +470,11 @@ def _legofication(
 
                 # Initialize brick information in metadata if not present
                 if "brick_info" not in small_img.metadata:
-                    small_img.metadata["brick_info"] = {"tiles": {}}
+                    small_img.metadata["brick_info"] = {"pixels": {}}
 
                 # Store brick information including position, color name, and whether it's water
                 tile_key = f"{i}_{j}"
-                small_img.metadata["brick_info"]["tiles"][tile_key] = {
+                small_img.metadata["brick_info"]["pixels"][tile_key] = {
                     "position": (i, j),
                     "color_name": lego_color_name,
                     "is_water": is_water,
@@ -579,6 +579,7 @@ def legofication(
 def generate_lego_instructions(
     data: RasterStack,
     grid_size: int = 50,
+    tile_info: Dict[str, Any] = None,
     include_legend: bool = True,
 ) -> RasterStack:
     """Generate building instructions for a legofied image.
@@ -601,12 +602,13 @@ def generate_lego_instructions(
         brick_info = img_data.metadata["brick_info"]
         grid_dims = brick_info["grid_dimensions"]
 
-        # Calculate image dimensions
+        # Calculate image dimensions with padding for coordinates
+        coord_padding = grid_size
         legend_width = 300 if include_legend else 0
-        img_width = grid_dims[1] * grid_size + legend_width
-        img_height = grid_dims[0] * grid_size
+        img_width = grid_dims[1] * grid_size + legend_width + coord_padding
+        img_height = grid_dims[0] * grid_size + coord_padding
 
-        # Create a blank white image
+        # Create a blank white image with padding
         instruction_img = Image.new("RGB", (img_width, img_height), "white")
         from PIL import ImageDraw, ImageFont
 
@@ -621,22 +623,47 @@ def generate_lego_instructions(
         except:
             font = ImageFont.load_default()
 
-        # Draw grid lines
+        # Add padding for labels
+        coord_padding = grid_size
+        grid_start_x = coord_padding
+        grid_start_y = coord_padding
+
+        # Draw grid lines with padding
         for i in range(grid_dims[0] + 1):
-            y = i * grid_size
-            draw.line([(0, y), (grid_dims[1] * grid_size, y)], fill="gray", width=1)
+            y = grid_start_y + i * grid_size
+            draw.line([(grid_start_x, y), (grid_start_x + grid_dims[1] * grid_size, y)], fill="gray", width=1)
         for j in range(grid_dims[1] + 1):
-            x = j * grid_size
-            draw.line([(x, 0), (x, grid_dims[0] * grid_size)], fill="gray", width=1)
+            x = grid_start_x + j * grid_size
+            draw.line([(x, grid_start_y), (x, grid_start_y + grid_dims[0] * grid_size)], fill="gray", width=1)
+
+        # Draw tile position X at the top
+        x_position = tile_info["x"]
+        text = f"X: {x_position}"
+        text_bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_x = grid_start_x + (grid_dims[1] * grid_size - text_width) // 2
+        draw.text((text_x, grid_size // 3), text, font=font, fill="black")
+
+        # Draw tile position Y on the left (rotated 90° counterclockwise)
+        y_position = tile_info["y"]
+        text = f"Y: {y_position}"
+        # Create a new image for the rotated text
+        text_img = Image.new('RGB', (grid_size * 2, grid_size), 'white')
+        text_draw = ImageDraw.Draw(text_img)
+        # Draw text
+        text_draw.text((0, grid_size // 3), text, font=font, fill="black")
+        # Rotate and paste
+        rotated_text = text_img.rotate(90, expand=True)
+        instruction_img.paste(rotated_text, (grid_size // 3, grid_start_y))
 
         # Track brick colors for the legend
         color_counts = {}
 
         # Draw bricks
-        for tile_key, tile_info in brick_info["tiles"].items():
-            i, j = tile_info["position"]
-            color_name = tile_info["color_name"]
-            is_water = tile_info["is_water"]
+        for pixel_key, pixel_info in brick_info["pixels"].items():
+            i, j = pixel_info["position"]
+            color_name = pixel_info["color_name"]
+            is_water = pixel_info["is_water"]
 
             # Get RGB color
             rgb_color = lego_colors[color_name]["rgb"]
@@ -645,9 +672,9 @@ def generate_lego_instructions(
             # Update color count
             color_counts[color_name] = color_counts.get(color_name, 0) + 1
 
-            # Calculate cell position
-            x = j * grid_size
-            y = i * grid_size
+            # Calculate cell position with padding
+            x = grid_start_x + j * grid_size
+            y = grid_start_y + i * grid_size
 
             # Draw filled rectangle for the brick
             draw.rectangle(
@@ -679,7 +706,7 @@ def generate_lego_instructions(
 
         # Add legend if requested
         if include_legend and color_counts:
-            legend_x = grid_dims[1] * grid_size + 10
+            legend_x = grid_start_x + grid_dims[1] * grid_size + 10
             legend_y = 10
             legend_square_size = int(grid_size / 2)
 
@@ -760,7 +787,7 @@ def get_brick_quantities(data: RasterStack) -> Dict:
 
         # Collect brick counts from metadata
         brick_counts: Dict[str, int] = {}
-        for tile_info in img_data.metadata["brick_info"]["tiles"].values():
+        for tile_info in img_data.metadata["brick_info"]["pixels"].values():
             color_name = tile_info["color_name"]
             brick_counts[color_name] = brick_counts.get(color_name, 0) + 1
 
@@ -790,6 +817,3 @@ def get_brick_quantities(data: RasterStack) -> Dict:
     if len(result) == 1:
         return next(iter(result.values()))
     return result
-
-
-

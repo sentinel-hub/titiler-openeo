@@ -118,6 +118,9 @@
         "arguments": {
           "data": {
             "from_node": "lego"
+          },
+          "tile_info": {
+            "from_node": "claim"
           }
         }
       },
