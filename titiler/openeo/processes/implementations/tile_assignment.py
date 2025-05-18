@@ -50,12 +50,14 @@ def tile_assignment(
             current_tile = store.get_user_tile(service_id, user_id)
             if not current_tile:
                 raise TileNotAssignedError(f"No tile assigned to user {user_id}")
-            
+
             # Get tile's assigned user
             tile_user = current_tile.get("user_id")
             if tile_user != user_id:
-                raise TileNotAssignedError(f"Tile is assigned to user {tile_user}, not {user_id}")
-        
+                raise TileNotAssignedError(
+                    f"Tile is assigned to user {tile_user}, not {user_id}"
+                )
+
         # Perform the requested operation
         if stage == "release":
             return store.release_tile(service_id, user_id)

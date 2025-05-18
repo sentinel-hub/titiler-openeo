@@ -248,6 +248,7 @@ def test_unauthorized_release(store):
             control_user=True,
         )
 
+
 def test_unauthorized_submit(store):
     """Test submitting another user's tile with control_user=True."""
     # First user claims a tile
@@ -273,6 +274,7 @@ def test_unauthorized_submit(store):
             user_id="user2",
             control_user=True,
         )
+
 
 def test_control_user_disabled(store):
     """Test operations on another user's tile with control_user=False."""
@@ -329,6 +331,7 @@ def test_control_user_disabled(store):
     assert submitted["x"] == claimed["x"]
     assert submitted["y"] == claimed["y"]
     assert submitted["stage"] == "submitted"
+
 
 def test_release_submitted_tile(store):
     """Test releasing a submitted tile."""
