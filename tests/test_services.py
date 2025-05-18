@@ -314,6 +314,16 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
             "scope": "restricted",
             "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 401},
         },
+        "restricted_with_users": {
+            "scope": "restricted",
+            "authorized_users": ["test_user", "other_user"],
+            "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 401},
+        },
+        "restricted_unauthorized": {
+            "scope": "restricted",
+            "authorized_users": ["test_user"],
+            "expected_status": {"owner": 200, "authenticated": 403, "anonymous": 401},
+        },
         "public": {
             "scope": "public",
             "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 200},
@@ -359,10 +369,14 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
             app_with_auth.app.endpoints.auth.validate_optional
         ] = test_auth.validate_optional
 
-        # Create service with specific scope
+        # Create service with specific scope and authorized users
         service_input = base_service.copy()
         service_input["configuration"] = service_input.get("configuration", {})
         service_input["configuration"]["scope"] = config["scope"]
+        if "authorized_users" in config:
+            service_input["configuration"]["authorized_users"] = config[
+                "authorized_users"
+            ]
 
         # Create service as owner
         create_response = app_with_auth.post(
