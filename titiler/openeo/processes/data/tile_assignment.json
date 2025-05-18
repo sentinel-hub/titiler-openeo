@@ -28,6 +28,11 @@
       "type": "string",
       "enum": ["claim", "release", "submit"],
       "required": true
+    },
+    "control_user": {
+      "description": "Enable user verification for release/submit operations. When true, only the user who claimed a tile can release/submit it.",
+      "type": "boolean",
+      "default": true
     }
   },
   "returns": {

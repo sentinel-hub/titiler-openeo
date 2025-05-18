@@ -44,6 +44,23 @@ The tile assignment process accepts the following parameters:
   - `claim`: Request a new tile assignment
   - `release`: Release a currently assigned tile
   - `submit`: Mark a tile as submitted (locks the tile)
+- `control_user` (boolean, optional): Enable user verification for release/submit operations
+  - When true (default), only the user who claimed a tile can release/submit it
+  - When false, any user can release/submit any tile
+
+## Access Control
+
+The tile assignment process supports two modes of operation through the `control_user` parameter:
+
+1. **Controlled Mode** (default, control_user=true):
+   - Only the user who claimed a tile can release or submit it
+   - Attempts by other users to release/submit a tile will raise TileNotAssignedError
+   - Ensures tiles can only be managed by their owners
+
+2. **Unrestricted Mode** (control_user=false):
+   - Any user can release or submit any tile
+   - Useful for scenarios where tiles need to be managed by multiple users
+   - Still maintains tile uniqueness (no duplicate assignments)
 
 ## Usage Example
 
@@ -58,7 +75,8 @@ Here's an example of using the tile assignment process in a service:
         "zoom": 12,
         "x_range": [1000, 1010],
         "y_range": [2000, 2010],
-        "stage": "claim"
+        "stage": "claim",
+        "control_user": true  // Optional, defaults to true
       }
     }
   }
@@ -77,12 +95,20 @@ Here's an example of using the tile assignment process in a service:
    - User releases their tile with stage="release"
    - Tile becomes available for other users to claim
    - Cannot release a submitted tile
-   - Error if user has no tile assigned
+   - In controlled mode (default):
+     * Only the owner can release their tile
+     * Error if another user tries to release it
+   - In unrestricted mode:
+     * Any user can release any claimed tile
 
 3. **Submitting a Tile**:
    - User submits their tile with stage="submit"
    - Tile becomes locked and cannot be released
-   - Error if user has no tile assigned
+   - In controlled mode (default):
+     * Only the owner can submit their tile
+     * Error if another user tries to submit it
+   - In unrestricted mode:
+     * Any user can submit any claimed tile
 
 ## Error Handling
 
