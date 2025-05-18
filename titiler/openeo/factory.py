@@ -799,11 +799,8 @@ class EndpointsFactory(BaseFactory):
                         "authorized_users": {
                             "description": "List of user IDs authorized to access the service when scope is restricted. If not specified, all authenticated users can access.",
                             "type": "array",
-                            "items": {
-                                "type": "string",
-                                "description": "User ID"
-                            },
-                            "required": False
+                            "items": {"type": "string", "description": "User ID"},
+                            "required": False,
                         },
                     },
                     "process_parameters": [

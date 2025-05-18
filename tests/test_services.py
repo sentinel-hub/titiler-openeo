@@ -374,7 +374,9 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
         service_input["configuration"] = service_input.get("configuration", {})
         service_input["configuration"]["scope"] = config["scope"]
         if "authorized_users" in config:
-            service_input["configuration"]["authorized_users"] = config["authorized_users"]
+            service_input["configuration"]["authorized_users"] = config[
+                "authorized_users"
+            ]
 
         # Create service as owner
         create_response = app_with_auth.post(
