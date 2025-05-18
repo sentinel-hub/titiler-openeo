@@ -70,7 +70,7 @@ class ServiceAuthorizationManager:
             user: Optional authenticated user with user_id attribute
 
         Raises:
-            HTTPException: 
+            HTTPException:
                 - 401 Unauthorized if authentication is required but missing
                 - 403 Forbidden if user doesn't have sufficient permissions
 
