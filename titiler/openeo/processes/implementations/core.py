@@ -195,7 +195,7 @@ limitations under the License.
 import inspect
 import logging
 from functools import wraps
-from typing import Optional
+from typing import Optional, Union
 
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
 
@@ -295,13 +295,32 @@ def process(f):
                         f"Error: Process Parameter {arg.from_parameter} was missing for process {f.__name__}"
                     )
 
-        # STEP 3: Resolve keyword arguments
+        # STEP 3: Get parameter types from function signature
+        sig = inspect.signature(f)
+        param_types = {name: param.annotation for name, param in sig.parameters.items()}
+
+        # STEP 4: Resolve keyword arguments
         # Similar to positional args, but preserves parameter names
         # Example: compute_ndvi(red=from_parameter("red_band")) -> compute_ndvi(red=0.5)
         for k, arg in kwargs.items():
             if isinstance(arg, ParameterReference):
                 if arg.from_parameter in named_parameters:
-                    resolved_kwargs[k] = named_parameters[arg.from_parameter]
+                    value = named_parameters[arg.from_parameter]
+                    # Handle _openeo_user parameter based on type annotation
+                    if arg.from_parameter == "_openeo_user" and k in param_types:
+                        # Handle both str and Optional[str]
+                        param_type = param_types[k]
+                        is_string_type = param_type == str or (
+                            hasattr(param_type, "__origin__")
+                            and param_type.__origin__ is Union
+                            and str in param_type.__args__
+                            and type(None) in param_type.__args__
+                        )
+                        if is_string_type:
+                            # If parameter is annotated as string or Optional[str], extract user_id
+                            value = value.user_id
+
+                    resolved_kwargs[k] = value
                 else:
                     raise ProcessParameterMissing(
                         f"Error: Process Parameter {arg.from_parameter} was missing for process {f.__name__}"
@@ -309,7 +328,7 @@ def process(f):
             else:
                 resolved_kwargs[k] = arg
 
-        # STEP 4: Handle special parameters
+        # STEP 5: Handle special parameters
         # These are common parameters in the OpenEO ecosystem that might not be
         # relevant for all processes. Remove them if the target function doesn't expect them.
         special_args = [
@@ -324,7 +343,7 @@ def process(f):
             if arg not in inspect.signature(f).parameters:
                 resolved_kwargs.pop(arg, None)
 
-        # STEP 5: Debug logging
+        # STEP 6: Debug logging
         # Log the resolved parameters for debugging (truncate long values)
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
         if hasattr(f, "__name__"):

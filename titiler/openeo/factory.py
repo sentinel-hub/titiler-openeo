@@ -801,6 +801,11 @@ class EndpointsFactory(BaseFactory):
                             "items": {"type": "string", "description": "User ID"},
                             "required": False,
                         },
+                        "inject_user": {
+                            "description": "Whether to inject the authenticated user as a named parameter 'user' into the process graph.",
+                            "type": "boolean",
+                            "default": False,
+                        },
                     },
                     "process_parameters": [
                         {
@@ -1021,12 +1026,13 @@ class EndpointsFactory(BaseFactory):
 
             # Prepare named parameters
             named_params = {}
-            if user:
-                named_params["user"] = user
 
-            # Only inject tile_store if configured at service level
+            # Inject named parameters based on configuration
             if configuration.get("tile_store", False) and self.tile_store:
-                named_params["store"] = self.tile_store
+                named_params["_openeo_tile_store"] = self.tile_store
+
+            if configuration.get("inject_user", False) and user:
+                named_params["_openeo_user"] = user
 
             img = pg_callable(named_parameters=named_params)
             return Response(img.data, media_type=media_type)

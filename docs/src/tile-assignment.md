@@ -25,7 +25,28 @@ The tile assignment feature requires two levels of configuration:
 
 The feature will only be active when both:
 - A valid tile store URL is configured at the system level
-- The service has `tile_store: true` in its configuration
+- The service has `tile_store: true` in its configuration (this will inject the store as "_openeo_tile_store" parameter)
+
+To access the injected tile store in your process graph, use the `from_parameter` reference:
+
+```json
+{
+  "process_graph": {
+    "tile_assignment1": {
+      "process_id": "tile_assignment",
+      "arguments": {
+        "store": {
+          "from_parameter": "_openeo_tile_store"
+        },
+        "zoom": 12,
+        "x_range": [1000, 1010],
+        "y_range": [2000, 2010],
+        "stage": "claim"
+      }
+    }
+  }
+}
+```
 
 ### Supported Store Types
 Currently supported tile store implementations:
@@ -35,18 +56,53 @@ Currently supported tile store implementations:
 
 ## Process Parameters
 
-The tile assignment process accepts the following parameters:
+The tile assignment process is defined with the following JSON schema:
 
-- `zoom` (integer, required): Fixed zoom level for tile assignment
-- `x_range` (array[integer, integer], required): Range of possible X values [min, max]
-- `y_range` (array[integer, integer], required): Range of possible Y values [min, max]
-- `stage` (string, required): Stage of tile assignment
-  - `claim`: Request a new tile assignment
-  - `release`: Release a currently assigned tile
-  - `submit`: Mark a tile as submitted (locks the tile)
-- `control_user` (boolean, optional): Enable user verification for release/submit operations
-  - When true (default), only the user who claimed a tile can release/submit it
-  - When false, any user can release/submit any tile
+```json
+{
+  "parameters": {
+    "zoom": {
+      "description": "Fixed zoom level for tile assignment",
+      "type": "integer",
+      "required": true
+    },
+    "x_range": {
+      "description": "Range of possible X values [min, max]",
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 2,
+      "maxItems": 2,
+      "required": true
+    },
+    "y_range": {
+      "description": "Range of possible Y values [min, max]",
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 2,
+      "maxItems": 2,
+      "required": true
+    },
+    "stage": {
+      "description": "Stage of tile assignment",
+      "type": "string",
+      "enum": ["claim", "release", "submit"],
+      "required": true
+    },
+    "user_id": {
+      "description": "User identifier for tile assignment",
+      "type": "string",
+      "required": true
+    },
+    "control_user": {
+      "description": "Enable user verification for release/submit operations",
+      "type": "boolean",
+      "default": true
+    }
+  }
+}
+```
+
+Because `user_id` is defined with `"type": "string"`, when using `from_parameter: "_openeo_user"`, it will automatically extract just the user ID from the User object.
 
 ## Access Control
 
@@ -76,6 +132,7 @@ Here's an example of using the tile assignment process in a service:
         "x_range": [1000, 1010],
         "y_range": [2000, 2010],
         "stage": "claim",
+        "user_id": "user123",
         "control_user": true  // Optional, defaults to true
       }
     }

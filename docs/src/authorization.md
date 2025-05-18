@@ -29,6 +29,7 @@ Authorization is configured through the service configuration object when creati
 |-----------|------|-------------|
 | `scope` | string | Access scope: `private`, `restricted`, or `public` |
 | `authorized_users` | array | Optional list of user IDs allowed to access a restricted service |
+| `inject_user` | boolean | Whether to inject the authenticated user as a named parameter '_openeo_user' into the process graph (default: false). |
 
 ## Implementation
 
@@ -45,6 +46,74 @@ The authorization mechanism is implemented in two main components:
    - Pass authorized requests to the service implementation
 
 ## Example Usage
+
+For example:
+
+```json
+{
+  "configuration": {
+    "scope": "restricted",
+    "authorized_users": ["user1", "user2"],
+    "inject_user": true  // Enable user injection into process graph
+  }
+}
+```
+
+The behavior of the injected user parameter depends on how it's defined in the process's JSON schema:
+
+1. When the parameter schema defines `"type": "string"`:
+```json
+{
+  "parameters": {
+    "user_id": {
+      "type": "string",
+      "description": "User identifier"
+    }
+  }
+}
+```
+The process will receive just the user ID string, even when using from_parameter:
+```json
+{
+  "process_graph": {
+    "example1": {
+      "process_id": "example_process",
+      "arguments": {
+        "user_id": {
+          "from_parameter": "_openeo_user"  // Will extract just the user_id
+        }
+      }
+    }
+  }
+}
+```
+
+2. When the parameter schema defines a User object type:
+```json
+{
+  "parameters": {
+    "user": {
+      "type": "object",
+      "description": "User object with full properties"
+    }
+  }
+}
+```
+The process will receive the complete User object:
+```json
+{
+  "process_graph": {
+    "example1": {
+      "process_id": "example_process",
+      "arguments": {
+        "user": {
+          "from_parameter": "_openeo_user"  // Will provide the full User object
+        }
+      }
+    }
+  }
+}
+```
 
 ```python
 from titiler.openeo.services.auth import ServiceAuthorizationManager
