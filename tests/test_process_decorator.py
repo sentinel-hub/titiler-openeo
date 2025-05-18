@@ -11,7 +11,7 @@ from titiler.openeo.processes.implementations.core import process
 
 def test_user_parameter_string_type():
     """Test that string-typed parameters get just the user_id."""
-    
+
     @process
     def example_process(user_id: str) -> Dict:
         """Example process with string user parameter."""
@@ -29,7 +29,7 @@ def test_user_parameter_string_type():
         user_id=ParameterReference(from_parameter="_openeo_user"),
         named_parameters={
             "_openeo_user": test_user,
-        }
+        },
     )
 
     assert result["received_user"] == "test123"
@@ -38,7 +38,7 @@ def test_user_parameter_string_type():
 
 def test_user_parameter_object_type():
     """Test that User-typed parameters get the full object."""
-    
+
     @process
     def example_process(user: User) -> Dict:
         """Example process with User object parameter."""
@@ -56,7 +56,7 @@ def test_user_parameter_object_type():
         user=ParameterReference(from_parameter="_openeo_user"),
         named_parameters={
             "_openeo_user": test_user,
-        }
+        },
     )
 
     assert isinstance(result["received_user"], User)
@@ -66,7 +66,7 @@ def test_user_parameter_object_type():
 
 def test_user_parameter_direct_value():
     """Test that direct values are passed through unchanged."""
-    
+
     @process
     def example_process(user_id: str) -> Dict:
         """Example process with string user parameter."""
@@ -79,7 +79,7 @@ def test_user_parameter_direct_value():
 
 def test_user_parameter_optional_string():
     """Test that optional string parameters work correctly."""
-    
+
     @process
     def example_process(user_id: Optional[str] = None) -> Dict:
         """Example process with optional string user parameter."""
@@ -97,7 +97,7 @@ def test_user_parameter_optional_string():
         user_id=ParameterReference(from_parameter="_openeo_user"),
         named_parameters={
             "_openeo_user": test_user,
-        }
+        },
     )
 
     assert result["received_user"] == "test123"
@@ -109,7 +109,7 @@ def test_user_parameter_optional_string():
 
 def test_user_parameter_missing():
     """Test error handling for missing user parameter."""
-    
+
     @process
     def example_process(user_id: str) -> Dict:
         """Example process with string user parameter."""
@@ -119,6 +119,6 @@ def test_user_parameter_missing():
     with pytest.raises(Exception) as exc_info:
         example_process(
             user_id=ParameterReference(from_parameter="_openeo_user"),
-            named_parameters={}
+            named_parameters={},
         )
     assert "missing" in str(exc_info.value).lower()

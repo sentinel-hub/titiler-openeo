@@ -793,7 +793,7 @@ class EndpointsFactory(BaseFactory):
                             "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
                             "type": "string",
                             "enum": ["private", "restricted", "public"],
-                            "default": "private",
+                            "default": "public",
                         },
                         "authorized_users": {
                             "description": "List of user IDs authorized to access the service when scope is restricted. If not specified, all authenticated users can access.",

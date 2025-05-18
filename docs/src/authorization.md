@@ -6,9 +6,9 @@ TiTiler OpenEO implements a flexible service authorization mechanism that contro
 
 Services can be configured with one of three scopes:
 
-- `private` (default): Only the service owner can access the service
+- `private`: Only the service owner can access the service
 - `restricted`: Any authenticated user can access, with optional user-specific restrictions
-- `public`: No authentication required, anyone can access the service
+- `public` (default): No authentication required, anyone can access the service
 
 ## Configuration
 

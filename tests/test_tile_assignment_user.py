@@ -1,6 +1,6 @@
 """Test tile assignment user parameter handling."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import pytest
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
@@ -14,10 +14,12 @@ class MockTileStore(TileAssignmentStore):
     """Mock tile store for testing."""
 
     def __init__(self):
+        """Initialize mock tile store."""
         self.tiles = {}
         self.last_user_id = None
-        
-    def __repr__(self):
+
+    def __repr__(self) -> str:
+        """Return string representation of mock store."""
         return f"MockTileStore(tiles={self.tiles}, last_user_id={self.last_user_id})"
 
     def claim_tile(
