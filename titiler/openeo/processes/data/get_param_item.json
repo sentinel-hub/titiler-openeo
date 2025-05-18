@@ -1,0 +1,65 @@
+{
+  "id": "get_param_item",
+  "summary": "Get a nested item from a parameter",
+  "description": "Gets a nested value from a parameter using JSONPath syntax. The function only works with JSON-compatible structures (dictionaries, lists and scalar values).\n\nFor example:\n```\n$.metadata.bands[0]  # Get first band from metadata\n$.options.resolution  # Get resolution from options\n```",
+  "categories": [
+    "cubes"
+  ],
+  "parameters": [
+    {
+      "name": "parameter",
+      "description": "The parameter value to navigate through. Must contain only JSON-compatible types (dicts, lists, strings, numbers, booleans, null).",
+      "schema": {
+        "description": "Any JSON-compatible data type"
+      }
+    },
+    {
+      "name": "path",
+      "description": "JSONPath expression that describes the path to the desired value.",
+      "schema": {
+        "type": "string",
+        "examples": [
+          "$.metadata.bands[0]",
+          "$.options.resolution"
+        ]
+      }
+    }
+  ],
+  "returns": {
+    "description": "The value at the specified path",
+    "schema": {
+      "description": "Any JSON-compatible data type"
+    }
+  },
+  "exceptions": {
+    "ProcessParameterMissing": {
+      "message": "Path not found in parameter",
+      "http": 400
+    },
+    "ProcessParameterInvalid": {
+      "message": "Invalid path syntax or parameter structure",
+      "http": 400
+    }
+  },
+  "examples": [
+    {
+      "arguments": {
+        "parameter": {
+          "metadata": {
+            "bands": ["red", "green", "blue"],
+            "resolution": 10
+          }
+        },
+        "path": "$.metadata.bands[0]"
+      },
+      "returns": "red"
+    }
+  ],
+  "links": [
+    {
+      "rel": "about",
+      "href": "https://goessner.net/articles/JsonPath/",
+      "title": "JSONPath Specification"
+    }
+  ]
+}

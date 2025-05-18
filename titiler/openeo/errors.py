@@ -122,6 +122,18 @@ class ExceptionHandler:
         )
 
 
+class ProcessParameterInvalid(OpenEOException):
+    """Invalid parameter value or type."""
+
+    def __init__(self, message: str):
+        """Initialize error with invalid process parameter."""
+        super().__init__(
+            message=message,
+            code="ProcessParameterInvalid",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class ProcessParameterMissing(OpenEOException):
     """Invalid Parameters."""
 
