@@ -8,28 +8,25 @@
   ],
   "parameters": [
     {
-      "name": "x",
-      "description": "Tile X coordinate",
+      "name": "data",
+      "description": "Tile coordinates in XYZ format",
       "schema": {
-        "type": "integer",
-        "minimum": 0
-      }
-    },
-    {
-      "name": "y",
-      "description": "Tile Y coordinate",
-      "schema": {
-        "type": "integer",
-        "minimum": 0
-      }
-    },
-    {
-      "name": "z",
-      "description": "Zoom level",
-      "schema": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 25
+        "type": "object",
+        "required": ["x", "y", "z"],
+        "properties": {
+          "x": {
+            "type": "integer",
+            "description": "Tile x coordinate"
+          },
+          "y": {
+            "type": "integer",
+            "description": "Tile y coordinate"
+          },
+          "z": {
+            "type": "integer",
+            "description": "Tile zoom level"
+          }
+        }
       }
     }
   ],

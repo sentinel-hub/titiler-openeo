@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 import attr
 import rasterio
 from morecantile import TileMatrixSet
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
 from rasterio.warp import transform_bounds
@@ -27,6 +26,8 @@ from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
 from typing_extensions import TypedDict
 
+from titiler.openeo.models import SpatialExtent
+
 
 class Dims(TypedDict):
     """Estimate Dimensions."""
@@ -39,7 +40,7 @@ class Dims(TypedDict):
 
 def _estimate_output_dimensions(
     items: List[Dict],
-    spatial_extent: BoundingBox,
+    spatial_extent: SpatialExtent,
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,
