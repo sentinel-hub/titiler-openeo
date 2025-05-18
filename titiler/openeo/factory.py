@@ -20,7 +20,6 @@ from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
 from titiler.openeo.models import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
-from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 from titiler.openeo.services import ServicesStore, TileAssignmentStore
 from titiler.openeo.stacapi import stacApiBackend
 

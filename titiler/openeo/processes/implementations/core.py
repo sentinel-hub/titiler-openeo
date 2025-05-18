@@ -207,23 +207,23 @@ logger = logging.getLogger(__name__)
 def process(f):
     """
     The `@process` decorator handles parameter resolution in the OpenEO processing pipeline.
-    
+
     This decorator is a crucial component in OpenEO's data processing architecture:
-    
+
     1. Parameter Resolution Flow:
        - OpenEO process graphs are parsed by openeo_pg_parser_networkx which creates ParameterReference objects
        - These references must be resolved to actual values before process execution
        - The decorator handles this resolution by mapping references to actual parameters
-    
+
     2. Integration with STAC:
        - When loading data (e.g., via load_collection), parameters get passed through the processing chain
        - The decorator ensures proper parameter passing between STAC API interactions and process execution
-    
+
     3. Parameter Types:
        - Positional parameters: Used by processes like 'apply' that need position-based arguments
        - Named parameters: Standard key-value parameter mapping
        - Special parameters: Handled automatically for compatibility (axis, keepdims, etc.)
-    
+
     Parameters
     ----------
     positional_parameters : dict, optional
@@ -231,21 +231,21 @@ def process(f):
         positional arguments to child processes
     named_parameters : dict, optional
         Maps parameter names to their resolved values
-    
+
     Example
     -------
     ```python
     @process
     def compute_ndvi(red: float, nir: float) -> float:
         return (nir - red) / (nir + red)
-    
+
     # When used in a process graph:
     result = compute_ndvi(
         from_parameter="red_band",  # Will be resolved by the decorator
         from_parameter="nir_band"   # Will be resolved by the decorator
     )
     ```
-    
+
     Raises
     ------
     ProcessParameterMissing
@@ -272,7 +272,7 @@ def process(f):
             named_parameters = {}
 
         # Storage for resolved parameters
-        resolved_args = []    # Will hold resolved positional arguments
+        resolved_args = []  # Will hold resolved positional arguments
         resolved_kwargs = {}  # Will hold resolved keyword arguments
 
         # STEP 1: Handle positional parameters
@@ -313,11 +313,11 @@ def process(f):
         # These are common parameters in the OpenEO ecosystem that might not be
         # relevant for all processes. Remove them if the target function doesn't expect them.
         special_args = [
-            "axis",      # Dimension to operate on
+            "axis",  # Dimension to operate on
             "keepdims",  # Whether to preserve dimensions after reduction
-            "context",   # Additional process context
-            "dim_labels", # Labels for dimensions
-            "data",      # Input data reference
+            "context",  # Additional process context
+            "dim_labels",  # Labels for dimensions
+            "data",  # Input data reference
         ]
         # Check function signature and remove special args if not expected
         for arg in special_args:

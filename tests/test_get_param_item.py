@@ -1,3 +1,5 @@
+"""Tests for the get_param_item process implementation and API integration."""
+
 import pytest
 
 from titiler.openeo.errors import ProcessParameterInvalid, ProcessParameterMissing
@@ -108,6 +110,7 @@ def test_get_param_item_empty_structures():
     assert get_param_item({}, "$.metadata") is None
     assert get_param_item({"arr": []}, "$.arr[0]") is None
 
+
 def test_get_param_item_integration(app_with_auth):
     """Test get_param_item process using the POST /result endpoint."""
     process_graph = {
@@ -119,12 +122,12 @@ def test_get_param_item_integration(app_with_auth):
                         "parameter": {
                             "metadata": {
                                 "bands": ["red", "green", "blue"],
-                                "resolution": 10
+                                "resolution": 10,
                             }
                         },
-                        "path": "$.metadata.bands[0]"
+                        "path": "$.metadata.bands[0]",
                     },
-                    "result": True
+                    "result": True,
                 }
             }
         }
