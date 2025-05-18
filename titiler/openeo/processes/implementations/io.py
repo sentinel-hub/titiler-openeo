@@ -195,6 +195,20 @@ def save_result(
         For single images: ResultData containing the rendered image bytes and metadata
         For RasterStack: dictionary mapping keys to ResultData objects
     """
+    # Handle txt/plain format
+    if format.lower() in ["txt", "plain"]:
+        # Convert data to string representation
+        if isinstance(data, dict):
+            # If data is a dictionary, convert each item to string
+            data = {k: str(v) for k, v in data.items()}
+        else:
+            # Otherwise, convert the entire data to string
+            data = str(data)
+
+        # Convert to bytes
+        bytes_data = str(data).encode("utf-8")
+        return SaveResultData(data=bytes_data, media_type="text/plain")
+    
     # Handle special cases for GeoJSON data directly
     if (
         format.lower() in ["json", "geojson"]

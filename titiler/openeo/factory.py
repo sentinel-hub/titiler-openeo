@@ -1049,6 +1049,8 @@ def _get_media_type(process_graph: Dict[str, Any]) -> str:
                 return "image/jpg"
             elif node["arguments"]["format"] == "GTiff":
                 return "image/tiff"
+            elif node["arguments"]["format"] == "txt":
+                return "text/plain"
             else:
                 return "application/PNG"
 
