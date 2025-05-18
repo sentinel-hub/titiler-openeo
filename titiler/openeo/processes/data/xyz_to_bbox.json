@@ -1,0 +1,90 @@
+{
+  "id": "xyz_to_bbox",
+  "summary": "Convert XYZ tile coordinates to bounding box",
+  "description": "Converts web mercator tile coordinates (x, y, z) to a geographic bounding box in EPSG:4326. This process is primarily used to convert tile indices to spatial extents for data loading.",
+  "categories": [
+    "cubes",
+    "spatial"
+  ],
+  "parameters": [
+    {
+      "name": "x",
+      "description": "Tile X coordinate",
+      "schema": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    {
+      "name": "y",
+      "description": "Tile Y coordinate",
+      "schema": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    {
+      "name": "z",
+      "description": "Zoom level",
+      "schema": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 25
+      }
+    }
+  ],
+  "returns": {
+    "description": "A bounding box object with coordinates in EPSG:4326",
+    "schema": {
+      "type": "object",
+      "required": ["west", "south", "east", "north", "crs"],
+      "properties": {
+        "west": {
+          "type": "number",
+          "description": "Western longitude in degrees"
+        },
+        "south": {
+          "type": "number",
+          "description": "Southern latitude in degrees"
+        },
+        "east": {
+          "type": "number",
+          "description": "Eastern longitude in degrees"
+        },
+        "north": {
+          "type": "number",
+          "description": "Northern latitude in degrees"
+        },
+        "crs": {
+          "type": "string",
+          "description": "Coordinate reference system",
+          "enum": ["EPSG:4326"]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "title": "Convert tile coordinates to bounding box",
+      "arguments": {
+        "x": 1,
+        "y": 1,
+        "z": 2
+      },
+      "returns": {
+        "west": -90,
+        "south": 0,
+        "east": 0,
+        "north": 66.51326044311186,
+        "crs": "EPSG:4326"
+      }
+    }
+  ],
+  "links": [
+    {
+      "rel": "about",
+      "href": "https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames",
+      "title": "Slippy Map Tilenames Specification"
+    }
+  ]
+}

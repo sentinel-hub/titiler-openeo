@@ -1,0 +1,28 @@
+{
+  "id": "lego-release-service",
+  "type": "XYZ",
+  "configuration": {
+    "scope": "restricted",
+    "tile_store": true,
+    "referenced_service": "lego-base-service",
+    "tile_size": 256,
+    "minzoom": 7,
+    "maxzoom": 7
+  },
+  "title": "Lego Brick Tile Release Service",
+  "description": "Service for releasing a claimed tile back to the pool",
+  "enabled": true,
+  "process": {
+    "parameters": [],
+    "process_graph": {
+      "release": {
+        "process_id": "tile_assignment",
+        "arguments": {
+          "stage": "release",
+          "service_id": "lego-base-service"
+        },
+        "result": true
+      }
+    }
+  }
+}

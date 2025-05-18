@@ -1,0 +1,93 @@
+{
+  "id": "lego-claim-service",
+  "type": "XYZ",
+  "configuration": {
+    "scope": "restricted",
+    "tile_store": true,
+    "tile_size": 256,
+    "minzoom": 7,
+    "maxzoom": 7,
+    "grid": {
+      "width": 26,
+      "height": 27,
+      "x_range": [55, 80],
+      "y_range": [27, 52]
+    }
+  },
+  "title": "Lego Brick Tile Claim Service",
+  "description": "Service for claiming and getting instructions for a specific tile",
+  "enabled": true,
+  "process": {
+    "parameters": [],
+    "process_graph": {
+      "claim": {
+        "process_id": "tile_assignment",
+        "arguments": {
+          "zoom": 7,
+          "x_range": [55, 80],
+          "y_range": [27, 52],
+          "stage": "claim"
+        }
+      },
+      "bbox": {
+        "process_id": "xyz_to_bbox",
+        "arguments": {
+          "x": {"from_node": "claim", "path": "$.x"},
+          "y": {"from_node": "claim", "path": "$.y"},
+          "z": {"from_node": "claim", "path": "$.z"}
+        }
+      },
+      "params": {
+        "process_id": "get_param_item",
+        "arguments": {
+          "parameter": {"from_node": "bbox"},
+          "path": "$"
+        }
+      },
+      "load": {
+        "process_id": "load_collection_and_reduce",
+        "arguments": {
+          "bands": ["B04", "B03", "B02"],
+          "id": "sentinel-2-global-mosaics",
+          "spatial_extent": {"from_node": "params"},
+          "temporal_extent": [
+            "2024-04-01T00:00:00Z",
+            "2024-04-30T23:59:59Z"
+          ]
+        }
+      },
+      "scale": {
+        "process_id": "linear_scale_range",
+        "arguments": {
+          "x": {"from_node": "load"},
+          "inputMin": 0,
+          "inputMax": 10000,
+          "outputMax": 255
+        }
+      },
+      "color": {
+        "process_id": "color_formula",
+        "arguments": {
+          "data": {"from_node": "scale"},
+          "formula": "Gamma R 2 Gamma G 2.32 Gamma B 2.2 Sigmoidal RGB 10 0.237 Saturation 1.15"
+        }
+      },
+      "lego": {
+        "process_id": "legofication",
+        "arguments": {
+          "data": {"from_node": "color"},
+          "nbbricks": 4,
+          "bricksize": 64,
+          "water_threshold": 0.1
+        }
+      },
+      "instructions": {
+        "process_id": "generate_lego_instructions",
+        "arguments": {
+          "data": {"from_node": "lego"}
+        },
+        "result": true
+      }
+    }
+  }
+}
