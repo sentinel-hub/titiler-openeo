@@ -4,6 +4,38 @@
 
 Implementation plan for creating web services that allow users to interact with tiles for building a Lego map. The system consists of four main services with different authorization levels and functionalities.
 
+```mermaid
+graph TD
+    subgraph "Service Configurations"
+        A[Base Lego Service]
+        B[Claim Service]
+        C[Release Service]
+        D[Commit Service]
+        
+        A -->|references| B
+        A -->|references| C
+        A -->|references| D
+    end
+
+    subgraph "Authorization"
+        AA[Public Scope]
+        BB[Restricted Scope]
+        
+        A --- AA
+        B --- BB
+        C --- BB
+        D --- BB
+    end
+
+    subgraph "Tile Store"
+        TS[PostgreSQL Store]
+        B -->|claim| TS
+        C -->|release| TS
+        D -->|submit| TS
+    end
+  ```
+
+
 ## 1. Required Components
 
 ### New Process: xyz_to_bbox
@@ -240,25 +272,7 @@ Implementation plan for creating web services that allow users to interact with 
   3. Get build instructions
   4. Release or commit tile
 
-## 5. Database Configuration
-
-PostgreSQL tile store configuration:
-```sql
-CREATE TABLE tile_assignments (
-  id SERIAL PRIMARY KEY,
-  service_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  x INTEGER NOT NULL,
-  y INTEGER NOT NULL,
-  z INTEGER NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('claimed', 'released', 'submitted')),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(service_id, x, y, z)
-);
-```
-
-## 6. Testing Strategy
+## 5. Testing Strategy
 
 1. Unit Tests:
 - xyz_to_bbox process validation

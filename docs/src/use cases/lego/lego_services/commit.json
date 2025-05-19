@@ -7,7 +7,8 @@
     "referenced_service": "lego-base-service",
     "tile_size": 256,
     "minzoom": 7,
-    "maxzoom": 7
+    "maxzoom": 7,
+    "inject_user": true
   },
   "title": "Lego Brick Tile Commit Service",
   "description": "Service for committing a completed tile to the final map",
@@ -18,8 +19,27 @@
       "commit": {
         "process_id": "tile_assignment",
         "arguments": {
-          "stage": "submit",
-          "service_id": "lego-base-service"
+          "zoom": 7,
+          "x_range": [55, 80],
+          "y_range": [27, 52],
+          "stage": "release",
+          "store": {
+            "from_parameter": "_openeo_tile_store"
+          },
+          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "user_id": {
+            "from_parameter": "_openeo_user"
+          }
+        },
+        "result": false
+      },
+      "save": {
+        "process_id": "save_result",
+        "arguments": {
+          "data": {
+            "from_node": "commit"
+          },
+          "format": "txt"
         },
         "result": true
       }
