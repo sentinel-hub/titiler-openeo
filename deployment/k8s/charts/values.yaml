@@ -62,6 +62,29 @@ extraHostPathMounts:
 
 imagePullSecrets: []
 
+# Authentication configuration
+auth:
+  # Authentication method: "basic" or "oidc"
+  method: "basic"
+  
+  # Basic auth configuration (for testing)
+  basic:
+    enabled: true
+    users:
+      - username: "test"
+        password: "password"
+  
+  # OIDC configuration (for production)
+  oidc:
+    enabled: false
+    clientId: ""
+    wellKnownUrl: ""
+    redirectUrl: ""
+    scopes: "openid email profile"
+    nameClaim: "name"
+    title: "OIDC"
+    description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+
 env:
   CPL_TMPDIR: /tmp
   GDAL_CACHEMAX: 200   # 200 mb

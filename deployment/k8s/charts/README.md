@@ -126,6 +126,37 @@ ingress:
       paths: ["/"]
 ```
 
+### Authentication Configuration
+
+The chart supports two authentication methods:
+
+1. Basic Authentication (for testing)
+```yaml
+auth:
+  method: "basic"
+  basic:
+    enabled: true
+    users:
+      - username: "test"
+        password: "password"
+```
+
+2. OpenID Connect (for production)
+```yaml
+auth:
+  method: "oidc"
+  oidc:
+    enabled: true
+    clientId: "your-client-id"
+    wellKnownUrl: "https://your-provider/.well-known/openid-configuration"
+    redirectUrl: "your-redirect-url"
+    # Optional configurations
+    scopes: "openid email profile"  # Space-separated list
+    nameClaim: "name"  # Claim to use for user name
+    title: "OIDC"  # Provider title
+    description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"  # Provider description
+```
+
 ### Resource Configuration
 
 ```yaml
