@@ -13,8 +13,8 @@ image:
     - "80"
     - "--workers"
     - "4"
-    - "--forwarded-allow-ips" # to make sure it works behind a reverse proxy
-    - "*" # Allow all
+    - "--forwarded-allow-ips"   # to make sure it works behind a reverse proxy
+    - "*"   # Allow all
     - "--log-config"
     - "/config/log_config.yaml"
 
@@ -87,17 +87,17 @@ auth:
 
 # STAC configuration
 stac:
-  apiUrl: "https://stac.eoapi.dev" # STAC API endpoint URL
+  apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
 
 env:
   CPL_TMPDIR: /tmp
-  GDAL_CACHEMAX: 200 # 200 mb
-  VSI_CACHE: "TRUE" # Enable VSI cache
-  VSI_CACHE_SIZE: 5000000 # 5 MB (per file-handle)
-  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR" # Disable directory listing
-  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES" # Merge consecutive ranges
-  GDAL_HTTP_MULTIPLEX: "YES" # Enable multiplexing
-  GDAL_HTTP_VERSION: 2 # Use HTTP/2
+  GDAL_CACHEMAX: 200   # 200 mb
+  VSI_CACHE: "TRUE"   # Enable VSI cache
+  VSI_CACHE_SIZE: 5000000   # 5 MB (per file-handle)
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"   # Disable directory listing
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"   # Merge consecutive ranges
+  GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
+  GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
 
 resources:
@@ -136,7 +136,7 @@ database:
   # Type of database to use: "json", "duckdb", "postgresql"
   type: "json"
   # Default services configuration file path
-  defaultServices: "" # Path to default services configuration file (like files/copernicus.json)
+  defaultServices: ""  # Path to default services configuration file (like files/copernicus.json)
 
   # File-based storage configuration (for JSON and DuckDB)
   persistence:
@@ -153,7 +153,7 @@ database:
     # Will be used if type is "json"
     enabled: true
     path: "/mnt/data/store.json"
-    seed: "files/eoapi.json" # Initial data to populate the JSON store
+    seed: "files/eoapi.json"   # Initial data to populate the JSON store
 
   # DuckDB configuration
   duckdb:
@@ -169,8 +169,8 @@ database:
     user: openeo
     database: openeo
     password: ""
-    existingSecret: "" # Name of existing secret containing password
-    existingSecretKey: "password" # Key in the existing secret
+    existingSecret: ""   # Name of existing secret containing password
+    existingSecretKey: "password"   # Key in the existing secret
 
 securityContext:
   {}
