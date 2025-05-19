@@ -2,7 +2,7 @@
 
 TiTiler backend for openEO
 
-![TiTiler OpenEO](img/image.png)
+![openEO by TiTiler](img/image.png)
 
 ## Overview
 
