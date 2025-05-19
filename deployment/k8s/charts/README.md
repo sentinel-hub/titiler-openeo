@@ -25,9 +25,11 @@ To deploy an instance working with CDSE:
 2. Create a values file (e.g., `values-cdse.yaml`) with CDSE-specific configurations:
 
 ```yaml
+# STAC configuration
+stac:
+  apiUrl: "https://stac.dataspace.copernicus.eu/v1"
+
 env:
-  TITILER_OPENEO_STAC_API_URL: "https://stac.dataspace.copernicus.eu/v1"
-  TITILER_OPENEO_SERVICE_STORE_URL: "services/copernicus.json"
   # CDSE S3 Configuration
   AWS_S3_ENDPOINT: "eodata.dataspace.copernicus.eu"
   AWS_ACCESS_KEY_ID: "your_access_key"  # Add your S3 access key from CDSE
@@ -124,6 +126,13 @@ ingress:
   hosts:
     - host: titiler.yourdomain.com
       paths: ["/"]
+```
+
+### STAC Configuration
+
+```yaml
+stac:
+  apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
 ```
 
 ### Authentication Configuration

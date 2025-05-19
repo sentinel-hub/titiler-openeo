@@ -85,6 +85,10 @@ auth:
     title: "OIDC"
     description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
 
+# STAC configuration
+stac:
+  apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
+
 env:
   CPL_TMPDIR: /tmp
   GDAL_CACHEMAX: 200   # 200 mb
@@ -95,7 +99,6 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
-  TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
 
 resources:
   limits:

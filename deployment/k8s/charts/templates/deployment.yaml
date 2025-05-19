@@ -60,6 +60,9 @@ spec:
             - name: TITILER_OPENEO_DEFAULT_SERVICES_FILE
               value: "/config/default_services.json"
             {{- end }}
+            # STAC configuration
+            - name: TITILER_OPENEO_STAC_API_URL
+              value: {{ .Values.stac.apiUrl | quote }}
             # Authentication configuration
             - name: TITILER_OPENEO_AUTH_METHOD
               value: {{ .Values.auth.method | quote }}
