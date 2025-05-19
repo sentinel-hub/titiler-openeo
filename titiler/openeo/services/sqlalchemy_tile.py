@@ -78,6 +78,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "y": result.y,
                 "z": result.z,
                 "stage": result.stage,
+                "user_id": result.user_id,
             }
 
     def claim_tile(

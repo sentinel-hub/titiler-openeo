@@ -112,18 +112,20 @@ def _save_single_result(
                 for feature in features:
                     properties = feature.get("properties", {})
                     values = properties.get("values", {})
-                    
-                    writer.writerow([
-                        properties.get("color", ""),
-                        values.get("quantity", 0),
-                        properties.get("pantone", ""),
-                        properties.get("hex", ""),
-                        properties.get("transparent", False)
-                    ])
+
+                    writer.writerow(
+                        [
+                            properties.get("color", ""),
+                            values.get("quantity", 0),
+                            properties.get("pantone", ""),
+                            properties.get("hex", ""),
+                            properties.get("transparent", False),
+                        ]
+                    )
             else:
                 # Original behavior for other data types
                 writer.writerow(["date", "feature_index", "value"])
-                
+
                 for idx, feature in enumerate(features):
                     properties = feature.get("properties", {})
                     values_dict = properties.get("values", {})
@@ -208,7 +210,7 @@ def save_result(
         # Convert to bytes
         bytes_data = str(data).encode("utf-8")
         return SaveResultData(data=bytes_data, media_type="text/plain")
-    
+
     # Handle special cases for GeoJSON data directly
     if (
         format.lower() in ["json", "geojson"]

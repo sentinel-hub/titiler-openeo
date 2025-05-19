@@ -614,14 +614,19 @@ def generate_lego_instructions(
 
         draw = ImageDraw.Draw(instruction_img)
 
-        # Try to load a font, fall back to default if not available
+        # Try to load fonts, fall back to default if not available
         try:
             font = ImageFont.truetype(
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
                 size=int(grid_size / 4),
             )
+            bold_font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                size=int(grid_size / 3),  # Slightly larger for emphasis
+            )
         except:
             font = ImageFont.load_default()
+            bold_font = font
 
         # Add padding for labels
         coord_padding = grid_size
@@ -654,7 +659,7 @@ def generate_lego_instructions(
         text_draw.text((0, grid_size // 3), text, font=font, fill="black")
         # Rotate and paste
         rotated_text = text_img.rotate(90, expand=True)
-        instruction_img.paste(rotated_text, (grid_size // 3, grid_start_y))
+        instruction_img.paste(rotated_text, (grid_size // 6, grid_start_y))
 
         # Track brick colors for the legend
         color_counts = {}
@@ -681,10 +686,10 @@ def generate_lego_instructions(
                 [x + 2, y + 2, x + grid_size - 2, y + grid_size - 2], fill=hex_color
             )
 
-            # Add brick coordinates
+            # Add brick coordinates in bold
             text = f"{i},{j}"
             # Get text size for centering
-            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_bbox = draw.textbbox((0, 0), text, font=bold_font)
             text_width = text_bbox[2] - text_bbox[0]
             text_height = text_bbox[3] - text_bbox[1]
 
@@ -694,7 +699,7 @@ def generate_lego_instructions(
 
             # Draw text with outline for better visibility
             text_color = "white" if sum(rgb_color) < 384 else "black"
-            draw.text((text_x, text_y), text, font=font, fill=text_color)
+            draw.text((text_x, text_y), text, font=bold_font, fill=text_color)
 
             # Add indicator for transparent/water bricks
             if is_water:
@@ -711,7 +716,7 @@ def generate_lego_instructions(
             legend_square_size = int(grid_size / 2)
 
             # Draw legend title
-            draw.text((legend_x, legend_y), "Brick Colors:", font=font, fill="black")
+            draw.text((legend_x, legend_y), "Brick Colors:", font=bold_font, fill="black")
             legend_y += int(grid_size / 2)
 
             # Sort colors by count
