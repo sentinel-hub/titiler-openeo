@@ -92,6 +92,8 @@ affinity: {}
 logging:
   configFile: "files/log_config.yaml"
 
+enableTileStore: false
+
 # LEGO configuration
 lego:
   colors:

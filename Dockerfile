@@ -49,7 +49,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    libexpat1 \
+    libexpat1 fonts-dejavu \
     curl && \
     rm -rf /var/lib/apt/lists/*
 
