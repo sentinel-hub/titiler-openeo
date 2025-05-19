@@ -53,10 +53,10 @@ nav:
 plugins:
   - search
   - social
-  - mkdocs-jupyter:
-      include_source: true
-      ignore: ["**/.ipynb_checkpoints/*.ipynb"]
-      execute: false
+  # - mkdocs-jupyter:
+  #     include_source: true
+  #     ignore: ["**/.ipynb_checkpoints/*.ipynb"]
+  #     execute: false
   - mkdocstrings:
       enable_inventory: true
       handlers:
