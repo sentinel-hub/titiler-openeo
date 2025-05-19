@@ -60,50 +60,102 @@ COASTLINE_ZIP_PATH = os.path.join(
     "simplified-land-polygons-complete-3857.zip",
 )
 
-# Initialize coastline shapefile data
-try:
-    import geopandas as gpd
-    import shapely.geometry
-    from shapely.prepared import prep
+import threading
+from typing import Optional
 
-    # Load the EEA coastline shapefile directly from the zip file
-    # The path format for zip files is: zip://path/to/zip/file.zip!path/inside/zip/file.shp
-    zip_path = f"zip://{COASTLINE_ZIP_PATH}!simplified-land-polygons-complete-3857/simplified_land_polygons.shp"
-    _COASTLINE_GDF = gpd.read_file(zip_path)
+# Initialize coastline data placeholders
+_COASTLINE_GDF: Optional[Any] = None
+_COASTLINE_GEOMETRY: Optional[Any] = None
+_PREPARED_COASTLINE: Optional[Any] = None
+_COASTLINE_LOADED = False
+_COASTLINE_LOADING = False
+_COASTLINE_LOAD_ERROR: Optional[str] = None
+_COASTLINE_LOCK = threading.Lock()
 
-    # Convert to a CRS that's suitable for point-in-polygon tests (WGS84)
-    if _COASTLINE_GDF.crs != "EPSG:4326":
-        _COASTLINE_GDF = _COASTLINE_GDF.to_crs("EPSG:4326")
+def _load_coastline_data():
+    """Load coastline data in background thread."""
+    global _COASTLINE_GDF, _COASTLINE_GEOMETRY, _PREPARED_COASTLINE, _COASTLINE_LOADED, _COASTLINE_LOADING, _COASTLINE_LOAD_ERROR
+    
+    try:
+        import geopandas as gpd
+        import shapely.geometry
+        from shapely.prepared import prep
 
-    # Create a unified geometry from all polygons for faster checks
-    _COASTLINE_GEOMETRY = _COASTLINE_GDF.geometry.unary_union
+        # Load the EEA coastline shapefile directly from the zip file
+        zip_path = f"zip://{COASTLINE_ZIP_PATH}!simplified-land-polygons-complete-3857/simplified_land_polygons.shp"
+        gdf = gpd.read_file(zip_path)
 
-    # Prepare geometry for efficient containment tests
-    _PREPARED_COASTLINE = prep(_COASTLINE_GEOMETRY)
+        # Convert to a CRS that's suitable for point-in-polygon tests (WGS84)
+        if gdf.crs != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
 
-    print(f"Loaded coastline shapefile with {len(_COASTLINE_GDF)} features")
-    _COASTLINE_LOADED = True
-except Exception as e:
-    print(f"Error loading coastline shapefile: {e}")
-    _COASTLINE_LOADED = False
+        # Create a unified geometry from all polygons for faster checks
+        geometry = gdf.geometry.unary_union
+
+        # Prepare geometry for efficient containment tests
+        prepared = prep(geometry)
+
+        # Update global variables atomically
+        with _COASTLINE_LOCK:
+            global _COASTLINE_GDF, _COASTLINE_GEOMETRY, _PREPARED_COASTLINE
+            _COASTLINE_GDF = gdf
+            _COASTLINE_GEOMETRY = geometry
+            _PREPARED_COASTLINE = prepared
+            _COASTLINE_LOADED = True
+            _COASTLINE_LOAD_ERROR = None
+            print(f"Loaded coastline shapefile with {len(gdf)} features")
+
+    except Exception as e:
+        with _COASTLINE_LOCK:
+            _COASTLINE_LOAD_ERROR = str(e)
+            print(f"Error loading coastline shapefile: {e}")
+    finally:
+        with _COASTLINE_LOCK:
+            _COASTLINE_LOADING = False
+
+# Start background loading
+_COASTLINE_LOADING = True
+thread = threading.Thread(target=_load_coastline_data, daemon=True)
+thread.start()
+
+def get_coastline_status():
+    """Get the current status of coastline data loading."""
+    with _COASTLINE_LOCK:
+        return {
+            "loaded": _COASTLINE_LOADED,
+            "loading": _COASTLINE_LOADING,
+            "error": _COASTLINE_LOAD_ERROR
+        }
 
 
-def is_land(lon, lat):
+def is_land(lon, lat, max_wait_seconds=30):
     """Check if a point is land (inside coastline) or water.
 
     Args:
         lon: Longitude in degrees (-180 to 180)
         lat: Latitude in degrees (-90 to 90)
+        max_wait_seconds: Maximum time to wait for coastline data to load (default 30 seconds)
 
     Returns:
-        Boolean: True if point is land, False if water
+        Boolean: True if point is land, False if water or data not loaded
     """
-    # Use the coastline shapefile for land/water determination in Europe
-    # Create a point geometry
-    point = shapely.geometry.Point(lon, lat)
+    # Wait for coastline data to load
+    import time
+    start_time = time.time()
+    while _COASTLINE_LOADING and time.time() - start_time < max_wait_seconds:
+        time.sleep(1)  # Wait 1 second between checks
+    
+    with _COASTLINE_LOCK:
+        if not _COASTLINE_LOADED:
+            # If data is not loaded yet after waiting, assume water
+            return False
+        
+        # Use the coastline shapefile for land/water determination in Europe
+        import shapely.geometry
+        point = shapely.geometry.Point(lon, lat)
 
-    # Check if the point is inside the coastline (land)
-    return _PREPARED_COASTLINE.contains(point)
+        # Check if the point is inside the coastline (land)
+        return _PREPARED_COASTLINE.contains(point)
 
 
 def _get_tiles(x, y, z, zoom):
@@ -167,7 +219,7 @@ def generate_subtiles_ref(x: int, y: int, z: int, zoom: int) -> ArrayLike:
     return subtiles_ref
 
 
-def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20):
+def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, max_wait_seconds=30):
     """Get water mask for the given bounds, using coastline shapefile for high accuracy.
 
     Args:
@@ -176,10 +228,20 @@ def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20):
         shape: Shape of the target mask (height, width)
         intersection_threshold: Threshold for determining if a cell is land (default 0.20)
                                If the intersection area is > 20% of the cell area, it's considered land
+        max_wait_seconds: Maximum time to wait for coastline data to load (default 30 seconds)
 
     Returns:
         Water mask array resampled to the target shape
     """
+    # Wait for coastline data to load
+    import time
+    start_time = time.time()
+    while _COASTLINE_LOADING and time.time() - start_time < max_wait_seconds:
+        time.sleep(1)  # Wait 100ms between checks
+    
+    if _COASTLINE_LOADING:
+        print(f"Warning: Coastline data still loading after {max_wait_seconds} seconds")
+        return numpy.ones(shape, dtype=numpy.float32)  # Return all water if timeout
     import pyproj
     import numpy as np
     from shapely.geometry import Point, box
@@ -624,13 +686,17 @@ def generate_lego_instructions(
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                 size=int(grid_size / 3),  # Slightly larger for emphasis
             )
+            big_font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                size=int(grid_size / 2),
+            )
         except:
             font = ImageFont.load_default()
             bold_font = font
 
         # Add padding for labels
         coord_padding = grid_size
-        grid_start_x = coord_padding
+        grid_start_x = coord_padding * 1.2  # Double padding on the left for Y label
         grid_start_y = coord_padding
 
         # Draw grid lines with padding
@@ -644,10 +710,10 @@ def generate_lego_instructions(
         # Draw tile position X at the top
         x_position = tile_info["x"]
         text = f"X: {x_position}"
-        text_bbox = draw.textbbox((0, 0), text, font=font)
+        text_bbox = draw.textbbox((0, 0), text, font=big_font)
         text_width = text_bbox[2] - text_bbox[0]
         text_x = grid_start_x + (grid_dims[1] * grid_size - text_width) // 2
-        draw.text((text_x, grid_size // 3), text, font=font, fill="black")
+        draw.text((text_x, grid_size // 3), text, font=big_font, fill="black")
 
         # Draw tile position Y on the left (rotated 90° counterclockwise)
         y_position = tile_info["y"]
@@ -656,10 +722,10 @@ def generate_lego_instructions(
         text_img = Image.new('RGB', (grid_size * 2, grid_size), 'white')
         text_draw = ImageDraw.Draw(text_img)
         # Draw text
-        text_draw.text((0, grid_size // 3), text, font=font, fill="black")
+        text_draw.text((0, grid_size // 6), text, font=big_font, fill="black")
         # Rotate and paste
         rotated_text = text_img.rotate(90, expand=True)
-        instruction_img.paste(rotated_text, (grid_size // 6, grid_start_y))
+        instruction_img.paste(rotated_text, (grid_size // 6, grid_start_y + (grid_dims[0] * 8)))
 
         # Track brick colors for the legend
         color_counts = {}
