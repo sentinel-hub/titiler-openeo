@@ -128,7 +128,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             ]
 
             if not available_coords:
-                raise NoTileAvailableError("No tiles available within the given ranges")
+                raise NoTileAvailableError(service_id, user_id)
 
             # Randomly select a coordinate
             x, y = random.choice(available_coords)
@@ -151,6 +151,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "y": y,
                 "z": zoom,
                 "stage": "claimed",
+                "user_id": user_id,
             }
 
     def release_tile(
@@ -169,12 +170,13 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
             if not tile:
                 raise TileNotAssignedError(
-                    f"No tile assigned to user {user_id} for service {service_id}"
+                    service_id=service_id,
+                    user_id=user_id,
                 )
 
             if tile.stage == "submitted":
                 raise TileAlreadyLockedError(
-                    f"Tile {tile.x},{tile.y},{tile.z} is already submitted and cannot be released"
+                    tile.x, tile.y, tile.z, service_id, user_id
                 )
 
             # Store tile info before deletion
@@ -207,7 +209,13 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
             if not tile:
                 raise TileNotAssignedError(
-                    f"No tile assigned to user {user_id} for service {service_id}"
+                    service_id=service_id,
+                    user_id=user_id,
+                )
+
+            if tile.stage == "submitted":
+                raise TileAlreadyLockedError(
+                    tile.x, tile.y, tile.z, service_id, user_id
                 )
 
             # Update tile stage
