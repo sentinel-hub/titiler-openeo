@@ -6,7 +6,7 @@ TiTiler backend for openEO
 
 ## Overview
 
-[`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/main.py) is a TiTiler backend implementation for openEO developed by [![Development Seed](docs/src/img/ds-logo-hor.svg){: style="height:25px"}](https://developmentseed.org/) and [![Sinergise](docs/src/img/sinergise-logo.png){: style="height:25px"}](https://www.sinergise.com/).
+[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a> and <a href="https://www.sinergise.com/"><img alt="Sinergise" src="docs/src/img/sinergise-logo.png" height="25px"></a>.
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
 This simplicity comes with some specific implementation choices like the type of data managed by the backend.
