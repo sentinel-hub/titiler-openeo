@@ -6,7 +6,7 @@ Issues and pull requests are more than welcome: https://github.com/sentinel-hub/
 
 ```bash
 git clone https://github.com/sentinel-hub/titiler-openeo.git
-cd titiler
+cd titiler-openeo
 
 python -m pip install -e ".[test,dev]"
 ```
@@ -19,6 +19,11 @@ The project includes a Keycloak instance for testing OpenID Connect authenticati
 ```bash
 docker compose up
 ```
+
+This will start:
+- API service at http://localhost:8081
+- openEO Web Editor at http://localhost:8080
+- Keycloak at http://localhost:8082
 
 2. Access Keycloak admin console at http://localhost:8082/admin
    - Username: `admin`
@@ -34,9 +39,15 @@ docker compose up
    - Click "Save"
 
 4. Configure client settings:
-   - Valid redirect URIs: `http://localhost:8081/*` and `http://localhost:8080/*` for the openEO editor
-   - Web origins: `http://localhost:8081` and `http://localhost:8080` for the openEO editor
+   - Valid redirect URIs: `http://localhost:8080/*` for the openEO editor
+   - Web origins: `http://localhost:8080` for the openEO editor
    - Click "Save"
+
+The environment includes several pre-configured settings:
+- GDAL optimization settings for performance
+- Debug mode enabled
+- STAC API endpoint set to https://stac.eoapi.dev
+- Keycloak OIDC configuration
 
 5. Create a test user:
    - Go to "Users" → "Add user"
@@ -68,7 +79,7 @@ python -m pytest --cov=titiler.openeo --cov-report=xml --cov-append --cov-report
 
 ```bash
 git clone https://github.com/sentinel-hub/titiler-openeo.git
-cd titiler
+cd titiler-openeo
 python -m pip install -e ".[docs]"
 ```
 

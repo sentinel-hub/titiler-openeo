@@ -1,23 +1,23 @@
-{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+{{- if and (or (eq .Values.database.type "json") (eq .Values.database.type "duckdb")) .Values.database.persistence.enabled (not .Values.database.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "titiler.fullname" . }}-data
   labels:
     {{- include "titiler.labels" . | nindent 4 }}
-  {{- with .Values.persistence.annotations }}
+  {{- with .Values.database.persistence.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   accessModes:
-    {{- range .Values.persistence.accessModes }}
+    {{- range .Values.database.persistence.accessModes }}
     - {{ . | quote }}
     {{- end }}
   resources:
     requests:
-      storage: {{ .Values.persistence.size | quote }}
-  {{- if .Values.persistence.storageClassName }}
-  storageClassName: {{ .Values.persistence.storageClassName | quote }}
+      storage: {{ .Values.database.persistence.size | quote }}
+  {{- if .Values.database.persistence.storageClassName }}
+  storageClassName: {{ .Values.database.persistence.storageClassName | quote }}
   {{- end }}
 {{- end }}

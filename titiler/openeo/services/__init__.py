@@ -2,7 +2,8 @@
 
 from urllib.parse import urlparse
 
-from .base import ServicesStore  # noqa
+from .base import ServicesStore, TileAssignmentStore  # noqa
+from .sqlalchemy_tile import SQLAlchemyTileStore  # noqa
 
 
 def get_store(store_uri: str) -> ServicesStore:
@@ -27,3 +28,23 @@ def get_store(store_uri: str) -> ServicesStore:
         return SQLAlchemyStore(store=store_uri)
 
     raise ValueError(f"Couldn't load {store_uri}")
+
+
+def get_tile_store(store_uri: str) -> TileAssignmentStore:
+    """Return Tile Assignment Store.
+
+    Args:
+        store_uri: URI for the store
+
+    Returns:
+        TileAssignmentStore implementation
+
+    Raises:
+        ValueError: When store type is not supported
+    """
+    parsed = urlparse(store_uri)
+
+    if parsed.scheme == "sqlalchemy" or parsed.scheme.startswith("postgresql"):
+        return SQLAlchemyTileStore(store=store_uri)
+
+    raise ValueError(f"Tile store not supported for {store_uri}")

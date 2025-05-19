@@ -8,13 +8,13 @@ from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
-from titiler.core.middleware import CacheControlMiddleware
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo.auth import get_auth
 from titiler.openeo.errors import ExceptionHandler, OpenEOException
 from titiler.openeo.factory import EndpointsFactory
+from titiler.openeo.middleware import DynamicCacheControlMiddleware
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
-from titiler.openeo.services import get_store
+from titiler.openeo.services import get_store, get_tile_store
 from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
 from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
@@ -34,6 +34,11 @@ except Exception as err:
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
 service_store = get_store(str(backend_settings.service_store_url))
+tile_store = (
+    get_tile_store(backend_settings.tile_store_url)
+    if backend_settings.tile_store_url
+    else None
+)
 auth = get_auth(auth_settings)
 
 ###############################################################################
@@ -46,13 +51,10 @@ def create_app():
         docs_url="/api.html",
         description="""TiTiler backend for openEO.
 
-    ---
+**Documentation**: <a href="https://sentinel-hub.github.io/titiler-openeo" target="_blank">https://sentinel-hub.github.io/titiler-openeo</a>
 
-    **Documentation**: <a href="https://developmentseed.org/titiler-openeo/" target="_blank">https://developmentseed.org/titiler-openeo/</a>
+**Source Code**: <a href="https://github.com/sentinel-hub/titiler-openeo" target="_blank">https://github.com/sentinel-hub/titiler-openeo</a>
 
-    **Source Code**: <a href="https://github.com/sentinel-hub/titiler-openeo" target="_blank">https://github.com/sentinel-hub/titiler-openeo</a>
-
-    ---
         """,
         version=titiler_version,
         root_path=api_settings.root_path,
@@ -84,8 +86,15 @@ def create_app():
     )
 
     app.add_middleware(
-        CacheControlMiddleware,
-        cachecontrol=api_settings.cachecontrol,
+        DynamicCacheControlMiddleware,
+        static_paths=["/static/"],
+        dynamic_paths=[
+            "/processes/",
+            "/jobs/",
+            "/collections/",
+            "/services/",
+            "/results/",
+        ],
     )
 
     # Register backend specific load_collection methods
@@ -107,12 +116,18 @@ def create_app():
     )
 
     # Register OpenEO endpoints
-    endpoints = EndpointsFactory(
-        services_store=service_store,
-        stac_client=stac_client,
-        process_registry=process_registry,
-        auth=auth,
-    )
+    # Create endpoints with optional tile_store
+    factory_args = {
+        "services_store": service_store,
+        "stac_client": stac_client,
+        "process_registry": process_registry,
+        "auth": auth,
+        "default_services_file": backend_settings.default_services_file,
+    }
+    if tile_store:
+        factory_args["tile_store"] = tile_store
+
+    endpoints = EndpointsFactory(**factory_args)
     app.include_router(endpoints.router)
     app.endpoints = endpoints
 

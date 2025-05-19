@@ -5,7 +5,12 @@ import pytest
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.apply import apply
-from titiler.openeo.processes.implementations.arrays import array_element
+from titiler.openeo.processes.implementations.arrays import (
+    add_dimension,
+    array_create,
+    array_element,
+    create_data_cube,
+)
 from titiler.openeo.processes.implementations.data_model import to_raster_stack
 from titiler.openeo.processes.implementations.dem import hillshade
 from titiler.openeo.processes.implementations.image import (
@@ -13,7 +18,7 @@ from titiler.openeo.processes.implementations.image import (
     image_indexes,
     to_array,
 )
-from titiler.openeo.processes.implementations.indices import ndvi
+from titiler.openeo.processes.implementations.indices import ndvi, ndwi
 from titiler.openeo.processes.implementations.reduce import reduce_dimension
 
 
@@ -113,6 +118,22 @@ def test_ndvi(sample_raster_stack):
         assert img_data.band_names == ["ndvi"]  # Should be named "ndvi"
 
 
+def test_ndwi(sample_raster_stack):
+    """Test the ndwi function."""
+    # NDWI uses nir and swir bands, but we only have 3 bands
+    # Let's use bands 2 and 3 for this test
+    result = ndwi(sample_raster_stack, 2, 3)
+
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+
+    # Each result should be an ImageData with 1 band
+    for _key, img_data in result.items():
+        assert isinstance(img_data, ImageData)
+        assert img_data.count == 1  # NDWI results in a single band
+        assert img_data.band_names == ["ndwi"]  # Should be named "ndwi"
+
+
 def test_apply(sample_raster_stack):
     """Test the apply function."""
 
@@ -193,3 +214,68 @@ def test_hillshade(sample_raster_stack):
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1  # Hillshade is single band
         assert img_data.band_names == ["hillshade"]  # Should be named "hillshade"
+
+
+def test_array_create():
+    """Test array_create function."""
+    # Test empty array creation
+    pixel = array_create()
+    assert len(pixel) == 1
+
+    # Test array creation with data
+    data = [[1, 2, 3, 4], [5, 6, 7, 8]]
+    result = array_create(data=data)
+    assert isinstance(result, np.ndarray)
+    assert np.array_equal(result, np.array(data))
+
+
+def test_create_data_cube():
+    """Test create_data_cube function."""
+    result = create_data_cube()
+    assert isinstance(result, dict)
+    assert len(result) == 0
+
+
+def test_add_dimension():
+    """Test add_dimension function."""
+    # Test with empty data cube
+    cube = create_data_cube()
+
+    # Add a temporal dimension to empty cube
+    result = add_dimension(data=cube, name="temporal", label="2021-01", type="temporal")
+    assert isinstance(result, dict)
+    assert "temporal" in result
+    assert isinstance(result["temporal"], ImageData)
+    assert result["temporal"].metadata["dimension"] == "temporal"
+    assert result["temporal"].metadata["label"] == "2021-01"
+    assert result["temporal"].metadata["type"] == "temporal"
+
+    # Test with non-empty data cube
+    # First create a cube with some data
+    data = np.ma.masked_array(
+        np.random.randint(0, 256, size=(1, 10, 10), dtype=np.uint8),
+        mask=np.zeros((1, 10, 10), dtype=bool),
+    )
+    cube = {"data": ImageData(data)}
+
+    # Add a bands dimension
+    result = add_dimension(data=cube, name="bands", label="red", type="bands")
+    assert "bands" in result
+    assert isinstance(result["bands"], ImageData)
+    # Should match spatial dimensions of existing data
+    assert result["bands"].height == cube["data"].height
+    assert result["bands"].width == cube["data"].width
+    assert result["bands"].metadata["dimension"] == "bands"
+    assert result["bands"].metadata["label"] == "red"
+    assert result["bands"].metadata["type"] == "bands"
+
+    # Test error cases
+    # Cannot add existing dimension
+    with pytest.raises(
+        ValueError, match="A dimension with name 'bands' already exists"
+    ):
+        add_dimension(data=result, name="bands", label="green", type="bands")
+
+    # Cannot add spatial dimension
+    with pytest.raises(ValueError, match="Cannot add spatial dimensions"):
+        add_dimension(data=result, name="x", label="1", type="spatial")

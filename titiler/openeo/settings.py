@@ -134,8 +134,11 @@ class ApiSettings(BaseSettings):
 
     name: str = "TiTiler-OpenEO"
     cors_origins: str = "*"
-    cors_allow_methods: str = "GET,POST,DELETE,OPTIONS"
-    cachecontrol: str = "public, max-age=3600"
+    cors_allow_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    # Cache settings for different endpoint types
+    cache_static: str = "public, max-age=3600"  # For static resources
+    cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
+    cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""
 
     debug: bool = False
@@ -160,6 +163,10 @@ class BackendSettings(BaseSettings):
 
     stac_api_url: Union[AnyHttpUrl, PostgresDsn]
     service_store_url: Union[AnyHttpUrl, str]
+    tile_store_url: Optional[str] = None  # URL for tile assignment store
+    default_services_file: Optional[str] = (
+        None  # Path to default services configuration file
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_",

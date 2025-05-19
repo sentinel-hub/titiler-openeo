@@ -2,9 +2,20 @@
 
 import numpy as np
 import pytest
+from rasterio.errors import RasterioIOError
 from rio_tiler.models import ImageData
 
-from titiler.openeo.processes.implementations.io import SaveResultData, save_result
+from titiler.openeo.processes.implementations.io import (
+    SaveResultData,
+    load_url,
+    save_result,
+)
+
+
+@pytest.fixture
+def cog_url():
+    """URL to a sample COG."""
+    return "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2019_2573-1160/swissalti3d_2019_2573-1160_0.5_2056_5728.tif"
 
 
 @pytest.fixture
@@ -20,7 +31,7 @@ def sample_image_data():
 
 @pytest.fixture
 def sample_raster_stack(sample_image_data):
-    """Create a sample RasterStack (dict of ImageData) for testing."""
+    """Create a sample RasterStack for testing."""
     # Create a second ImageData
     data2 = np.ma.array(
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
@@ -51,6 +62,25 @@ def sample_feature_collection():
             }
         ],
     }
+
+
+@pytest.mark.vcr()
+def test_load_url(cog_url):
+    """Test loading a COG from a URL."""
+    result = load_url(cog_url)
+
+    # Test that we get a RasterStack
+    assert isinstance(result, dict)
+
+    # Access should be lazy, so no actual data loaded yet
+    assert "data" in result
+
+
+@pytest.mark.vcr()
+def test_load_url_invalid():
+    """Test loading from an invalid URL."""
+    with pytest.raises(RasterioIOError):
+        load_url("https://example.com/not-a-cog.tif")
 
 
 def test_save_result_png(sample_image_data):
@@ -111,8 +141,6 @@ def test_save_result_geojson(sample_feature_collection):
     assert "features" in json_str
 
 
-# Skip this test for now as it requires GDAL drivers
-# @pytest.mark.skip(reason="Requires proper GDAL driver setup")
 def test_save_result_geotiff(sample_raster_stack):
     """Test saving a RasterStack as GeoTIFF."""
     # Add CRS and bounds to make it a valid GeoTIFF

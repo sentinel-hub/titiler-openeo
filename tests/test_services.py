@@ -1,5 +1,11 @@
 """Test titiler.openeo services."""
 
+from typing import Any, Union
+
+from fastapi import Header
+
+from titiler.openeo.auth import Auth, User
+
 
 def test_add_service(app_with_auth):
     """Test adding a service."""
@@ -268,6 +274,143 @@ def test_delete_service(app_with_auth):
 #     }
 #     response = app_with_auth.post("/services", json=invalid_input)
 #     assert response.status_code == 422
+
+
+def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
+    """Test XYZ service access based on different scopes (private, restricted, public)."""
+    # Base service template
+    base_service = {
+        "process": {
+            "process_graph": {
+                "datacube1": {"process_id": "create_data_cube", "arguments": {}},
+                "add_dims": {
+                    "process_id": "add_dimension",
+                    "arguments": {
+                        "data": {"from_node": "datacube1"},
+                        "name": "bands",
+                        "label": "gray",
+                        "type": "bands",
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "add_dims"}, "format": "gtiff"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "Test Service",
+        "configuration": {"tile_size": 256, "tilematrixset": "WebMercatorQuad"},
+    }
+
+    # Create services with different scopes and test access
+    scope_configs = {
+        "private": {
+            "scope": "private",
+            "expected_status": {"owner": 200, "authenticated": 401, "anonymous": 401},
+        },
+        "restricted": {
+            "scope": "restricted",
+            "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 401},
+        },
+        "restricted_with_users": {
+            "scope": "restricted",
+            "authorized_users": ["test_user", "other_user"],
+            "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 401},
+        },
+        "restricted_unauthorized": {
+            "scope": "restricted",
+            "authorized_users": ["test_user"],
+            "expected_status": {"owner": 200, "authenticated": 403, "anonymous": 401},
+        },
+        "public": {
+            "scope": "public",
+            "expected_status": {"owner": 200, "authenticated": 200, "anonymous": 200},
+        },
+    }
+
+    # Create a flexible mock auth that can handle different users
+    from fastapi import HTTPException
+
+    class TestScopesAuth(Auth):
+        def validate(self, authorization: str = Header(default=None)) -> User:
+            if not authorization:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            if "owner_token" in authorization:
+                return User(user_id="test_user")
+            elif "other_token" in authorization:
+                return User(user_id="other_user")
+            raise HTTPException(
+                status_code=401, detail="Invalid authentication credentials"
+            )
+
+        def validate_optional(
+            self, authorization: str = Header(default=None)
+        ) -> Union[User, None]:
+            if not authorization:
+                return None
+            try:
+                return self.validate(authorization)
+            except HTTPException:
+                return None
+
+        def login(self, authorization: str = Header()) -> Any:
+            return {"access_token": "mock_token"}
+
+    test_auth = TestScopesAuth()
+
+    # Test each scope
+    for scope_name, config in scope_configs.items():
+        app_with_auth.app.dependency_overrides[
+            app_with_auth.app.endpoints.auth.validate
+        ] = test_auth.validate
+        app_with_auth.app.dependency_overrides[
+            app_with_auth.app.endpoints.auth.validate_optional
+        ] = test_auth.validate_optional
+
+        # Create service with specific scope and authorized users
+        service_input = base_service.copy()
+        service_input["configuration"] = service_input.get("configuration", {})
+        service_input["configuration"]["scope"] = config["scope"]
+        if "authorized_users" in config:
+            service_input["configuration"]["authorized_users"] = config[
+                "authorized_users"
+            ]
+
+        # Create service as owner
+        create_response = app_with_auth.post(
+            "/services",
+            json=service_input,
+            headers={"Authorization": "Bearer basic//owner_token"},
+        )
+        assert create_response.status_code == 201
+        service_id = create_response.headers["location"].split("/")[-1]
+
+        # Test owner access
+        owner_response = app_with_auth.get(
+            f"/services/xyz/{service_id}/tiles/0/0/0",
+            headers={"Authorization": "Bearer basic//owner_token"},
+        )
+        assert (
+            owner_response.status_code == config["expected_status"]["owner"]
+        ), f"Owner access failed for {scope_name} service"
+
+        # Test other user access
+        other_auth_response = app_with_auth.get(
+            f"/services/xyz/{service_id}/tiles/0/0/0",
+            headers={"Authorization": "Bearer basic//other_token"},
+        )
+        assert (
+            other_auth_response.status_code
+            == config["expected_status"]["authenticated"]
+        ), f"Authenticated user access failed for {scope_name} service"
+
+        # Test anonymous access
+        unauth_response = app_no_auth.get(f"/services/xyz/{service_id}/tiles/0/0/0")
+        assert (
+            unauth_response.status_code == config["expected_status"]["anonymous"]
+        ), f"Anonymous access failed for {scope_name} service"
 
 
 def test_service_configuration(app_with_auth):

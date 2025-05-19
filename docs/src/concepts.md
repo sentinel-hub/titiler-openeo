@@ -1,92 +1,73 @@
-# Concept Note
+# Core Concepts
 
-## Context
-
-openEO serves as an abstraction layer for Earth Observation (EO) processing and has gained significant traction within the community. Several data hubs now offer openEO as a service, notably the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/analyse/openeo), [Terrascope](https://terrascope.be), and [EODC](https://openeo.cloud/). Additionally, [EOEPCA+](https://eoepca.readthedocs.io/projects/processing/en/latest/design/processing-engine/openeo/), with its processing building block, is furthering the deployment of openEO.
-
-To enhance the value of openEO as an abstraction for essential services like STAC-based data collections, data processing methods, visualization services, and compute infrastructure, it is necessary for more commonly used raster processing and visualization services to provide an openEO interface. For instance, the [openEO Sentinel Hub driver](https://github.com/Open-EO/openeo-sentinelhub-python-driver) allows users to interact with Sentinel Hub features via an openEO interface. 
-
-Moreover, [TiTiler](https://github.com/developmentseed/titiler) facilitates dynamic tiling of STAC raster datasets and OGC Features, serving as a core component of eoAPI, Development Seed's open-source, interoperable EO data services stack.
-
-In this context, [Development Seed](https://developmentseed.org/) presents its own implementation of openEO, featuring a fast and lightweight solution to efficiently manage raster-based processes.
-
-## Overview
-
-The main goal of this project is to provide a light and fast backend for openEO services and processes using the same features as the TiTiler engine:
-
-- Built on top of FastAPI
-- Cloud Optimized GeoTIFF support
-- SpatioTemporal Asset Catalog support
-- Multiple projections support (see TileMatrixSets) via morecantile.
-- JPEG / JP2 / PNG / WEBP / GTIFF / NumpyTile output format support
-- XYZ service support
-- Automatic OpenAPI documentation (FastAPI builtin)
-
-## API
-
-The application provides with [openEO API (L1A and L1C)](https://openeo.org/documentation/1.0/developers/profiles/api.html#api-profiles).
-
-### Synchronous Processing (L1A profile)
-
-The synchronous processing endpoints aim at processing and downloading data synchronously.
-The `POST /results` executes a user-defined process directly (synchronously) and the result is downloaded in the format specified in the process graph.
-This endpoint can be used to generate small previews including few data sources (typically tiles) or test user-defined processes before starting a batch job.
-Timeouts on either client- or server-side are to be expected for complex computations.
-Back-ends MAY send the openEO error ProcessGraphComplexity immediately if the computation is expected to time out.
-Otherwise requests MAY time-out after a certain amount of time by sending openEO error RequestTimeout
-
-### Secondary Web Services (L1C profile)
-
-The set of secondary web services endpoints aims to provide data visualization with dynamic tiling according to a process graph submitted or available in the API.
+This document explains the core concepts and data models used in openEO by TiTiler.
 
 ## Data Model
 
-In openEO, a datacube is a fundamental concept and a key component of the platform. Data is represented as datacubes in openEO, which are multi-dimensional arrays with additional information about their dimensionality.
-Datacubes are powerful but can also be heavy to manipulate and often requires asynchronous processing to properly process and serve the data.
-Unlike most of the existing openEO implementation, `titiler-openeo` project simplifies this concept by focusing on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
+In openEO, a datacube is a fundamental concept and a key component of the platform. While traditional openEO implementations use multi-dimensional arrays for data representation, openEO by TiTiler simplifies this concept by focusing on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
 
 ### Raster Data Model
 
-In order to make the processing as light and fast as possible, the backend must manipulate the data in a way that is easy to process and serve.
-There are two primary data structures used in the backend:
+The backend uses three primary data structures for efficient processing:
 
-1. **ImageData**: Most processes use [`ImageData`](https://cogeotiff.github.io/rio-tiler/models/#imagedata) objects provided by [rio-tiler](https://cogeotiff.github.io/rio-tiler/) for individual raster operations. This object was initially designed to create slippy map tiles from large raster data sources and render these tiles dynamically on a web map.
+1. **ImageData**: Most processes use [`ImageData`](https://cogeotiff.github.io/rio-tiler/models/#imagedata) objects provided by [rio-tiler](https://cogeotiff.github.io/rio-tiler/) for individual raster operations. This object was initially designed to create slippy map tiles from large raster data sources and render these tiles dynamically on a web map. Each ImageData object inherently has two spatial dimensions (height and width).
 
 ![alt text](img/raster.png)
 
-2. **RasterStack**: A dictionary mapping names/dates to ImageData objects, allowing for consistent handling of multiple raster layers.
+2. **RasterStack**: A dictionary mapping names/dates to ImageData objects, allowing for consistent handling of multiple raster layers. This is our implementation of the openEO data cube concept, with some key characteristics:
+   - An empty data cube is represented as an empty dictionary (`{}`)
+   - When there is at least one raster in the stack, it has a minimum of 2 dimensions (the spatial dimensions from the raster data)
+   - Additional dimensions (like temporal or bands) can be added, but they must be compatible with the existing spatial dimensions
+   - Spatial dimensions are inherent to the raster data and cannot be added separately
 
 3. **LazyRasterStack**: An optimized version of RasterStack that lazily loads data when accessed. This improves performance by only executing processing tasks when the data is actually needed.
 
-### Reducing the data
+### Dimension Handling
 
-The ImageData object is obtained by reducing as early as possible the data from the collections.
-While the traditional [`load_collections` process](https://github.com/sentinel-hub/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection.json#L2) is implemented and can be used, it is recommended to use the `load_collection_and_reduce` process to have immediately an `imagedata` object to manipulate. The `load_collection_and_reduce` process applies the [`apply_pixel_selection`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json) process on a stack of raster data that are loaded from the collections.
+The data cube implementation in openEO by TiTiler follows these principles for dimension handling:
 
-All spatial and reduction processes have been refactored to consistently use RasterStack as input and output, providing a more predictable and efficient processing pipeline.
+1. **Spatial Dimensions**: Every raster in the stack has two spatial dimensions (height and width) that are inherent to the data. These dimensions cannot be added or removed through processes, as they are fundamental to the raster data structure.
+
+2. **Additional Dimensions**: Non-spatial dimensions can be added to the data cube:
+   - Temporal dimension: For time series data (e.g., "2021-01", "2021-02")
+   - Bands dimension: For spectral bands (e.g., "red", "green", "blue")
+   - Other dimensions: For any other type of categorization
+
+3. **Dimension Compatibility**: When adding dimensions to a non-empty data cube, the new dimension must be compatible with the existing spatial dimensions. This means any ImageData added to the stack must match the height and width of existing rasters.
+
+4. **Empty Data Cubes**: An empty data cube (`{}`) can receive any non-spatial dimension. The first raster data added to the cube will establish the spatial dimensions that all subsequent data must match.
+
+### Data Reduction
+
+The ImageData object is obtained by reducing as early as possible the data from the collections. While the traditional [`load_collections` process](https://github.com/sentinel-hub/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection.json#L2) is implemented, it's recommended to use the `load_collection_and_reduce` process to immediately get an `imagedata` object.
 
 ![alt text](img/rasterstack.png)
 
-The reduce process comes with a parameter to choose the [pixel selection method](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24) to apply on the stack of raster data. The default method is `first` that will select the first pixel value of the stack. Other methods are available like `highest`, `lowest`, `mean`, `median`, `stddev`, `lastbandlow`, `lastbandhigh`, `lastbandavg`, `count`.
+The reduce process includes a parameter to choose the [pixel selection method](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24):
 
-## Collections
+- `first` (default): selects the first pixel value
+- `highest`, `lowest`: selects extreme values
+- `mean`, `median`, `stddev`: statistical measures
+- `lastbandlow`, `lastbandhigh`, `lastbandavg`: band-specific selections
+- `count`: number of valid pixels
 
-In openEO, the backend offers set of collections to be processed. `titiler-openeo` offers the possibiltiy to use external STAC API services to get the collections.
-It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API and get the collections. The STAC API is configured through `TITILER_OPENEO_SERVICE_STORE_URL` environment variable.
+## Collections and STAC Integration
+
+openEO by TiTiler integrates with external STAC API services to provide collections. It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API, configured through the `TITILER_OPENEO_SERVICE_STORE_URL` environment variable.
 
 ### OpenEO Process Graph to CQL2-JSON Conversion
 
-When filtering STAC collections using OpenEO properties, `titiler-openeo` automatically converts OpenEO process graphs to CQL2-JSON format, which is the standard filtering format for STAC API. This conversion improves interoperability between OpenEO filters and STAC API, allowing for more complex and efficient filtering of collections.
+The backend automatically converts OpenEO process graphs to CQL2-JSON format for STAC API filtering. Supported operators include:
 
-Supported operators include:
 - Comparison operators (`eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `between`)
 - Array operators (`in`, `array_contains`)
 - Pattern matching operators (`starts_with`, `ends_with`, `contains`)
 - Null checks (`is_null`)
 - Logical operators (`and`, `or`, `not`)
 
-For example, the following OpenEO process graph filter:
+Example conversion:
 ```json
+// OpenEO process graph
 {
   "cloud_cover": {
     "process_graph": {
@@ -97,33 +78,19 @@ For example, the following OpenEO process graph filter:
     }
   }
 }
-```
 
-Will be converted to the CQL2-JSON filter:
-```json
+// Converted to CQL2-JSON
 {
   "op": "<",
   "args": [{"property": "properties.cloud_cover"}, 20]
 }
 ```
 
-## File formats
+## Performance Considerations
 
-Since the backend is built on top of the TiTiler engine, it supports the same output formats:
+The backend is optimized for on-the-fly processing and serving of raster data. Key considerations:
 
-- JPEG
-- PNG
-
-## Processes
-
-`titiler-openeo` supports a set of processes that can be used in a process graph. There are mostly focused on raster processing.
-
-### Load Collection
-
-The `load_collection` process is used to load a collection from the STAC API. In `titiler-openeo`, it also returns a `Datacube` object type that needs to be reduced to an [`ImageData`](.#reducing-the-data) object type to be used with most of the other process.
-
-## General limitations
-
-The backend is designed to process and serve raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data. So as a rule of thumb, bigger the initial extent of the data to process, the longer the processing time will be and thus may lead to timeouts.
-
-Since titiler-openeo does not require any other middleware to be deployed, it can be easily replicated and scaled.
+- Processing time increases with the extent of data
+- Larger extents may lead to timeouts
+- The backend can be easily replicated and scaled
+- No additional middleware required for deployment

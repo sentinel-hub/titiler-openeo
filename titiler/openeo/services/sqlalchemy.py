@@ -132,9 +132,8 @@ class SQLAlchemyStore(ServicesStore):
             if result.user_id != user_id:
                 raise ValueError(f"Service {item_id} does not belong to user {user_id}")
 
-            # Merge the existing service with updates
-            service_data = result.service
-            service_data.update(val)
+            # Create a new dict to ensure SQLAlchemy detects the change
+            service_data = {**result.service, **val}
             result.service = service_data
 
             session.commit()

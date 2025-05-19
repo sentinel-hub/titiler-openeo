@@ -19,9 +19,8 @@ from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
 from titiler.openeo import models
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
-from titiler.openeo.models import OPENEO_VERSION, ServiceInput
-from titiler.openeo.processes.implementations.io import SaveResultData, save_result
-from titiler.openeo.services import ServicesStore
+from titiler.openeo.models import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
+from titiler.openeo.services import ServicesStore, TileAssignmentStore
 from titiler.openeo.stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
@@ -32,9 +31,11 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
+    tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
     auth: Auth
+    default_services_file: Optional[str] = None
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -440,6 +441,41 @@ class EndpointsFactory(BaseFactory):
         def openeo_services(request: Request, user=Depends(self.auth.validate)):
             """Lists all secondary web services."""
             services = self.services_store.get_user_services(user.user_id)
+
+            # If services list is empty and default_services_file is configured, load default services
+            if not services and self.default_services_file:
+                try:
+                    import json
+                    import os
+
+                    # Check if the file exists
+                    if os.path.exists(self.default_services_file):
+                        with open(self.default_services_file, "r") as f:
+                            default_services_config = json.load(f)
+
+                        # Create each service using the service configuration
+                        for _, service_data in default_services_config.items():
+                            # Extract just the service configuration, ignoring id and user_id
+                            service_config = service_data.get("service", {})
+                            if "id" in service_config:
+                                del service_config[
+                                    "id"
+                                ]  # Remove the id as it will be generated
+
+                            # Create the service
+                            body = models.ServiceInput(**service_config)
+                            self.services_store.add_service(
+                                user.user_id, body.model_dump()
+                            )
+
+                        # Reload services after adding defaults
+                        services = self.services_store.get_user_services(user.user_id)
+                except Exception as e:
+                    # Log the error but continue without default services
+                    import logging
+
+                    logging.error(f"Failed to load default services: {str(e)}")
+
             return {
                 "services": [
                     {
@@ -569,6 +605,13 @@ class EndpointsFactory(BaseFactory):
             # except Exception as e:
             #     raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
 
+            # Check process and type are present
+            if not body.process or not body.type:
+                raise HTTPException(
+                    422,
+                    detail="Both 'process' and 'type' fields are required.",
+                )
+
             service_id = self.services_store.add_service(
                 user.user_id, body.model_dump()
             )
@@ -646,16 +689,38 @@ class EndpointsFactory(BaseFactory):
             tags=["Secondary Services"],
         )
         def openeo_service_update(
+            body: ServiceUpdateInput,
             service_id: str = Path(
                 description="A per-backend unique identifier of the secondary web service.",
             ),
-            body: Optional[ServiceInput] = None,
             user=Depends(self.auth.validate),
         ):
             """Updates an existing secondary web service."""
-            self.services_store.update_service(
-                user.user_id, service_id, body.model_dump() if body else {}
-            )
+            # Get existing service
+            existing = self.services_store.get_service(service_id)
+            if not existing:
+                raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
+            if body:
+                update_data = {}
+                # Only include non-None fields from the update
+                body_data = body.model_dump(exclude_none=True)
+
+                # Start with existing service data
+                update_data = existing.copy()
+                # Remove id since it's a special field from get_service
+                if "id" in update_data:
+                    del update_data["id"]
+
+                # Update with any new values provided
+                update_data.update(body_data)
+            else:
+                update_data = existing
+                if "id" in update_data:
+                    del update_data["id"]
+
+            self.services_store.update_service(user.user_id, service_id, update_data)
             return Response(status_code=204)
 
         @self.router.get(
@@ -723,6 +788,23 @@ class EndpointsFactory(BaseFactory):
                             "description": "Buffer on each side of the given tile. It must be a multiple of `0.5`. Output **tilesize** will be expanded to `tilesize + 2 * buffer` (e.g 0.5 = 257x257, 1.0 = 258x258).",
                             "type": "number",
                             "minimum": 0,
+                        },
+                        "scope": {
+                            "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
+                            "type": "string",
+                            "enum": ["private", "restricted", "public"],
+                            "default": "public",
+                        },
+                        "authorized_users": {
+                            "description": "List of user IDs authorized to access the service when scope is restricted. If not specified, all authenticated users can access.",
+                            "type": "array",
+                            "items": {"type": "string", "description": "User ID"},
+                            "required": False,
+                        },
+                        "inject_user": {
+                            "description": "Whether to inject the authenticated user as a named parameter 'user' into the process graph.",
+                            "type": "boolean",
+                            "default": False,
                         },
                     },
                     "process_parameters": [
@@ -800,15 +882,23 @@ class EndpointsFactory(BaseFactory):
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry
+                process_registry=self.process_registry,
             )
-            result = pg_callable()
+            result = pg_callable(named_parameters={"user": user})
+
+            media_type = result.media_type if hasattr(result, "media_type") else None
+            if not media_type and isinstance(result, str):
+                media_type = "text/plain"
+            elif not media_type:
+                media_type = "application/octet-stream"
+
+            data = result.data if hasattr(result, "data") else result
 
             # if the result is not a SaveResultData object, convert it to one
-            if not isinstance(result, SaveResultData):
-                result = save_result(result, "GTiff")
+            # if not isinstance(result, SaveResultData):
+            #     result = save_result(result, "GTiff")
 
-            return Response(result.data, media_type=result.media_type)
+            return Response(data, media_type=media_type)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
@@ -851,14 +941,20 @@ class EndpointsFactory(BaseFactory):
                     description="Row (Y) index of the tile on the selected TileMatrix. It cannot exceed the MatrixWidth-1 for the selected TileMatrix.",
                 ),
             ],
-            # user=Depends(self.auth.validate),
+            user=Depends(self.auth.validate_optional),
         ):
             """Create map tile."""
-            service = self.services_store.get_service(service_id)
+            from titiler.openeo.services.auth import ServiceAuthorizationManager
 
-            # SERVICE CONFIGURATION
+            service = self.services_store.get_service(service_id)
             if service is None:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # Authorize service access
+            auth_manager = ServiceAuthorizationManager()
+            auth_manager.authorize(service, user)
+
+            # Get service configuration
             configuration = service.get("configuration", {})
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
@@ -876,10 +972,6 @@ class EndpointsFactory(BaseFactory):
             process = deepcopy(service["process"])
 
             load_collection_nodes = get_load_collection_nodes(process["process_graph"])
-            # Check there is at least one load_collection process
-            assert (
-                load_collection_nodes
-            ), "Could not find any `load_collection process in service's process-graph"
 
             # Check that nodes have spatial-extent
             assert all(
@@ -931,7 +1023,18 @@ class EndpointsFactory(BaseFactory):
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry
             )
-            img = pg_callable()
+
+            # Prepare named parameters
+            named_params = {}
+
+            # Inject named parameters based on configuration
+            if configuration.get("tile_store", False) and self.tile_store:
+                named_params["_openeo_tile_store"] = self.tile_store
+
+            if configuration.get("inject_user", False) and user:
+                named_params["_openeo_user"] = user
+
+            img = pg_callable(named_parameters=named_params)
             return Response(img.data, media_type=media_type)
 
 

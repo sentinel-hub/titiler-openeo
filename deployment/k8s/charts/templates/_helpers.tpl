@@ -50,3 +50,37 @@ Selector labels
 app.kubernetes.io/name: {{ include "titiler.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Database URL construction helper
+*/}}
+{{- define "database.url" -}}
+{{- if eq .Values.database.type "json" -}}
+{{ .Values.database.json.path }}
+{{- else if eq .Values.database.type "duckdb" -}}
+{{ .Values.database.duckdb.path }}
+{{- else if eq .Values.database.type "postgresql" -}}
+{{- if .Values.database.external.enabled -}}
+{{- $externalPassword := .Values.database.external.password -}}
+{{- if .Values.database.external.existingSecret -}}
+{{- $secret := (lookup "v1" "Secret" .Release.Namespace .Values.database.external.existingSecret) -}}
+{{- if and $secret $secret.data (hasKey $secret.data .Values.database.external.existingSecretKey) -}}
+{{- $externalPassword = index $secret.data .Values.database.external.existingSecretKey | b64dec -}}
+{{- end -}}
+{{- end -}}
+postgresql://{{ .Values.database.external.user }}:{{ $externalPassword }}@{{ .Values.database.external.host }}:{{ .Values.database.external.port }}/{{ .Values.database.external.database }}
+{{- else -}}
+{{- $postgresqlPassword := (randAlphaNum 32) -}}
+{{- if .Values.postgresql.auth.password -}}
+{{- $postgresqlPassword = .Values.postgresql.auth.password -}}
+{{- else -}}
+{{- $postgresqlSecret := (lookup "v1" "Secret" .Release.Namespace (printf "%s-postgresql" (include "titiler.fullname" .))) -}}
+{{- $passwordKey := printf "password" -}}
+{{- if and $postgresqlSecret $postgresqlSecret.data (hasKey $postgresqlSecret.data $passwordKey) -}}
+{{- $postgresqlPassword = index $postgresqlSecret.data $passwordKey | b64dec -}}
+{{- end -}}
+{{- end -}}
+postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{ include "titiler.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
