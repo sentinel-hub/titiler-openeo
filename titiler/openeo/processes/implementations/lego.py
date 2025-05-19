@@ -664,15 +664,33 @@ def generate_lego_instructions(
         brick_info = img_data.metadata["brick_info"]
         grid_dims = brick_info["grid_dimensions"]
 
+        # Calculate dimensions for original image display
+        original_height = grid_size * 4  # Height for original image display
+        
         # Calculate image dimensions with padding for coordinates
         coord_padding = grid_size
         legend_width = 300 if include_legend else 0
         img_width = grid_dims[1] * grid_size + legend_width + coord_padding
-        img_height = grid_dims[0] * grid_size + coord_padding
+        img_height = grid_dims[0] * grid_size + coord_padding + original_height
 
         # Create a blank white image with padding
         instruction_img = Image.new("RGB", (img_width, img_height), "white")
         from PIL import ImageDraw, ImageFont
+
+        # Add original image at the top
+        original_array = img_data.array.data
+        original_img = Image.fromarray(numpy.transpose(original_array, (1, 2, 0)))
+        
+        # Calculate width to maintain aspect ratio
+        aspect_ratio = original_img.width / original_img.height
+        original_width = int(original_height * aspect_ratio)
+        
+        # Resize original image
+        original_img = original_img.resize((original_width, original_height), Image.Resampling.LANCZOS)
+        
+        # Center the original image
+        original_x = (img_width - original_width) // 2
+        instruction_img.paste(original_img, (original_x, 0))
 
         draw = ImageDraw.Draw(instruction_img)
 
@@ -694,10 +712,10 @@ def generate_lego_instructions(
             font = ImageFont.load_default()
             bold_font = font
 
-        # Add padding for labels
+        # Add padding for labels, adjusted for original image
         coord_padding = grid_size
         grid_start_x = coord_padding * 1.2  # Double padding on the left for Y label
-        grid_start_y = coord_padding
+        grid_start_y = coord_padding + original_height  # Start grid below original image
 
         # Draw grid lines with padding
         for i in range(grid_dims[0] + 1):
@@ -713,7 +731,7 @@ def generate_lego_instructions(
         text_bbox = draw.textbbox((0, 0), text, font=big_font)
         text_width = text_bbox[2] - text_bbox[0]
         text_x = grid_start_x + (grid_dims[1] * grid_size - text_width) // 2
-        draw.text((text_x, grid_size // 3), text, font=big_font, fill="black")
+        draw.text((text_x, grid_start_y - grid_size + 10), text, font=big_font, fill="black")
 
         # Draw tile position Y on the left (rotated 90° counterclockwise)
         y_position = tile_info["y"]
@@ -778,7 +796,7 @@ def generate_lego_instructions(
         # Add legend if requested
         if include_legend and color_counts:
             legend_x = grid_start_x + grid_dims[1] * grid_size + 10
-            legend_y = 10
+            legend_y = grid_start_y + 10
             legend_square_size = int(grid_size / 2)
 
             # Draw legend title
