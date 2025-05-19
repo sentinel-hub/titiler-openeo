@@ -31,15 +31,22 @@ extra:
       link: "https://github.com/sentinel-hub"
 
 nav:
-  - TiTiler-OpenEO: "index.md"
+  - openEO by TiTiler: "index.md"
   - Project:
-    - Overview: "concepts.md"
-    - Documentation Plan: "documentation-plan.md"
+    - Overview: "project-overview.md"
     - Release Notes: "release-notes.md"
-  - Concepts:
+  - Architecture:
+    - Concepts: "concepts.md"
     - RasterStack Data Model: "raster-stack.md"
-    - Tile Assignment: "tile-assignment.md"
-    - Service Authorization: "authorization.md"
+    - Special Features:
+      - Service Authorization: "authorization.md"
+      - Tile Assignment: "tile-assignment.md"
+  - Deployment:
+    - Local Setup: "local-setup.md"
+    - Kubernetes Guide: "kubernetes.md"
+  - Administrator Guide:
+    - Overview: "admin-guide.md"
+    - OpenID Connect: "openid-connect.md"
   - Development:
     - Contributing: "contributing.md"
 
