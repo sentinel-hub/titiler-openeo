@@ -2,7 +2,7 @@
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
-  tag: "dev"
+  tag: "latest"
   pullPolicy: IfNotPresent
   command: "uvicorn"
   args:
