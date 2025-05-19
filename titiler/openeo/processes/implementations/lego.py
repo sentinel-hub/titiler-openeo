@@ -241,7 +241,7 @@ def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, 
     
     if _COASTLINE_LOADING:
         print(f"Warning: Coastline data still loading after {max_wait_seconds} seconds")
-        return numpy.ones(shape, dtype=numpy.float32)  # Return all water if timeout
+        return numpy.zeros(shape, dtype=bool)  # Return all land if still loading
     import pyproj
     import numpy as np
     from shapely.geometry import Point, box
@@ -280,7 +280,7 @@ def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, 
             west, south, east, north = minx, miny, maxx, maxy
 
         # Create an empty water mask (1 = water, 0 = land)
-        water_mask = np.ones(shape, dtype=np.float32)
+        water_mask = np.ones(shape, dtype=numpy.int8)
 
         # Check if the bounds are within Europe where EEA coastline data is valid
         # The EEA coastline covers roughly -30° to 50° longitude and 30° to 72° latitude
@@ -330,8 +330,8 @@ def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, 
 
     except Exception as e:
         print(f"Error processing water mask: {e}")
-        # Return all water as fallback
-        return numpy.ones(shape, dtype=numpy.float32)
+        # Return all land if there's an error
+        return numpy.zeros(shape, dtype=bool)
 
 
 def _legofication(
@@ -539,7 +539,8 @@ def _legofication(
                 small_img.metadata["brick_info"]["pixels"][tile_key] = {
                     "position": (i, j),
                     "color_name": lego_color_name,
-                    "is_water": is_water,
+                    "is_water": bool(is_water),
+                    "rgb": lego_rgb,
                 }
 
                 # Store information about transparent bricks for later processing
@@ -844,10 +845,12 @@ def generate_lego_instructions(
             band_names=["R", "G", "B"],
             metadata={
                 "instruction_metadata": {
-                    "grid_size": grid_size,
                     "total_bricks": sum(color_counts.values()),
                     "color_counts": color_counts,
-                }
+                    "x_position": tile_info["x"],
+                    "y_position": tile_info["y"],
+                },
+                "brick_info": brick_info
             },
         )
 

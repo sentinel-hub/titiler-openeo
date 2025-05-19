@@ -1,0 +1,139 @@
+{
+  "id": "lego-claim-service-json",
+  "type": "XYZ",
+  "configuration": {
+    "scope": "restricted",
+    "tile_store": true,
+    "tile_size": 256,
+    "minzoom": 7,
+    "maxzoom": 7,
+    "inject_user": true,
+    "grid": {
+      "width": 26,
+      "height": 27,
+      "x_range": [55, 80],
+      "y_range": [27, 52]
+    }
+  },
+  "title": "Lego Brick Tile Claim Service (JSON)",
+  "description": "Service for claiming and getting instructions for a specific tile (uses JSON format)",
+  "enabled": true,
+  "process": {
+    "parameters": [],
+    "process_graph": {
+      "claim": {
+        "process_id": "tile_assignment",
+        "result": false,
+        "arguments": {
+          "zoom": 7,
+          "x_range": [55, 80],
+          "y_range": [27, 52],
+          "stage": "claim",
+          "store": {
+            "from_parameter": "_openeo_tile_store"
+          },
+          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "user_id": {
+            "from_parameter": "_openeo_user"
+          }
+        }
+      },
+      "bbox": {
+        "process_id": "xyz_to_bbox",
+        "result": false,
+        "arguments": {
+          "data": {
+            "from_node": "claim"
+          }
+        }
+      },
+      "load": {
+        "process_id": "load_collection_and_reduce",
+        "result": false,
+        "arguments": {
+          "bands": ["B04", "B03", "B02"],
+          "id": "sentinel-2-global-mosaics",
+          "spatial_extent": { "from_node": "bbox" },
+          "temporal_extent": ["2024-04-01T00:00:00Z", "2024-04-30T23:59:59Z"]
+        }
+      },
+      "rgb": {
+        "process_id": "apply",
+        "result": false,
+        "arguments": {
+          "data": {
+            "from_node": "load"
+          },
+          "process": {
+            "process_graph": {
+              "1": {
+                "arguments": {
+                  "inputMax": 10000,
+                  "inputMin": 0,
+                  "outputMax": 255,
+                  "x": {
+                    "from_parameter": "x"
+                  }
+                },
+                "process_id": "linear_scale_range"
+              },
+              "2": {
+                "process_id": "trunc",
+                "arguments": {
+                  "x": {
+                    "from_node": "1"
+                  }
+                },
+                "result": true
+              }
+            }
+          }
+        }
+      },
+      "color": {
+        "process_id": "color_formula",
+        "result": false,
+        "arguments": {
+          "data": {
+            "from_node": "rgb"
+          },
+          "formula": "Gamma R 2 Gamma G 2.32 Gamma B 2.2 Sigmoidal RGB 10 0.237 Saturation 1.15"
+        }
+      },
+      "lego": {
+        "process_id": "legofication",
+        "result": false,
+        "arguments": {
+          "data": {
+            "from_node": "color"
+          },
+          "nbbricks": 4,
+          "bricksize": 64,
+          "water_threshold": 0.1
+        }
+      },
+      "instructions": {
+        "process_id": "generate_lego_instructions",
+        "result": false,
+        "arguments": {
+          "data": {
+            "from_node": "lego"
+          },
+          "tile_info": {
+            "from_node": "claim"
+          }
+        }
+      },
+      "save": {
+        "process_id": "save_result",
+        "result": true,
+        "arguments": {
+          "data": {
+            "from_node": "instructions"
+          },
+          "format": "metajson"
+        }
+      }
+    }
+  }
+}

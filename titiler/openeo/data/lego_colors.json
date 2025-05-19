@@ -201,7 +201,7 @@
             "pantone": "2423 C",
             "hex": "#00AA13"
         },
-        "Green (Dark Green)": {
+        "Green": {
             "hsl": [141, 100, 27],
             "rgb": [0, 137, 47],
             "pantone": "3522 C",
