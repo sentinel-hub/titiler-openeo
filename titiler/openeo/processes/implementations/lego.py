@@ -796,7 +796,7 @@ def generate_lego_instructions(
         # Add legend if requested
         if include_legend and color_counts:
             legend_x = grid_start_x + grid_dims[1] * grid_size + 10
-            legend_y = grid_start_y + 10
+            legend_y = grid_start_y
             legend_square_size = int(grid_size / 2)
 
             # Draw legend title
