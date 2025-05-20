@@ -68,6 +68,43 @@ spec:
             - name: TITILER_OPENEO_LEGO_COLORS_FILE
               value: "/config/lego_colors.json"
             {{- end }}
+            # STAC configuration
+            - name: TITILER_OPENEO_STAC_API_URL
+              value: {{ .Values.stac.apiUrl | quote }}
+            # Authentication configuration
+            - name: TITILER_OPENEO_AUTH_METHOD
+              value: {{ .Values.auth.method | quote }}
+            {{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled }}
+            - name: TITILER_OPENEO_AUTH_BASIC_USERS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titiler.fullname" . }}-configmap
+                  key: basic-auth-users
+            {{- end }}
+            {{- if and (eq .Values.auth.method "oidc") .Values.auth.oidc.enabled }}
+            - name: TITILER_OPENEO_AUTH_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            - name: TITILER_OPENEO_AUTH_OIDC_WK_URL
+              value: {{ .Values.auth.oidc.wellKnownUrl | quote }}
+            - name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+              value: {{ .Values.auth.oidc.redirectUrl | quote }}
+            {{- if .Values.auth.oidc.scopes }}
+            - name: TITILER_OPENEO_AUTH_OIDC_SCOPES
+              value: {{ .Values.auth.oidc.scopes | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.nameClaim }}
+            - name: TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM
+              value: {{ .Values.auth.oidc.nameClaim | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.title }}
+            - name: TITILER_OPENEO_AUTH_OIDC_TITLE
+              value: {{ .Values.auth.oidc.title | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.description }}
+            - name: TITILER_OPENEO_AUTH_OIDC_DESCRIPTION
+              value: {{ .Values.auth.oidc.description | quote }}
+            {{- end }}
+            {{- end }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
             - name: {{ $key }}

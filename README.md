@@ -2,38 +2,30 @@
 
 TiTiler backend for openEO
 
-![TiTiler OpenEO](img/image.png)
+![TiTiler OpenEO](docs/src/img/image.png)
 
 ## Overview
 
-[`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/main.py) is a TiTiler backend implementation for openEO developed by [![Development Seed](img/ds-logo-hor.svg){: style="height:25px"}](https://developmentseed.org/) and [![Sinergise](img/sinergise-logo.png){: style="height:25px"}](https://www.sinergise.com/).
+[`titiler-openeo`](titiler/openeo/main.py ) is a TiTiler backend implementation for openEO developed by <a href="https://developmentseed.org/"><img alt="Development Seed" src="docs/src/img/ds-logo-hor.svg" height="25px"></a> and <a href="https://www.sinergise.com/"><img alt="Sinergise" src="docs/src/img/sinergise-logo.png" height="25px"></a>.
 
 The main goal of this project is to provide a light and fast backend for openEO services and processes using the TiTiler engine.
 This simplicity comes with some specific implementation choices like the type of data managed by the backend.
 It is focused on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
-A concept note is available [here](concepts.md) to describe in more detail the implementation choices.
+A concept note is available [here](https://sentinel-hub.github.io/titiler-openeo/concepts/) to describe in more detail the implementation choices.
 
 The application provides with a minimal [openEO API (L1A and L1C)](https://openeo.org/documentation/1.0/developers/profiles/api.html#api-profiles).
 
 ## Features
 
-- STAC API integration with external STAC services
-- Synchronous processing
+- [STAC API integration](https://sentinel-hub.github.io/titiler-openeo/concepts/#collections-and-stac-integration) with external STAC services
+- [Synchronous processing](https://sentinel-hub.github.io/titiler-openeo/concepts/#data-model) capabilities
 - Various output formats (e.g., JPEG, PNG)
-- Multiple supported processes
+- Multiple [supported processes](https://sentinel-hub.github.io/titiler-openeo/concepts/#data-reduction)
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
-- Optimized RasterStack data model for consistent processing
-- LazyRasterStack implementation for improved performance
-
-## Roadmap
-
-- [ ] Services Management (CRUD `/services` endpoints)
-- [ ] Integrated Authentication
-- [ ] More output formats
-- [ ] More openEO processes
-- [x] Github pages documentation
+- Optimized [RasterStack data model](https://sentinel-hub.github.io/titiler-openeo/raster-stack/) for consistent processing
+- [LazyRasterStack implementation](https://sentinel-hub.github.io/titiler-openeo/raster-stack/#lazyrasterstack) for improved performance
 
 ## Installation
 
@@ -52,7 +44,7 @@ To run the application, use the following command:
 ```bash
 cp .env.eoapi .env
 export $(cat .env | xargs)
-uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
+uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8081
 ```
 
 ## Configuration
@@ -74,7 +66,7 @@ In this repository, 2 `.env` sample files are provided:
 - [`.env.cdse`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
 
   ```bash
-  TITILER_OPENEO_SERVICE_STORE_URL="https://stac.dataspace.copernicus.eu/v1"
+  TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
   TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
   ```
 
@@ -115,20 +107,20 @@ python -m pytest
 
 ### Use the openEO editor
 
-To use the openEO editor, start the server as described in [usage](#usage) section.
-Then, run the following command:
+To use the openEO editor, you can use Docker Compose to start all services:
 
 ```bash
-docker pull mundialis/openeo-web-editor:latest
-docker run -p 8081:80 mundialis/openeo-web-editor:latest
+docker compose up
 ```
 
-Then, open the editor in your browser at http://localhost:8081.
-In the editor, set the openEO backend URL to http://localhost:8080.
-Login with the following credentials:
+This will start:
+- API service at http://localhost:8081
+- openEO Web Editor at http://localhost:8080
+- Keycloak at http://localhost:8082
 
-- Username: `anonymous`
-- Password: `test`
+Access the editor at http://localhost:8080 and set the backend URL to http://localhost:8081.
+
+For authentication setup and testing, see the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication).
 
 ## License
 

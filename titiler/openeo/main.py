@@ -51,13 +51,10 @@ def create_app():
         docs_url="/api.html",
         description="""TiTiler backend for openEO.
 
-    ---
+**Documentation**: <a href="https://sentinel-hub.github.io/titiler-openeo" target="_blank">https://sentinel-hub.github.io/titiler-openeo</a>
 
-    **Documentation**: <a href="https://developmentseed.org/titiler-openeo/" target="_blank">https://developmentseed.org/titiler-openeo/</a>
+**Source Code**: <a href="https://github.com/sentinel-hub/titiler-openeo" target="_blank">https://github.com/sentinel-hub/titiler-openeo</a>
 
-    **Source Code**: <a href="https://github.com/sentinel-hub/titiler-openeo" target="_blank">https://github.com/sentinel-hub/titiler-openeo</a>
-
-    ---
         """,
         version=titiler_version,
         root_path=api_settings.root_path,

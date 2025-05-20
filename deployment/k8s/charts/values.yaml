@@ -2,7 +2,7 @@
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
-  tag: "dev"
+  tag: "latest"
   pullPolicy: IfNotPresent
   command: "uvicorn"
   args:
@@ -60,6 +60,33 @@ extraHostPathMounts:
 
 imagePullSecrets: []
 
+# Authentication configuration
+auth:
+  # Authentication method: "basic" or "oidc"
+  method: "basic"
+
+  # Basic auth configuration (for testing)
+  basic:
+    enabled: true
+    users:
+      - username: "test"
+        password: "password"
+
+  # OIDC configuration (for production)
+  oidc:
+    enabled: false
+    clientId: ""
+    wellKnownUrl: ""
+    redirectUrl: ""
+    scopes: "openid email profile"
+    nameClaim: "name"
+    title: "OIDC"
+    description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+
+# STAC configuration
+stac:
+  apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
+
 env:
   CPL_TMPDIR: /tmp
   GDAL_CACHEMAX: 200   # 200 mb
@@ -70,7 +97,6 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
-  TITILER_OPENEO_STAC_API_URL: https://stac.eoapi.dev
 
 resources:
   limits:

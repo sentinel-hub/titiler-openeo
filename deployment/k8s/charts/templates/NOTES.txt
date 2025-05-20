@@ -1,0 +1,46 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+The application can be accessed through the following ingress hosts:
+{{- range .Values.ingress.hosts }}
+  - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+The application can be accessed:
+
+* Within the cluster:
+    export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "titiler.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+    export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+    kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+Then visit http://localhost:8080
+{{- end }}
+
+Authentication Configuration:
+{{- if eq .Values.auth.method "basic" }}
+Basic Authentication is enabled:
+- Multiple users can be configured in values.yaml
+- Current number of configured users: {{ len .Values.auth.basic.users }}
+{{- else if eq .Values.auth.method "oidc" }}
+OpenID Connect (OIDC) Authentication is enabled:
+- Well-known URL: {{ .Values.auth.oidc.wellKnownUrl }}
+- Redirect URL: {{ .Values.auth.oidc.redirectUrl }}
+{{- end }}
+
+STAC Configuration:
+- API URL: {{ .Values.stac.apiUrl }}
+
+Available Endpoints:
+- API Documentation: /api
+- OpenAPI Specification: /api.html
+- Health Check: /healthz
+
+For more information, visit:
+https://github.com/sentinel-hub/titiler-openeo
