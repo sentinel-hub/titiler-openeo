@@ -20,7 +20,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - [STAC API integration](https://sentinel-hub.github.io/titiler-openeo/concepts/#collections-and-stac-integration) with external STAC services
 - [Synchronous processing](https://sentinel-hub.github.io/titiler-openeo/concepts/#data-model) capabilities
 - Various output formats (e.g., JPEG, PNG)
-- Multiple [supported processes](https://sentinel-hub.github.io/titiler-openeo/concepts/#data-reduction)
+- Multiple [supported processes](https://github.com/sentinel-hub/titiler-openeo/tree/main/titiler/openeo/processes/data)
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
