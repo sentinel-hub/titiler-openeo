@@ -87,14 +87,14 @@ def _save_single_result(
     options: Optional[Dict] = None,
 ) -> SaveResultData:
     """Save a single result (ImageData or numpy array)."""
-    
+
     if isinstance(data, ImageData) and format.lower() == "metajson":
         # extract metadata from data
         metadata = data.metadata or {}
         # convert metadata to bytes
         bytes = json.dumps(metadata).encode("utf-8")
         return SaveResultData(data=bytes, media_type="application/json")
-    
+
     if isinstance(data, dict) and data.get("type") == "FeatureCollection":
         if format.lower() == "json":
             # convert json to bytes
@@ -217,7 +217,7 @@ def save_result(
 
         # Convert to bytes
         bytes_data = str(data).encode("utf-8")
-        return SaveResultData(data=bytes_data, media_type="text/plain")        
+        return SaveResultData(data=bytes_data, media_type="text/plain")
 
     # Handle special cases for GeoJSON data directly
     if (
@@ -226,6 +226,11 @@ def save_result(
         and data.get("type") == "FeatureCollection"
     ):
         return _save_single_result(data, format, options)
+
+    # Handle json for dictionaries structure
+    if format.lower() in ["json", "geojson"] and isinstance(data, dict):
+        data = json.dumps(data).encode("utf-8")
+        return SaveResultData(data=data, media_type="application/json")
 
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
