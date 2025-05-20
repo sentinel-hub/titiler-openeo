@@ -524,7 +524,7 @@ class LoadCollection:
         crs = dimensions["crs"]
 
         # Group items by date
-        items_by_date = {}
+        items_by_date: dict[str, list[dict]] = {}
         for item in items:
             date = _props_to_datename(item["properties"])
             if date not in items_by_date:

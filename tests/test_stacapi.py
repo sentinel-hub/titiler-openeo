@@ -3,7 +3,6 @@
 import pytest
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.models import ImageData
-from rio_tiler.tasks import create_tasks
 
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
@@ -271,6 +270,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
         captured_params.update(kwargs)
         # Return a mock ImageData
         import numpy
+
         return ImageData(
             numpy.zeros((1, 100, 100), dtype="uint8"),
             assets=kwargs.get("assets", ["B01"]),
