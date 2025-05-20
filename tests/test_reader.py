@@ -1,22 +1,22 @@
 """Tests for reader module."""
 
 import pytest
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 import rasterio
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
 from titiler.openeo.errors import (
+    MixedCRSError,
     OutputLimitExceeded,
     ProcessParameterMissing,
-    MixedCRSError,
 )
 from titiler.openeo.reader import (
-    _validate_input_parameters,
-    _get_item_resolutions,
-    _reproject_resolution,
+    SimpleSTACReader,
     _calculate_dimensions,
     _check_pixel_limit,
     _estimate_output_dimensions,
-    SimpleSTACReader,
+    _get_item_resolutions,
+    _reproject_resolution,
+    _validate_input_parameters,
 )
 
 
@@ -63,7 +63,9 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
     """Test resolution extraction from STAC item."""
     # Test with proj:transform
     with SimpleSTACReader(sample_stac_item) as src_dst:
-        x_res, y_res = _get_item_resolutions(sample_stac_item, src_dst, sample_spatial_extent)
+        x_res, y_res = _get_item_resolutions(
+            sample_stac_item, src_dst, sample_spatial_extent
+        )
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 10  # From proj:transform
@@ -81,7 +83,9 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
         },
     }
     with SimpleSTACReader(item_with_shape) as src_dst:
-        x_res, y_res = _get_item_resolutions(item_with_shape, src_dst, sample_spatial_extent)
+        x_res, y_res = _get_item_resolutions(
+            item_with_shape, src_dst, sample_spatial_extent
+        )
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 0.1  # 10/100
@@ -98,7 +102,9 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
         },
     }
     with SimpleSTACReader(item_without_metadata) as src_dst:
-        x_res, y_res = _get_item_resolutions(item_without_metadata, src_dst, sample_spatial_extent)
+        x_res, y_res = _get_item_resolutions(
+            item_without_metadata, src_dst, sample_spatial_extent
+        )
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 1024  # Default resolution
@@ -120,7 +126,7 @@ def test_reproject_resolution():
 def test_calculate_dimensions():
     """Test dimension calculation."""
     bbox = [0, 0, 10, 10]
-    
+
     # Test with specified dimensions
     width, height = _calculate_dimensions(bbox, None, None, width=100, height=200)
     assert width == 100
@@ -161,7 +167,9 @@ def test_check_pixel_limit():
     # Test with None dimensions (should convert to 0)
     width_int, height_int = None, None
     items = [{"id": "item1"}, {"id": "item2"}]
-    _check_pixel_limit(width_int, height_int, items)  # Should not raise error for 0 pixels
+    _check_pixel_limit(
+        width_int, height_int, items
+    )  # Should not raise error for 0 pixels
 
 
 def test_estimate_output_dimensions(sample_stac_item, sample_spatial_extent):

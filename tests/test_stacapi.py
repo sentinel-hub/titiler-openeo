@@ -88,7 +88,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     loader = LoadCollection(stac_api=backend)
 
     # Test with dimensions exceeding threshold
-    with pytest.raises(OutputLimitExceeded) as exc_info:
+    with pytest.raises(OutputLimitExceeded):
         loader.load_collection(
             id="test",
             spatial_extent=BoundingBox(
@@ -177,7 +177,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     loader = LoadCollection(stac_api=backend)
 
     # Test with dimensions exceeding threshold
-    with pytest.raises(OutputLimitExceeded) as exc_info:
+    with pytest.raises(OutputLimitExceeded):
         loader.load_collection_and_reduce(
             id="test",
             spatial_extent=BoundingBox(
