@@ -17,15 +17,16 @@ The application implements the [openEO API (L1A and L1C)](https://openeo.org/doc
 
 ## Features
 
-- STAC API integration with external STAC services
-- Synchronous processing
+- [STAC API integration](https://sentinel-hub.github.io/titiler-openeo/concepts/#collections-and-stac-integration) with external STAC services
+- [Synchronous processing](https://sentinel-hub.github.io/titiler-openeo/concepts/#data-model) capabilities
 - Various output formats (e.g., JPEG, PNG)
-- Multiple supported processes
+- Multiple [supported processes](https://github.com/sentinel-hub/titiler-openeo/tree/main/titiler/openeo/processes/data)
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
-- Optimized RasterStack data model for consistent processing
-- LazyRasterStack implementation for improved performance
+- Optimized [RasterStack data model](https://sentinel-hub.github.io/titiler-openeo/raster-stack/) for consistent processing
+- [LazyRasterStack implementation](https://sentinel-hub.github.io/titiler-openeo/raster-stack/#lazyrasterstack) for improved performance
+
 
 ## Getting Started
 
