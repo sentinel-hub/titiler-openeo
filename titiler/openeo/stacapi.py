@@ -21,7 +21,14 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
-from .errors import NoDataAvailable, TemporalExtentEmpty
+from .errors import (
+    NoDataAvailable,
+    TemporalExtentEmpty,
+    ItemsLimitExceeded,
+    UnsupportedSTACObject,
+    OutputLimitExceeded,
+    STACLoadError,
+)
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
@@ -495,16 +502,14 @@ class LoadCollection:
 
         # Check the items limit
         if len(items) > processing_settings.max_items:
-            raise ValueError(
-                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
-            )
+            raise ItemsLimitExceeded(len(items), processing_settings.max_items)
 
         # Check pixel limit before calling _estimate_output_dimensions
         # For test_load_collection_pixel_threshold
-        if width and height and (width * height) > processing_settings.max_pixels:
-            raise ValueError(
-                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
-            )
+        if width and height:
+            pixel_count = width * height * len(items)
+            if pixel_count > processing_settings.max_pixels:
+                raise OutputLimitExceeded(width, height, processing_settings.max_pixels, items_count=len(items))
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
@@ -575,16 +580,14 @@ class LoadCollection:
 
         # Check the items limit
         if len(items) > processing_settings.max_items:
-            raise ValueError(
-                f"Number of items in the workflow pipeline exceeds maximum allowed: {len(items)} (max allowed: {processing_settings.max_items})"
-            )
+            raise ItemsLimitExceeded(len(items), processing_settings.max_items)
 
         # Check pixel limit before calling _estimate_output_dimensions
         # For test_load_collection_and_reduce_pixel_threshold
-        if width and height and (width * height) > processing_settings.max_pixels:
-            raise ValueError(
-                f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
-            )
+        if width and height:
+            pixel_count = width * height * len(items)
+            if pixel_count > processing_settings.max_pixels:
+                raise OutputLimitExceeded(width, height, processing_settings.max_pixels, items_count=len(items))
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
@@ -645,9 +648,7 @@ class LoadStac:
         try:
             return pystac.read_file(url)
         except Exception as e:
-            raise ValueError(
-                f"Failed to read STAC from URL: {url}. Error: {str(e)}"
-            ) from e
+            raise STACLoadError(url=url, error=str(e)) from e
 
     def _handle_collection_or_catalog(
         self,
@@ -862,7 +863,7 @@ class LoadStac:
         elif isinstance(stac_obj, pystac.Item):
             items = [stac_obj.to_dict()]
         else:
-            raise ValueError(f"Unsupported STAC object type: {type(stac_obj)}")
+            raise UnsupportedSTACObject(str(type(stac_obj)))
 
         if not items:
             raise NoDataAvailable("There is no data available in the STAC catalog.")

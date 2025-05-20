@@ -19,6 +19,11 @@ from rio_tiler.errors import (
     InvalidAssetName,
     MissingAssets,
 )
+from titiler.openeo.errors import (
+    OutputLimitExceeded,
+    ProcessParameterMissing,
+    MixedCRSError,
+)
 from rio_tiler.io import Reader
 from rio_tiler.io.base import BaseReader, MultiBaseReader
 from rio_tiler.models import ImageData
@@ -66,15 +71,15 @@ def _estimate_output_dimensions(
     processing_settings = ProcessingSettings()
 
     if not spatial_extent:
-        raise ValueError("Missing required input: spatial_extent")
+        raise ProcessParameterMissing("spatial_extent")
 
     # Test if items are empty
     if not items:
-        raise ValueError("Missing required input: items")
+        raise ProcessParameterMissing("items")
 
     # Check if bands are empty
     if not bands:
-        raise ValueError("Missing required input: bands")
+        raise ProcessParameterMissing("bands")
 
     # Extract CRS and resolution information from items
     item_crs: rasterio.crs.CRS = None
@@ -86,9 +91,7 @@ def _estimate_output_dimensions(
             if item_crs is None:
                 item_crs = src_dst.crs
             elif item_crs != src_dst.crs:
-                raise ValueError(
-                    f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
-                )
+                raise MixedCRSError(found_crs=str(src_dst.crs), expected_crs=str(item_crs))
 
             # Get resolution information at item level first if available
             if src_dst.transform:
@@ -102,7 +105,15 @@ def _estimate_output_dimensions(
                     if asset_transform := asset.get("proj:transform"):
                         x_resolutions.append(abs(asset_transform[0]))
                         y_resolutions.append(abs(asset_transform[4]))
-
+                    elif asset_shape := asset.get("proj:shape"):
+                        # Get resolution from asset shape
+                        if asset_shape[0] > 0 and asset_shape[1] > 0:
+                            x_resolutions.append(
+                                abs((spatial_extent.east - spatial_extent.west) / asset_shape[0])
+                            )
+                            y_resolutions.append(
+                                abs((spatial_extent.north - spatial_extent.south) / asset_shape[1])
+                            )
                     else:
                         # Default to 1024x1024 if no resolution is found
                         x_resolutions.append(1024)
@@ -151,10 +162,14 @@ def _estimate_output_dimensions(
             height = 1024
 
     # Check if estimated pixel count exceeds maximum allowed
-    pixel_count = int(width or 0) * int(height or 0)
+    # Multiply by number of items since each item will be loaded into memory
+    pixel_count = int(width or 0) * int(height or 0) * len(items)
     if pixel_count > processing_settings.max_pixels:
-        raise ValueError(
-            f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
+        raise OutputLimitExceeded(
+            width, 
+            height, 
+            processing_settings.max_pixels,
+            items_count=len(items)
         )
 
     # Return all information needed for rendering

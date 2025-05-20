@@ -242,3 +242,69 @@ class ServiceUnavailable(OpenEOException):
             code="ServiceUnavailable",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+
+class OutputLimitExceeded(OpenEOException):
+    """The output size exceeds the maximum allowed limit."""
+
+    def __init__(self, width: int, height: int, max_pixels: int, items_count: Optional[int] = None):
+        """Initialize error with output size limit exceeded."""
+        total_pixels = width * height * (items_count or 1)
+        message = (
+            f"Estimated output size too large: {width}x{height} pixels"
+            + (f" x {items_count} items" if items_count else "")
+            + f" = {total_pixels:,} total pixels (max allowed: {max_pixels:,} pixels)"
+        )
+        super().__init__(
+            message=message,
+            code="OutputLimitExceeded",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class MixedCRSError(OpenEOException):
+    """The input data contains mixed coordinate reference systems."""
+
+    def __init__(self, found_crs: str, expected_crs: str):
+        """Initialize error with mixed CRS details."""
+        super().__init__(
+            message=f"Mixed CRS in items: found {found_crs} but expected {expected_crs}",
+            code="MixedCRSError",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class ItemsLimitExceeded(OpenEOException):
+    """The number of items exceeds the maximum allowed limit."""
+
+    def __init__(self, items_count: int, max_items: int):
+        """Initialize error with items limit exceeded."""
+        super().__init__(
+            message=f"Number of items in the workflow pipeline exceeds maximum allowed: {items_count} (max allowed: {max_items})",
+            code="ItemsLimitExceeded",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class UnsupportedSTACObject(OpenEOException):
+    """The STAC object type is not supported."""
+
+    def __init__(self, object_type: str):
+        """Initialize error with unsupported STAC object type."""
+        super().__init__(
+            message=f"Unsupported STAC object type: {object_type}",
+            code="UnsupportedSTACObject",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class STACLoadError(OpenEOException):
+    """Failed to load STAC object from URL."""
+
+    def __init__(self, url: str, error: str):
+        """Initialize error with STAC loading failure details."""
+        super().__init__(
+            message=f"Failed to read STAC from URL: {url}. Error: {error}",
+            code="STACLoadError",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
