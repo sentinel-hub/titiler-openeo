@@ -57,8 +57,9 @@ test = [
 ]
 dev = ["pre-commit", "bump-my-version"]
 docs = [
+    "ipython~=8.0.0",
     "mkdocs>=1.6.1",
-    # "mkdocs-jupyter>=0.25.1",
+    "mkdocs-jupyter~=0.24.0",
     "mkdocs-material[imaging]>=9.6.14",
     "griffe-inherited-docstrings>=1.1.1",
     "mkdocstrings[python]>=0.29.1",

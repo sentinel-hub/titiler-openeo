@@ -2,7 +2,6 @@
 
 import pytest
 from rio_tiler.models import ImageData
-from rio_tiler.tasks import create_tasks
 
 from titiler.openeo.models import SpatialExtent
 from titiler.openeo.settings import ProcessingSettings
@@ -263,16 +262,22 @@ def test_resolution_based_dimension_calculation(monkeypatch):
     monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
 
-    # Override task processing to capture the width/height values
+    # Override mosaic_reader to capture the width/height values
     captured_params = {}
 
-    def mock_create_tasks(reader_function, items, max_threads, bbox, **kwargs):
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
         # Capture the parameters for later inspection
         captured_params.update(kwargs)
-        # Pass through to the original function
-        return create_tasks(reader_function, items, max_threads, bbox, **kwargs)
+        # Return a mock ImageData
+        import numpy
 
-    monkeypatch.setattr("titiler.openeo.stacapi.create_tasks", mock_create_tasks)
+        return ImageData(
+            numpy.zeros((1, 100, 100), dtype="uint8"),
+            assets=kwargs.get("assets", ["B01"]),
+            crs=kwargs.get("dst_crs", "EPSG:4326"),
+        ), None
+
+    monkeypatch.setattr("titiler.openeo.stacapi.mosaic_reader", mock_mosaic_reader)
 
     # Setup and run the test
     backend = stacApiBackend(url="https://example.com")
@@ -290,5 +295,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
 
     # Check that calculated dimensions are close to expected (1000x1000)
     # Allow some flexibility due to rounding
-    assert 950 <= captured_params.get("width", 0) <= 1050
-    assert 950 <= captured_params.get("height", 0) <= 1050
+    width = captured_params.get("width", 0)
+    height = captured_params.get("height", 0)
+    assert 950 <= width <= 1050, f"Width {width} is not within expected range"
+    assert 950 <= height <= 1050, f"Height {height} is not within expected range"

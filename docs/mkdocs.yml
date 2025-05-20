@@ -41,22 +41,27 @@ nav:
     - Special Features:
       - Service Authorization: "authorization.md"
       - Tile Assignment: "tile-assignment.md"
-  - Deployment:
-    - Local Setup: "local-setup.md"
-    - Kubernetes Guide: "kubernetes.md"
   - Administrator Guide:
     - Overview: "admin-guide.md"
     - OpenID Connect: "openid-connect.md"
+  - Deployment:
+    - Local Setup: "local-setup.md"
+    - Kubernetes Guide: "kubernetes.md"
+  - Examples:
+    - Overview: "examples/index.md"
+    - Notebooks:
+      - Manhattan Satellite Imagery: "notebooks/manhattan.ipynb"
+      - NDVI Time Series Analysis: "notebooks/ndvi_time_series.ipynb"
   - Development:
     - Contributing: "contributing.md"
 
 plugins:
   - search
   - social
-  # - mkdocs-jupyter:
-  #     include_source: true
-  #     ignore: ["**/.ipynb_checkpoints/*.ipynb"]
-  #     execute: false
+  - mkdocs-jupyter:
+      include_source: true
+      ignore: ["**/.ipynb_checkpoints/*.ipynb"]
+      execute: false
   - mkdocstrings:
       enable_inventory: true
       handlers:
