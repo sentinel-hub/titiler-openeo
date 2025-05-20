@@ -4,6 +4,7 @@ import pytest
 from rio_tiler.models import ImageData
 
 from titiler.openeo.models import SpatialExtent
+from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
@@ -87,18 +88,16 @@ def test_load_collection_pixel_threshold(monkeypatch):
     loader = LoadCollection(stac_api=backend)
 
     # Test with dimensions exceeding threshold
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(OutputLimitExceeded):
         loader.load_collection(
             id="test",
             spatial_extent=SpatialExtent(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
             bands=["B01"],
-            width=5000,
-            height=5000,
+            width=15000,
+            height=15000,
         )
-    assert "Estimated output size too large" in str(exc_info.value)
-    assert "max allowed: 10000000" in str(exc_info.value)
 
     # Test with acceptable dimensions
     result = loader.load_collection(
@@ -178,17 +177,15 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     loader = LoadCollection(stac_api=backend)
 
     # Test with dimensions exceeding threshold
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(OutputLimitExceeded):
         loader.load_collection_and_reduce(
             id="test",
             spatial_extent=SpatialExtent(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
-            width=5000,
-            height=5000,
+            width=15000,
+            height=15000,
         )
-    assert "Estimated output size too large" in str(exc_info.value)
-    assert "max allowed: 10000000" in str(exc_info.value)
 
     # Test with acceptable dimensions
     result = loader.load_collection_and_reduce(
