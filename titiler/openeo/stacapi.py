@@ -523,24 +523,32 @@ class LoadCollection:
         bbox = dimensions["bbox"]
         crs = dimensions["crs"]
 
-        tasks = create_tasks(
-            _reader,
-            items,
-            MAX_THREADS,
-            bbox,
-            assets=bands,
-            bounds_crs=crs,
-            dst_crs=crs,
-            width=width if width else width,
-            height=height if height else height,
-            buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-        )
-        # Return a LazyRasterStack that will only execute the tasks when accessed
-        return LazyRasterStack(
-            tasks=tasks,
-            date_name_fn=lambda asset: _props_to_datename(asset["properties"]),
-            allowed_exceptions=(TileOutsideBounds,),
-        )
+        # Group items by date
+        items_by_date = {}
+        for item in items:
+            date = _props_to_datename(item["properties"])
+            if date not in items_by_date:
+                items_by_date[date] = []
+            items_by_date[date].append(item)
+
+        # Create a RasterStack with merged items for each date
+        result = {}
+        for date, date_items in items_by_date.items():
+            img, _ = mosaic_reader(
+                date_items,
+                _reader,
+                bbox,
+                bounds_crs=crs,
+                assets=bands,
+                dst_crs=crs,
+                width=int(width) if width else width,
+                height=int(height) if height else height,
+                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+                pixel_selection=PixelSelectionMethod["first"].value(),
+            )
+            result[date] = img
+
+        return result
 
     def load_collection_and_reduce(
         self,
