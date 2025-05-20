@@ -247,7 +247,13 @@ class ServiceUnavailable(OpenEOException):
 class OutputLimitExceeded(OpenEOException):
     """The output size exceeds the maximum allowed limit."""
 
-    def __init__(self, width: int, height: int, max_pixels: int, items_count: Optional[int] = None):
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        max_pixels: int,
+        items_count: Optional[int] = None,
+    ):
         """Initialize error with output size limit exceeded."""
         total_pixels = width * height * (items_count or 1)
         message = (

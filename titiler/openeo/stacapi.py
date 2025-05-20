@@ -22,12 +22,12 @@ from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
 from .errors import (
-    NoDataAvailable,
-    TemporalExtentEmpty,
     ItemsLimitExceeded,
-    UnsupportedSTACObject,
+    NoDataAvailable,
     OutputLimitExceeded,
     STACLoadError,
+    TemporalExtentEmpty,
+    UnsupportedSTACObject,
 )
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
@@ -507,9 +507,16 @@ class LoadCollection:
         # Check pixel limit before calling _estimate_output_dimensions
         # For test_load_collection_pixel_threshold
         if width and height:
-            pixel_count = width * height * len(items)
+            width_int = int(width)
+            height_int = int(height)
+            pixel_count = width_int * height_int * len(items)
             if pixel_count > processing_settings.max_pixels:
-                raise OutputLimitExceeded(width, height, processing_settings.max_pixels, items_count=len(items))
+                raise OutputLimitExceeded(
+                    width_int,
+                    height_int,
+                    processing_settings.max_pixels,
+                    items_count=len(items),
+                )
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
@@ -585,9 +592,16 @@ class LoadCollection:
         # Check pixel limit before calling _estimate_output_dimensions
         # For test_load_collection_and_reduce_pixel_threshold
         if width and height:
-            pixel_count = width * height * len(items)
+            width_int = int(width)
+            height_int = int(height)
+            pixel_count = width_int * height_int * len(items)
             if pixel_count > processing_settings.max_pixels:
-                raise OutputLimitExceeded(width, height, processing_settings.max_pixels, items_count=len(items))
+                raise OutputLimitExceeded(
+                    width_int,
+                    height_int,
+                    processing_settings.max_pixels,
+                    items_count=len(items),
+                )
 
         # If bands parameter is missing, use the first asset from the first item
         if bands is None and items and "assets" in items[0]:
