@@ -27,6 +27,12 @@ from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
 from typing_extensions import TypedDict
 
+from titiler.openeo.errors import (
+    MixedCRSError,
+    OutputLimitExceeded,
+    ProcessParameterMissing,
+)
+
 
 class Dims(TypedDict):
     """Estimate Dimensions."""
@@ -35,169 +41,6 @@ class Dims(TypedDict):
     height: int
     crs: rasterio.crs.CRS
     bbox: List[float]
-
-
-def _estimate_output_dimensions(
-    items: List[Dict],
-    spatial_extent: BoundingBox,
-    bands: Optional[list[str]],
-    width: Optional[int] = None,
-    height: Optional[int] = None,
-) -> Dims:
-    """
-    Estimate output dimensions based on items and spatial extent.
-
-    Args:
-        items: List of STAC items
-        spatial_extent: Bounding box for the output
-        bands: List of band names to include
-        width: Optional user-specified width
-        height: Optional user-specified height
-
-    Returns:
-        Dictionary containing:
-            - width: Estimated or specified width
-            - height: Estimated or specified height
-            - crs: Target CRS to use
-            - bbox: Bounding box as a list [west, south, east, north]
-    """
-    from .settings import ProcessingSettings
-
-    processing_settings = ProcessingSettings()
-
-    if not spatial_extent:
-        raise ValueError("Missing required input: spatial_extent")
-
-    # Test if items are empty
-    if not items:
-        raise ValueError("Missing required input: items")
-
-    # Check if bands are empty
-    if not bands:
-        raise ValueError("Missing required input: bands")
-
-    # Extract CRS and resolution information from items
-    item_crs: rasterio.crs.CRS = None
-    x_resolutions = []
-    y_resolutions = []
-
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            if item_crs is None:
-                item_crs = src_dst.crs
-            elif item_crs != src_dst.crs:
-                raise ValueError(
-                    f"Mixed CRS in items: found {src_dst.crs} but expected {item_crs}"
-                )
-
-            # Get resolution information at item level first if available
-            if src_dst.transform:
-                x_resolutions.append(abs(src_dst.transform.a))
-                y_resolutions.append(abs(src_dst.transform.e))
-
-            # If no transform, check for assets metadata
-            else:
-                for _, asset in item.get("assets", {}).items():
-                    # Get resolution from asset metadata
-                    if asset_transform := asset.get("proj:transform"):
-                        x_resolutions.append(abs(asset_transform[0]))
-                        y_resolutions.append(abs(asset_transform[4]))
-
-                    else:
-                        # Default to 1024x1024 if no resolution is found
-                        x_resolutions.append(1024)
-                        y_resolutions.append(1024)
-
-    # Get the highest resolution (smallest pixel size)
-    x_resolution = min(x_resolutions) if x_resolutions else None
-    y_resolution = min(y_resolutions) if y_resolutions else None
-
-    # Get target CRS and bounds
-    crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
-
-    # Convert bounds to the same CRS if needed
-    bbox = [
-        spatial_extent.west,
-        spatial_extent.south,
-        spatial_extent.east,
-        spatial_extent.north,
-    ]
-
-    # If item CRS is different from spatial_extent CRS, we need to reproject the resolution
-    if item_crs and item_crs != crs:
-        # Calculate approximate resolution in target CRS
-        # Get reprojected resolution using a small 1x1 degree box at the center of the bbox
-        center_x = (bbox[0] + bbox[2]) / 2
-        center_y = (bbox[1] + bbox[3]) / 2
-        src_box = [
-            center_x,
-            center_y,
-            center_x + x_resolution,
-            center_y + y_resolution,
-        ]
-        dst_box = transform_bounds(item_crs, crs, *src_box, densify_pts=21)
-
-        x_resolution = abs(dst_box[2] - dst_box[0])
-        y_resolution = abs(dst_box[3] - dst_box[1])
-
-    # Calculate dimensions based on bounds and resolution if not specified
-    if not width and not height:
-        if x_resolution and y_resolution:
-            width = int(round((bbox[2] - bbox[0]) / x_resolution))
-            height = int(round((bbox[3] - bbox[1]) / y_resolution))
-        else:
-            # Fallback to a reasonable default if resolution can't be determined
-            width = 1024
-            height = 1024
-
-    # Check if estimated pixel count exceeds maximum allowed
-    pixel_count = int(width or 0) * int(height or 0)
-    if pixel_count > processing_settings.max_pixels:
-        raise ValueError(
-            f"Estimated output size too large: {width}x{height} pixels (max allowed: {processing_settings.max_pixels} pixels)"
-        )
-
-    # Return all information needed for rendering
-    return Dims(
-        width=width,  # type: ignore
-        height=height,  # type: ignore
-        crs=crs,
-        bbox=bbox,
-    )
-
-
-def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
-    """
-    Read a STAC item and return an ImageData object.
-
-    Args:
-        item: STAC item dictionary
-        bbox: Bounding box to read
-        **kwargs: Additional keyword arguments to pass to the reader
-
-    Returns:
-        ImageData object
-    """
-    max_retries = 4
-    retry_delay = 1.0  # seconds
-    retries = 0
-
-    while True:
-        try:
-            with SimpleSTACReader(item) as src_dst:
-                return src_dst.part(bbox, **kwargs)
-        except RasterioIOError as e:
-            retries += 1
-            if retries >= max_retries:
-                # If we've reached max retries, re-raise the exception
-                raise
-            # Log the error and retry after a delay
-            print(
-                f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
-            )
-            time.sleep(retry_delay)
-            # Increase delay for next retry (exponential backoff)
-            retry_delay *= 2
 
 
 @attr.s
@@ -240,7 +83,11 @@ class SimpleSTACReader(MultiBaseReader):
         self.crs = WGS84_CRS  # Per specification STAC items are in WGS84
 
         if proj := self.input.get("proj"):
-            crs_string = proj.get("code") or proj.get("epsg") or proj.get("wkt")
+            crs_string = str(
+                proj.get("code")
+                or (f"epsg:{proj.get('epsg')}" if proj.get("epsg") else None)
+                or proj.get("wkt")
+            )
             if all(
                 [
                     proj.get("transform"),
@@ -251,7 +98,7 @@ class SimpleSTACReader(MultiBaseReader):
                 self.height, self.width = proj.get("shape")
                 self.transform = proj.get("transform")
                 self.bounds = array_bounds(self.height, self.width, self.transform)
-                self.crs = rasterio.crs.CRS.from_string(crs_string)
+                self.crs = rasterio.crs.CRS.from_user_input(crs_string)
 
         self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
         self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
@@ -414,3 +261,236 @@ class SimpleSTACReader(MultiBaseReader):
             return img.apply_expression(expression)
 
         return img
+
+
+def _validate_input_parameters(
+    spatial_extent: BoundingBox,
+    items: List[Dict],
+    bands: Optional[list[str]],
+) -> None:
+    """Validate required input parameters."""
+    if not spatial_extent:
+        raise ProcessParameterMissing("spatial_extent")
+    if not items:
+        raise ProcessParameterMissing("items")
+    if not bands:
+        raise ProcessParameterMissing("bands")
+
+
+def _get_item_resolutions(
+    item: Dict,
+    src_dst: SimpleSTACReader,
+    spatial_extent: BoundingBox,
+) -> tuple[list[float], list[float]]:
+    """Get x and y resolutions from a STAC item."""
+    x_resolutions = []
+    y_resolutions = []
+
+    if src_dst.transform:
+        x_resolutions.append(abs(src_dst.transform.a))
+        y_resolutions.append(abs(src_dst.transform.e))
+    else:
+        for _, asset in item.get("assets", {}).items():
+            if asset_transform := asset.get("proj:transform"):
+                x_resolutions.append(abs(asset_transform[0]))
+                y_resolutions.append(abs(asset_transform[4]))
+            elif asset_shape := asset.get("proj:shape"):
+                if asset_shape[0] > 0 and asset_shape[1] > 0:
+                    x_resolutions.append(
+                        abs(
+                            (spatial_extent.east - spatial_extent.west) / asset_shape[0]
+                        )
+                    )
+                    y_resolutions.append(
+                        abs(
+                            (spatial_extent.north - spatial_extent.south)
+                            / asset_shape[1]
+                        )
+                    )
+            else:
+                x_resolutions.append(1024)
+                y_resolutions.append(1024)
+
+    return x_resolutions, y_resolutions
+
+
+def _reproject_resolution(
+    item_crs: rasterio.crs.CRS,
+    crs: rasterio.crs.CRS,
+    bbox: List[float],
+    x_resolution: Optional[float],
+    y_resolution: Optional[float],
+) -> tuple[Optional[float], Optional[float]]:
+    """Reproject resolution if CRS differs."""
+    if not (item_crs and item_crs != crs):
+        return x_resolution, y_resolution
+
+    center_x = (bbox[0] + bbox[2]) / 2
+    center_y = (bbox[1] + bbox[3]) / 2
+    src_box = [
+        center_x,
+        center_y,
+        center_x + x_resolution if x_resolution else 0,
+        center_y + y_resolution if y_resolution else 0,
+    ]
+    dst_box = transform_bounds(item_crs, crs, *src_box, densify_pts=21)
+
+    return (
+        abs(dst_box[2] - dst_box[0]) if x_resolution else None,
+        abs(dst_box[3] - dst_box[1]) if y_resolution else None,
+    )
+
+
+def _calculate_dimensions(
+    bbox: List[float],
+    x_resolution: Optional[float],
+    y_resolution: Optional[float],
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+) -> tuple[int, int]:
+    """Calculate output dimensions."""
+    if width and height:
+        return width, height
+
+    if x_resolution and y_resolution:
+        width = int(round((bbox[2] - bbox[0]) / x_resolution))
+        height = int(round((bbox[3] - bbox[1]) / y_resolution))
+    else:
+        width = 1024
+        height = 1024
+
+    return width, height
+
+
+def _check_pixel_limit(
+    width: Optional[int],
+    height: Optional[int],
+    items: List[Dict],
+) -> None:
+    """Check if pixel count exceeds maximum allowed."""
+    from .settings import ProcessingSettings
+
+    processing_settings = ProcessingSettings()
+
+    width_int = int(width or 0)
+    height_int = int(height or 0)
+    pixel_count = width_int * height_int * len(items)
+    if pixel_count > processing_settings.max_pixels:
+        raise OutputLimitExceeded(
+            width_int,
+            height_int,
+            processing_settings.max_pixels,
+            items_count=len(items),
+        )
+
+
+def _estimate_output_dimensions(
+    items: List[Dict],
+    spatial_extent: BoundingBox,
+    bands: Optional[list[str]],
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+) -> Dims:
+    """
+    Estimate output dimensions based on items and spatial extent.
+
+    Args:
+        items: List of STAC items
+        spatial_extent: Bounding box for the output
+        bands: List of band names to include
+        width: Optional user-specified width
+        height: Optional user-specified height
+
+    Returns:
+        Dictionary containing:
+            - width: Estimated or specified width
+            - height: Estimated or specified height
+            - crs: Target CRS to use
+            - bbox: Bounding box as a list [west, south, east, north]
+    """
+    _validate_input_parameters(spatial_extent, items, bands)
+
+    # Extract CRS and resolution information from items
+    item_crs: rasterio.crs.CRS = None
+    all_x_resolutions = []
+    all_y_resolutions = []
+
+    for item in items:
+        with SimpleSTACReader(item) as src_dst:
+            if item_crs is None:
+                item_crs = src_dst.crs
+            elif item_crs != src_dst.crs:
+                raise MixedCRSError(
+                    found_crs=str(src_dst.crs), expected_crs=str(item_crs)
+                )
+
+            x_res, y_res = _get_item_resolutions(item, src_dst, spatial_extent)
+            all_x_resolutions.extend(x_res)
+            all_y_resolutions.extend(y_res)
+
+    # Get the highest resolution (smallest pixel size)
+    x_resolution = min(all_x_resolutions) if all_x_resolutions else None
+    y_resolution = min(all_y_resolutions) if all_y_resolutions else None
+
+    # Get target CRS and bounds
+    crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
+    bbox = [
+        spatial_extent.west,
+        spatial_extent.south,
+        spatial_extent.east,
+        spatial_extent.north,
+    ]
+
+    # Reproject resolution if needed
+    x_resolution, y_resolution = _reproject_resolution(
+        item_crs, crs, bbox, x_resolution, y_resolution
+    )
+
+    # Calculate dimensions
+    width, height = _calculate_dimensions(
+        bbox, x_resolution, y_resolution, width, height
+    )
+
+    # Check pixel limit
+    _check_pixel_limit(width, height, items)
+
+    return Dims(
+        width=width,  # type: ignore
+        height=height,  # type: ignore
+        crs=crs,
+        bbox=bbox,
+    )
+
+
+def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
+    """
+    Read a STAC item and return an ImageData object.
+
+    Args:
+        item: STAC item dictionary
+        bbox: Bounding box to read
+        **kwargs: Additional keyword arguments to pass to the reader
+
+    Returns:
+        ImageData object
+    """
+    max_retries = 4
+    retry_delay = 1.0  # seconds
+    retries = 0
+
+    while True:
+        try:
+            with SimpleSTACReader(item) as src_dst:
+                return src_dst.part(bbox, **kwargs)
+        except RasterioIOError as e:
+            retries += 1
+            if retries >= max_retries:
+                # If we've reached max retries, re-raise the exception
+                raise
+            # Log the error and retry after a delay
+            print(
+                f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+            )
+            time.sleep(retry_delay)
+            # Increase delay for next retry (exponential backoff)
+            retry_delay *= 2
