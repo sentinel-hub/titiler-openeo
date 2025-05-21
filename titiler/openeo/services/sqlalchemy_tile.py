@@ -185,6 +185,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "y": tile.y,
                 "z": tile.z,
                 "stage": "released",
+                "service_id": service_id,
+                "user_id": user_id,
             }
 
             # Delete the tile assignment
@@ -228,4 +230,5 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "y": tile.y,
                 "z": tile.z,
                 "stage": "submitted",
+                "user_id": user_id,
             }
