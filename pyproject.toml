@@ -130,7 +130,7 @@ explicit_package_bases = true
 max-complexity = 14
 
 [tool.bumpversion]
-current_version = "0.2.0"
+current_version = "0.2.1"
 search = "{current_version}"
 replace = "{new_version}"
 regex = false
