@@ -1,13 +1,13 @@
 {
     "colors": {
-        "Transparent Water Blue Light": {
+        "Water Blue Light": {
             "hsl": [200, 80, 60],
             "rgb": [51, 153, 204],
             "pantone": "2915 C",
             "hex": "#3399CC",
             "transparent": true
         },
-        "Transparent Water Blue Dark": {
+        "Water Blue Dark": {
             "hsl": [210, 90, 30],
             "rgb": [1, 23, 110],
             "pantone": "534 C",
@@ -21,13 +21,13 @@
             "hex": "#F4F4F4",
             "transparent": false
         },
-        "Light Bluish Grey (Medium Stone Grey)": {
+        "Light Bluish Grey": {
             "hsl": [196, 6, 66],
             "rgb": [162, 170, 173],
             "pantone": "429 C",
             "hex": "#A2AAAD"
         },
-        "Dark Bluish Grey (Dark Stone Grey)": {
+        "Dark Bluish Grey": {
             "hsl": [214, 3, 40],
             "rgb": [99, 102, 106],
             "pantone": "CG 10 C",
@@ -39,13 +39,13 @@
             "pantone": "Black 6 C",
             "hex": "#101820"
         },
-        "Tan (Brick Yellow)": {
+        "Tan": {
             "hsl": [40, 66, 82],
             "rgb": [239, 219, 178],
             "pantone": "7506 C",
             "hex": "#EFDBB2"
         },
-        "Dark Tan (Sand Yellow)": {
+        "Dark Tan": {
             "hsl": [31, 22, 49],
             "rgb": [154, 127, 98],
             "pantone": "2470 C",
@@ -70,21 +70,21 @@
             "hex": "#688197",
             "transparent": false
         },
-        "Coral (Vibrant Coral)": {
+        "Coral": {
             "hsl": [354, 100, 67],
             "rgb": [255, 88, 105],
             "pantone": "2346 C",
             "hex": "#FF5869",
             "transparent": false
         },
-        "Red (Bright Red)": {
+        "Red": {
             "hsl": [352, 100, 40],
             "rgb": [205, 0, 26],
             "pantone": "3546 C",
             "hex": "#CD001A",
             "transparent": false
         },
-        "Dark Red (New Dark Red)": {
+        "Dark Red": {
             "hsl": [0, 53, 36],
             "rgb": [138, 43, 43],
             "pantone": "7623 C",
@@ -112,7 +112,7 @@
             "hex": "#ECC3B2",
             "transparent": false
         },
-        "Medium Tan (Warm Tan)": {
+        "Medium Tan": {
             "hsl": [32, 100, 74],
             "rgb": [255, 194, 123],
             "pantone": "149 C",
@@ -133,7 +133,7 @@
             "hex": "#C88242",
             "transparent": false
         },
-        "Orange (Bright Orange)": {
+        "Orange": {
             "hsl": [31, 100, 50],
             "rgb": [255, 130, 0],
             "pantone": "151 C",
@@ -154,42 +154,42 @@
             "hex": "#785135",
             "transparent": false
         },
-        "Bright Light Yellow (Cool Yellow)": {
+        "Bright Light Yellow": {
             "hsl": [48, 91, 73],
             "rgb": [249, 226, 125],
             "pantone": "2002 C",
             "hex": "#F9E27D",
             "transparent": false
         },
-        "Yellow (Bright Yellow)": {
+        "Yellow": {
             "hsl": [48, 100, 50],
             "rgb": [255, 205, 0],
             "pantone": "116 C",
             "hex": "#FFCD00",
             "transparent": false
         },
-        "Bright Light Orange (Flame Yellowish Orange)": {
+        "Bright Light Orange": {
             "hsl": [43, 100, 50],
             "rgb": [255, 182, 0],
             "pantone": "2010 C",
             "hex": "#FFB600",
             "transparent": false
         },
-        "Neon Yellow (Vibrant Yellow)": {
+        "Neon Yellow": {
             "hsl": [59, 100, 50],
             "rgb": [255, 252, 0],
             "pantone": "TBC",
             "hex": "#FFFC00",
             "transparent": false
         },
-        "Yellowish Green (Spring Yellowish Green)": {
+        "Yellowish Green": {
             "hsl": [76, 72, 71],
             "rgb": [205, 234, 128],
             "pantone": "373 C",
             "hex": "#CDEA80",
             "transparent": false
         },
-        "Lime (Bright Yellowish Green)": {
+        "Lime": {
             "hsl": [70, 100, 41],
             "rgb": [174, 208, 0],
             "pantone": "3507 C",
@@ -207,19 +207,19 @@
             "pantone": "3522 C",
             "hex": "#00892F"
         },
-        "Dark Green (Earth Green)": {
+        "Dark Green": {
             "hsl": [145, 100, 14],
             "rgb": [0, 73, 30],
             "pantone": "3537 C",
             "hex": "#00491E"
         },
-        "Light Aqua (Aqua)": {
+        "Light Aqua": {
             "hsl": [163, 33, 79],
             "rgb": [185, 220, 210],
             "pantone": "566 C",
             "hex": "#B9DCD2"
         },
-        "Dark Turquoise (Bright Bluish Green)": {
+        "Dark Turquoise": {
             "hsl": [184, 100, 31],
             "rgb": [0, 147, 157],
             "pantone": "3541 C",
@@ -237,7 +237,7 @@
             "pantone": "3538 C",
             "hex": "#0094D5"
         },
-        "Bright Light Blue (Light Royal Blue)": {
+        "Bright Light Blue": {
             "hsl": [208, 66, 74],
             "rgb": [146, 193, 233],
             "pantone": "283 C",
@@ -255,7 +255,7 @@
             "pantone": "2175C",
             "hex": "#006AC6"
         },
-        "Dark Blue (Earth Blue)": {
+        "Dark Blue": {
             "hsl": [207, 100, 17],
             "rgb": [0, 48, 87],
             "pantone": "540 C",
@@ -273,25 +273,25 @@
             "pantone": "2577 C",
             "hex": "#A77BCA"
         },
-        "Dark Purple (Medium Lilac)": {
+        "Dark Purple": {
             "hsl": [262, 36, 38],
             "rgb": [86, 61, 130],
             "pantone": "7679 C",
             "hex": "#563D82"
         },
-        "Bright Pink (Light Purple)": {
+        "Bright Pink": {
             "hsl": [317, 73, 80],
             "rgb": [241, 167, 220],
             "pantone": "236 C",
             "hex": "#F1A7DC"
         },
-        "Dark Pink (Bright Purple)": {
+        "Dark Pink": {
             "hsl": [326, 70, 66],
             "rgb": [229, 109, 177],
             "pantone": "218 C",
             "hex": "#E56DB1"
         },
-        "Magenta (Bright Reddish Violet)": {
+        "Magenta": {
             "hsl": [322, 100, 32],
             "rgb": [162, 0, 103],
             "pantone": "234 C",

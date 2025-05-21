@@ -33,7 +33,7 @@ def _load_lego_colors(config_path=None):
     """
     # Check environment variable for config path
     env_path = os.getenv("TITILER_OPENEO_LEGO_COLORS_FILE")
-    
+
     # Use provided path, environment variable, or default config
     if config_path is None:
         config_path = env_path or os.path.join(
@@ -72,10 +72,17 @@ _COASTLINE_LOADING = False
 _COASTLINE_LOAD_ERROR: Optional[str] = None
 _COASTLINE_LOCK = threading.Lock()
 
+
 def _load_coastline_data():
     """Load coastline data in background thread."""
-    global _COASTLINE_GDF, _COASTLINE_GEOMETRY, _PREPARED_COASTLINE, _COASTLINE_LOADED, _COASTLINE_LOADING, _COASTLINE_LOAD_ERROR
-    
+    global \
+        _COASTLINE_GDF, \
+        _COASTLINE_GEOMETRY, \
+        _PREPARED_COASTLINE, \
+        _COASTLINE_LOADED, \
+        _COASTLINE_LOADING, \
+        _COASTLINE_LOAD_ERROR
+
     try:
         import geopandas as gpd
         import shapely.geometry
@@ -113,10 +120,12 @@ def _load_coastline_data():
         with _COASTLINE_LOCK:
             _COASTLINE_LOADING = False
 
+
 # Start background loading
 _COASTLINE_LOADING = True
 thread = threading.Thread(target=_load_coastline_data, daemon=True)
 thread.start()
+
 
 def get_coastline_status():
     """Get the current status of coastline data loading."""
@@ -124,7 +133,7 @@ def get_coastline_status():
         return {
             "loaded": _COASTLINE_LOADED,
             "loading": _COASTLINE_LOADING,
-            "error": _COASTLINE_LOAD_ERROR
+            "error": _COASTLINE_LOAD_ERROR,
         }
 
 
@@ -141,17 +150,19 @@ def is_land(lon, lat, max_wait_seconds=30):
     """
     # Wait for coastline data to load
     import time
+
     start_time = time.time()
     while _COASTLINE_LOADING and time.time() - start_time < max_wait_seconds:
         time.sleep(1)  # Wait 1 second between checks
-    
+
     with _COASTLINE_LOCK:
         if not _COASTLINE_LOADED:
             # If data is not loaded yet after waiting, assume water
             return False
-        
+
         # Use the coastline shapefile for land/water determination in Europe
         import shapely.geometry
+
         point = shapely.geometry.Point(lon, lat)
 
         # Check if the point is inside the coastline (land)
@@ -219,7 +230,9 @@ def generate_subtiles_ref(x: int, y: int, z: int, zoom: int) -> ArrayLike:
     return subtiles_ref
 
 
-def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, max_wait_seconds=30):
+def _get_water_mask_for_bounds(
+    bounds, crs, shape, intersection_threshold=0.20, max_wait_seconds=30
+):
     """Get water mask for the given bounds, using coastline shapefile for high accuracy.
 
     Args:
@@ -235,10 +248,11 @@ def _get_water_mask_for_bounds(bounds, crs, shape, intersection_threshold=0.20, 
     """
     # Wait for coastline data to load
     import time
+
     start_time = time.time()
     while _COASTLINE_LOADING and time.time() - start_time < max_wait_seconds:
         time.sleep(1)  # Wait 100ms between checks
-    
+
     if _COASTLINE_LOADING:
         print(f"Warning: Coastline data still loading after {max_wait_seconds} seconds")
         return numpy.zeros(shape, dtype=bool)  # Return all land if still loading
@@ -504,6 +518,30 @@ def _legofication(
                     for b in range(img.array.data.shape[0]):
                         img.array.data[b, rr, cc] = cur_values[b]
 
+        # Add the base plate to be used according to the bricks chosed in the previous step
+        # If all the bricks are transparent, use a Dark Bluish Grey base plate
+        # Otherwise, use a Light Bluish Grey base plate
+        # get all the information from the lego_colors dict
+        base_plate = {}
+        if all(
+            lego_colors[info["color_name"]]["transparent"]
+            for info in img.metadata["brick_info"]["pixels"].values()
+        ):
+            base_plate = {
+                "color_name": "Dark Bluish Grey",
+                "rgb": lego_colors["Dark Bluish Grey"]["rgb"],
+                "hex": lego_colors["Dark Bluish Grey"]["hex"],
+            }
+        else:
+            base_plate = {
+                "color_name": "Light Bluish Grey",
+                "rgb": lego_colors["Light Bluish Grey"]["rgb"],
+                "hex": lego_colors["Light Bluish Grey"]["hex"],
+            }
+
+        # add the base plate in the metadata
+        img.metadata["brick_info"]["base"] = base_plate
+
         return img
 
     # Compress the image
@@ -541,6 +579,7 @@ def _legofication(
                     "color_name": lego_color_name,
                     "is_water": bool(is_water),
                     "rgb": lego_rgb,
+                    "hex": colour.Color(rgb=lego_rgb).hex,
                 }
 
                 # Store information about transparent bricks for later processing
@@ -667,7 +706,7 @@ def generate_lego_instructions(
 
         # Calculate dimensions for original image display
         original_height = grid_size * 4  # Height for original image display
-        
+
         # Calculate image dimensions with padding for coordinates
         coord_padding = grid_size
         legend_width = 300 if include_legend else 0
@@ -681,14 +720,16 @@ def generate_lego_instructions(
         # Add original image at the top
         original_array = img_data.array.data
         original_img = Image.fromarray(numpy.transpose(original_array, (1, 2, 0)))
-        
+
         # Calculate width to maintain aspect ratio
         aspect_ratio = original_img.width / original_img.height
         original_width = int(original_height * aspect_ratio)
-        
+
         # Resize original image
-        original_img = original_img.resize((original_width, original_height), Image.Resampling.LANCZOS)
-        
+        original_img = original_img.resize(
+            (original_width, original_height), Image.Resampling.LANCZOS
+        )
+
         # Center the original image
         original_x = (img_width - original_width) // 2
         instruction_img.paste(original_img, (original_x, 0))
@@ -716,15 +757,25 @@ def generate_lego_instructions(
         # Add padding for labels, adjusted for original image
         coord_padding = grid_size
         grid_start_x = coord_padding * 1.2  # Double padding on the left for Y label
-        grid_start_y = coord_padding + original_height  # Start grid below original image
+        grid_start_y = (
+            coord_padding + original_height
+        )  # Start grid below original image
 
         # Draw grid lines with padding
         for i in range(grid_dims[0] + 1):
             y = grid_start_y + i * grid_size
-            draw.line([(grid_start_x, y), (grid_start_x + grid_dims[1] * grid_size, y)], fill="gray", width=1)
+            draw.line(
+                [(grid_start_x, y), (grid_start_x + grid_dims[1] * grid_size, y)],
+                fill="gray",
+                width=1,
+            )
         for j in range(grid_dims[1] + 1):
             x = grid_start_x + j * grid_size
-            draw.line([(x, grid_start_y), (x, grid_start_y + grid_dims[0] * grid_size)], fill="gray", width=1)
+            draw.line(
+                [(x, grid_start_y), (x, grid_start_y + grid_dims[0] * grid_size)],
+                fill="gray",
+                width=1,
+            )
 
         # Draw tile position X at the top
         x_position = tile_info["x"]
@@ -732,19 +783,23 @@ def generate_lego_instructions(
         text_bbox = draw.textbbox((0, 0), text, font=big_font)
         text_width = text_bbox[2] - text_bbox[0]
         text_x = grid_start_x + (grid_dims[1] * grid_size - text_width) // 2
-        draw.text((text_x, grid_start_y - grid_size + 10), text, font=big_font, fill="black")
+        draw.text(
+            (text_x, grid_start_y - grid_size + 10), text, font=big_font, fill="black"
+        )
 
         # Draw tile position Y on the left (rotated 90° counterclockwise)
         y_position = tile_info["y"]
         text = f"Y: {y_position}"
         # Create a new image for the rotated text
-        text_img = Image.new('RGB', (grid_size * 2, grid_size), 'white')
+        text_img = Image.new("RGB", (grid_size * 2, grid_size), "white")
         text_draw = ImageDraw.Draw(text_img)
         # Draw text
         text_draw.text((0, grid_size // 6), text, font=big_font, fill="black")
         # Rotate and paste
         rotated_text = text_img.rotate(90, expand=True)
-        instruction_img.paste(rotated_text, (grid_size // 6, grid_start_y + (grid_dims[0] * 8)))
+        instruction_img.paste(
+            rotated_text, (grid_size // 6, grid_start_y + (grid_dims[0] * 8))
+        )
 
         # Track brick colors for the legend
         color_counts = {}
@@ -801,7 +856,9 @@ def generate_lego_instructions(
             legend_square_size = int(grid_size / 2)
 
             # Draw legend title
-            draw.text((legend_x, legend_y), "Brick Colors:", font=bold_font, fill="black")
+            draw.text(
+                (legend_x, legend_y), "Brick Colors:", font=bold_font, fill="black"
+            )
             legend_y += int(grid_size / 2)
 
             # Sort colors by count
@@ -849,8 +906,9 @@ def generate_lego_instructions(
                     "color_counts": color_counts,
                     "x_position": tile_info["x"],
                     "y_position": tile_info["y"],
+                    "tile_stage": tile_info["stage"],
                 },
-                "brick_info": brick_info
+                "brick_info": brick_info,
             },
         )
 
