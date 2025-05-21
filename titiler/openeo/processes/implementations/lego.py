@@ -524,7 +524,7 @@ def _legofication(
         # get all the information from the lego_colors dict
         base_plate = {}
         if all(
-            lego_colors[info["color_name"]]["transparent"]
+            info["is_water"]
             for info in img.metadata["brick_info"]["pixels"].values()
         ):
             base_plate = {
@@ -579,7 +579,7 @@ def _legofication(
                     "color_name": lego_color_name,
                     "is_water": bool(is_water),
                     "rgb": lego_rgb,
-                    "hex": colour.Color(rgb=lego_rgb).hex,
+                    "hex": "#%02x%02x%02x" % tuple(lego_rgb),
                 }
 
                 # Store information about transparent bricks for later processing
