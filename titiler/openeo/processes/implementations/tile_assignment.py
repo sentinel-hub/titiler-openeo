@@ -54,10 +54,7 @@ def tile_assignment(
         else:  # force-release
             # Use the current tile's coordinates for force release
             return store.force_release_tile(
-                service_id,
-                current_tile["x"],
-                current_tile["y"],
-                current_tile["z"]
+                service_id, current_tile["x"], current_tile["y"], current_tile["z"]
             )
     else:
         raise ValueError(f"Invalid stage: {stage}")

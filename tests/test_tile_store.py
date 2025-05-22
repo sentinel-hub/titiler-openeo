@@ -237,10 +237,7 @@ def test_force_release_tile(tile_store):
 
     # Force release should work even on submitted tiles
     released = tile_store.force_release_tile(
-        service_id="test_service",
-        x=submitted["x"],
-        y=submitted["y"],
-        z=submitted["z"]
+        service_id="test_service", x=submitted["x"], y=submitted["y"], z=submitted["z"]
     )
 
     # Verify release response
@@ -250,17 +247,16 @@ def test_force_release_tile(tile_store):
     assert released["stage"] == "released"
 
     # Verify tile is no longer assigned
-    assert tile_store.get_user_tile(service_id="test_service", user_id="test_user") is None
+    assert (
+        tile_store.get_user_tile(service_id="test_service", user_id="test_user") is None
+    )
+
 
 def test_force_release_nonexistent_tile(tile_store):
     """Test force-releasing a tile that doesn't exist."""
     with pytest.raises(TileNotAssignedError):
-        tile_store.force_release_tile(
-            service_id="test_service",
-            x=0,
-            y=0,
-            z=12
-        )
+        tile_store.force_release_tile(service_id="test_service", x=0, y=0, z=12)
+
 
 def test_complex_scenario(tile_store):
     """Test a complex scenario with multiple users and various operations."""

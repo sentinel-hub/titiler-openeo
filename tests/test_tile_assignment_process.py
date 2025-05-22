@@ -10,6 +10,7 @@ from titiler.openeo.services.base import (
     TileNotAssignedError,
 )
 
+
 class MockTileStore(TileAssignmentStore):
     """Mock tile store for testing."""
 
@@ -97,10 +98,12 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         return self.assignments.get(key)
 
+
 @pytest.fixture
 def store():
     """Create a mock tile store."""
     return MockTileStore()
+
 
 def test_claim_tile(store):
     """Test claiming a tile through the process."""
@@ -119,6 +122,7 @@ def test_claim_tile(store):
     assert result["y"] == 0
     assert result["z"] == 12
     assert result["stage"] == "claimed"
+
 
 def test_release_tile(store):
     """Test releasing a tile through the process."""
@@ -145,6 +149,7 @@ def test_release_tile(store):
     )
 
     assert result["stage"] == "released"
+
 
 def test_submit_tile(store):
     """Test submitting a tile through the process."""
@@ -175,6 +180,7 @@ def test_submit_tile(store):
     assert result["z"] == claimed["z"]
     assert result["stage"] == "submitted"
 
+
 def test_invalid_stage(store):
     """Test invalid stage parameter."""
     with pytest.raises(ValueError, match="Invalid stage"):
@@ -187,6 +193,7 @@ def test_invalid_stage(store):
             service_id="test_service",
             user_id="test_user",
         )
+
 
 def test_no_tiles_available(store):
     """Test when no tiles are available."""
@@ -201,6 +208,7 @@ def test_no_tiles_available(store):
             user_id="test_user",
         )
 
+
 def test_release_not_assigned(store):
     """Test releasing a tile that isn't assigned."""
     with pytest.raises(TileNotAssignedError):
@@ -214,6 +222,7 @@ def test_release_not_assigned(store):
             user_id="test_user",
         )
 
+
 def test_submit_not_assigned(store):
     """Test submitting a tile that isn't assigned."""
     with pytest.raises(TileNotAssignedError):
@@ -226,6 +235,7 @@ def test_submit_not_assigned(store):
             service_id="test_service",
             user_id="test_user",
         )
+
 
 def test_unauthorized_release(store):
     """Test releasing another user's tile."""
@@ -252,6 +262,7 @@ def test_unauthorized_release(store):
             user_id="user2",
         )
 
+
 def test_unauthorized_submit(store):
     """Test submitting another user's tile."""
     # First user claims a tile
@@ -277,6 +288,7 @@ def test_unauthorized_submit(store):
             user_id="user2",
         )
 
+
 def test_force_release_submitted_tile(store):
     """Test force-releasing a submitted tile."""
     # First claim and submit a tile
@@ -289,7 +301,7 @@ def test_force_release_submitted_tile(store):
         service_id="test_service",
         user_id="test_user",
     )
-    submitted = tile_assignment(
+    tile_assignment(
         zoom=12,
         x_range=(0, 1),
         y_range=(0, 1),
@@ -317,6 +329,7 @@ def test_force_release_submitted_tile(store):
 
     # Verify tile is gone
     assert store.get_user_tile("test_service", "test_user") is None
+
 
 def test_force_release_nonexistent_tile(store):
     """Test force-releasing a tile that doesn't exist."""
