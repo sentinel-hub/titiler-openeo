@@ -43,7 +43,7 @@
             "description": "Stage of tile assignment",
             "schema": {
                 "type": "string",
-                "enum": ["claim", "release", "submit"]
+                "enum": ["claim", "release", "submit", "force-release"]
             }
         },
         {
@@ -66,15 +66,6 @@
             "schema": {
                 "type": "string"
             }
-        },
-        {
-            "name": "control_user",
-            "description": "Whether to enforce user-specific tile control",
-            "schema": {
-                "type": "boolean"
-            },
-            "optional": true,
-            "default": true
         }
     ],
     "returns": {
@@ -87,7 +78,7 @@
                 "z": {"type": "integer"},
                 "stage": {
                     "type": "string",
-                    "enum": ["claimed", "released", "submitted"]
+                    "enum": ["claimed", "released", "submitted", "force-released"]
                 },
                 "user_id": {"type": "string"}
             },

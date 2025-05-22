@@ -221,6 +221,47 @@ def test_random_assignment(tile_store):
     assert len(set(y_values)) > 1, "All tiles have the same y coordinate"
 
 
+def test_force_release_tile(tile_store):
+    """Test force-releasing a tile."""
+    # First claim a tile
+    tile = tile_store.claim_tile(
+        service_id="test_service",
+        user_id="test_user",
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+    )
+
+    # Submit the tile (which would normally prevent release)
+    submitted = tile_store.submit_tile(service_id="test_service", user_id="test_user")
+
+    # Force release should work even on submitted tiles
+    released = tile_store.force_release_tile(
+        service_id="test_service",
+        x=submitted["x"],
+        y=submitted["y"],
+        z=submitted["z"]
+    )
+
+    # Verify release response
+    assert released["x"] == tile["x"]
+    assert released["y"] == tile["y"]
+    assert released["z"] == tile["z"]
+    assert released["stage"] == "released"
+
+    # Verify tile is no longer assigned
+    assert tile_store.get_user_tile(service_id="test_service", user_id="test_user") is None
+
+def test_force_release_nonexistent_tile(tile_store):
+    """Test force-releasing a tile that doesn't exist."""
+    with pytest.raises(TileNotAssignedError):
+        tile_store.force_release_tile(
+            service_id="test_service",
+            x=0,
+            y=0,
+            z=12
+        )
+
 def test_complex_scenario(tile_store):
     """Test a complex scenario with multiple users and various operations."""
     # Setup a 2x2 grid of tiles
