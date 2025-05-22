@@ -49,6 +49,10 @@ class MockTileStore(TileAssignmentStore):
         self.last_user_id = user_id
         return {"x": 1000, "y": 2000, "z": 12, "stage": "submitted"}
 
+    def force_release_tile(self, service_id: str, x: int, y: int, z: int) -> Dict:
+        """Mock force-releasing a tile."""
+        return {"x": x, "y": y, "z": z, "stage": "released"}
+
 
 def test_tile_assignment_user_parameter():
     """Test that tile_assignment correctly handles the user parameter."""

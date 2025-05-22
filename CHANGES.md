@@ -2,6 +2,10 @@
 
 ## [0.2.1] (2025-05-21)
 
+### Added
+
+* Added force-release functionality for tile assignment to release tiles regardless of state
+
 ### Changed
 
 * Fix load_collection to properly merge items from same date to maintain strict temporal dimension [#93](https://github.com/sentinel-hub/titiler-openeo/pull/93)
