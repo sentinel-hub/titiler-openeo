@@ -1,5 +1,16 @@
 # Changes
 
+## [0.2.1] (2025-05-21)
+
+### Added
+
+* Added force-release functionality for tile assignment to release tiles regardless of state
+
+### Changed
+
+* Fix load_collection to properly merge items from same date to maintain strict temporal dimension [#93](https://github.com/sentinel-hub/titiler-openeo/pull/93)
+* Improve error handling for output size limits with clearer error messages and proper pixel count calculation [#94](https://github.com/sentinel-hub/titiler-openeo/pull/94)
+
 ## [0.2.0] (2025-05-19)
 
 ### Added
@@ -35,3 +46,4 @@ Initial release of openEO by TiTiler
 
 [0.1.0]: https://github.com/sentinel-hub/titiler-openeo/releases/tag/0.1.0
 [0.2.0]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.1.0...v0.2.0
+[0.2.1]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.2.0...HEAD

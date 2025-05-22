@@ -85,7 +85,7 @@ The tile assignment process is defined with the following JSON schema:
     "stage": {
       "description": "Stage of tile assignment",
       "type": "string",
-      "enum": ["claim", "release", "submit"],
+      "enum": ["claim", "release", "submit", "force-release"],
       "required": true
     },
     "user_id": {
@@ -93,11 +93,6 @@ The tile assignment process is defined with the following JSON schema:
       "type": "string",
       "required": true
     },
-    "control_user": {
-      "description": "Enable user verification for release/submit operations",
-      "type": "boolean",
-      "default": true
-    }
   }
 }
 ```
@@ -106,17 +101,9 @@ Because `user_id` is defined with `"type": "string"`, when using `from_parameter
 
 ## Access Control
 
-The tile assignment process supports two modes of operation through the `control_user` parameter:
-
-1. **Controlled Mode** (default, control_user=true):
-   - Only the user who claimed a tile can release or submit it
-   - Attempts by other users to release/submit a tile will raise TileNotAssignedError
-   - Ensures tiles can only be managed by their owners
-
-2. **Unrestricted Mode** (control_user=false):
-   - Any user can release or submit any tile
-   - Useful for scenarios where tiles need to be managed by multiple users
-   - Still maintains tile uniqueness (no duplicate assignments)
+The tile assignment process ensures that each tile can only be managed by the user who claimed it. 
+Each operation (release/submit/force-release) requires a valid tile assignment - a user must have 
+a claimed tile to perform any operation on it.
 
 ## Usage Example
 
@@ -132,8 +119,7 @@ Here's an example of using the tile assignment process in a service:
         "x_range": [1000, 1010],
         "y_range": [2000, 2010],
         "stage": "claim",
-        "user_id": "user123",
-        "control_user": true  // Optional, defaults to true
+        "user_id": "user123"
       }
     }
   }
@@ -151,21 +137,21 @@ Here's an example of using the tile assignment process in a service:
 2. **Releasing a Tile**:
    - User releases their tile with stage="release"
    - Tile becomes available for other users to claim
-   - Cannot release a submitted tile
-   - In controlled mode (default):
-     * Only the owner can release their tile
-     * Error if another user tries to release it
-   - In unrestricted mode:
-     * Any user can release any claimed tile
+   - Cannot release a submitted tile without force-release
+   - Only the owner can release their tile
+   - Error if another user tries to release it
 
 3. **Submitting a Tile**:
    - User submits their tile with stage="submit"
-   - Tile becomes locked and cannot be released
-   - In controlled mode (default):
-     * Only the owner can submit their tile
-     * Error if another user tries to submit it
-   - In unrestricted mode:
-     * Any user can submit any claimed tile
+   - Tile becomes locked and cannot be released normally
+   - Only the owner of the tile can submit it
+   - Submitted tiles can only be released using force-release
+
+4. **Force-releasing a Tile**:
+   - User can force-release their tile with stage="force-release"
+   - Works on any tile state (claimed or submitted)
+   - Only the owner of the tile can force-release it
+   - Useful for recovering tiles that are stuck in submitted state
 
 ## Error Handling
 

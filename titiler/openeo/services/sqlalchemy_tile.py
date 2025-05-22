@@ -232,3 +232,40 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "stage": "submitted",
                 "user_id": user_id,
             }
+
+    def force_release_tile(
+        self,
+        service_id: str,
+        x: int,
+        y: int,
+        z: int,
+    ) -> Dict[str, Any]:
+        """Force release a tile regardless of its state."""
+        with Session(self._engine) as session:
+            tile = session.execute(
+                select(TileAssignment).where(
+                    TileAssignment.service_id == service_id,
+                    TileAssignment.x == x,
+                    TileAssignment.y == y,
+                    TileAssignment.z == z,
+                )
+            ).scalar_one_or_none()
+
+            if not tile:
+                raise TileNotAssignedError(
+                    f"No tile assignment found for {x},{y},{z} in service {service_id}"
+                )
+
+            # Store tile info before deletion
+            tile_info = {
+                "x": tile.x,
+                "y": tile.y,
+                "z": tile.z,
+                "stage": "released",
+            }
+
+            # Delete the tile assignment regardless of its state
+            session.delete(tile)
+            session.commit()
+
+            return tile_info

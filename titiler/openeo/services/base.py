@@ -124,6 +124,26 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
+    def force_release_tile(
+        self, service_id: str, x: int, y: int, z: int
+    ) -> Dict[str, Any]:
+        """Force release a tile regardless of its state.
+
+        Args:
+            service_id: The service identifier
+            x: The tile x coordinate
+            y: The tile y coordinate
+            z: The tile z coordinate
+
+        Returns:
+            Dict with x, y, z, and stage of released tile
+
+        Raises:
+            TileNotAssignedError: When tile does not exist
+        """
+        ...
+
+    @abc.abstractmethod
     def get_user_tile(self, service_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get a user's currently assigned tile.
 

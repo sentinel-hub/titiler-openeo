@@ -17,7 +17,6 @@ def tile_assignment(
     store: TileAssignmentStore,
     service_id: str,
     user_id: str,
-    control_user: bool = True,  # Optional parameter to enable user control
 ) -> Dict[str, Any]:
     """Assign XYZ tiles to users.
 
@@ -25,13 +24,10 @@ def tile_assignment(
         zoom: Fixed zoom level
         x_range: Range of X values [min, max]
         y_range: Range of Y values [min, max]
-        stage: Stage of assignment (claim/release/submit)
+        stage: Stage of assignment (claim/release/submit/force-release)
         store: Tile assignment store instance
         service_id: Current service ID
         user_id: Current user ID
-        control_user: Enable user verification for release/submit operations.
-                    When True, only the user who claimed a tile can release/submit it.
-                    Defaults to True.
 
     Returns:
         Dict containing x, y, z coordinates and stage
@@ -44,22 +40,21 @@ def tile_assignment(
     """
     if stage == "claim":
         return store.claim_tile(service_id, user_id, zoom, x_range, y_range)
-    elif stage in ["release", "submit"]:
-        if control_user:
-            # Get current tile assignment to check ownership
-            current_tile = store.get_user_tile(service_id, user_id)
-            if not current_tile:
-                raise TileNotAssignedError(service_id, user_id)
-
-            # Get tile's assigned user
-            tile_user = current_tile.get("user_id")
-            if tile_user != user_id:
-                raise TileNotAssignedError(service_id, user_id)
+    elif stage in ["release", "submit", "force-release"]:
+        # Get current tile assignment
+        current_tile = store.get_user_tile(service_id, user_id)
+        if not current_tile:
+            raise TileNotAssignedError(f"No tile assigned to user {user_id}")
 
         # Perform the requested operation
         if stage == "release":
             return store.release_tile(service_id, user_id)
-        else:  # submit
+        elif stage == "submit":
             return store.submit_tile(service_id, user_id)
+        else:  # force-release
+            # Use the current tile's coordinates for force release
+            return store.force_release_tile(
+                service_id, current_tile["x"], current_tile["y"], current_tile["z"]
+            )
     else:
         raise ValueError(f"Invalid stage: {stage}")
