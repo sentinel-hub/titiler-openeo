@@ -21,7 +21,7 @@ max_workers = 3  # Number of concurrent downloads (adjust as needed)
 # European spatial
 spatial_extent_east = 45.0
 spatial_extent_west = -25.0
-spatial_extent_north = 72.0
+spatial_extent_north = 71.0
 spatial_extent_south = 30.0
 
 def lat_lon_to_tile(lat, lon, zoom):
@@ -74,7 +74,8 @@ def download_tile(tile_number: Tuple[int, int], zoom: int, output_dir: str) -> T
             # If loading fails, we'll try downloading it again
     
     print(f"Downloading tile: {x}, {y}")
-    tile_url = f"https://openeo.ds.io/services/xyz/5fe543d9-50e0-4851-a3f7-0a9d6a8bd756/tiles/{zoom}/{x}/{y}"
+    # tile_url = f"https://openeo.ds.io/services/xyz/5fe543d9-50e0-4851-a3f7-0a9d6a8bd756/tiles/{zoom}/{x}/{y}" # LEGO mosaic
+    tile_url = f"https://openeo.ds.io/services/xyz/b7c52ea4-9120-4300-bb86-84ebe6d2201f/tiles/{zoom}/{x}/{y}" # RGB mosaic
     
     try:
         response = requests.get(tile_url)
