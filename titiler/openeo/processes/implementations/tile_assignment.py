@@ -18,6 +18,7 @@ def tile_assignment(
     service_id: str,
     user_id: str,
     control_user: bool = True,  # Optional parameter to enable user control
+    data: Dict[str, Any] = None,  # Optional data for updating tile information
 ) -> Dict[str, Any]:
     """Assign XYZ tiles to users.
 
@@ -25,13 +26,14 @@ def tile_assignment(
         zoom: Fixed zoom level
         x_range: Range of X values [min, max]
         y_range: Range of Y values [min, max]
-        stage: Stage of assignment (claim/release/submit)
+        stage: Stage of assignment (claim/release/submit/update)
         store: Tile assignment store instance
         service_id: Current service ID
         user_id: Current user ID
-        control_user: Enable user verification for release/submit operations.
-                    When True, only the user who claimed a tile can release/submit it.
+        control_user: Enable user verification for release/submit/update operations.
+                    When True, only the user who claimed a tile can modify it.
                     Defaults to True.
+        data: Additional information to store with the tile (for update stage)
 
     Returns:
         Dict containing x, y, z coordinates and stage
@@ -63,5 +65,23 @@ def tile_assignment(
             return store.release_tile(service_id, user_id)
         else:  # submit
             return store.submit_tile(service_id, user_id)
+    elif stage == "update":
+        if control_user:
+            # Get current tile assignment to check ownership
+            current_tile = store.get_user_tile(service_id, user_id)
+            if not current_tile:
+                raise TileNotAssignedError(f"No tile assigned to user {user_id}")
+
+            # Get tile's assigned user
+            tile_user = current_tile.get("user_id")
+            if tile_user != user_id:
+                raise TileNotAssignedError(
+                    f"Tile is assigned to user {tile_user}, not {user_id}"
+                )
+
+        # Update tile with additional data
+        if not data:
+            data = {}
+        return store.update_tile(service_id, user_id, data)
     else:
         raise ValueError(f"Invalid stage: {stage}")
