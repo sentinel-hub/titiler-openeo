@@ -56,6 +56,10 @@ class MockTileStore(TileAssignmentStore):
         response.update(json_data)
         return response
 
+    def force_release_tile(self, service_id: str, x: int, y: int, z: int) -> Dict:
+        """Mock force-releasing a tile."""
+        return {"x": x, "y": y, "z": z, "stage": "released"}
+
 
 def test_tile_assignment_user_parameter():
     """Test that tile_assignment correctly handles the user parameter."""

@@ -78,6 +78,21 @@ class MockTileStore(TileAssignmentStore):
 
         raise TileNotAssignedError("No tile assigned")
 
+    def force_release_tile(self, service_id, x, y, z):
+        """Mock force release tile."""
+        # Find tile by coordinates
+        for key, tile in self.assignments.items():
+            if (
+                key.startswith(f"{service_id}:")
+                and tile["x"] == x
+                and tile["y"] == y
+                and tile["z"] == z
+            ):
+                released_tile = {**tile, "stage": "released"}
+                del self.assignments[key]
+                return released_tile
+        raise TileNotAssignedError("No tile found with these coordinates")
+
     def get_user_tile(self, service_id, user_id):
         """Mock get user tile."""
         key = f"{service_id}:{user_id}"
@@ -223,7 +238,7 @@ def test_submit_not_assigned(store):
 
 
 def test_unauthorized_release(store):
-    """Test releasing another user's tile with control_user=True."""
+    """Test releasing another user's tile."""
     # First user claims a tile
     tile_assignment(
         zoom=12,
@@ -245,12 +260,11 @@ def test_unauthorized_release(store):
             store=store,
             service_id="test_service",
             user_id="user2",
-            control_user=True,
         )
 
 
 def test_unauthorized_submit(store):
-    """Test submitting another user's tile with control_user=True."""
+    """Test submitting another user's tile."""
     # First user claims a tile
     tile_assignment(
         zoom=12,
@@ -272,71 +286,13 @@ def test_unauthorized_submit(store):
             store=store,
             service_id="test_service",
             user_id="user2",
-            control_user=True,
         )
 
 
-def test_control_user_disabled(store):
-    """Test operations on another user's tile with control_user=False."""
-    # First user claims a tile
-    claimed = tile_assignment(
-        zoom=12,
-        x_range=(0, 1),
-        y_range=(0, 1),
-        stage="claim",
-        store=store,
-        service_id="test_service",
-        user_id="user1",
-    )
-
-    # Second user can release it with control_user=False
-    released = tile_assignment(
-        zoom=12,
-        x_range=(0, 1),
-        y_range=(0, 1),
-        stage="release",
-        store=store,
-        service_id="test_service",
-        user_id="user2",
-        control_user=False,
-    )
-
-    assert released["x"] == claimed["x"]
-    assert released["y"] == claimed["y"]
-    assert released["stage"] == "released"
-
-    # First user claims a new tile
-    claimed = tile_assignment(
-        zoom=12,
-        x_range=(0, 1),
-        y_range=(0, 1),
-        stage="claim",
-        store=store,
-        service_id="test_service",
-        user_id="user1",
-    )
-
-    # Second user can submit it with control_user=False
-    submitted = tile_assignment(
-        zoom=12,
-        x_range=(0, 1),
-        y_range=(0, 1),
-        stage="submit",
-        store=store,
-        service_id="test_service",
-        user_id="user2",
-        control_user=False,
-    )
-
-    assert submitted["x"] == claimed["x"]
-    assert submitted["y"] == claimed["y"]
-    assert submitted["stage"] == "submitted"
-
-
-def test_release_submitted_tile(store):
-    """Test releasing a submitted tile."""
+def test_force_release_submitted_tile(store):
+    """Test force-releasing a submitted tile."""
     # First claim and submit a tile
-    tile_assignment(
+    claimed = tile_assignment(
         zoom=12,
         x_range=(0, 1),
         y_range=(0, 1),
@@ -355,13 +311,34 @@ def test_release_submitted_tile(store):
         user_id="test_user",
     )
 
-    # Try to release it
-    with pytest.raises(TileAlreadyLockedError):
+    # Force release the tile - this should work even though it's submitted
+    result = tile_assignment(
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+        stage="force-release",
+        store=store,
+        service_id="test_service",
+        user_id="test_user",
+    )
+
+    assert result["x"] == claimed["x"]
+    assert result["y"] == claimed["y"]
+    assert result["z"] == claimed["z"]
+    assert result["stage"] == "released"
+
+    # Verify tile is gone
+    assert store.get_user_tile("test_service", "test_user") is None
+
+
+def test_force_release_nonexistent_tile(store):
+    """Test force-releasing a tile that doesn't exist."""
+    with pytest.raises(TileNotAssignedError):
         tile_assignment(
             zoom=12,
             x_range=(0, 1),
             y_range=(0, 1),
-            stage="release",
+            stage="force-release",
             store=store,
             service_id="test_service",
             user_id="test_user",
