@@ -1,5 +1,7 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
+import json
+from rio_tiler.models import ImageData
 from typing import Any, Dict, Optional, Tuple
 
 from ...services.base import TileAssignmentStore, TileNotAssignedError
@@ -48,8 +50,7 @@ def tile_assignment(
         # Get current tile assignment
         current_tile = store.get_user_tile(service_id, user_id)
         if not current_tile:
-            raise TileNotAssignedError(f"No tile assigned to user {user_id}")
-
+            raise TileNotAssignedError(service_id=service_id, user_id=user_id)
         # Perform the requested operation
         if stage == "release":
             return store.release_tile(service_id, user_id)
@@ -58,6 +59,11 @@ def tile_assignment(
         elif stage == "update":
             if not data:
                 data = {}
+            if isinstance(data, ImageData):
+                # extract metadata from data
+                metadata = data.metadata or {}
+                # convert metadata to bytes
+                data = json.dumps(metadata)
             return store.update_tile(service_id, user_id, data)
         else:  # force-release
             # Use the current tile's coordinates for force release

@@ -176,7 +176,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
             if not tile:
                 raise TileNotAssignedError(
-                    f"No tile assigned to user {user_id} for service {service_id}"
+                    service_id=service_id,
+                    user_id=user_id,
                 )
 
             # Update the tile's data
@@ -293,7 +294,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
 
             if not tile:
                 raise TileNotAssignedError(
-                    f"No tile assignment found for {x},{y},{z} in service {service_id}"
+                    service_id=service_id,
+                    user_id=None,
                 )
 
             # Store tile info before deletion

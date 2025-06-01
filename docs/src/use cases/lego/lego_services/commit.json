@@ -18,30 +18,30 @@
     "process_graph": {
       "commit": {
         "process_id": "tile_assignment",
+        "result": false,
         "arguments": {
           "zoom": 7,
           "x_range": [55, 80],
           "y_range": [27, 52],
-          "stage": "release",
+          "stage": "submit",
           "store": {
             "from_parameter": "_openeo_tile_store"
           },
-          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "service_id": "lego-mosaic-test-1",
           "user_id": {
             "from_parameter": "_openeo_user"
           }
-        },
-        "result": false
+        }
       },
       "save": {
         "process_id": "save_result",
+        "result": true,
         "arguments": {
           "data": {
             "from_node": "commit"
           },
-          "format": "txt"
-        },
-        "result": true
+          "format": "json"
+        }
       }
     }
   }

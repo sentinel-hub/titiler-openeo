@@ -124,6 +124,26 @@
           }
         }
       },
+      "update": {
+        "process_id": "tile_assignment",
+        "result": false,
+        "arguments": {
+          "zoom": 7,
+          "x_range": [55, 80],
+          "y_range": [27, 52],
+          "stage": "claim",
+          "store": {
+            "from_parameter": "_openeo_tile_store"
+          },
+          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "user_id": {
+            "from_parameter": "_openeo_user"
+          },
+          "data": {
+            "from_node": "instructions"
+          }
+        }
+      },
       "save": {
         "process_id": "save_result",
         "result": true,
