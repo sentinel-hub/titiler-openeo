@@ -1,6 +1,6 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ...services.base import TileAssignmentStore, TileNotAssignedError
 from .core import process
@@ -17,6 +17,9 @@ def tile_assignment(
     store: TileAssignmentStore,
     service_id: str,
     user_id: str,
+    data: Optional[
+        Dict[str, Any]
+    ] = None,  # Optional data for updating tile information
 ) -> Dict[str, Any]:
     """Assign XYZ tiles to users.
 
@@ -28,6 +31,7 @@ def tile_assignment(
         store: Tile assignment store instance
         service_id: Current service ID
         user_id: Current user ID
+        data: Additional information to store with the tile (for update stage)
 
     Returns:
         Dict containing x, y, z coordinates and stage
@@ -40,7 +44,7 @@ def tile_assignment(
     """
     if stage == "claim":
         return store.claim_tile(service_id, user_id, zoom, x_range, y_range)
-    elif stage in ["release", "submit", "force-release"]:
+    elif stage in ["release", "submit", "force-release", "update"]:
         # Get current tile assignment
         current_tile = store.get_user_tile(service_id, user_id)
         if not current_tile:
@@ -51,6 +55,10 @@ def tile_assignment(
             return store.release_tile(service_id, user_id)
         elif stage == "submit":
             return store.submit_tile(service_id, user_id)
+        elif stage == "update":
+            if not data:
+                data = {}
+            return store.update_tile(service_id, user_id, data)
         else:  # force-release
             # Use the current tile's coordinates for force release
             return store.force_release_tile(

@@ -49,6 +49,17 @@ class MockTileStore(TileAssignmentStore):
         self.last_user_id = user_id
         return {"x": 1000, "y": 2000, "z": 12, "stage": "submitted"}
 
+    def update_tile(self, service_id: str, user_id: str, json_data: Dict) -> Dict:
+        """Mock updating a tile with additional information."""
+        self.last_user_id = user_id
+        response = {"x": 1000, "y": 2000, "z": 12, "stage": "claimed"}
+        response.update(json_data)
+        return response
+
+    def force_release_tile(self, service_id: str, x: int, y: int, z: int) -> Dict:
+        """Mock force-releasing a tile."""
+        return {"x": x, "y": y, "z": z, "stage": "released"}
+
 
 def test_tile_assignment_user_parameter():
     """Test that tile_assignment correctly handles the user parameter."""
@@ -134,3 +145,34 @@ def test_tile_assignment_user_parameter_missing():
             named_parameters={},
         )
     assert "missing" in str(exc_info.value).lower()
+
+
+def test_tile_assignment_update():
+    """Test updating a tile with additional information."""
+    # Create mock store
+    store = MockTileStore()
+
+    # Test updating tile with direct user_id
+    json_data = {"progress": 50, "metadata": {"timestamp": "2025-05-26T12:00:00Z"}}
+    result = tile_assignment(
+        zoom=12,
+        x_range=(1000, 1010),
+        y_range=(2000, 2010),
+        stage="update",
+        store=store,
+        service_id="test_service",
+        user_id="direct123",
+        data=json_data,
+    )
+
+    # Verify the store received the user_id
+    assert store.last_user_id == "direct123"
+    assert isinstance(store.last_user_id, str)
+
+    # Verify the result includes both tile info and json data
+    assert result["stage"] == "claimed"
+    assert result["x"] == 1000
+    assert result["y"] == 2000
+    assert result["z"] == 12
+    assert result["progress"] == 50
+    assert result["metadata"]["timestamp"] == "2025-05-26T12:00:00Z"

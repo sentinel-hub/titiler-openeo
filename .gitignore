@@ -169,8 +169,11 @@ cdk.context.json
 *.nc
 .claud*
 openapi.json
+
 europe_tiles/
 europe_map*.png
 titiler/openeo/data/EEA_Coastline_Polygon_Shape.zip
 brick_quantities/
 file::memory:
+
+.venv311/

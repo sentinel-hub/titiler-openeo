@@ -34,7 +34,7 @@ dependencies = [
     "titiler.core==0.21.0",
     "rio-tiler>=7.4.0,<8.0",
     "starlette-cramjam>=0.4,<0.5",
-    "openeo-pg-parser-networkx",
+    "openeo-pg-parser-networkx==2024.10.1",
     "pystac-client",
     "pydantic-settings~=2.0",
     "scikit-image~=0.22.0",
