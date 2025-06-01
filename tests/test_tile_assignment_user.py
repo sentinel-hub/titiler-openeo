@@ -146,6 +146,7 @@ def test_tile_assignment_user_parameter_missing():
         )
     assert "missing" in str(exc_info.value).lower()
 
+
 def test_tile_assignment_update():
     """Test updating a tile with additional information."""
     # Create mock store
@@ -161,7 +162,7 @@ def test_tile_assignment_update():
         store=store,
         service_id="test_service",
         user_id="direct123",
-        data=json_data
+        data=json_data,
     )
 
     # Verify the store received the user_id

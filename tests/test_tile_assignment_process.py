@@ -103,7 +103,7 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         if key not in self.assignments:
             raise TileNotAssignedError(f"No tile assigned to user {user_id}")
-        
+
         tile = self.assignments[key]
         updated_tile = {**tile}
         updated_tile.update(json_data)
@@ -356,6 +356,7 @@ def test_force_release_nonexistent_tile(store):
             user_id="test_user",
         )
 
+
 def test_update_tile(store):
     """Test updating a tile with additional data."""
     # First claim a tile
@@ -392,6 +393,7 @@ def test_update_tile(store):
     assert result["progress"] == 50
     assert result["metadata"]["timestamp"] == "2025-05-26T12:00:00Z"
 
+
 def test_update_tile_not_assigned(store):
     """Test updating a tile that isn't assigned."""
     with pytest.raises(TileNotAssignedError):
@@ -405,6 +407,7 @@ def test_update_tile_not_assigned(store):
             user_id="test_user",
             data={"progress": 50},
         )
+
 
 def test_unauthorized_update(store):
     """Test updating another user's tile."""

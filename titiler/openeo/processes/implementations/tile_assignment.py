@@ -1,6 +1,6 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ...services.base import TileAssignmentStore, TileNotAssignedError
 from .core import process
@@ -17,7 +17,9 @@ def tile_assignment(
     store: TileAssignmentStore,
     service_id: str,
     user_id: str,
-    data: Dict[str, Any] = None,  # Optional data for updating tile information
+    data: Optional[
+        Dict[str, Any]
+    ] = None,  # Optional data for updating tile information
 ) -> Dict[str, Any]:
     """Assign XYZ tiles to users.
 

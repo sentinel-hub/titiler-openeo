@@ -361,6 +361,7 @@ def test_complex_scenario(tile_store):
     assert tile_store.get_user_tile("test_service", "user5")["stage"] == "claimed"
     assert tile_store.get_user_tile("test_service", "user6")["stage"] == "claimed"
 
+
 def test_update_tile(tile_store):
     """Test updating a tile with additional information."""
     # First claim a tile
@@ -376,12 +377,10 @@ def test_update_tile(tile_store):
     json_data = {
         "progress": 50,
         "metadata": {"start_time": "2025-05-26T09:30:00Z"},
-        "custom_field": "test value"
+        "custom_field": "test value",
     }
     updated = tile_store.update_tile(
-        service_id="test_service",
-        user_id="test_user",
-        json_data=json_data
+        service_id="test_service", user_id="test_user", json_data=json_data
     )
 
     # Verify update response contains original tile info plus new data
@@ -399,11 +398,10 @@ def test_update_tile(tile_store):
     assert stored["metadata"]["start_time"] == "2025-05-26T09:30:00Z"
     assert stored["custom_field"] == "test value"
 
+
 def test_update_tile_not_assigned(tile_store):
     """Test updating a tile that isn't assigned."""
     with pytest.raises(TileNotAssignedError):
         tile_store.update_tile(
-            service_id="test_service",
-            user_id="test_user",
-            json_data={"progress": 50}
+            service_id="test_service", user_id="test_user", json_data={"progress": 50}
         )
