@@ -98,6 +98,18 @@ class MockTileStore(TileAssignmentStore):
         key = f"{service_id}:{user_id}"
         return self.assignments.get(key)
 
+    def update_tile(self, service_id, user_id, json_data):
+        """Mock update tile with additional information."""
+        key = f"{service_id}:{user_id}"
+        if key not in self.assignments:
+            raise TileNotAssignedError(f"No tile assigned to user {user_id}")
+
+        tile = self.assignments[key]
+        updated_tile = {**tile}
+        updated_tile.update(json_data)
+        self.assignments[key] = updated_tile
+        return updated_tile
+
 
 @pytest.fixture
 def store():
@@ -342,4 +354,83 @@ def test_force_release_nonexistent_tile(store):
             store=store,
             service_id="test_service",
             user_id="test_user",
+        )
+
+
+def test_update_tile(store):
+    """Test updating a tile with additional data."""
+    # First claim a tile
+    claimed = tile_assignment(
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+        stage="claim",
+        store=store,
+        service_id="test_service",
+        user_id="test_user",
+    )
+
+    # Update the tile with additional data
+    json_data = {"progress": 50, "metadata": {"timestamp": "2025-05-26T12:00:00Z"}}
+    result = tile_assignment(
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+        stage="update",
+        store=store,
+        service_id="test_service",
+        user_id="test_user",
+        data=json_data,
+    )
+
+    # Verify base tile info is preserved
+    assert result["x"] == claimed["x"]
+    assert result["y"] == claimed["y"]
+    assert result["z"] == claimed["z"]
+    assert result["stage"] == "claimed"
+
+    # Verify additional data is included
+    assert result["progress"] == 50
+    assert result["metadata"]["timestamp"] == "2025-05-26T12:00:00Z"
+
+
+def test_update_tile_not_assigned(store):
+    """Test updating a tile that isn't assigned."""
+    with pytest.raises(TileNotAssignedError):
+        tile_assignment(
+            zoom=12,
+            x_range=(0, 1),
+            y_range=(0, 1),
+            stage="update",
+            store=store,
+            service_id="test_service",
+            user_id="test_user",
+            data={"progress": 50},
+        )
+
+
+def test_unauthorized_update(store):
+    """Test updating another user's tile."""
+    # First user claims a tile
+    tile_assignment(
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+        stage="claim",
+        store=store,
+        service_id="test_service",
+        user_id="user1",
+    )
+
+    # Second user tries to update it
+    with pytest.raises(TileNotAssignedError, match="No tile assigned to user user2"):
+        tile_assignment(
+            zoom=12,
+            x_range=(0, 1),
+            y_range=(0, 1),
+            stage="update",
+            store=store,
+            service_id="test_service",
+            user_id="user2",
+            data={"progress": 50},
         )

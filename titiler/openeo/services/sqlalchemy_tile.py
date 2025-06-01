@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     Integer,
@@ -37,6 +38,7 @@ class TileAssignment(Base):
     z = Column(Integer, nullable=False)
     stage = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    data = Column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("service_id", "x", "y", "z", name="unique_tile"),
@@ -72,13 +74,16 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             if not result:
                 return None
 
-            return {
+            response = {
                 "service_id": result.service_id,
                 "x": result.x,
                 "y": result.y,
                 "z": result.z,
                 "stage": result.stage,
             }
+            if result.data:
+                response.update(result.data)
+            return response
 
     def claim_tile(
         self,
@@ -151,6 +156,41 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "z": zoom,
                 "stage": "claimed",
             }
+
+    def update_tile(
+        self,
+        service_id: str,
+        user_id: str,
+        json_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update a user's assigned tile with additional information."""
+        with Session(self._engine) as session:
+            tile = session.execute(
+                select(TileAssignment).where(
+                    TileAssignment.service_id == service_id,
+                    TileAssignment.user_id == user_id,
+                )
+            ).scalar_one_or_none()
+
+            if not tile:
+                raise TileNotAssignedError(
+                    f"No tile assigned to user {user_id} for service {service_id}"
+                )
+
+            # Update the tile's data
+            tile.data = json_data
+            session.commit()
+
+            # Return updated tile info
+            response = {
+                "service_id": service_id,
+                "x": tile.x,
+                "y": tile.y,
+                "z": tile.z,
+                "stage": tile.stage,
+            }
+            response.update(json_data)
+            return response
 
     def release_tile(
         self,

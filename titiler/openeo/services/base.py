@@ -136,6 +136,25 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
         """
         ...
 
+    @abc.abstractmethod
+    def update_tile(
+        self, service_id: str, user_id: str, json_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update a user's assigned tile with additional information.
+
+        Args:
+            service_id: The service identifier
+            user_id: The user identifier
+            json_data: Additional information to store with the tile
+
+        Returns:
+            Dict with x, y, z, stage and additional data
+
+        Raises:
+            TileNotAssignedError: When user has no tile
+        """
+        ...
+
 
 @define()
 class ServicesStore(metaclass=abc.ABCMeta):
