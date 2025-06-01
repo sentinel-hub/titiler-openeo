@@ -137,7 +137,9 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def update_tile(self, service_id: str, user_id: str, json_data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_tile(
+        self, service_id: str, user_id: str, json_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Update a user's assigned tile with additional information.
 
         Args:
