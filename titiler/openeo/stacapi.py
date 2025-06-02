@@ -486,7 +486,7 @@ class LoadCollection:
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
         # private arguments
-        width: Optional[int] = None,
+        width: Optional[int] = 4096,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
     ) -> RasterStack:

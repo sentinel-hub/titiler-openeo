@@ -286,30 +286,28 @@ def _get_item_resolutions(
     x_resolutions = []
     y_resolutions = []
 
+    # If the item has a transform, use it directly
     if src_dst.transform:
         x_resolutions.append(abs(src_dst.transform.a))
         y_resolutions.append(abs(src_dst.transform.e))
     else:
         for _, asset in item.get("assets", {}).items():
+            # If the asset has a transform, use the pixel size from it
             if asset_transform := asset.get("proj:transform"):
                 x_resolutions.append(abs(asset_transform[0]))
                 y_resolutions.append(abs(asset_transform[4]))
+            # If the asset has a shape, calculate pixel size from it
             elif asset_shape := asset.get("proj:shape"):
                 if asset_shape[0] > 0 and asset_shape[1] > 0:
                     x_resolutions.append(
-                        abs(
-                            (spatial_extent.east - spatial_extent.west) / asset_shape[0]
-                        )
+                        abs((item["bbox"][2] - item["bbox"][0]) / asset_shape[0])
                     )
                     y_resolutions.append(
-                        abs(
-                            (spatial_extent.north - spatial_extent.south)
-                            / asset_shape[1]
-                        )
+                        abs((item["bbox"][3] - item["bbox"][1]) / asset_shape[1])
                     )
             else:
-                x_resolutions.append(1024)
-                y_resolutions.append(1024)
+                x_resolutions.append(1)  # Default x resolution
+                y_resolutions.append(1)  # Default y resolution
 
     return x_resolutions, y_resolutions
 
@@ -348,18 +346,43 @@ def _calculate_dimensions(
     width: Optional[int] = None,
     height: Optional[int] = None,
 ) -> tuple[int, int]:
-    """Calculate output dimensions."""
+    """Calculate output dimensions maintaining aspect ratio when only one dimension is provided."""
+
+    # If both width and height are provided, return them directly
     if width and height:
         return width, height
 
+    # Calculate native dimensions from resolution
     if x_resolution and y_resolution:
-        width = int(round((bbox[2] - bbox[0]) / x_resolution))
-        height = int(round((bbox[3] - bbox[1]) / y_resolution))
-    else:
-        width = 1024
-        height = 1024
+        native_width = int(round((bbox[2] - bbox[0]) / x_resolution))
+        native_height = int(round((bbox[3] - bbox[1]) / y_resolution))
+        aspect_ratio = native_width / native_height
 
-    return width, height
+        # Only width provided - calculate height to maintain proportions
+        if width and not height:
+            height = int(round(width / aspect_ratio))
+            return width, height
+
+        # Only height provided - calculate width to maintain proportions
+        if height and not width:
+            width = int(round(height * aspect_ratio))
+            return width, height
+
+        # Neither provided - use native dimensions
+        return native_width, native_height
+
+    # No resolution info - use default dimensions
+    if not width and not height:
+        return 1024, 1024
+
+    # If we get here, we have resolution issues but one dimension was provided
+    # Use provided dimension and default the other to 1024
+    if width:
+        return width, 1024
+    if height:
+        return 1024, height
+
+    return 1024, 1024
 
 
 def _check_pixel_limit(
@@ -415,6 +438,8 @@ def _estimate_output_dimensions(
     all_x_resolutions = []
     all_y_resolutions = []
 
+    # Get the full extent first
+    full_bbox = None
     for item in items:
         with SimpleSTACReader(item) as src_dst:
             if item_crs is None:
@@ -423,6 +448,17 @@ def _estimate_output_dimensions(
                 raise MixedCRSError(
                     found_crs=str(src_dst.crs), expected_crs=str(item_crs)
                 )
+
+            if full_bbox is None:
+                full_bbox = src_dst.bounds
+            else:
+                # Expand bbox to include this item
+                full_bbox = [
+                    min(full_bbox[0], src_dst.bounds[0]),  # west
+                    min(full_bbox[1], src_dst.bounds[1]),  # south
+                    max(full_bbox[2], src_dst.bounds[2]),  # east
+                    max(full_bbox[3], src_dst.bounds[3]),  # north
+                ]
 
             x_res, y_res = _get_item_resolutions(item, src_dst, spatial_extent)
             all_x_resolutions.extend(x_res)
