@@ -95,6 +95,11 @@ def _save_single_result(
         bytes = json.dumps(metadata).encode("utf-8")
         return SaveResultData(data=bytes, media_type="application/json")
 
+    if isinstance(data, list) and format.lower() == "metajson":
+        # If data is a dictionary, convert it to JSON bytes
+        bytes = json.dumps(data).encode("utf-8")
+        return SaveResultData(data=bytes, media_type="application/json")
+
     if isinstance(data, dict) and data.get("type") == "FeatureCollection":
         if format.lower() == "json":
             # convert json to bytes
