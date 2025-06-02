@@ -1,8 +1,8 @@
 """titiler.openeo.processes Apply."""
 
 from typing import Any, Callable, Dict, Optional
+
 import morecantile
-from numpy.typing import ArrayLike
 
 from titiler.openeo.models import SpatialExtent
 
@@ -39,7 +39,7 @@ def apply(
 def xyz_to_bbox(
     data: Dict[str, Any],
     context: Optional[Dict] = None,
-) -> RasterStack:
+) -> SpatialExtent:
     """Apply process on ArrayLike."""
 
     # find x, y and z attributes

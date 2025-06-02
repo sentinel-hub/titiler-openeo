@@ -22,7 +22,11 @@ def get_store(store_uri: str) -> ServicesStore:
 
         return DuckDBStore(store=store_uri)
 
-    if parsed.scheme == "sqlalchemy" or parsed.scheme.startswith("postgresql") or parsed.scheme.startswith("sqlite"):
+    if (
+        parsed.scheme == "sqlalchemy"
+        or parsed.scheme.startswith("postgresql")
+        or parsed.scheme.startswith("sqlite")
+    ):
         from .sqlalchemy import SQLAlchemyStore  # noqa
 
         return SQLAlchemyStore(store=store_uri)
@@ -44,7 +48,11 @@ def get_tile_store(store_uri: str) -> TileAssignmentStore:
     """
     parsed = urlparse(store_uri)
 
-    if parsed.scheme == "sqlalchemy" or parsed.scheme.startswith("postgresql") or parsed.scheme.startswith("sqlite"):
+    if (
+        parsed.scheme == "sqlalchemy"
+        or parsed.scheme.startswith("postgresql")
+        or parsed.scheme.startswith("sqlite")
+    ):
         return SQLAlchemyTileStore(store=store_uri)
 
     raise ValueError(f"Tile store not supported for {store_uri}")

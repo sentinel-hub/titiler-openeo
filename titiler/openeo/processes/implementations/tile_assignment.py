@@ -1,8 +1,8 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
-import json
-from rio_tiler.models import ImageData
 from typing import Any, Dict, Optional, Tuple
+
+from rio_tiler.models import ImageData
 
 from ...services.base import TileAssignmentStore, TileNotAssignedError
 from .core import process
@@ -64,8 +64,7 @@ def tile_assignment(
                 if all(isinstance(v, ImageData) for v in data.values()):
                     # extract each ImageData's metadata
                     data = {
-                        k: v.metadata if v.metadata else {}
-                        for k, v in data.items()
+                        k: v.metadata if v.metadata else {} for k, v in data.items()
                     }
             return store.update_tile(service_id, user_id, data)
         else:  # force-release

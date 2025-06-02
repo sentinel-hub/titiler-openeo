@@ -2,8 +2,6 @@
 
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from geojson_pydantic import Polygon
-from pydantic import BaseModel
 import pyproj
 import pystac
 from attrs import define, field
@@ -25,7 +23,6 @@ from urllib3 import Retry
 
 from titiler.openeo.models import SpatialExtent
 
-from .errors import NoDataAvailable, TemporalExtentEmpty
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -218,7 +215,6 @@ class stacApiBackend:
             max_items=max_items,
         )
         return list(items.items_as_dicts())
-
 
 
 @define

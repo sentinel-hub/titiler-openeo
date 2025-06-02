@@ -1,16 +1,15 @@
 """titiler.openeo.processes.implementations image methods."""
 
-from typing import Dict, Sequence, Tuple, Any
-import os
 import json
+import os
+from typing import Any, Dict, Tuple
+
+import colour
+import morecantile
 import numpy
 from numpy.typing import ArrayLike
-import morecantile
-from rio_tiler.colormap import cmap as default_cmap
-from rio_tiler.types import ColorMapType
-from skimage.draw import disk
-import colour
 from PIL import Image
+from skimage.draw import disk
 
 from .data_model import ImageData, RasterStack
 
@@ -85,7 +84,6 @@ def _load_coastline_data():
 
     try:
         import geopandas as gpd
-        import shapely.geometry
         from shapely.prepared import prep
 
         # Load the EEA coastline shapefile directly from the zip file
@@ -256,9 +254,9 @@ def _get_water_mask_for_bounds(
     if _COASTLINE_LOADING:
         print(f"Warning: Coastline data still loading after {max_wait_seconds} seconds")
         return numpy.zeros(shape, dtype=bool)  # Return all land if still loading
-    import pyproj
     import numpy as np
-    from shapely.geometry import Point, box
+    import pyproj
+    from shapely.geometry import box
 
     try:
         # Unpack bounds
@@ -524,8 +522,7 @@ def _legofication(
         # get all the information from the lego_colors dict
         base_plate = {}
         if all(
-            info["is_water"]
-            for info in img.metadata["brick_info"]["pixels"].values()
+            info["is_water"] for info in img.metadata["brick_info"]["pixels"].values()
         ):
             base_plate = {
                 "color_name": "Dark Bluish Grey",

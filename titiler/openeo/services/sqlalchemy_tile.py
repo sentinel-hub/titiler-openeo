@@ -81,8 +81,9 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "z": result.z,
                 "stage": result.stage,
                 "user_id": result.user_id,
-                "data": result.data,
             }
+            if result.data:
+                response["data"] = result.data
             return response
 
     def claim_tile(
@@ -190,8 +191,10 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "y": tile.y,
                 "z": tile.z,
                 "stage": tile.stage,
+                "user_id": user_id,
             }
-            response.update(json_data)
+            if tile.data:
+                response["data"] = tile.data
             return response
 
     def release_tile(
@@ -294,7 +297,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             if not tile:
                 raise TileNotAssignedError(
                     service_id=service_id,
-                    user_id=None,
+                    user_id="Any",
                 )
 
             # Store tile info before deletion

@@ -1,7 +1,7 @@
 """Test HTTP error codes for tile assignment endpoints."""
 
-from base64 import b64encode
 import json
+from base64 import b64encode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -95,15 +95,19 @@ def create_test_services(app, auth_token: str) -> dict:
 def engine():
     """Create a shared database engine."""
     from sqlalchemy import create_engine
+
     return create_engine("sqlite:///file::memory:?cache=shared&mode=memory")
+
 
 @pytest.fixture(autouse=True)
 def clear_db(engine):
     """Clear database tables before each test."""
     from titiler.openeo.services.sqlalchemy import Base
+
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     yield
+
 
 @pytest.fixture
 def app_with_mock_store(monkeypatch, engine, clear_db):

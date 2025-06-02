@@ -1,16 +1,10 @@
 """titiler.openeo.processes.implementations image methods."""
 
-from typing import Dict, Sequence, Tuple, Any
-import os
-import json
+from typing import Dict, Sequence
+
 import numpy
-from numpy.typing import ArrayLike
-import morecantile
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
-from skimage.draw import disk
-import colour
-from PIL import Image
 
 from .data_model import ImageData, RasterStack
 
@@ -109,6 +103,7 @@ def get_colormap(name: str) -> ColorMapType:
 def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     """Apply colormap to a single ImageData."""
     return data.apply_colormap(colormap)
+
 
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.

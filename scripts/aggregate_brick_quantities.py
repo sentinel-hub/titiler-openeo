@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Aggregate LEGO brick quantities from Europe map tiles."""
 
-import os
 import csv
-import numpy as np
-import requests
-from io import StringIO
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from io import StringIO
 from typing import Dict, List, Tuple
+
+import numpy as np
+import requests
 
 
 @dataclass
@@ -176,8 +177,8 @@ def generate_summary(quantities: Dict[str, BrickInfo], output_file: str):
         f.write(f"Regular bricks: {regular_bricks}\n")
         f.write(f"Transparent bricks: {transparent_bricks}\n")
         f.write(
-            "\nDetailed 1x1 brick quantities (https://www.bricklink.com/v2/catalog/catalogitem.page?P=3024#T=C&C=48):\n"+
-            "(Add 5-10% to the total for 1x1 bricks)\n"
+            "\nDetailed 1x1 brick quantities (https://www.bricklink.com/v2/catalog/catalogitem.page?P=3024#T=C&C=48):\n"
+            + "(Add 5-10% to the total for 1x1 bricks)\n"
         )
         f.write("ref,color,quantity,transparent\n")
 

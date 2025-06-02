@@ -1,9 +1,9 @@
-import geopandas as gpd
+import glob
 import os
+import zipfile
 from pathlib import Path
 
-import zipfile
-import glob
+import geopandas as gpd
 
 # Input and output paths
 input_zip = Path("/home/emathot/Downloads/coastlines-split-3857.zip")
@@ -15,7 +15,7 @@ os.makedirs(tmp_dir, exist_ok=True)
 os.system(f"rm -rf {tmp_dir}/*")
 
 # Extract the zip file
-with zipfile.ZipFile(input_zip, 'r') as zip_ref:
+with zipfile.ZipFile(input_zip, "r") as zip_ref:
     zip_ref.extractall(tmp_dir)
     print("Extracted files:")
     for file in zip_ref.namelist():
@@ -41,10 +41,7 @@ gdf.geometry = gdf_simplified
 os.system(f"rm -rf {tmp_dir}/*")
 
 # Save to new shapefile
-gdf.to_file(
-    f"{tmp_dir}/coastline_simplified.shp",
-    driver="ESRI Shapefile"
-)
+gdf.to_file(f"{tmp_dir}/coastline_simplified.shp", driver="ESRI Shapefile")
 
 # Create the output zip file with only the simplified files
 os.system(f"cd {tmp_dir} && zip -r {output_zip.resolve()} coastline_simplified.*")
@@ -58,7 +55,7 @@ original_size = os.path.getsize(input_zip) / (1024 * 1024)  # MB
 new_size = os.path.getsize(output_zip) / (1024 * 1024)  # MB
 reduction = ((original_size - new_size) / original_size) * 100
 
-print(f"\nFile size reduction:")
+print("\nFile size reduction:")
 print(f"Original: {original_size:.1f}MB")
 print(f"Simplified: {new_size:.1f}MB")
 print(f"Reduction: {reduction:.1f}%")
