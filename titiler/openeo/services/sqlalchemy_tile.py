@@ -249,21 +249,28 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             user_id (if assigned), status (if submitted), and any additional metadata
         """
         with Session(self._engine) as session:
-            tiles = session.execute(
-                select(TileAssignment).where(
-                    TileAssignment.service_id == service_id
+            tiles = (
+                session.execute(
+                    select(TileAssignment).where(
+                        TileAssignment.service_id == service_id
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
-            return [{
-                "service_id": tile.service_id,
-                "x": tile.x,
-                "y": tile.y,
-                "z": tile.z,
-                "stage": tile.stage,
-                "user_id": tile.user_id,
-                "data": tile.data if tile.data else None,
-            } for tile in tiles]
+            return [
+                {
+                    "service_id": tile.service_id,
+                    "x": tile.x,
+                    "y": tile.y,
+                    "z": tile.z,
+                    "stage": tile.stage,
+                    "user_id": tile.user_id,
+                    "data": tile.data if tile.data else None,
+                }
+                for tile in tiles
+            ]
 
     def submit_tile(
         self,

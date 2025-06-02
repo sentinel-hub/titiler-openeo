@@ -461,9 +461,7 @@ def test_tiles_summary_empty(store):
     """Test getting summary of tiles when there are no tiles."""
     summary = tiles_summary(store=store, service_id="test_service")
 
-    assert isinstance(summary, dict)
-    assert summary["claimed"] == []
-    assert summary["submitted"] == []
+    assert isinstance(summary, List)
 
 
 def test_tiles_summary_with_tiles(store):

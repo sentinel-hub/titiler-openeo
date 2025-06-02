@@ -1,6 +1,6 @@
 """Test tile assignment user parameter handling."""
 
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
@@ -59,6 +59,10 @@ class MockTileStore(TileAssignmentStore):
     def force_release_tile(self, service_id: str, x: int, y: int, z: int) -> Dict:
         """Mock force-releasing a tile."""
         return {"x": x, "y": y, "z": z, "stage": "released"}
+
+    def get_all_tiles(self, service_id: str) -> List[Dict[str, Any]]:
+        """Mock get all tiles."""
+        return []
 
 
 def test_tile_assignment_user_parameter():
