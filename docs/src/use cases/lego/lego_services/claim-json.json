@@ -32,7 +32,7 @@
           "store": {
             "from_parameter": "_openeo_tile_store"
           },
-          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "service_id": "lego-mosaic-test-1",
           "user_id": {
             "from_parameter": "_openeo_user"
           }
@@ -53,7 +53,9 @@
         "arguments": {
           "bands": ["B04", "B03", "B02"],
           "id": "sentinel-2-global-mosaics",
-          "spatial_extent": { "from_node": "bbox" },
+          "spatial_extent": {
+            "from_node": "bbox"
+          },
           "temporal_extent": ["2024-04-01T00:00:00Z", "2024-04-30T23:59:59Z"]
         }
       },
@@ -131,11 +133,11 @@
           "zoom": 7,
           "x_range": [55, 80],
           "y_range": [27, 52],
-          "stage": "claim",
+          "stage": "update",
           "store": {
             "from_parameter": "_openeo_tile_store"
           },
-          "service_id": "18e2881b-f38c-4f98-9ba2-09df4b6500af",
+          "service_id": "lego-mosaic-test-1",
           "user_id": {
             "from_parameter": "_openeo_user"
           },

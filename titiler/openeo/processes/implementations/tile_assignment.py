@@ -59,11 +59,14 @@ def tile_assignment(
         elif stage == "update":
             if not data:
                 data = {}
-            if isinstance(data, ImageData):
-                # extract metadata from data
-                metadata = data.metadata or {}
-                # convert metadata to bytes
-                data = json.dumps(metadata)
+            if isinstance(data, dict):
+                # check tha each value in data is a valid ImageData
+                if all(isinstance(v, ImageData) for v in data.values()):
+                    # extract each ImageData's metadata
+                    data = {
+                        k: v.metadata if v.metadata else {}
+                        for k, v in data.items()
+                    }
             return store.update_tile(service_id, user_id, data)
         else:  # force-release
             # Use the current tile's coordinates for force release

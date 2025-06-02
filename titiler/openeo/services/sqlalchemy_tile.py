@@ -81,9 +81,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
                 "z": result.z,
                 "stage": result.stage,
                 "user_id": result.user_id,
+                "data": result.data,
             }
-            if result.data:
-                response.update(result.data)
             return response
 
     def claim_tile(
