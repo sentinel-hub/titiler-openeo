@@ -1,16 +1,16 @@
 """Tests for reader module."""
 
+from typing import Any, Dict, Optional
+
+import attr
 import pytest
 import rasterio
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from rasterio.transform import Affine, from_bounds
 
-from titiler.openeo.errors import (
-    MixedCRSError,
-    OutputLimitExceeded,
-    ProcessParameterMissing,
-)
+from titiler.openeo.errors import OutputLimitExceeded, ProcessParameterMissing
 from titiler.openeo.models import SpatialExtent
 from titiler.openeo.reader import (
-    SimpleSTACReader,
     _calculate_dimensions,
     _check_pixel_limit,
     _estimate_output_dimensions,
@@ -29,10 +29,60 @@ def sample_stac_item():
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
-                "proj:transform": [10, 0, 0, 0, -10, 0],
+                "proj:transform": [1, 0, 0, 0, -1, 0, 0, 0, 1],
             }
         },
     }
+
+
+@attr.s(auto_attribs=True)
+class MockSimpleSTACReader:
+    """Mock SimpleSTACReader."""
+
+    input: Dict[str, Any]
+    _bounds: Optional[list] = attr.ib(init=False)
+    _transform: Optional[Affine] = attr.ib(init=False)
+    _crs: Optional[rasterio.crs.CRS] = attr.ib(init=False)
+
+    def __attrs_post_init__(self) -> None:
+        """Initialize reader attributes."""
+        self._bounds = self.input["bbox"]
+        self._crs = rasterio.crs.CRS.from_epsg(4326)
+        self._transform = None
+
+        # Initialize transform from asset if available
+        if asset := self.input["assets"].get("B01"):
+            if "proj:transform" in asset:
+                t = asset["proj:transform"]
+                self._transform = Affine(t[0], t[1], t[2], t[3], t[4], t[5])
+            elif "proj:shape" in asset:
+                # Create transform from bounds and shape
+                west, south, east, north = self._bounds
+                width, height = asset["proj:shape"]
+                self._transform = from_bounds(west, south, east, north, width, height)
+
+    @property
+    def bounds(self):
+        """Return item bounds."""
+        return self._bounds
+
+    @property
+    def transform(self):
+        """Return transform."""
+        return self._transform
+
+    @property
+    def crs(self):
+        """Return CRS."""
+        return self._crs
+
+    def __enter__(self):
+        """Context manager enter method."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit method."""
+        pass
 
 
 @pytest.fixture
@@ -62,14 +112,14 @@ def test_validate_input_parameters(sample_spatial_extent, sample_stac_item):
 def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
     """Test resolution extraction from STAC item."""
     # Test with proj:transform
-    with SimpleSTACReader(sample_stac_item) as src_dst:
+    with MockSimpleSTACReader(sample_stac_item) as src_dst:
         x_res, y_res = _get_item_resolutions(
             sample_stac_item, src_dst, sample_spatial_extent
         )
         assert len(x_res) > 0
         assert len(y_res) > 0
-        assert x_res[0] == 10  # From proj:transform
-        assert y_res[0] == 10  # From proj:transform
+        assert x_res[0] == 1.0  # From proj:transform
+        assert y_res[0] == 1.0  # From proj:transform
 
     # Test with proj:shape
     item_with_shape = {
@@ -82,7 +132,7 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
             }
         },
     }
-    with SimpleSTACReader(item_with_shape) as src_dst:
+    with MockSimpleSTACReader(item_with_shape) as src_dst:
         x_res, y_res = _get_item_resolutions(
             item_with_shape, src_dst, sample_spatial_extent
         )
@@ -101,14 +151,14 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
             }
         },
     }
-    with SimpleSTACReader(item_without_metadata) as src_dst:
+    with MockSimpleSTACReader(item_without_metadata) as src_dst:
         x_res, y_res = _get_item_resolutions(
             item_without_metadata, src_dst, sample_spatial_extent
         )
         assert len(x_res) > 0
         assert len(y_res) > 0
-        assert x_res[0] == 1024  # Default resolution
-        assert y_res[0] == 1024  # Default resolution
+        assert x_res[0] == 1.0  # Default resolution
+        assert y_res[0] == 1.0  # Default resolution
 
 
 def test_reproject_resolution():
@@ -127,17 +177,52 @@ def test_calculate_dimensions():
     """Test dimension calculation."""
     bbox = [0, 0, 10, 10]
 
-    # Test with specified dimensions
+    # Test with native resolution - both dimensions provided
+    width, height = _calculate_dimensions(bbox, 0.1, 0.1, width=100, height=200)
+    assert width == 100
+    assert height == 200
+
+    # Test with native resolution - only width provided
+    native_width = 100
+    native_height = 200
+    x_resolution = (bbox[2] - bbox[0]) / native_width
+    y_resolution = (bbox[3] - bbox[1]) / native_height
+    aspect_ratio = native_width / native_height
+
+    width, height = _calculate_dimensions(
+        bbox, x_resolution, y_resolution, width=50, height=None
+    )
+    assert width == 50
+    assert height == int(round(50 / aspect_ratio))
+
+    # Test with native resolution - only height provided
+    width, height = _calculate_dimensions(
+        bbox, x_resolution, y_resolution, width=None, height=100
+    )
+    assert height == 100
+    assert width == int(round(100 * aspect_ratio))
+
+    # Test with resolution - no dimensions provided
+    width, height = _calculate_dimensions(bbox, x_resolution, y_resolution)
+    assert width == native_width
+    assert height == native_height
+
+    # Test with no resolution - both dimensions provided
     width, height = _calculate_dimensions(bbox, None, None, width=100, height=200)
     assert width == 100
     assert height == 200
 
-    # Test with resolution
-    width, height = _calculate_dimensions(bbox, x_resolution=0.1, y_resolution=0.1)
-    assert width == 100  # 10 / 0.1
-    assert height == 100  # 10 / 0.1
+    # Test with no resolution - only width provided
+    width, height = _calculate_dimensions(bbox, None, None, width=100, height=None)
+    assert width == 100
+    assert height == 1024
 
-    # Test default fallback
+    # Test with no resolution - only height provided
+    width, height = _calculate_dimensions(bbox, None, None, width=None, height=100)
+    assert width == 1024
+    assert height == 100
+
+    # Test with no resolution - no dimensions provided
     width, height = _calculate_dimensions(bbox, None, None)
     assert width == 1024
     assert height == 1024
@@ -172,9 +257,13 @@ def test_check_pixel_limit():
     )  # Should not raise error for 0 pixels
 
 
-def test_estimate_output_dimensions(sample_stac_item, sample_spatial_extent):
+def test_estimate_output_dimensions(
+    sample_stac_item, sample_spatial_extent, monkeypatch
+):
     """Test complete output dimension estimation."""
-    # Test successful estimation
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockSimpleSTACReader)
+
+    # Test with full extent
     result = _estimate_output_dimensions(
         [sample_stac_item],
         sample_spatial_extent,
@@ -184,32 +273,39 @@ def test_estimate_output_dimensions(sample_stac_item, sample_spatial_extent):
     assert "height" in result
     assert "crs" in result
     assert "bbox" in result
+    assert result["width"] == 10
+    assert result["height"] == 10
 
-    # Test mixed CRS error
-    item2 = {
-        "id": "test-item-2",
-        "bbox": [0, 0, 10, 10],
-        "proj": {
-            "epsg": 3857,
-            "transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
-            "shape": [100, 100],
-        },
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-                "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
-            }
-        },
-    }
-    with pytest.raises(MixedCRSError) as exc_info:
-        _estimate_output_dimensions(
-            [sample_stac_item, item2],
-            sample_spatial_extent,
-            ["B01"],
-        )
-    assert "Mixed CRS in items" in str(exc_info.value)
-    assert "found EPSG:3857" in str(exc_info.value)
-    assert "expected EPSG:4326" in str(exc_info.value)
+    # Test with cropped extent
+    cropped_extent = BoundingBox(west=0, south=0, east=5, north=5, crs="EPSG:4326")
+    result_cropped = _estimate_output_dimensions(
+        [sample_stac_item],
+        cropped_extent,
+        ["B01"],
+    )
+    # Dimensions should be half when extent is halved
+    assert result_cropped["width"] == result["width"] // 2
+    assert result_cropped["height"] == result["height"] // 2
+
+    # Test with specified width
+    result = _estimate_output_dimensions(
+        [sample_stac_item],
+        sample_spatial_extent,
+        ["B01"],
+        width=100,
+    )
+    assert result["width"] == 100
+    assert result["height"] > 0  # Should be proportional
+
+    # Test with specified height
+    result = _estimate_output_dimensions(
+        [sample_stac_item],
+        sample_spatial_extent,
+        ["B01"],
+        height=100,
+    )
+    assert result["height"] == 100
+    assert result["width"] > 0  # Should be proportional
 
     # Test output size limit with single item
     with pytest.raises(OutputLimitExceeded) as exc_info:

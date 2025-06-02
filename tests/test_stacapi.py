@@ -34,6 +34,12 @@ def test_load_collection_pixel_threshold(monkeypatch):
             self.height = 5000
             # Affine transform with 0.0002 degrees per pixel (typical for medium resolution imagery)
             self.transform = Affine(0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0)
+            self.bounds = (
+                0.0,  # west
+                0.0,  # south
+                1.0,  # east
+                1.0,  # north
+            )
 
         def __enter__(self):
             return self
@@ -127,6 +133,12 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
             self.height = 5000
             # Affine transform with 0.0002 degrees per pixel (typical for medium resolution imagery)
             self.transform = Affine(0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0)
+            self.bounds = (
+                0.0,  # west
+                0.0,  # south
+                1.0,  # east
+                1.0,  # north
+            )
 
         def __enter__(self):
             return self
@@ -216,6 +228,12 @@ def test_resolution_based_dimension_calculation(monkeypatch):
             self.height = 1000
             # Affine transform with 0.001 degrees per pixel
             self.transform = Affine(0.001, 0.0, 0.0, 0.0, -0.001, 0.0)
+            self.bounds = (
+                0.0,  # west
+                0.0,  # south
+                1.0,  # east
+                1.0,  # north
+            )
 
         def __enter__(self):
             return self
@@ -288,6 +306,8 @@ def test_resolution_based_dimension_calculation(monkeypatch):
     loader.load_collection(
         id="test",
         spatial_extent=spatial_extent,
+        width=None,
+        height=None,
     )
 
     # Check that calculated dimensions are close to expected (1000x1000)
