@@ -390,20 +390,36 @@ def _check_pixel_limit(
     height: Optional[int],
     items: List[Dict],
 ) -> None:
-    """Check if pixel count exceeds maximum allowed."""
+    """Check if pixel count exceeds maximum allowed.
+
+    For mosaics, items with the same datetime are counted only once since they
+    will be combined into a single mosaic.
+    """
     from .settings import ProcessingSettings
 
     processing_settings = ProcessingSettings()
 
     width_int = int(width or 0)
     height_int = int(height or 0)
-    pixel_count = width_int * height_int * len(items)
+
+    # Group items by datetime to avoid double counting mosaic items
+    datetimes = set()
+    for item in items:
+        dt = item.get("properties", {}).get("datetime")
+        if dt:
+            datetimes.add(dt)
+        else:
+            # If no datetime, treat as unique item
+            datetimes.add(id(item))
+
+    # Use number of unique datetimes instead of total items
+    pixel_count = width_int * height_int * len(datetimes)
     if pixel_count > processing_settings.max_pixels:
         raise OutputLimitExceeded(
             width_int,
             height_int,
             processing_settings.max_pixels,
-            items_count=len(items),
+            items_count=len(datetimes),
         )
 
 
