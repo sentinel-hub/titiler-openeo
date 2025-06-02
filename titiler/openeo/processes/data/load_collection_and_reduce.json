@@ -220,12 +220,12 @@
         },
         {
             "name": "width",
-            "description": "The width of the output image in pixels. If only width is provided, height will be calculated to maintain the aspect ratio. Defaults to 4096 to prevent loading in native resolution.",
+            "description": "The width of the output image in pixels. If only width is provided, height will be calculated to maintain the aspect ratio. Defaults to 1024 to prevent loading in native resolution.",
             "schema": {
                 "type": "number",
                 "minimum": 1
             },
-            "default": 4096,
+            "default": 1024,
             "optional": true
         },
         {

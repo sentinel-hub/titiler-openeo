@@ -6,6 +6,26 @@ This document explains the core concepts and data models used in openEO by TiTil
 
 In openEO, a datacube is a fundamental concept and a key component of the platform. While traditional openEO implementations use multi-dimensional arrays for data representation, openEO by TiTiler simplifies this concept by focusing on image raster data that can be processed on-the-fly and served as tiles or as light dynamic raw data.
 
+### Resolution and Dimension Management
+
+The backend intelligently handles resolution and dimensions using these key principles:
+
+1. **Default Resolution Control**: 
+   - The `load_collection` and `load_collection_and_reduce` processes default to a width of 1024 pixels
+   - This intentionally avoids loading data at native resolution by default, which could cause memory issues
+   - Users can explicitly request native resolution by providing their own width/height parameters
+   - The default provides a good balance between quality and performance
+
+2. **Native Resolution Access**:
+   - Resolution information is extracted from source metadata (transform or shape)
+   - When width/height parameters are provided, proportions are maintained
+   - Resolution is adjusted based on the requested spatial extent
+
+3. **Early Resolution Optimization**:
+   - Resolution is determined during initial data loading
+   - Cropping adjusts resolution proportionally
+   - CRS reprojection accounts for resolution changes
+
 ### Raster Data Model
 
 The backend uses three primary data structures for efficient processing:
@@ -39,7 +59,12 @@ The data cube implementation in openEO by TiTiler follows these principles for d
 
 ### Data Reduction
 
-The ImageData object is obtained by reducing as early as possible the data from the collections. While the traditional [`load_collections` process](https://github.com/sentinel-hub/titiler-openeo/blob/43702f98cbe2b418c4399dbdefd8623af446b237/titiler/openeo/processes/data/load_collection.json#L2) is implemented, it's recommended to use the `load_collection_and_reduce` process to immediately get an `imagedata` object.
+The ImageData object is obtained by reducing as early as possible the data from the collections. While both `load_collection` and `load_collection_and_reduce` processes are available, it's recommended to use `load_collection_and_reduce` to immediately get an `imagedata` object at the desired resolution. This approach:
+
+1. Uses a default width of 1024 pixels to prevent memory issues
+2. Allows explicit control over resolution through width/height parameters
+3. Performs data reduction at the target resolution
+4. Maintains proper proportions throughout the process
 
 ![alt text](img/rasterstack.png)
 
@@ -94,3 +119,8 @@ The backend is optimized for on-the-fly processing and serving of raster data. K
 - Larger extents may lead to timeouts
 - The backend can be easily replicated and scaled
 - No additional middleware required for deployment
+- Resolution is managed automatically to balance quality and performance
+- Memory usage is controlled through:
+  - Default width of 1024 pixels in load functions
+  - Pixel count limits for larger requests
+  - Early resolution optimization

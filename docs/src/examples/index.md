@@ -25,7 +25,8 @@ We provide several Jupyter notebooks demonstrating different use cases:
 Learn how to:
 
 - Connect to the openEO backend
-- Load and process Sentinel-2 imagery
+- Load and process Sentinel-2 imagery using default resolution (1024 pixels width)
+- Control output resolution with explicit width/height parameters
 - Create true-color RGB visualizations
 - Apply color enhancements for better visualization
 
@@ -35,8 +36,35 @@ Explore how to:
 
 - Calculate vegetation indices (NDVI)
 - Extract time series data for specific areas
+- Control memory usage with appropriate resolution settings
 - Analyze temporal patterns in vegetation
 - Visualize results using matplotlib
+
+### Resolution Control Examples
+
+The examples demonstrate different approaches to managing resolution:
+
+1. **Default Resolution**:
+```python
+loadcol = load_collection_and_reduce(
+    "SENTINEL2_L2A",
+    spatial_extent=bbox,
+    temporal_extent=["2021-01-01", "2021-12-31"],
+    bands=["B04", "B08"]
+)
+# Uses default width of 1024 pixels for memory efficiency
+```
+
+2. **Custom Resolution**:
+```python
+loadcol = load_collection_and_reduce(
+    "SENTINEL2_L2A",
+    spatial_extent=bbox,
+    temporal_extent=["2021-01-01", "2021-12-31"],
+    bands=["B04", "B08"],
+    width=2048,  # Explicitly control resolution
+)
+```
 
 ## Running the Notebooks
 
