@@ -153,7 +153,7 @@ Here's an example of using the tile assignment process in a service:
    - Only the owner of the tile can force-release it
    - Useful for recovering tiles that are stuck in submitted state
 
-4. **Updating a Tile**:
+5. **Updating a Tile**:
    - User can add or update additional information to their assigned tile
    - Supports arbitrary JSON data for tracking progress, metadata, etc.
    - Additional data persists and is returned in subsequent queries

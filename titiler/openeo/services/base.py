@@ -4,9 +4,12 @@ import abc
 from typing import Any, Dict, List, Optional, Tuple
 
 from attrs import define, field
+from starlette import status
+
+from titiler.openeo.errors import OpenEOException
 
 
-class TileAssignmentError(Exception):
+class TileAssignmentError(OpenEOException):
     """Base class for tile assignment errors."""
 
     pass
@@ -15,19 +18,37 @@ class TileAssignmentError(Exception):
 class NoTileAvailableError(TileAssignmentError):
     """Raised when no tiles are available for assignment."""
 
-    pass
+    def __init__(self, service_id: str, user_id: str, message: str = ""):
+        """Initialize error with no tile available message."""
+        super().__init__(
+            message=f"No tile available for service_id: {service_id} and user_id: {user_id}. {message}",
+            code="NoTileAvailable",
+            status_code=status.HTTP_409_CONFLICT,
+        )
 
 
 class TileNotAssignedError(TileAssignmentError):
     """Raised when trying to release/submit a non-assigned tile."""
 
-    pass
+    def __init__(self, service_id: str, user_id: str):
+        """Initialize error with no tile assigned message."""
+        super().__init__(
+            message=f"No tile assigned to user {user_id} for service {service_id}",
+            code="TileNotAssigned",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
 
 
 class TileAlreadyLockedError(TileAssignmentError):
     """Raised when trying to release a submitted tile."""
 
-    pass
+    def __init__(self, x: int, y: int, z: int, service_id: str, user_id: str):
+        """Initialize error with tile already locked message."""
+        super().__init__(
+            message=f"Tile {x}/{y}/{z} is already locked for user {user_id} for service {service_id}",
+            code="TileAlreadyLocked",
+            status_code=status.HTTP_409_CONFLICT,
+        )
 
 
 @define()

@@ -87,6 +87,14 @@ def _save_single_result(
     options: Optional[Dict] = None,
 ) -> SaveResultData:
     """Save a single result (ImageData or numpy array)."""
+
+    if isinstance(data, ImageData) and format.lower() == "metajson":
+        # extract metadata from data
+        metadata = data.metadata or {}
+        # convert metadata to bytes
+        bytes = json.dumps(metadata).encode("utf-8")
+        return SaveResultData(data=bytes, media_type="application/json")
+
     if isinstance(data, dict) and data.get("type") == "FeatureCollection":
         if format.lower() == "json":
             # convert json to bytes
@@ -160,6 +168,115 @@ def _save_single_result(
     return SaveResultData(data=rendered_data, media_type=media_type)
 
 
+def _handle_text_format(data: Any) -> SaveResultData:
+    """Handle saving data in text/plain format.
+
+    Args:
+        data: The data to convert to text format
+
+    Returns:
+        SaveResultData: The data as text/plain bytes
+    """
+    if isinstance(data, dict):
+        # If data is a dictionary, convert each item to string
+        data = {k: str(v) for k, v in data.items()}
+    else:
+        # Otherwise, convert the entire data to string
+        data = str(data)
+
+    # Convert to bytes
+    bytes_data = str(data).encode("utf-8")
+    return SaveResultData(data=bytes_data, media_type="text/plain")
+
+
+def _handle_json_format(data: Dict, format: str) -> SaveResultData:
+    """Handle saving data in JSON/GeoJSON format.
+
+    Args:
+        data: Dictionary data to convert to JSON
+        format: The target format (json or geojson)
+
+    Returns:
+        SaveResultData: The data as JSON bytes
+    """
+    # Convert to JSON and encode as bytes
+    json_bytes = json.dumps(data).encode("utf-8")
+    return SaveResultData(data=json_bytes, media_type="application/json")
+
+
+def _handle_raster_geotiff(data: Dict[str, ImageData]) -> ImageData:
+    """Handle combining multiple ImageData objects into a single multi-band GeoTIFF.
+
+    Args:
+        data: Dictionary mapping band names to ImageData objects
+
+    Returns:
+        ImageData: Combined multi-band image
+
+    Raises:
+        ValueError: If ImageData objects have incompatible properties
+    """
+    # Get all ImageData objects from the RasterStack
+    image_data_list = list(data.values())
+
+    # Check if this is a RasterStack with ImageData objects
+    if not all(isinstance(img, ImageData) for img in image_data_list):
+        raise ValueError(
+            "All items in RasterStack must be ImageData objects to save as GeoTIFF"
+        )
+
+    # Check if all ImageData objects have the same shape, bounds, and CRS
+    first_img = image_data_list[0]
+    shape = first_img.array.shape[1:]  # Height, Width
+    bounds = first_img.bounds
+    crs = first_img.crs
+
+    for img in image_data_list[1:]:
+        if img.array.shape[1:] != shape:
+            raise ValueError("All images in RasterStack must have the same shape")
+        if img.bounds != bounds:
+            raise ValueError("All images in RasterStack must have the same bounds")
+        if img.crs != crs:
+            raise ValueError("All images in RasterStack must have the same CRS")
+
+    # Stack all arrays into a single multi-band array
+    # Each input array should be (1, height, width), and we want (bands, height, width)
+    arrays = []
+    for img in image_data_list:
+        # Get the array and ensure it's uint8
+        arr = img.array.astype(numpy.uint8)
+        # If array is 2D (height, width), add band dimension
+        if arr.ndim == 2:
+            arr = arr[numpy.newaxis, ...]
+        # If array has multiple bands, take first band
+        elif arr.shape[0] > 1:
+            arr = arr[0:1, ...]
+        arrays.append(arr)
+
+    # Stack along band dimension
+    stacked_array = numpy.ma.concatenate(arrays, axis=0)
+
+    # Prepare metadata
+    band_names_list = [str(key) for key in data.keys()]
+    combined_metadata: Dict[str, Any] = {
+        "band_names": band_names_list.copy(),
+        "original_keys": band_names_list.copy(),
+    }
+
+    # Add any metadata from the original images
+    for i, (key, img) in enumerate(data.items()):  # noqa: B007
+        if img.metadata:
+            combined_metadata[f"band_{i}_metadata"] = img.metadata
+
+    return ImageData(
+        stacked_array,
+        bounds=bounds,
+        crs=crs,
+        metadata=combined_metadata,
+        band_names=band_names_list,
+    )
+
+
 def save_result(
     data: Union[numpy.ndarray, numpy.ma.MaskedArray, RasterStack, dict],
     format: str,
@@ -176,13 +293,15 @@ def save_result(
         For single images: ResultData containing the rendered image bytes and metadata
         For RasterStack: dictionary mapping keys to ResultData objects
     """
-    # Handle special cases for GeoJSON data directly
-    if (
-        format.lower() in ["json", "geojson"]
-        and isinstance(data, dict)
-        and data.get("type") == "FeatureCollection"
-    ):
-        return _save_single_result(data, format, options)
+    # Handle text/plain format
+    if format.lower() in ["txt", "plain"]:
+        return _handle_text_format(data)
+
+    # Handle JSON formats
+    if format.lower() in ["json", "geojson"] and isinstance(data, dict):
+        if data.get("type") == "FeatureCollection":
+            return _save_single_result(data, format, options)
+        return _handle_json_format(data, format)
 
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
@@ -197,66 +316,7 @@ def save_result(
 
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
-            # Get all ImageData objects from the RasterStack
-            image_data_list = list(data.values())
-
-            # Check if this is a RasterStack with ImageData objects
-            if not all(isinstance(img, ImageData) for img in image_data_list):
-                raise ValueError(
-                    "All items in RasterStack must be ImageData objects to save as GeoTIFF"
-                )
-
-            # Check if all ImageData objects have the same shape, bounds, and CRS
-            first_img = image_data_list[0]
-            shape = first_img.array.shape[1:]  # Height, Width
-            bounds = first_img.bounds
-            crs = first_img.crs
-
-            for img in image_data_list[1:]:
-                if img.array.shape[1:] != shape:
-                    raise ValueError(
-                        "All images in RasterStack must have the same shape"
-                    )
-                if img.bounds != bounds:
-                    raise ValueError(
-                        "All images in RasterStack must have the same bounds"
-                    )
-                if img.crs != crs:
-                    raise ValueError("All images in RasterStack must have the same CRS")
-
-            # Stack all arrays into a single multi-band array
-            # Each ImageData.array has shape (bands, height, width)
-            # We need to extract the first band from each image (assuming single-band images)
-            # and stack them into a new array with shape (num_images, height, width)
-            arrays = [
-                img.array[0] if img.array.ndim > 2 else img.array
-                for img in image_data_list
-            ]
-            stacked_array = numpy.ma.stack(arrays)
-
-            # Create a new ImageData object with the stacked array
-            band_names_list = [str(key) for key in data.keys()]
-
-            # Create metadata dictionary
-            combined_metadata: Dict[str, Any] = {}
-            combined_metadata["band_names"] = band_names_list.copy()
-            combined_metadata["original_keys"] = band_names_list.copy()
-
-            # Add any metadata from the original images
-            for i, (key, img) in enumerate(data.items()):  # noqa: B007
-                if img.metadata:
-                    combined_metadata[f"band_{i}_metadata"] = img.metadata
-
-            # Create the combined image
-            combined_img = ImageData(
-                stacked_array,
-                bounds=bounds,
-                crs=crs,
-                metadata=combined_metadata,
-                band_names=band_names_list,
-            )
-
-            # Save the combined image as a GeoTIFF
+            combined_img = _handle_raster_geotiff(data)
             return _save_single_result(combined_img, format, options)
     # Otherwise, save as a single result
     return _save_single_result(data, format, options)

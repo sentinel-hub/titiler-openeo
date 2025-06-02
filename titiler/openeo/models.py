@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
+from geojson_pydantic import Polygon
 from pydantic import AnyUrl, BaseModel, Field, RootModel
 from typing_extensions import Self
 
@@ -1679,3 +1680,25 @@ class ResultRequest(BaseModel):
 JsonSchema.model_rebuild()
 ProcessArgumentValue.model_rebuild()
 ProcessGraphWithMetadata.model_rebuild()
+
+
+class SpatialExtent(BaseModel, arbitrary_types_allowed=True):
+    west: float
+    east: float
+    north: float
+    south: float
+    base: Optional[float] = None
+    height: Optional[float] = None
+    crs: Optional[Union[str, int]] = None
+
+    @property
+    def polygon(self) -> Polygon:
+        """"""
+        return Polygon(
+            [
+                (self.west, self.south),
+                (self.west, self.north),
+                (self.east, self.north),
+                (self.east, self.south),
+            ]
+        )

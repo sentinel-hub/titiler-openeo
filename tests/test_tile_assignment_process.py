@@ -26,7 +26,7 @@ class MockTileStore(TileAssignmentStore):
             return self.assignments[key]
 
         if x_range[0] > x_range[1] or y_range[0] > y_range[1]:
-            raise NoTileAvailableError("Invalid ranges")
+            raise NoTileAvailableError(service_id, user_id, "Range is invalid")
 
         tile = {
             "x": x_range[0],
@@ -45,7 +45,7 @@ class MockTileStore(TileAssignmentStore):
         if key in self.assignments:
             tile = self.assignments[key]
             if tile["stage"] == "submitted":
-                raise TileAlreadyLockedError("Tile is submitted")
+                raise TileAlreadyLockedError(0, 0, 0, service_id, user_id)
             tile = {**tile, "stage": "released"}
             del self.assignments[key]
             return tile
@@ -54,12 +54,12 @@ class MockTileStore(TileAssignmentStore):
         for k, tile in self.assignments.items():
             if k.startswith(f"{service_id}:"):
                 if tile["stage"] == "submitted":
-                    raise TileAlreadyLockedError("Tile is submitted")
+                    raise TileAlreadyLockedError(0, 0, 0, service_id, user_id)
                 tile = {**tile, "stage": "released"}
                 del self.assignments[k]
                 return tile
 
-        raise TileNotAssignedError("No tile assigned")
+        raise TileNotAssignedError(service_id, user_id)
 
     def submit_tile(self, service_id, user_id):
         """Mock submit tile."""
@@ -76,7 +76,7 @@ class MockTileStore(TileAssignmentStore):
                 tile["stage"] = "submitted"
                 return tile
 
-        raise TileNotAssignedError("No tile assigned")
+        raise TileNotAssignedError(service_id, user_id)
 
     def force_release_tile(self, service_id, x, y, z):
         """Mock force release tile."""

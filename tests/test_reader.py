@@ -8,14 +8,14 @@ import rasterio
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.transform import Affine, from_bounds
 
-from titiler.openeo.errors import OutputLimitExceeded, ProcessParameterMissing
+from titiler.openeo.errors import OutputLimitExceeded
+from titiler.openeo.models import SpatialExtent
 from titiler.openeo.reader import (
     _calculate_dimensions,
     _check_pixel_limit,
     _estimate_output_dimensions,
     _get_item_resolutions,
     _reproject_resolution,
-    _validate_input_parameters,
 )
 
 
@@ -87,34 +87,14 @@ class MockSimpleSTACReader:
 @pytest.fixture
 def sample_spatial_extent():
     """Create a sample spatial extent."""
-    return BoundingBox(west=0, south=0, east=10, north=10, crs="EPSG:4326")
+    return SpatialExtent(west=0, south=0, east=10, north=10, crs="EPSG:4326")
 
 
-def test_validate_input_parameters(sample_spatial_extent, sample_stac_item):
-    """Test input parameter validation."""
-    # Test valid inputs
-    _validate_input_parameters(sample_spatial_extent, [sample_stac_item], ["B01"])
-
-    # Test missing spatial extent
-    with pytest.raises(ProcessParameterMissing, match="spatial_extent"):
-        _validate_input_parameters(None, [sample_stac_item], ["B01"])
-
-    # Test empty items list
-    with pytest.raises(ProcessParameterMissing, match="items"):
-        _validate_input_parameters(sample_spatial_extent, [], ["B01"])
-
-    # Test missing bands
-    with pytest.raises(ProcessParameterMissing, match="bands"):
-        _validate_input_parameters(sample_spatial_extent, [sample_stac_item], None)
-
-
-def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
+def test_get_item_resolutions(sample_stac_item):
     """Test resolution extraction from STAC item."""
     # Test with proj:transform
     with MockSimpleSTACReader(sample_stac_item) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            sample_stac_item, src_dst, sample_spatial_extent
-        )
+        x_res, y_res = _get_item_resolutions(sample_stac_item, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 1.0  # From proj:transform
@@ -132,9 +112,7 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
         },
     }
     with MockSimpleSTACReader(item_with_shape) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            item_with_shape, src_dst, sample_spatial_extent
-        )
+        x_res, y_res = _get_item_resolutions(item_with_shape, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 0.1  # 10/100
@@ -151,9 +129,7 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
         },
     }
     with MockSimpleSTACReader(item_without_metadata) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            item_without_metadata, src_dst, sample_spatial_extent
-        )
+        x_res, y_res = _get_item_resolutions(item_without_metadata, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 1.0  # Default resolution

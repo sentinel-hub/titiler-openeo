@@ -388,15 +388,15 @@ def test_update_tile(tile_store):
     assert updated["y"] == tile["y"]
     assert updated["z"] == tile["z"]
     assert updated["stage"] == tile["stage"]
-    assert updated["progress"] == 50
-    assert updated["metadata"]["start_time"] == "2025-05-26T09:30:00Z"
-    assert updated["custom_field"] == "test value"
+    assert updated["data"]["progress"] == 50
+    assert updated["data"]["metadata"]["start_time"] == "2025-05-26T09:30:00Z"
+    assert updated["data"]["custom_field"] == "test value"
 
     # Verify the data persists in subsequent get_user_tile calls
     stored = tile_store.get_user_tile(service_id="test_service", user_id="test_user")
-    assert stored["progress"] == 50
-    assert stored["metadata"]["start_time"] == "2025-05-26T09:30:00Z"
-    assert stored["custom_field"] == "test value"
+    assert stored["data"]["progress"] == 50
+    assert stored["data"]["metadata"]["start_time"] == "2025-05-26T09:30:00Z"
+    assert stored["data"]["custom_field"] == "test value"
 
 
 def test_update_tile_not_assigned(tile_store):
