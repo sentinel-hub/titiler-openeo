@@ -527,4 +527,3 @@ def test_tiles_summary_with_tiles(store):
     assert summary[1]["z"] == tile2["z"]
     assert summary[1]["user_id"] == "user2"
     assert summary[1]["stage"] == "submitted"
-

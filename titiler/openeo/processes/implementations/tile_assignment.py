@@ -1,6 +1,6 @@
 """titiler.openeo.processes.implementations tile_assignment."""
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rio_tiler.models import ImageData
 
@@ -80,7 +80,7 @@ def tile_assignment(
 def tiles_summary(
     store: TileAssignmentStore,
     service_id: str,
-) -> Dict[str, Any]:
+) -> List[Dict[str, Any]]:
     """Get a summary of all tiles information.
 
     Args:

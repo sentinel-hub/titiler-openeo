@@ -406,11 +406,13 @@ def test_update_tile_not_assigned(tile_store):
             service_id="test_service", user_id="test_user", json_data={"progress": 50}
         )
 
+
 def test_get_all_tiles_empty(tile_store):
     """Test getting all tiles from an empty store."""
     tiles = tile_store.get_all_tiles("test_service")
     assert isinstance(tiles, list)
     assert len(tiles) == 0
+
 
 def test_get_all_tiles_with_claimed_and_submitted(tile_store):
     """Test getting all tiles with different states."""
@@ -455,6 +457,7 @@ def test_get_all_tiles_with_claimed_and_submitted(tile_store):
     assert user2_tile["z"] == tile2["z"]
     assert user2_tile["stage"] == "submitted"
 
+
 def test_get_all_tiles_with_data(tile_store):
     """Test getting all tiles including their metadata/data."""
     # Claim a tile
@@ -467,14 +470,9 @@ def test_get_all_tiles_with_data(tile_store):
     )
 
     # Add data to the tile
-    data = {
-        "progress": 75,
-        "metadata": {"timestamp": "2025-06-02T12:00:00Z"}
-    }
+    data = {"progress": 75, "metadata": {"timestamp": "2025-06-02T12:00:00Z"}}
     tile_store.update_tile(
-        service_id="test_service",
-        user_id="test_user",
-        json_data=data
+        service_id="test_service", user_id="test_user", json_data=data
     )
 
     # Get all tiles
