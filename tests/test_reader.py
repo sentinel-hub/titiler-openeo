@@ -1,19 +1,15 @@
 """Tests for reader module."""
 
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
+
 import attr
 import pytest
 import rasterio
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
-from rasterio.transform import from_bounds, Affine
+from rasterio.transform import Affine, from_bounds
 
-from titiler.openeo.errors import (
-    MixedCRSError,
-    OutputLimitExceeded,
-    ProcessParameterMissing,
-)
+from titiler.openeo.errors import OutputLimitExceeded, ProcessParameterMissing
 from titiler.openeo.reader import (
-    SimpleSTACReader,
     _calculate_dimensions,
     _check_pixel_limit,
     _estimate_output_dimensions,
@@ -21,6 +17,7 @@ from titiler.openeo.reader import (
     _reproject_resolution,
     _validate_input_parameters,
 )
+
 
 @pytest.fixture
 def sample_stac_item():
@@ -36,9 +33,11 @@ def sample_stac_item():
         },
     }
 
+
 @attr.s(auto_attribs=True)
 class MockSimpleSTACReader:
     """Mock SimpleSTACReader."""
+
     input: Dict[str, Any]
     _bounds: Optional[list] = attr.ib(init=False)
     _transform: Optional[Affine] = attr.ib(init=False)
@@ -77,15 +76,19 @@ class MockSimpleSTACReader:
         return self._crs
 
     def __enter__(self):
+        """Context manager enter method."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit method."""
         pass
+
 
 @pytest.fixture
 def sample_spatial_extent():
     """Create a sample spatial extent."""
     return BoundingBox(west=0, south=0, east=10, north=10, crs="EPSG:4326")
+
 
 def test_validate_input_parameters(sample_spatial_extent, sample_stac_item):
     """Test input parameter validation."""
@@ -104,8 +107,9 @@ def test_validate_input_parameters(sample_spatial_extent, sample_stac_item):
     with pytest.raises(ProcessParameterMissing, match="bands"):
         _validate_input_parameters(sample_spatial_extent, [sample_stac_item], None)
 
+
 def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
-    """Test resolution extraction from STAC item."""    
+    """Test resolution extraction from STAC item."""
     # Test with proj:transform
     with MockSimpleSTACReader(sample_stac_item) as src_dst:
         x_res, y_res = _get_item_resolutions(
@@ -155,6 +159,7 @@ def test_get_item_resolutions(sample_stac_item, sample_spatial_extent):
         assert x_res[0] == 1.0  # Default resolution
         assert y_res[0] == 1.0  # Default resolution
 
+
 def test_reproject_resolution():
     """Test resolution reprojection."""
     src_crs = rasterio.crs.CRS.from_epsg(4326)
@@ -165,6 +170,7 @@ def test_reproject_resolution():
     assert y_res is not None
     assert x_res != 0.1  # Should be different after reprojection
     assert y_res != 0.1  # Should be different after reprojection
+
 
 def test_calculate_dimensions():
     """Test dimension calculation."""
@@ -182,12 +188,16 @@ def test_calculate_dimensions():
     y_resolution = (bbox[3] - bbox[1]) / native_height
     aspect_ratio = native_width / native_height
 
-    width, height = _calculate_dimensions(bbox, x_resolution, y_resolution, width=50, height=None)
+    width, height = _calculate_dimensions(
+        bbox, x_resolution, y_resolution, width=50, height=None
+    )
     assert width == 50
     assert height == int(round(50 / aspect_ratio))
 
     # Test with native resolution - only height provided
-    width, height = _calculate_dimensions(bbox, x_resolution, y_resolution, width=None, height=100)
+    width, height = _calculate_dimensions(
+        bbox, x_resolution, y_resolution, width=None, height=100
+    )
     assert height == 100
     assert width == int(round(100 * aspect_ratio))
 
@@ -215,6 +225,7 @@ def test_calculate_dimensions():
     width, height = _calculate_dimensions(bbox, None, None)
     assert width == 1024
     assert height == 1024
+
 
 def test_check_pixel_limit():
     """Test pixel count limit check."""
@@ -244,7 +255,10 @@ def test_check_pixel_limit():
         width_int, height_int, items
     )  # Should not raise error for 0 pixels
 
-def test_estimate_output_dimensions(sample_stac_item, sample_spatial_extent, monkeypatch):
+
+def test_estimate_output_dimensions(
+    sample_stac_item, sample_spatial_extent, monkeypatch
+):
     """Test complete output dimension estimation."""
     monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockSimpleSTACReader)
 
