@@ -1,0 +1,70 @@
+{
+    "id": "tiles_summary",
+    "summary": "Get Summary of Tiles",
+    "description": "Returns a comprehensive summary of all tiles in an XYZ grid, including their assignment status and metadata",
+    "categories": [
+        "cubes",
+        "tiles"
+    ],
+    "parameters": [
+        {
+            "name": "store",
+            "description": "Tile assignment store instance",
+            "schema": {
+                "type": "object"
+            }
+        },
+        {
+            "name": "service_id",
+            "description": "Identifier for the service",
+            "schema": {
+                "type": "string"
+            }
+        }
+    ],
+    "returns": {
+        "description": "Summary of all tiles",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "claimed": {
+                    "type": "array",
+                    "description": "List of claimed tiles with their metadata",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "x": {"type": "integer"},
+                            "y": {"type": "integer"},
+                            "z": {"type": "integer"},
+                            "user_id": {"type": "string"},
+                            "data": {
+                                "type": "object",
+                                "description": "Additional tile metadata"
+                            }
+                        },
+                        "required": ["x", "y", "z", "user_id"]
+                    }
+                },
+                "submitted": {
+                    "type": "array",
+                    "description": "List of submitted tiles with their metadata",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "x": {"type": "integer"},
+                            "y": {"type": "integer"},
+                            "z": {"type": "integer"},
+                            "user_id": {"type": "string"},
+                            "data": {
+                                "type": "object",
+                                "description": "Additional tile metadata"
+                            }
+                        },
+                        "required": ["x", "y", "z", "user_id"]
+                    }
+                }
+            },
+            "required": ["claimed", "submitted"]
+        }
+    }
+}

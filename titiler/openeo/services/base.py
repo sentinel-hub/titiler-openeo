@@ -176,6 +176,19 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
         """
         ...
 
+    @abc.abstractmethod
+    def get_all_tiles(self, service_id: str) -> List[Dict[str, Any]]:
+        """Get all tiles for a given service.
+
+        Args:
+            service_id: The service identifier
+
+        Returns:
+            List of dictionaries containing tile information including x, y, z coordinates,
+            user_id (if assigned), status, and any additional metadata
+        """
+        ...
+
 
 @define()
 class ServicesStore(metaclass=abc.ABCMeta):

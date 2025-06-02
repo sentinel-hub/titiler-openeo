@@ -405,3 +405,84 @@ def test_update_tile_not_assigned(tile_store):
         tile_store.update_tile(
             service_id="test_service", user_id="test_user", json_data={"progress": 50}
         )
+
+
+def test_get_all_tiles_empty(tile_store):
+    """Test getting all tiles from an empty store."""
+    tiles = tile_store.get_all_tiles("test_service")
+    assert isinstance(tiles, list)
+    assert len(tiles) == 0
+
+
+def test_get_all_tiles_with_claimed_and_submitted(tile_store):
+    """Test getting all tiles with different states."""
+    # Claim a tile for user1
+    tile1 = tile_store.claim_tile(
+        service_id="test_service",
+        user_id="user1",
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+    )
+
+    # Claim and submit a tile for user2
+    tile2 = tile_store.claim_tile(
+        service_id="test_service",
+        user_id="user2",
+        zoom=12,
+        x_range=(1, 2),
+        y_range=(1, 2),
+    )
+    tile_store.submit_tile(service_id="test_service", user_id="user2")
+
+    # Get all tiles
+    tiles = tile_store.get_all_tiles("test_service")
+
+    # Verify we got both tiles
+    assert len(tiles) == 2
+
+    # Find tiles by user_id
+    user1_tile = next(t for t in tiles if t["user_id"] == "user1")
+    user2_tile = next(t for t in tiles if t["user_id"] == "user2")
+
+    # Verify user1's claimed tile
+    assert user1_tile["x"] == tile1["x"]
+    assert user1_tile["y"] == tile1["y"]
+    assert user1_tile["z"] == tile1["z"]
+    assert user1_tile["stage"] == "claimed"
+
+    # Verify user2's submitted tile
+    assert user2_tile["x"] == tile2["x"]
+    assert user2_tile["y"] == tile2["y"]
+    assert user2_tile["z"] == tile2["z"]
+    assert user2_tile["stage"] == "submitted"
+
+
+def test_get_all_tiles_with_data(tile_store):
+    """Test getting all tiles including their metadata/data."""
+    # Claim a tile
+    tile = tile_store.claim_tile(
+        service_id="test_service",
+        user_id="test_user",
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+    )
+
+    # Add data to the tile
+    data = {"progress": 75, "metadata": {"timestamp": "2025-06-02T12:00:00Z"}}
+    tile_store.update_tile(
+        service_id="test_service", user_id="test_user", json_data=data
+    )
+
+    # Get all tiles
+    tiles = tile_store.get_all_tiles("test_service")
+
+    # Verify we got the tile with its data
+    assert len(tiles) == 1
+    assert tiles[0]["x"] == tile["x"]
+    assert tiles[0]["y"] == tile["y"]
+    assert tiles[0]["z"] == tile["z"]
+    assert tiles[0]["user_id"] == "test_user"
+    assert tiles[0]["data"]["progress"] == 75
+    assert tiles[0]["data"]["metadata"]["timestamp"] == "2025-06-02T12:00:00Z"
