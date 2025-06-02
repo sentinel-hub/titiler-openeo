@@ -8,6 +8,7 @@ from typing import Any
 
 from jsonpath_ng import parse
 from jsonpath_ng.exceptions import JsonPathParserError
+from pydantic import BaseModel
 
 from ...errors import ProcessParameterInvalid, ProcessParameterMissing
 
@@ -30,7 +31,7 @@ def _validate_structure(obj: Any, path: str = "$") -> None:
     elif isinstance(obj, list):
         for i, value in enumerate(obj):
             _validate_structure(value, f"{path}[{i}]")
-    elif not isinstance(obj, (str, int, float, bool, type(None))):
+    elif not isinstance(obj, (BaseModel, str, int, float, bool, type(None))):
         raise ProcessParameterInvalid(
             f"Invalid type at {path}: only dict, list, and JSON-compatible scalar types are allowed"
         )

@@ -169,5 +169,6 @@ cdk.context.json
 *.nc
 .claud*
 openapi.json
+file::memory:
 
 .venv311/

@@ -9,6 +9,7 @@ from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.transform import Affine, from_bounds
 
 from titiler.openeo.errors import OutputLimitExceeded, ProcessParameterMissing
+from titiler.openeo.models import SpatialExtent
 from titiler.openeo.reader import (
     _calculate_dimensions,
     _check_pixel_limit,
@@ -87,7 +88,7 @@ class MockSimpleSTACReader:
 @pytest.fixture
 def sample_spatial_extent():
     """Create a sample spatial extent."""
-    return BoundingBox(west=0, south=0, east=10, north=10, crs="EPSG:4326")
+    return SpatialExtent(west=0, south=0, east=10, north=10, crs="EPSG:4326")
 
 
 def test_validate_input_parameters(sample_spatial_extent, sample_stac_item):

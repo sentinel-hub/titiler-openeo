@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 import attr
 import rasterio
 from morecantile import TileMatrixSet
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
 from rasterio.warp import transform_bounds
@@ -27,6 +26,7 @@ from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
 from typing_extensions import TypedDict
 
+from titiler.openeo.models import SpatialExtent
 from titiler.openeo.errors import (
     MixedCRSError,
     OutputLimitExceeded,
@@ -264,7 +264,7 @@ class SimpleSTACReader(MultiBaseReader):
 
 
 def _validate_input_parameters(
-    spatial_extent: BoundingBox,
+    spatial_extent: SpatialExtent,
     items: List[Dict],
     bands: Optional[list[str]],
 ) -> None:
@@ -280,7 +280,7 @@ def _validate_input_parameters(
 def _get_item_resolutions(
     item: Dict,
     src_dst: SimpleSTACReader,
-    spatial_extent: BoundingBox,
+    spatial_extent: SpatialExtent,
 ) -> tuple[list[float], list[float]]:
     """Get x and y resolutions from a STAC item."""
     x_resolutions = []
@@ -425,7 +425,7 @@ def _check_pixel_limit(
 
 def _estimate_output_dimensions(
     items: List[Dict],
-    spatial_extent: BoundingBox,
+    spatial_extent: SpatialExtent,
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,
