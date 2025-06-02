@@ -1681,6 +1681,7 @@ JsonSchema.model_rebuild()
 ProcessArgumentValue.model_rebuild()
 ProcessGraphWithMetadata.model_rebuild()
 
+
 class SpatialExtent(BaseModel, arbitrary_types_allowed=True):
     west: float
     east: float

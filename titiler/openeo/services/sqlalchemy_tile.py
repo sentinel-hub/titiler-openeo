@@ -297,7 +297,7 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             if not tile:
                 raise TileNotAssignedError(
                     service_id=service_id,
-                    user_id=None,
+                    user_id="Any",
                 )
 
             # Store tile info before deletion

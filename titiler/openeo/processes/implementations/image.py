@@ -104,6 +104,7 @@ def _apply_colormap(data: ImageData, colormap: ColorMapType) -> ImageData:
     """Apply colormap to a single ImageData."""
     return data.apply_colormap(colormap)
 
+
 def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     """Apply colormap to RasterStack.
 

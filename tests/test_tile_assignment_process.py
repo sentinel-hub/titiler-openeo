@@ -93,21 +93,6 @@ class MockTileStore(TileAssignmentStore):
                 return released_tile
         raise TileNotAssignedError("No tile found with these coordinates")
 
-    def force_release_tile(self, service_id, x, y, z):
-        """Mock force release tile."""
-        # Find tile by coordinates
-        for key, tile in self.assignments.items():
-            if (
-                key.startswith(f"{service_id}:")
-                and tile["x"] == x
-                and tile["y"] == y
-                and tile["z"] == z
-            ):
-                released_tile = {**tile, "stage": "released"}
-                del self.assignments[key]
-                return released_tile
-        raise TileNotAssignedError("No tile found with these coordinates")
-
     def get_user_tile(self, service_id, user_id):
         """Mock get user tile."""
         key = f"{service_id}:{user_id}"

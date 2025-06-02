@@ -26,12 +26,8 @@ from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
 from typing_extensions import TypedDict
 
+from titiler.openeo.errors import MixedCRSError, OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
-from titiler.openeo.errors import (
-    MixedCRSError,
-    OutputLimitExceeded,
-    ProcessParameterMissing,
-)
 
 
 class Dims(TypedDict):
@@ -263,24 +259,9 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
-def _validate_input_parameters(
-    spatial_extent: SpatialExtent,
-    items: List[Dict],
-    bands: Optional[list[str]],
-) -> None:
-    """Validate required input parameters."""
-    if not spatial_extent:
-        raise ProcessParameterMissing("spatial_extent")
-    if not items:
-        raise ProcessParameterMissing("items")
-    if not bands:
-        raise ProcessParameterMissing("bands")
-
-
 def _get_item_resolutions(
     item: Dict,
     src_dst: SimpleSTACReader,
-    spatial_extent: SpatialExtent,
 ) -> tuple[list[float], list[float]]:
     """Get x and y resolutions from a STAC item."""
     x_resolutions = []
@@ -425,7 +406,7 @@ def _check_pixel_limit(
 
 def _estimate_output_dimensions(
     items: List[Dict],
-    spatial_extent: SpatialExtent,
+    spatial_extent: Optional[SpatialExtent],
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,
@@ -447,8 +428,6 @@ def _estimate_output_dimensions(
             - crs: Target CRS to use
             - bbox: Bounding box as a list [west, south, east, north]
     """
-    _validate_input_parameters(spatial_extent, items, bands)
-
     # Extract CRS and resolution information from items
     item_crs: rasterio.crs.CRS = None
     all_x_resolutions = []
@@ -476,7 +455,7 @@ def _estimate_output_dimensions(
                     max(full_bbox[3], src_dst.bounds[3]),  # north
                 ]
 
-            x_res, y_res = _get_item_resolutions(item, src_dst, spatial_extent)
+            x_res, y_res = _get_item_resolutions(item, src_dst)
             all_x_resolutions.extend(x_res)
             all_y_resolutions.extend(y_res)
 
@@ -484,19 +463,20 @@ def _estimate_output_dimensions(
     x_resolution = min(all_x_resolutions) if all_x_resolutions else None
     y_resolution = min(all_y_resolutions) if all_y_resolutions else None
 
-    # Get target CRS and bounds
-    crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
-    bbox = [
-        spatial_extent.west,
-        spatial_extent.south,
-        spatial_extent.east,
-        spatial_extent.north,
-    ]
+    if spatial_extent:
+        # Get target CRS and bounds
+        crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
+        bbox = [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
 
-    # Reproject resolution if needed
-    x_resolution, y_resolution = _reproject_resolution(
-        item_crs, crs, bbox, x_resolution, y_resolution
-    )
+        # Reproject resolution if needed
+        x_resolution, y_resolution = _reproject_resolution(
+            item_crs, crs, bbox, x_resolution, y_resolution
+        )
 
     # Calculate dimensions
     width, height = _calculate_dimensions(
