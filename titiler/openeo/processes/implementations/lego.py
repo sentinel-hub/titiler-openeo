@@ -9,6 +9,7 @@ import morecantile
 import numpy
 from numpy.typing import ArrayLike
 from PIL import Image
+import pyproj
 from skimage.draw import disk
 
 from .data_model import ImageData, RasterStack
@@ -592,11 +593,24 @@ def _legofication(
                     # For land areas, use normal color
                     rgb_data[:, i, j] = lego_rgb
 
-                # Store overall brick grid dimensions for later reference
-                small_img.metadata["brick_info"]["grid_dimensions"] = (
-                    shape[1],
-                    shape[2],
+                # Store overall brick grid dimensions and tile bbox for later reference
+                # Convert bounds to EPSG:4326 (lat/lon)
+                trans = pyproj.Transformer.from_crs(
+                        data.crs,
+                        pyproj.CRS.from_epsg(4326),
+                        always_xy=True,
                 )
+                tile_bounds = trans.transform_bounds(*data.bounds, densify_pts=21)
+
+                small_img.metadata["brick_info"].update({
+                    "grid_dimensions": (shape[1], shape[2]),
+                    "tile_bbox": {
+                        "west": tile_bounds[0],
+                        "south": tile_bounds[1],
+                        "east": tile_bounds[2],
+                        "north": tile_bounds[3],
+                    }
+                })
 
     # Upscale and add brick effects
     lego_img = _upscale(small_img, bricksize)
