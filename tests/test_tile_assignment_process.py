@@ -1,8 +1,13 @@
 """Test tile assignment process."""
 
+from typing import Any, Dict, List
+
 import pytest
 
-from titiler.openeo.processes.implementations.tile_assignment import tile_assignment
+from titiler.openeo.processes.implementations.tile_assignment import (
+    tile_assignment,
+    tiles_summary,
+)
 from titiler.openeo.services.base import (
     NoTileAvailableError,
     TileAlreadyLockedError,
@@ -109,6 +114,22 @@ class MockTileStore(TileAssignmentStore):
         updated_tile.update(json_data)
         self.assignments[key] = updated_tile
         return updated_tile
+
+    def get_all_tiles(self, service_id: str) -> List[Dict[str, Any]]:
+        """Mock get all tiles.
+
+        Args:
+            service_id: The service identifier
+
+        Returns:
+            List of dictionaries containing tile information including x, y, z coordinates,
+            user_id (if assigned), status (if submitted), and any additional metadata
+        """
+        tiles = []
+        for key, tile in self.assignments.items():
+            if key.startswith(f"{service_id}:"):
+                tiles.append(tile)
+        return tiles
 
 
 @pytest.fixture
@@ -434,3 +455,76 @@ def test_unauthorized_update(store):
             user_id="user2",
             data={"progress": 50},
         )
+
+
+def test_tiles_summary_empty(store):
+    """Test getting summary of tiles when there are no tiles."""
+    summary = tiles_summary(store=store, service_id="test_service")
+
+    assert isinstance(summary, dict)
+    assert summary["claimed"] == []
+    assert summary["submitted"] == []
+
+
+def test_tiles_summary_with_tiles(store):
+    """Test getting summary of tiles with various states."""
+    # Claim a tile for user1
+    tile1 = tile_assignment(
+        zoom=12,
+        x_range=(0, 1),
+        y_range=(0, 1),
+        stage="claim",
+        store=store,
+        service_id="test_service",
+        user_id="user1",
+    )
+
+    # Claim and submit a tile for user2
+    tile2 = tile_assignment(
+        zoom=12,
+        x_range=(1, 2),
+        y_range=(1, 2),
+        stage="claim",
+        store=store,
+        service_id="test_service",
+        user_id="user2",
+    )
+    tile_assignment(
+        zoom=12,
+        x_range=(1, 2),
+        y_range=(1, 2),
+        stage="submit",
+        store=store,
+        service_id="test_service",
+        user_id="user2",
+    )
+
+    # Add metadata to tile2
+    metadata = {"progress": 100, "timestamp": "2025-06-02T12:00:00Z"}
+    tile_assignment(
+        zoom=12,
+        x_range=(1, 2),
+        y_range=(1, 2),
+        stage="update",
+        store=store,
+        service_id="test_service",
+        user_id="user2",
+        data={"metadata": metadata},
+    )
+
+    summary = tiles_summary(store=store, service_id="test_service")
+
+    # Check
+    assert isinstance(summary, List)
+    assert len(summary) == 2
+    assert summary[0]["x"] == tile1["x"]
+    assert summary[0]["y"] == tile1["y"]
+    assert summary[0]["z"] == tile1["z"]
+    assert summary[0]["user_id"] == "user1"
+    assert summary[0]["stage"] == "claimed"
+    assert summary[1]["x"] == tile2["x"]
+    assert summary[1]["y"] == tile2["y"]
+    assert summary[1]["z"] == tile2["z"]
+    assert summary[1]["user_id"] == "user2"
+    assert summary[1]["stage"] == "submitted"
+

@@ -2,7 +2,7 @@
 
 import random
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import (
     JSON,
@@ -237,6 +237,33 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             session.commit()
 
             return tile_info
+
+    def get_all_tiles(self, service_id: str) -> List[Dict[str, Any]]:
+        """Get all tiles for a given service.
+
+        Args:
+            service_id: The service identifier
+
+        Returns:
+            List of dictionaries containing tile information including x, y, z coordinates,
+            user_id (if assigned), status (if submitted), and any additional metadata
+        """
+        with Session(self._engine) as session:
+            tiles = session.execute(
+                select(TileAssignment).where(
+                    TileAssignment.service_id == service_id
+                )
+            ).scalars().all()
+
+            return [{
+                "service_id": tile.service_id,
+                "x": tile.x,
+                "y": tile.y,
+                "z": tile.z,
+                "stage": tile.stage,
+                "user_id": tile.user_id,
+                "data": tile.data if tile.data else None,
+            } for tile in tiles]
 
     def submit_tile(
         self,

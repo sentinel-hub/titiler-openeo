@@ -7,7 +7,7 @@ from rio_tiler.models import ImageData
 from ...services.base import TileAssignmentStore, TileNotAssignedError
 from .core import process
 
-__all__ = ["tile_assignment"]
+__all__ = ["tile_assignment", "tiles_summary"]
 
 
 @process
@@ -74,3 +74,22 @@ def tile_assignment(
             )
     else:
         raise ValueError(f"Invalid stage: {stage}")
+
+
+@process
+def tiles_summary(
+    store: TileAssignmentStore,
+    service_id: str,
+) -> Dict[str, Any]:
+    """Get a summary of all tiles information.
+
+    Args:
+        store: Tile assignment store instance
+        service_id: Current service ID
+
+    Returns:
+        Dict containing information about all tiles including:
+        - claimed: Dict[str, Dict] mapping user_ids to their assigned tile info
+        - submitted: List[Dict] of submitted tiles with their metadata
+    """
+    return store.get_all_tiles(service_id)
