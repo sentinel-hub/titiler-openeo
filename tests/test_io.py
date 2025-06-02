@@ -43,9 +43,13 @@ def test_handle_raster_geotiff():
     """Test _handle_raster_geotiff function."""
     # Create test image data
     # Create 2x2 images, each with a single band
-    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 2)
-    array2 = numpy.array([[5, 6], [7, 8]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 2)
-    
+    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
+    array2 = numpy.array([[5, 6], [7, 8]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
+
     data = {
         "band1": ImageData(array1),
         "band2": ImageData(array2),
@@ -62,9 +66,13 @@ def test_handle_raster_geotiff():
 def test_handle_raster_geotiff_validation():
     """Test validation in _handle_raster_geotiff."""
     # Create 2x2 and 2x3 images for validation testing
-    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 2)
-    array2 = numpy.array([[5, 6, 7], [8, 9, 10]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 3)
-    
+    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
+    array2 = numpy.array([[5, 6, 7], [8, 9, 10]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 3)
+
     data = {
         "band1": ImageData(array1),
         "band2": ImageData(array2),
@@ -94,7 +102,9 @@ def test_save_result_json():
 
 def test_save_result_numpy():
     """Test save_result with numpy array."""
-    data = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 2)
+    data = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
     result = save_result(data, "png")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "image/png"
@@ -104,8 +114,12 @@ def test_save_result_numpy():
 def test_save_result_geotiff():
     """Test save_result with multi-band GeoTIFF."""
     # Create test data
-    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.byte)[None, ...]  # Shape: (1, 2, 2)
-    array2 = numpy.array([[5, 6], [7, 8]], dtype=numpy.byte)[None, ...]  # Shape: (1, 2, 2)
+    array1 = numpy.array([[1, 2], [3, 4]], dtype=numpy.byte)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
+    array2 = numpy.array([[5, 6], [7, 8]], dtype=numpy.byte)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
     data = {
         "band1": ImageData(array1),
         "band2": ImageData(array2),
@@ -119,9 +133,11 @@ def test_save_result_geotiff():
 
 def test_save_result_single_image():
     """Test save_result with single image."""
-    array = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[None, ...]  # Shape: (1, 2, 2)
+    array = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
+        None, ...
+    ]  # Shape: (1, 2, 2)
     data = {"single": ImageData(array)}
-    
+
     result = save_result(data, "png")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "image/png"
@@ -133,13 +149,8 @@ def test_save_result_feature_collection():
     data = {
         "type": "FeatureCollection",
         "features": [
-            {
-                "type": "Feature",
-                "properties": {
-                    "values": {"2021-01-01": 1.0}
-                }
-            }
-        ]
+            {"type": "Feature", "properties": {"values": {"2021-01-01": 1.0}}}
+        ],
     }
 
     # Test JSON output

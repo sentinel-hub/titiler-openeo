@@ -94,9 +94,7 @@ def test_get_item_resolutions(sample_stac_item):
     """Test resolution extraction from STAC item."""
     # Test with proj:transform
     with MockSimpleSTACReader(sample_stac_item) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            sample_stac_item, src_dst
-        )
+        x_res, y_res = _get_item_resolutions(sample_stac_item, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 1.0  # From proj:transform
@@ -114,9 +112,7 @@ def test_get_item_resolutions(sample_stac_item):
         },
     }
     with MockSimpleSTACReader(item_with_shape) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            item_with_shape, src_dst
-        )
+        x_res, y_res = _get_item_resolutions(item_with_shape, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 0.1  # 10/100
@@ -133,9 +129,7 @@ def test_get_item_resolutions(sample_stac_item):
         },
     }
     with MockSimpleSTACReader(item_without_metadata) as src_dst:
-        x_res, y_res = _get_item_resolutions(
-            item_without_metadata, src_dst
-        )
+        x_res, y_res = _get_item_resolutions(item_without_metadata, src_dst)
         assert len(x_res) > 0
         assert len(y_res) > 0
         assert x_res[0] == 1.0  # Default resolution
