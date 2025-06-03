@@ -1,6 +1,7 @@
 """Test titiler.openeo.stacapi."""
 
 import pytest
+from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
@@ -41,30 +42,32 @@ def test_load_collection_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection."""
 
     # Mock STAC item
-    mock_item = {
-        "type": "Feature",
-        "id": "test-item",
-        "stac_version": "1.0.0",
-        "stac_extensions": [
-            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
-        ],
-        "bbox": [0, 0, 1, 1],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-        },
-        "properties": {
-            "datetime": "2021-01-01T00:00:00Z",
-            "proj:crs": "EPSG:4326",
-            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
-        },
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff",
-            }
-        },
-    }
+    mock_item = Item.from_dict(
+        {
+            "type": "Feature",
+            "id": "test-item",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+            ],
+            "bbox": [0, 0, 1, 1],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            },
+            "properties": {
+                "datetime": "2021-01-01T00:00:00Z",
+                "proj:crs": "EPSG:4326",
+                "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+            },
+            "assets": {
+                "B01": {
+                    "href": "https://example.com/B01.tif",
+                    "type": "image/tiff; application=geotiff",
+                }
+            },
+        }
+    )
 
     # Mock _get_items to return our test item
     def mock_get_items(*args, **kwargs):
@@ -110,31 +113,33 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection_and_reduce."""
 
     # Mock STAC item
-    mock_item = {
-        "type": "Feature",
-        "id": "test-item",
-        "stac_version": "1.0.0",
-        "stac_extensions": [
-            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
-        ],
-        "bbox": [0, 0, 1, 1],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-        },
-        "properties": {
-            "datetime": "2021-01-01T00:00:00Z",
-            "proj:crs": "EPSG:4326",
-            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
-            "proj:shape": [5000, 5000],  # Mocked dimensions
-        },
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff",
-            }
-        },
-    }
+    mock_item = Item.from_dict(
+        {
+            "type": "Feature",
+            "id": "test-item",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+            ],
+            "bbox": [0, 0, 1, 1],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            },
+            "properties": {
+                "datetime": "2021-01-01T00:00:00Z",
+                "proj:crs": "EPSG:4326",
+                "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+                "proj:shape": [5000, 5000],  # Mocked dimensions
+            },
+            "assets": {
+                "B01": {
+                    "href": "https://example.com/B01.tif",
+                    "type": "image/tiff; application=geotiff",
+                }
+            },
+        }
+    )
 
     # Mock _get_items to return our test item
     def mock_get_items(*args, **kwargs):
@@ -180,30 +185,32 @@ def test_resolution_based_dimension_calculation(monkeypatch):
     """Test resolution-based dimension calculation."""
 
     # Mock STAC item
-    mock_item = {
-        "type": "Feature",
-        "id": "test-item",
-        "stac_version": "1.0.0",
-        "stac_extensions": [
-            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
-        ],
-        "bbox": [0, 0, 1, 1],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-        },
-        "properties": {
-            "datetime": "2021-01-01T00:00:00Z",
-            "proj:crs": "EPSG:4326",
-            "proj:transform": [0.001, 0.0, 0.0, 0.0, -0.001, 0.0],
-        },
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff",
-            }
-        },
-    }
+    mock_item = Item.from_dict(
+        {
+            "type": "Feature",
+            "id": "test-item",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+            ],
+            "bbox": [0, 0, 1, 1],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            },
+            "properties": {
+                "datetime": "2021-01-01T00:00:00Z",
+                "proj:crs": "EPSG:4326",
+                "proj:transform": [0.001, 0.0, 0.0, 0.0, -0.001, 0.0],
+            },
+            "assets": {
+                "B01": {
+                    "href": "https://example.com/B01.tif",
+                    "type": "image/tiff; application=geotiff",
+                }
+            },
+        }
+    )
 
     # Mock _get_items to return our test item
     def mock_get_items(*args, **kwargs):
