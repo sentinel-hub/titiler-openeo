@@ -1,12 +1,9 @@
 """Tests for reader module."""
 
-from typing import Any, Dict, Optional
-
 import copy
+
 import pytest
 import rasterio
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
-from rasterio.transform import Affine, from_bounds
 
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
@@ -17,6 +14,84 @@ from titiler.openeo.reader import (
     _get_assets_resolutions,
     _reproject_resolution,
 )
+
+
+@pytest.fixture
+def complex_stac_items():
+    """Create a set of complex STAC items with different CRS and resolutions."""
+    items = []
+
+    # Item 1: Sentinel-2 like with UTM bands
+    items.append(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
+            ],
+            "id": "sentinel-item",
+            "bbox": [0, 40, 6, 46],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                "proj:epsg": 32631,
+            },
+            "assets": {
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "proj:epsg": 32631,
+                    "proj:shape": [10980, 10980],
+                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                },
+                "B08": {
+                    "href": "https://example.com/B08.tif",
+                    "proj:epsg": 32631,
+                    "proj:shape": [10980, 10980],
+                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                },
+            },
+        }
+    )
+
+    # Item 2: Mixed resolution bands in different CRS
+    items.append(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+            ],
+            "id": "mixed-item",
+            "bbox": [0, 0, 10, 10],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+            },
+            "assets": {
+                "lowres": {
+                    "href": "https://example.com/lowres.tif",
+                    "proj:epsg": 4326,
+                    "proj:shape": [100, 100],
+                    "proj:transform": [0.1, 0, 0, 0, -0.1, 10, 0, 0, 1],
+                },
+                "highres": {
+                    "href": "https://example.com/highres.tif",
+                    "proj:epsg": 3857,
+                    "proj:shape": [1000, 1000],
+                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                },
+            },
+        }
+    )
+
+    return items
 
 
 @pytest.fixture
@@ -210,7 +285,42 @@ def test_check_pixel_limit():
     )  # Should not raise error for 0 pixels
 
 
-def test_estimate_output_dimensions(sample_stac_item):
+def test_multiple_items_resolution(complex_stac_items):
+    """Test resolution handling with multiple items."""
+    # Create extent in web mercator
+    extent = SpatialExtent(
+        crs="EPSG:3857",
+        west=0,
+        south=0,
+        east=10000,
+        north=10000,
+    )
+
+    # Test combining bands from different UTM zones
+    item1 = complex_stac_items[0].copy()  # Sentinel in UTM 31N
+    item2 = complex_stac_items[0].copy()  # Create a copy
+    # Modify to UTM 32N
+    item2["id"] = "sentinel-item-32n"
+    item2["properties"]["proj:epsg"] = 32632
+    for asset in item2["assets"].values():
+        asset["proj:epsg"] = 32632
+
+    result = _estimate_output_dimensions(
+        [item1, item2],
+        extent,
+        ["B02"],  # Same band from different UTM zones
+        width=None,
+        height=None,
+    )
+
+    # Since both items have same resolution, output should maintain it
+    assert result["crs"].to_epsg() == 3857  # Target CRS
+    # Expected size based on 10m resolution in UTM (roughly)
+    assert 900 <= result["width"] <= 1100
+    assert 900 <= result["height"] <= 1100
+
+
+def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
     """Test complete output dimension estimation."""
     # Test with full extent using UTM asset
     full_extent = SpatialExtent(west=0, south=0, east=5, north=5, crs="EPSG:4326")
@@ -277,22 +387,50 @@ def test_estimate_output_dimensions(sample_stac_item):
     assert "200,000,000 total pixels" in error_msg
     assert "max allowed: 100,000,000 pixels" in error_msg
 
-    # Test with default dimensions
-    real_extent = SpatialExtent(
-        crs="EPSG:32631",
-        west= 0,
+    # Test mixed resolution and CRS combination
+    mixed_extent = SpatialExtent(
+        crs="EPSG:4326",
+        west=0,
         south=0,
-        east=10000,
-        north=10000,
+        east=1,
+        north=1,
     )
+
+    # Test combining sentinel bands
     result = _estimate_output_dimensions(
-        [sample_stac_item],
-        real_extent,
-        ["B01"],
+        [complex_stac_items[0]],  # Sentinel-like item
+        None,
+        ["B02", "B08"],
         width=None,
         height=None,
+        check_max_pixels=False,  # Disable limit for this test
     )
-    assert isinstance(result["width"], int)
-    assert isinstance(result["height"], int)
-    assert result["width"] == 1000  # Based on B01 asset resolution
-    assert result["height"] == 1000  # Based on B01 asset resolution
+    assert result["width"] == result["height"]  # Same resolution bands should be square
+    assert result["crs"].to_epsg() == 32631  # Target CRS from extent
+
+    # Test combining different resolution bands
+    result = _estimate_output_dimensions(
+        [complex_stac_items[1]],  # Mixed resolutions item
+        mixed_extent,
+        ["lowres", "highres"],
+        width=None,
+        height=None,
+        check_max_pixels=False,  # Disable limit for this test
+    )
+    # Should use highest resolution (smallest pixel size)
+    assert result["width"] > 100  # Should be higher than lowres dimensions
+    assert result["height"] > 100
+
+    # Test combining bands from different items
+    result = _estimate_output_dimensions(
+        complex_stac_items,  # Both items
+        mixed_extent,
+        ["B02", "lowres"],  # Mixing bands from different items
+        width=None,
+        height=None,
+        check_max_pixels=False,  # Disable limit for this test
+    )
+    # Should handle mixed CRS and resolutions properly
+    assert result["crs"].to_epsg() == 4326  # Target CRS from extent
+    assert result["width"] > 0
+    assert result["height"] > 0

@@ -20,6 +20,7 @@ def test_processing_settings():
     settings = ProcessingSettings(max_pixels=50_000_000)
     assert settings.max_pixels == 50_000_000
 
+
 # Mock SimpleSTACReader to return fixed dimensions and transform
 class MockReader(SimpleSTACReader):
     def part(self, bbox, **kwargs):
@@ -27,10 +28,14 @@ class MockReader(SimpleSTACReader):
         import numpy
 
         return ImageData(
-            numpy.zeros((1, kwargs.get("height", 1000), kwargs.get("width", 1000)), dtype="uint8"),
+            numpy.zeros(
+                (1, kwargs.get("height", 1000), kwargs.get("width", 1000)),
+                dtype="uint8",
+            ),
             assets=kwargs.get("assets", ["B01"]),
             crs=kwargs.get("dst_crs", "EPSG:4326"),
-            )
+        )
+
 
 def test_load_collection_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection."""

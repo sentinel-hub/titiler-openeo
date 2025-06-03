@@ -5,11 +5,10 @@ import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlparse
 
-from affine import Affine
-from shapely.geometry import box
 import attr
 import pystac
 import rasterio
+from affine import Affine
 from morecantile import TileMatrixSet
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
@@ -28,9 +27,10 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
+from shapely.geometry import box
 from typing_extensions import TypedDict
 
-from titiler.openeo.errors import MixedCRSError, OutputLimitExceeded
+from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
 
 
@@ -100,8 +100,14 @@ class SimpleSTACReader(MultiBaseReader):
             # Set transform and shape if available
             if proj_ext.transform and proj_ext.shape:
                 self.height, self.width = proj_ext.shape
-                self.transform = Affine(proj_ext.transform[0], proj_ext.transform[1], proj_ext.transform[2],
-                                        proj_ext.transform[3], proj_ext.transform[4], proj_ext.transform[5])
+                self.transform = Affine(
+                    proj_ext.transform[0],
+                    proj_ext.transform[1],
+                    proj_ext.transform[2],
+                    proj_ext.transform[3],
+                    proj_ext.transform[4],
+                    proj_ext.transform[5],
+                )
                 # Update bounds if we have both transform and shape
                 self.bounds = array_bounds(self.height, self.width, self.transform)
             elif proj_ext.transform:
@@ -479,8 +485,8 @@ def _estimate_output_dimensions(
             - bbox: Bounding box as a list [west, south, east, north]
     """
     # Initialize target CRS and bbox
-    target_crs = rasterio.crs.CRS.from_user_input(
-        spatial_extent.crs if spatial_extent else "epsg:4326"
+    target_crs = (
+        rasterio.crs.CRS.from_user_input(spatial_extent.crs) if spatial_extent else None
     )
 
     target_bbox = (
@@ -512,11 +518,17 @@ def _estimate_output_dimensions(
                     else:
                         # Convert current bbox to polygon and union with item polygon
                         current_polygon = box(
-                            target_bbox[0], target_bbox[1], target_bbox[2], target_bbox[3]
+                            target_bbox[0],
+                            target_bbox[1],
+                            target_bbox[2],
+                            target_bbox[3],
                         )
                         union = current_polygon.union(item_polygon)
                         if not union.is_empty:
                             target_bbox = list(union.bounds)
+
+                    if target_crs is None:
+                        target_crs = src_dst.crs
 
             # Get resolutions and CRS for this item's assets
             asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
@@ -567,7 +579,12 @@ def _estimate_output_dimensions(
     if check_max_pixels:
         if width is None or height is None:
             raise ValueError("Width and height must be specified or calculated")
-        _check_pixel_limit(width, height, len(cube_resolutions), len(max(cube_resolutions.values(), key=len)))
+        _check_pixel_limit(
+            width,
+            height,
+            len(cube_resolutions),
+            len(max(cube_resolutions.values(), key=len)),
+        )
 
     return Dims(
         width=width,  # type: ignore
