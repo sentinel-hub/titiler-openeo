@@ -459,6 +459,105 @@ def _check_pixel_limit(
         )
 
 
+def _get_target_crs_bbox(
+    items: List[Dict],
+    spatial_extent: Optional[SpatialExtent],
+) -> Tuple[rasterio.crs.CRS, List[float]]:
+    """Get target CRS and bbox from items and spatial extent."""
+    target_crs = (
+        rasterio.crs.CRS.from_user_input(spatial_extent.crs)
+        if spatial_extent
+        else WGS84_CRS
+    )
+
+    target_bbox: List[float] = (
+        [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
+        if spatial_extent
+        else []
+    )
+
+    # Process each item to update bbox
+    for item in items:
+        with SimpleSTACReader(item) as src_dst:
+            item_bbox = src_dst.bounds
+            if item_bbox:
+                item_polygon = box(
+                    item_bbox[0], item_bbox[1], item_bbox[2], item_bbox[3]
+                )
+                if not spatial_extent:
+                    if not target_bbox:
+                        target_bbox = list(item_bbox)
+                    else:
+                        current_polygon = box(
+                            target_bbox[0],
+                            target_bbox[1],
+                            target_bbox[2],
+                            target_bbox[3],
+                        )
+                        union = current_polygon.union(item_polygon)
+                        if not union.is_empty:
+                            target_bbox = list(union.bounds)
+
+                    if target_crs == WGS84_CRS:  # Only update if still default
+                        target_crs = src_dst.crs
+
+    if not target_bbox:
+        raise ValueError("No valid bounding box found in items")
+
+    return target_crs, target_bbox
+
+
+def _get_cube_resolutions(
+    items: List[Dict],
+    target_crs: rasterio.crs.CRS,
+    target_bbox: List[float],
+    bands: Optional[list[str]],
+) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
+    """Get resolutions for each datetime and band combination."""
+    cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
+
+    for item in items:
+        with SimpleSTACReader(item) as src_dst:
+            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
+            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
+                if x_res is None or y_res is None:
+                    continue
+
+                x_val: float = float(x_res)
+                y_val: float = float(y_res)
+
+                if asset_crs != target_crs:
+                    reprojected = _reproject_resolution(
+                        asset_crs,
+                        target_crs,
+                        target_bbox,
+                        x_val,
+                        y_val,
+                    )
+                    if reprojected[0] is None or reprojected[1] is None:
+                        continue
+                    x_val = float(reprojected[0])
+                    y_val = float(reprojected[1])
+
+                item_datetime = src_dst.item.datetime.isoformat()
+                if item_datetime not in cube_resolutions:
+                    cube_resolutions[item_datetime] = {}
+
+                if band_name not in cube_resolutions[item_datetime]:
+                    cube_resolutions[item_datetime][band_name] = []
+
+                cube_resolutions[item_datetime][band_name].append(
+                    (x_val, y_val, target_bbox)
+                )
+
+    return cube_resolutions
+
+
 def _estimate_output_dimensions(
     items: List[Dict],
     spatial_extent: Optional[SpatialExtent],
@@ -476,6 +575,7 @@ def _estimate_output_dimensions(
         bands: List of band names to include
         width: Optional user-specified width
         height: Optional user-specified height
+        check_max_pixels: Whether to check pixel count limit
 
     Returns:
         Dictionary containing:
@@ -484,81 +584,15 @@ def _estimate_output_dimensions(
             - crs: Target CRS to use
             - bbox: Bounding box as a list [west, south, east, north]
     """
-    # Initialize target CRS and bbox
-    target_crs = (
-        rasterio.crs.CRS.from_user_input(spatial_extent.crs) if spatial_extent else None
-    )
+    # Get target CRS and bbox
+    target_crs, target_bbox = _get_target_crs_bbox(items, spatial_extent)
 
-    target_bbox = (
-        [
-            spatial_extent.west,
-            spatial_extent.south,
-            spatial_extent.east,
-            spatial_extent.north,
-        ]
-        if spatial_extent
-        else None
-    )
-
-    # Dictionary to store (resolution_x, resolution_y) lists per band and per time (cube)
-    cube_resolutions: Dict[str, Dict[str, List[tuple[float, float, List[float]]]]] = {}
-
-    # Process each item
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            # Update bbox with ther intersection of current item bbox
-            item_bbox = src_dst.bounds
-            if item_bbox:
-                item_polygon = box(
-                    item_bbox[0], item_bbox[1], item_bbox[2], item_bbox[3]
-                )
-                if spatial_extent is None:
-                    if target_bbox is None:
-                        target_bbox = list(item_bbox)
-                    else:
-                        # Convert current bbox to polygon and union with item polygon
-                        current_polygon = box(
-                            target_bbox[0],
-                            target_bbox[1],
-                            target_bbox[2],
-                            target_bbox[3],
-                        )
-                        union = current_polygon.union(item_polygon)
-                        if not union.is_empty:
-                            target_bbox = list(union.bounds)
-
-                    if target_crs is None:
-                        target_crs = src_dst.crs
-
-            # Get resolutions and CRS for this item's assets
-            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
-            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
-                # Skip if we couldn't determine resolution
-                if x_res is None or y_res is None:
-                    continue
-
-                # Reproject resolution if needed
-                if asset_crs != target_crs:
-                    x_res, y_res = _reproject_resolution(
-                        asset_crs, target_crs, target_bbox, x_res, y_res
-                    )
-                    if x_res is None or y_res is None:
-                        continue
-
-                # Get item datetime for cube resolution grouping
-                item_datetime = src_dst.item.datetime.isoformat()
-                if item_datetime not in cube_resolutions:
-                    cube_resolutions[item_datetime] = {}
-
-                if band_name not in cube_resolutions[item_datetime]:
-                    cube_resolutions[item_datetime][band_name] = []
-                cube_resolutions[item_datetime][band_name].append(
-                    (x_res, y_res, target_bbox)
-                )
+    # Get resolutions for each datetime and band
+    cube_resolutions = _get_cube_resolutions(items, target_crs, target_bbox, bands)
 
     # Find the minimum resolution across all bands
-    x_resolution = None
-    y_resolution = None
+    x_resolution: Optional[float] = None
+    y_resolution: Optional[float] = None
     for item in cube_resolutions.values():
         for resolutions in item.values():
             for x_res, y_res, _ in resolutions:
@@ -567,15 +601,12 @@ def _estimate_output_dimensions(
                 if y_resolution is None or y_res < y_resolution:
                     y_resolution = y_res
 
-    if target_bbox is None:
-        raise ValueError("No valid bounding box found in items")
-
     # Calculate dimensions maintaining aspect ratio
     width, height = _calculate_dimensions(
         target_bbox, x_resolution, y_resolution, width, height
     )
 
-    # Check pixel limit
+    # Check pixel limit if requested
     if check_max_pixels:
         if width is None or height is None:
             raise ValueError("Width and height must be specified or calculated")
@@ -583,7 +614,7 @@ def _estimate_output_dimensions(
             width,
             height,
             len(cube_resolutions),
-            len(max(cube_resolutions.values(), key=len)),
+            len(max(cube_resolutions.values(), key=len)) if cube_resolutions else 0,
         )
 
     return Dims(

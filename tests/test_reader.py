@@ -8,6 +8,7 @@ import rasterio
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
 from titiler.openeo.reader import (
+    SimpleSTACReader,
     _calculate_dimensions,
     _check_pixel_limit,
     _estimate_output_dimensions,
@@ -131,9 +132,6 @@ def sample_stac_item():
             },
         },
     }
-
-
-from titiler.openeo.reader import SimpleSTACReader
 
 
 def test_get_assets_resolutions(sample_stac_item):
