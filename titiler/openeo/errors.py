@@ -253,12 +253,14 @@ class OutputLimitExceeded(OpenEOException):
         height: int,
         max_pixels: int,
         items_count: Optional[int] = None,
+        bands_count: Optional[int] = None,
     ):
         """Initialize error with output size limit exceeded."""
-        total_pixels = width * height * (items_count or 1)
+        total_pixels = width * height * (items_count or 1) * (bands_count or 1)
         message = (
             f"Estimated output size too large: {width}x{height} pixels"
             + (f" x {items_count} items" if items_count else "")
+            + (f" x {bands_count} bands" if bands_count else "")
             + f" = {total_pixels:,} total pixels (max allowed: {max_pixels:,} pixels)"
         )
         super().__init__(

@@ -5,6 +5,7 @@ from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
+from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
@@ -19,48 +20,29 @@ def test_processing_settings():
     settings = ProcessingSettings(max_pixels=50_000_000)
     assert settings.max_pixels == 50_000_000
 
+# Mock SimpleSTACReader to return fixed dimensions and transform
+class MockReader(SimpleSTACReader):
+    def part(self, bbox, **kwargs):
+        """Mock part method returning ImageData."""
+        import numpy
+
+        return ImageData(
+            numpy.zeros((1, kwargs.get("height", 1000), kwargs.get("width", 1000)), dtype="uint8"),
+            assets=kwargs.get("assets", ["B01"]),
+            crs=kwargs.get("dst_crs", "EPSG:4326"),
+            )
 
 def test_load_collection_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection."""
-
-    # Mock SimpleSTACReader to return fixed dimensions and transform
-    class MockReader:
-        def __init__(self, *args, **kwargs):
-            import pyproj
-            from affine import Affine
-
-            self.crs = pyproj.CRS.from_epsg(4326)
-            self.width = 5000
-            self.height = 5000
-            # Affine transform with 0.0002 degrees per pixel (typical for medium resolution imagery)
-            self.transform = Affine(0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0)
-            self.bounds = (
-                0.0,  # west
-                0.0,  # south
-                1.0,  # east
-                1.0,  # north
-            )
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def part(self, bbox, **kwargs):
-            """Mock part method returning ImageData."""
-            import numpy
-
-            return ImageData(
-                numpy.zeros((1, 100, 100), dtype="uint8"),
-                assets=kwargs.get("assets", ["B01"]),
-                crs=self.crs,
-            )
 
     # Mock STAC item
     mock_item = {
         "type": "Feature",
         "id": "test-item",
+        "stac_version": "1.0.0",
+        "stac_extensions": [
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
@@ -122,50 +104,25 @@ def test_load_collection_pixel_threshold(monkeypatch):
 def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection_and_reduce."""
 
-    # Mock SimpleSTACReader to return fixed dimensions and transform
-    class MockReader:
-        def __init__(self, *args, **kwargs):
-            import pyproj
-            from affine import Affine
-
-            self.crs = pyproj.CRS.from_epsg(4326)
-            self.width = 5000
-            self.height = 5000
-            # Affine transform with 0.0002 degrees per pixel (typical for medium resolution imagery)
-            self.transform = Affine(0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0)
-            self.bounds = (
-                0.0,  # west
-                0.0,  # south
-                1.0,  # east
-                1.0,  # north
-            )
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def part(self, bbox, **kwargs):
-            """Mock part method returning ImageData."""
-            import numpy
-
-            return ImageData(
-                numpy.zeros((1, 100, 100), dtype="uint8"),
-                assets=kwargs.get("assets", ["B01"]),
-                crs=self.crs,
-            )
-
     # Mock STAC item
     mock_item = {
         "type": "Feature",
         "id": "test-item",
+        "stac_version": "1.0.0",
+        "stac_extensions": [
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
             "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {"datetime": "2021-01-01T00:00:00Z"},
+        "properties": {
+            "datetime": "2021-01-01T00:00:00Z",
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+            "proj:shape": [5000, 5000],  # Mocked dimensions
+        },
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
@@ -217,50 +174,24 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
 def test_resolution_based_dimension_calculation(monkeypatch):
     """Test resolution-based dimension calculation."""
 
-    # Mock SimpleSTACReader with specific transform (resolution)
-    class MockReader:
-        def __init__(self, *args, **kwargs):
-            import pyproj
-            from affine import Affine
-
-            self.crs = pyproj.CRS.from_epsg(4326)
-            self.width = 1000
-            self.height = 1000
-            # Affine transform with 0.001 degrees per pixel
-            self.transform = Affine(0.001, 0.0, 0.0, 0.0, -0.001, 0.0)
-            self.bounds = (
-                0.0,  # west
-                0.0,  # south
-                1.0,  # east
-                1.0,  # north
-            )
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def part(self, bbox, **kwargs):
-            """Mock part method returning ImageData."""
-            import numpy
-
-            return ImageData(
-                numpy.zeros((1, 100, 100), dtype="uint8"),
-                assets=kwargs.get("assets", ["B01"]),
-                crs=self.crs,
-            )
-
     # Mock STAC item
     mock_item = {
         "type": "Feature",
         "id": "test-item",
+        "stac_version": "1.0.0",
+        "stac_extensions": [
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
             "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
         },
-        "properties": {"datetime": "2021-01-01T00:00:00Z"},
+        "properties": {
+            "datetime": "2021-01-01T00:00:00Z",
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.001, 0.0, 0.0, 0.0, -0.001, 0.0],
+        },
         "assets": {
             "B01": {
                 "href": "https://example.com/B01.tif",
