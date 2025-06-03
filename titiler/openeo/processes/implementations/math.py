@@ -1,5 +1,7 @@
 """titiler.openeo processes Math."""
 
+import builtins
+
 import numpy
 
 __all__ = [
@@ -26,6 +28,8 @@ __all__ = [
     "linear_scale_range",
     "ln",
     "log",
+    "min",
+    "max",
     "mean",
     "median",
     "mod",
@@ -174,12 +178,25 @@ def power(base, p):
     return base**p
 
 
-def _min(x, axis=None, keepdims=False):
-    return numpy.min(x, axis=axis, keepdims=keepdims)
+def _min(data, ignore_nodata=True, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        if not ignore_nodata:
+            # Fill masked values with the array's data
+            data = data.filled(data.fill_value)
+        return numpy.ma.min(data, axis=axis, keepdims=keepdims)
+
+    mind = numpy.min(data, axis=axis, keepdims=keepdims)
+    return mind
 
 
-def _max(x, axis=None, keepdims=False):
-    return numpy.max(x, axis=axis, keepdims=keepdims)
+def _max(data, ignore_nodata=True, axis=None, keepdims=False):
+    if isinstance(data, numpy.ma.MaskedArray):
+        if not ignore_nodata:
+            # Fill masked values with the array's data
+            data = data.filled(data.fill_value)
+        return numpy.ma.max(data, axis=axis, keepdims=keepdims)
+
+    return numpy.max(data, axis=axis, keepdims=keepdims)
 
 
 def median(data, axis=None, keepdims=False):
@@ -219,7 +236,7 @@ def linear_scale_range(
     outputMin: float = 0.0,
     outputMax: float = 1.0,
 ):
-    minv, maxv = min(inputMin, inputMax), max(inputMin, inputMax)
+    minv, maxv = builtins.min(inputMin, inputMax), builtins.max(inputMin, inputMax)
     x = clip(x, minv, maxv)
     return ((x - inputMin) / (inputMax - inputMin)) * (
         outputMax - outputMin
@@ -254,3 +271,33 @@ def last(data):
         return data[-1].filled()
     else:
         raise TypeError("Unsupported data type for last function.")
+
+
+def max(data, ignore_nodata=True):
+    """Return the maximum value of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        # Return a single array with the maximum value for each array items in the stack
+        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
+        return _max(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return _max(data, ignore_nodata=ignore_nodata)
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return _max(data, ignore_nodata=ignore_nodata)
+    else:
+        raise TypeError("Unsupported data type for max function.")
+
+
+def min(data, ignore_nodata=True):
+    """Return the minimum value of the array."""
+    # Handle RasterStack
+    if isinstance(data, dict):
+        # Return a single array with the minimum value for each array items in the stack
+        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
+        return _min(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
+    elif isinstance(data, numpy.ndarray):
+        return _min(data, ignore_nodata=ignore_nodata)
+    elif isinstance(data, numpy.ma.MaskedArray):
+        return _min(data, ignore_nodata=ignore_nodata)
+    else:
+        raise TypeError("Unsupported data type for min function.")

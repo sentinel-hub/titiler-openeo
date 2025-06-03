@@ -6,8 +6,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlparse
 
 import attr
+import pystac
 import rasterio
+from affine import Affine
 from morecantile import TileMatrixSet
+from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
 from rasterio.warp import transform_bounds
@@ -24,9 +27,10 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
+from shapely.geometry import box
 from typing_extensions import TypedDict
 
-from titiler.openeo.errors import MixedCRSError, OutputLimitExceeded
+from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
 
 
@@ -60,6 +64,7 @@ class SimpleSTACReader(MultiBaseReader):
     """
 
     input: Dict[str, Any] = attr.ib()
+    item: pystac.Item = attr.ib(init=False)
 
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
     minzoom: int = attr.ib(default=None)
@@ -75,26 +80,40 @@ class SimpleSTACReader(MultiBaseReader):
 
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
-        self.bounds = self.input["bbox"]
-        self.crs = WGS84_CRS  # Per specification STAC items are in WGS84
+        # Convert input to pystac.Item
+        self.item = pystac.Item.from_dict(self.input)
 
-        if proj := self.input.get("proj"):
-            crs_string = str(
-                proj.get("code")
-                or (f"epsg:{proj.get('epsg')}" if proj.get("epsg") else None)
-                or proj.get("wkt")
-            )
-            if all(
-                [
-                    proj.get("transform"),
-                    proj.get("shape"),
-                    crs_string,
-                ]
-            ):
-                self.height, self.width = proj.get("shape")
-                self.transform = proj.get("transform")
+        # Get bounding box and default CRS
+        self.bounds = self.item.bbox
+        self.crs = WGS84_CRS  # Default to WGS84
+
+        # Get projection information using STAC extension
+        if ProjectionExtension.has_extension(self.item):
+            proj_ext = ProjectionExtension.ext(self.item)
+
+            # Set CRS if available
+            if proj_ext.epsg:
+                self.crs = rasterio.crs.CRS.from_epsg(proj_ext.epsg)
+            elif proj_ext.wkt2:
+                self.crs = rasterio.crs.CRS.from_wkt(proj_ext.wkt2)
+
+            # Set transform and shape if available
+            if proj_ext.transform and proj_ext.shape:
+                self.height, self.width = proj_ext.shape
+                self.transform = Affine(
+                    proj_ext.transform[0],
+                    proj_ext.transform[1],
+                    proj_ext.transform[2],
+                    proj_ext.transform[3],
+                    proj_ext.transform[4],
+                    proj_ext.transform[5],
+                )
+                # Update bounds if we have both transform and shape
                 self.bounds = array_bounds(self.height, self.width, self.transform)
-                self.crs = rasterio.crs.CRS.from_user_input(crs_string)
+            elif proj_ext.transform:
+                self.transform = proj_ext.transform
+            elif proj_ext.shape:
+                self.height, self.width = proj_ext.shape
 
         self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
         self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
@@ -124,14 +143,13 @@ class SimpleSTACReader(MultiBaseReader):
         return asset, None
 
     def _get_asset_info(self, asset: str) -> AssetInfo:
-        """Validate asset names and return asset's url.
+        """Validate asset names and return asset's url and metadata.
 
         Args:
             asset (str): STAC asset name.
 
         Returns:
-            str: STAC asset href.
-
+            AssetInfo: Asset URL and metadata.
         """
         asset, vrt_options = self._parse_vrt_asset(asset)
         if asset not in self.assets:
@@ -139,26 +157,34 @@ class SimpleSTACReader(MultiBaseReader):
                 f"{asset} is not valid. Should be one of {self.assets}"
             )
 
-        asset_info = self.input["assets"][asset]
+        # Convert to pystac Item and get asset information
+        stac_item = pystac.Item.from_dict(self.input)
+        pystac_asset = stac_item.assets[asset]
+
         info = AssetInfo(
-            url=asset_info["href"],
+            url=pystac_asset.href,
             env={},
         )
 
-        if media_type := asset_info.get("type"):
-            info["media_type"] = media_type
+        # Add media type if available
+        if pystac_asset.media_type:
+            info["media_type"] = pystac_asset.media_type
 
-        if header_size := asset_info.get("file:header_size"):
-            info["env"]["GDAL_INGESTED_BYTES_AT_OPEN"] = header_size
+        # Add any asset-specific metadata
+        if pystac_asset.extra_fields:
+            # Handle file:header_size
+            if header_size := pystac_asset.extra_fields.get("file:header_size"):
+                info["env"]["GDAL_INGESTED_BYTES_AT_OPEN"] = header_size
 
-        if bands := asset_info.get("raster:bands"):
-            stats = [
-                (b["statistics"]["minimum"], b["statistics"]["maximum"])
-                for b in bands
-                if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
-            ]
-            if len(stats) == len(bands):
-                info["dataset_statistics"] = stats
+            # Handle raster:bands statistics
+            if bands := pystac_asset.extra_fields.get("raster:bands"):
+                stats = [
+                    (b["statistics"]["minimum"], b["statistics"]["maximum"])
+                    for b in bands
+                    if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
+                ]
+                if len(stats) == len(bands):
+                    info["dataset_statistics"] = stats
 
         if vrt_options:
             # Construct VRT url
@@ -259,38 +285,76 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
-def _get_item_resolutions(
+def _get_assets_resolutions(
     item: Dict,
     src_dst: SimpleSTACReader,
-) -> tuple[list[float], list[float]]:
-    """Get x and y resolutions from a STAC item."""
-    x_resolutions = []
-    y_resolutions = []
+    bands: Optional[list[str]] = None,
+) -> Dict[str, tuple[float, float, rasterio.crs.CRS]]:
+    """Get x and y resolutions and CRS for each band from STAC assets.
 
-    # If the item has a transform, use it directly
-    if src_dst.transform:
-        x_resolutions.append(abs(src_dst.transform.a))
-        y_resolutions.append(abs(src_dst.transform.e))
-    else:
-        for _, asset in item.get("assets", {}).items():
-            # If the asset has a transform, use the pixel size from it
-            if asset_transform := asset.get("proj:transform"):
-                x_resolutions.append(abs(asset_transform[0]))
-                y_resolutions.append(abs(asset_transform[4]))
-            # If the asset has a shape, calculate pixel size from it
-            elif asset_shape := asset.get("proj:shape"):
-                if asset_shape[0] > 0 and asset_shape[1] > 0:
-                    x_resolutions.append(
-                        abs((item["bbox"][2] - item["bbox"][0]) / asset_shape[0])
-                    )
-                    y_resolutions.append(
-                        abs((item["bbox"][3] - item["bbox"][1]) / asset_shape[1])
-                    )
-            else:
-                x_resolutions.append(1)  # Default x resolution
-                y_resolutions.append(1)  # Default y resolution
+    Args:
+        item: STAC item dictionary
+        src_dst: SimpleSTACReader instance
+        bands: Optional list of band names to filter assets
 
-    return x_resolutions, y_resolutions
+    Returns:
+        Dictionary mapping band names to (x_resolution, y_resolution, crs) tuples
+    """
+    band_resolutions = {}
+
+    # Convert item to pystac.Item to use projection extension
+    stac_item = pystac.Item.from_dict(item)
+
+    # If bands specified, only process those bands
+    assets_to_process = set(bands) if bands else set(stac_item.get_assets().keys())
+
+    for band_name in assets_to_process:
+        if band_name not in item.get("assets", {}):
+            continue
+
+        asset = stac_item.assets[band_name]
+        x_res = None
+        y_res = None
+        asset_crs = None
+
+        # Get asset-level projection information
+        if ProjectionExtension.has_extension(stac_item):
+            asset_proj_ext = ProjectionExtension.ext(asset)
+
+            if asset_proj_ext:
+                # Try to get asset-level CRS
+                if asset_proj_ext.epsg:
+                    asset_crs = rasterio.crs.CRS.from_epsg(asset_proj_ext.epsg)
+                elif asset_proj_ext.wkt2:
+                    asset_crs = rasterio.crs.CRS.from_wkt(asset_proj_ext.wkt2)
+
+                # Try to get transform and shape for resolution
+                if asset_proj_ext.transform:
+                    x_res = abs(asset_proj_ext.transform[0])
+                    y_res = abs(asset_proj_ext.transform[4])
+                elif asset_proj_ext.shape:
+                    bbox = asset.get("bbox", item["bbox"])
+                    shape = asset_proj_ext.shape
+                    if shape[0] > 0 and shape[1] > 0:
+                        x_res = abs((bbox[2] - bbox[0]) / shape[0])
+                        y_res = abs((bbox[3] - bbox[1]) / shape[1])
+
+        # Fall back to item-level CRS if needed
+        if asset_crs is None:
+            asset_crs = src_dst.crs
+
+        # Use item transform if no asset-level resolution available
+        if x_res is None and src_dst.transform:
+            x_res = abs(src_dst.transform.a)
+            y_res = abs(src_dst.transform.e)
+
+        # Skip if we couldn't determine resolution
+        if x_res is None or y_res is None:
+            continue
+
+        band_resolutions[band_name] = (x_res, y_res, asset_crs)
+
+    return band_resolutions
 
 
 def _reproject_resolution(
@@ -369,7 +433,8 @@ def _calculate_dimensions(
 def _check_pixel_limit(
     width: Optional[int],
     height: Optional[int],
-    items: List[Dict],
+    items_count: int,
+    bands_count: int,
 ) -> None:
     """Check if pixel count exceeds maximum allowed.
 
@@ -383,25 +448,114 @@ def _check_pixel_limit(
     width_int = int(width or 0)
     height_int = int(height or 0)
 
-    # Group items by datetime to avoid double counting mosaic items
-    datetimes = set()
-    for item in items:
-        dt = item.get("properties", {}).get("datetime")
-        if dt:
-            datetimes.add(dt)
-        else:
-            # If no datetime, treat as unique item
-            datetimes.add(id(item))
-
-    # Use number of unique datetimes instead of total items
-    pixel_count = width_int * height_int * len(datetimes)
+    pixel_count = width_int * height_int * items_count * bands_count
     if pixel_count > processing_settings.max_pixels:
         raise OutputLimitExceeded(
             width_int,
             height_int,
             processing_settings.max_pixels,
-            items_count=len(datetimes),
+            items_count=items_count,
+            bands_count=bands_count,
         )
+
+
+def _get_target_crs_bbox(
+    items: List[Dict],
+    spatial_extent: Optional[SpatialExtent],
+) -> Tuple[rasterio.crs.CRS, List[float]]:
+    """Get target CRS and bbox from items and spatial extent."""
+    target_crs = (
+        rasterio.crs.CRS.from_user_input(spatial_extent.crs)
+        if spatial_extent
+        else WGS84_CRS
+    )
+
+    target_bbox: List[float] = (
+        [
+            spatial_extent.west,
+            spatial_extent.south,
+            spatial_extent.east,
+            spatial_extent.north,
+        ]
+        if spatial_extent
+        else []
+    )
+
+    # Process each item to update bbox
+    for item in items:
+        with SimpleSTACReader(item) as src_dst:
+            item_bbox = src_dst.bounds
+            if item_bbox:
+                item_polygon = box(
+                    item_bbox[0], item_bbox[1], item_bbox[2], item_bbox[3]
+                )
+                if not spatial_extent:
+                    if not target_bbox:
+                        target_bbox = list(item_bbox)
+                    else:
+                        current_polygon = box(
+                            target_bbox[0],
+                            target_bbox[1],
+                            target_bbox[2],
+                            target_bbox[3],
+                        )
+                        union = current_polygon.union(item_polygon)
+                        if not union.is_empty:
+                            target_bbox = list(union.bounds)
+
+                    if target_crs == WGS84_CRS:  # Only update if still default
+                        target_crs = src_dst.crs
+
+    if not target_bbox:
+        raise ValueError("No valid bounding box found in items")
+
+    return target_crs, target_bbox
+
+
+def _get_cube_resolutions(
+    items: List[Dict],
+    target_crs: rasterio.crs.CRS,
+    target_bbox: List[float],
+    bands: Optional[list[str]],
+) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
+    """Get resolutions for each datetime and band combination."""
+    cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
+
+    for item in items:
+        with SimpleSTACReader(item) as src_dst:
+            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
+            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
+                if x_res is None or y_res is None:
+                    continue
+
+                x_val: float = float(x_res)
+                y_val: float = float(y_res)
+
+                if asset_crs != target_crs:
+                    reprojected = _reproject_resolution(
+                        asset_crs,
+                        target_crs,
+                        target_bbox,
+                        x_val,
+                        y_val,
+                    )
+                    if reprojected[0] is None or reprojected[1] is None:
+                        continue
+                    x_val = float(reprojected[0])
+                    y_val = float(reprojected[1])
+
+                item_datetime = src_dst.item.datetime.isoformat()
+                if item_datetime not in cube_resolutions:
+                    cube_resolutions[item_datetime] = {}
+
+                if band_name not in cube_resolutions[item_datetime]:
+                    cube_resolutions[item_datetime][band_name] = []
+
+                cube_resolutions[item_datetime][band_name].append(
+                    (x_val, y_val, target_bbox)
+                )
+
+    return cube_resolutions
 
 
 def _estimate_output_dimensions(
@@ -410,6 +564,7 @@ def _estimate_output_dimensions(
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,
+    check_max_pixels: bool = True,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -420,6 +575,7 @@ def _estimate_output_dimensions(
         bands: List of band names to include
         width: Optional user-specified width
         height: Optional user-specified height
+        check_max_pixels: Whether to check pixel count limit
 
     Returns:
         Dictionary containing:
@@ -428,69 +584,44 @@ def _estimate_output_dimensions(
             - crs: Target CRS to use
             - bbox: Bounding box as a list [west, south, east, north]
     """
-    # Extract CRS and resolution information from items
-    item_crs: rasterio.crs.CRS = None
-    all_x_resolutions = []
-    all_y_resolutions = []
+    # Get target CRS and bbox
+    target_crs, target_bbox = _get_target_crs_bbox(items, spatial_extent)
 
-    # Get the full extent first
-    full_bbox = None
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            if item_crs is None:
-                item_crs = src_dst.crs
-            elif item_crs != src_dst.crs:
-                raise MixedCRSError(
-                    found_crs=str(src_dst.crs), expected_crs=str(item_crs)
-                )
+    # Get resolutions for each datetime and band
+    cube_resolutions = _get_cube_resolutions(items, target_crs, target_bbox, bands)
 
-            if full_bbox is None:
-                full_bbox = src_dst.bounds
-            else:
-                # Expand bbox to include this item
-                full_bbox = [
-                    min(full_bbox[0], src_dst.bounds[0]),  # west
-                    min(full_bbox[1], src_dst.bounds[1]),  # south
-                    max(full_bbox[2], src_dst.bounds[2]),  # east
-                    max(full_bbox[3], src_dst.bounds[3]),  # north
-                ]
+    # Find the minimum resolution across all bands
+    x_resolution: Optional[float] = None
+    y_resolution: Optional[float] = None
+    for item in cube_resolutions.values():
+        for resolutions in item.values():
+            for x_res, y_res, _ in resolutions:
+                if x_resolution is None or x_res < x_resolution:
+                    x_resolution = x_res
+                if y_resolution is None or y_res < y_resolution:
+                    y_resolution = y_res
 
-            x_res, y_res = _get_item_resolutions(item, src_dst)
-            all_x_resolutions.extend(x_res)
-            all_y_resolutions.extend(y_res)
-
-    # Get the highest resolution (smallest pixel size)
-    x_resolution = min(all_x_resolutions) if all_x_resolutions else None
-    y_resolution = min(all_y_resolutions) if all_y_resolutions else None
-
-    if spatial_extent:
-        # Get target CRS and bounds
-        crs = rasterio.crs.CRS.from_user_input(spatial_extent.crs or "epsg:4326")
-        bbox = [
-            spatial_extent.west,
-            spatial_extent.south,
-            spatial_extent.east,
-            spatial_extent.north,
-        ]
-
-        # Reproject resolution if needed
-        x_resolution, y_resolution = _reproject_resolution(
-            item_crs, crs, bbox, x_resolution, y_resolution
-        )
-
-    # Calculate dimensions
+    # Calculate dimensions maintaining aspect ratio
     width, height = _calculate_dimensions(
-        bbox, x_resolution, y_resolution, width, height
+        target_bbox, x_resolution, y_resolution, width, height
     )
 
-    # Check pixel limit
-    _check_pixel_limit(width, height, items)
+    # Check pixel limit if requested
+    if check_max_pixels:
+        if width is None or height is None:
+            raise ValueError("Width and height must be specified or calculated")
+        _check_pixel_limit(
+            width,
+            height,
+            len(cube_resolutions),
+            len(max(cube_resolutions.values(), key=len)) if cube_resolutions else 0,
+        )
 
     return Dims(
         width=width,  # type: ignore
         height=height,  # type: ignore
-        crs=crs,
-        bbox=bbox,
+        crs=target_crs,
+        bbox=target_bbox,
     )
 
 
