@@ -282,6 +282,70 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
+def _get_asset_crs(
+    item: pystac.Item,
+    asset: pystac.Asset,
+    asset_proj_ext: Optional[ProjectionExtension],
+) -> Optional[rasterio.crs.CRS]:
+    """Get CRS from asset using various metadata sources.
+
+    Args:
+        item: STAC item
+        asset: STAC asset
+        asset_proj_ext: Asset's projection extension
+
+    Returns:
+        CRS object or None if not found
+    """
+    if asset_proj_ext:
+        if asset_proj_ext.epsg:
+            return rasterio.crs.CRS.from_epsg(asset_proj_ext.epsg)
+        if asset_proj_ext.wkt2:
+            return rasterio.crs.CRS.from_wkt(asset_proj_ext.wkt2)
+        if asset_proj_ext.crs_string:
+            return rasterio.crs.CRS.from_string(asset_proj_ext.crs_string)
+
+    if proj_code := asset.extra_fields.get("proj:code"):
+        return rasterio.crs.CRS.from_string(proj_code)
+
+    return None
+
+
+def _get_asset_resolution(
+    item: pystac.Item,
+    asset: pystac.Asset,
+    asset_proj_ext: Optional[ProjectionExtension],
+    src_dst: SimpleSTACReader,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Get x and y resolutions from asset metadata.
+
+    Args:
+        item: STAC item
+        asset: STAC asset
+        asset_proj_ext: Asset's projection extension
+        src_dst: SimpleSTACReader instance
+
+    Returns:
+        Tuple of (x_resolution, y_resolution), either may be None
+    """
+    if asset_proj_ext and asset_proj_ext.transform:
+        return (abs(asset_proj_ext.transform[0]), abs(asset_proj_ext.transform[4]))
+
+    if asset_proj_ext and asset_proj_ext.shape:
+        bbox = asset.get("bbox", item["bbox"])
+        shape = asset_proj_ext.shape
+        if shape[0] > 0 and shape[1] > 0:
+            return (
+                abs((bbox[2] - bbox[0]) / shape[0]),
+                abs((bbox[3] - bbox[1]) / shape[1]),
+            )
+
+    if src_dst.transform:
+        return abs(src_dst.transform.a), abs(src_dst.transform.e)
+
+    return None, None
+
+
 def _get_assets_resolutions(
     item: pystac.Item,
     src_dst: SimpleSTACReader,
@@ -298,8 +362,6 @@ def _get_assets_resolutions(
         Dictionary mapping band names to (x_resolution, y_resolution, crs) tuples
     """
     band_resolutions = {}
-
-    # If bands specified, only process those bands
     assets_to_process = set(bands) if bands else set(item.get_assets().keys())
 
     for band_name in assets_to_process:
@@ -307,46 +369,15 @@ def _get_assets_resolutions(
             continue
 
         asset = item.assets[band_name]
-        x_res = None
-        y_res = None
-        asset_crs = None
-
-        # Get asset-level projection information
+        asset_proj_ext = None
         if ProjectionExtension.has_extension(item):
             asset_proj_ext = ProjectionExtension.ext(asset)
 
-            if asset_proj_ext:
-                # Try to get asset-level CRS
-                if asset_proj_ext.epsg:
-                    asset_crs = rasterio.crs.CRS.from_epsg(asset_proj_ext.epsg)
-                elif asset_proj_ext.wkt2:
-                    asset_crs = rasterio.crs.CRS.from_wkt(asset_proj_ext.wkt2)
-                elif asset_proj_ext.crs_string:
-                    asset_crs = rasterio.crs.CRS.from_string(asset_proj_ext.crs_string)
-                elif asset.extra_fields.get("proj:code"):
-                    asset_crs = rasterio.crs.CRS.from_string(
-                        asset.extra_fields["proj:code"]
-                    )
+        # Get asset CRS or fall back to item CRS
+        asset_crs = _get_asset_crs(item, asset, asset_proj_ext) or src_dst.crs
 
-                # Try to get transform and shape for resolution
-                if asset_proj_ext.transform:
-                    x_res = abs(asset_proj_ext.transform[0])
-                    y_res = abs(asset_proj_ext.transform[4])
-                elif asset_proj_ext.shape:
-                    bbox = asset.get("bbox", item["bbox"])
-                    shape = asset_proj_ext.shape
-                    if shape[0] > 0 and shape[1] > 0:
-                        x_res = abs((bbox[2] - bbox[0]) / shape[0])
-                        y_res = abs((bbox[3] - bbox[1]) / shape[1])
-
-        # Fall back to item-level CRS if needed
-        if asset_crs is None:
-            asset_crs = src_dst.crs
-
-        # Use item transform if no asset-level resolution available
-        if x_res is None and src_dst.transform:
-            x_res = abs(src_dst.transform.a)
-            y_res = abs(src_dst.transform.e)
+        # Get asset resolution
+        x_res, y_res = _get_asset_resolution(item, asset, asset_proj_ext, src_dst)
 
         # Skip if we couldn't determine resolution
         if x_res is None or y_res is None:
