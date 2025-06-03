@@ -332,7 +332,7 @@ def _get_asset_resolution(
         return (abs(asset_proj_ext.transform[0]), abs(asset_proj_ext.transform[4]))
 
     if asset_proj_ext and asset_proj_ext.shape:
-        bbox = asset.get("bbox", item["bbox"])
+        bbox = item.bbox
         shape = asset_proj_ext.shape
         if shape[0] > 0 and shape[1] > 0:
             return (
