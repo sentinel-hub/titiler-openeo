@@ -1,9 +1,10 @@
 """Tests for reader module."""
 
-import copy
+import datetime
 
 import pytest
 import rasterio
+from pystac import Item
 
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.models import SpatialExtent
@@ -20,76 +21,80 @@ from titiler.openeo.reader import (
 @pytest.fixture
 def complex_stac_items():
     """Create a set of complex STAC items with different CRS and resolutions."""
-    items = []
+    items: list[Item] = []
 
     # Item 1: Sentinel-2 like with UTM bands
     items.append(
-        {
-            "type": "Feature",
-            "stac_version": "1.0.0",
-            "stac_extensions": [
-                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
-                "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
-            ],
-            "id": "sentinel-item",
-            "bbox": [0, 40, 6, 46],
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
-            },
-            "properties": {
-                "datetime": "2025-01-01T00:00:00Z",
-                "proj:epsg": 32631,
-            },
-            "assets": {
-                "B02": {
-                    "href": "https://example.com/B02.tif",
-                    "proj:epsg": 32631,
-                    "proj:shape": [10980, 10980],
-                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+        Item.from_dict(
+            {
+                "type": "Feature",
+                "stac_version": "1.0.0",
+                "stac_extensions": [
+                    "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                    "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
+                ],
+                "id": "sentinel-item",
+                "bbox": [0, 40, 6, 46],
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
                 },
-                "B08": {
-                    "href": "https://example.com/B08.tif",
+                "properties": {
+                    "datetime": "2025-01-01T00:00:00Z",
                     "proj:epsg": 32631,
-                    "proj:shape": [10980, 10980],
-                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
                 },
-            },
-        }
+                "assets": {
+                    "B02": {
+                        "href": "https://example.com/B02.tif",
+                        "proj:epsg": 32631,
+                        "proj:shape": [10980, 10980],
+                        "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                    },
+                    "B08": {
+                        "href": "https://example.com/B08.tif",
+                        "proj:epsg": 32631,
+                        "proj:shape": [10980, 10980],
+                        "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                    },
+                },
+            }
+        )
     )
 
     # Item 2: Mixed resolution bands in different CRS
     items.append(
-        {
-            "type": "Feature",
-            "stac_version": "1.0.0",
-            "stac_extensions": [
-                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
-            ],
-            "id": "mixed-item",
-            "bbox": [0, 0, 10, 10],
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
-            },
-            "properties": {
-                "datetime": "2025-01-01T00:00:00Z",
-            },
-            "assets": {
-                "lowres": {
-                    "href": "https://example.com/lowres.tif",
-                    "proj:epsg": 4326,
-                    "proj:shape": [100, 100],
-                    "proj:transform": [0.1, 0, 0, 0, -0.1, 10, 0, 0, 1],
+        Item.from_dict(
+            {
+                "type": "Feature",
+                "stac_version": "1.0.0",
+                "stac_extensions": [
+                    "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                ],
+                "id": "mixed-item",
+                "bbox": [0, 0, 10, 10],
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
                 },
-                "highres": {
-                    "href": "https://example.com/highres.tif",
-                    "proj:epsg": 3857,
-                    "proj:shape": [1000, 1000],
-                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                "properties": {
+                    "datetime": "2025-01-01T00:00:00Z",
                 },
-            },
-        }
+                "assets": {
+                    "lowres": {
+                        "href": "https://example.com/lowres.tif",
+                        "proj:epsg": 4326,
+                        "proj:shape": [100, 100],
+                        "proj:transform": [0.1, 0, 0, 0, -0.1, 10, 0, 0, 1],
+                    },
+                    "highres": {
+                        "href": "https://example.com/highres.tif",
+                        "proj:epsg": 3857,
+                        "proj:shape": [1000, 1000],
+                        "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                    },
+                },
+            }
+        )
     )
 
     return items
@@ -98,40 +103,42 @@ def complex_stac_items():
 @pytest.fixture
 def sample_stac_item():
     """Create a sample STAC item."""
-    return {
-        "type": "Feature",
-        "stac_version": "1.0.0",
-        "stac_extensions": [
-            "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
-            "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
-        ],
-        "id": "test-item",
-        "bbox": [0, 0, 10, 10],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
-        },
-        "properties": {
-            "datetime": "2025-01-01T00:00:00Z",
-            "proj:epsg": 4326,
-            "proj:shape": [100, 100],
-            "proj:transform": [0.1, 0, 0, 0, -0.1, 10, 0, 0, 1],
-        },
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-                "type": "image/tiff; application=geotiff",
-                "proj:epsg": 32631,
-                "proj:shape": [1000, 1000],
-                "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+    return Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                "https://stac-extensions.github.io/eo/v1.0.0/schema.json",
+            ],
+            "id": "test-item",
+            "bbox": [0, 0, 10, 10],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
             },
-            "B02": {
-                "href": "https://example.com/B02.tif",
-                "type": "image/tiff; application=geotiff",
-                "proj:shape": [2000, 2000],
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                "proj:epsg": 4326,
+                "proj:shape": [100, 100],
+                "proj:transform": [0.1, 0, 0, 0, -0.1, 10, 0, 0, 1],
             },
-        },
-    }
+            "assets": {
+                "B01": {
+                    "href": "https://example.com/B01.tif",
+                    "type": "image/tiff; application=geotiff",
+                    "proj:epsg": 32631,
+                    "proj:shape": [1000, 1000],
+                    "proj:transform": [10, 0, 0, 0, -10, 0, 0, 0, 1],
+                },
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "type": "image/tiff; application=geotiff",
+                    "proj:shape": [2000, 2000],
+                },
+            },
+        }
+    )
 
 
 def test_get_assets_resolutions(sample_stac_item):
@@ -167,22 +174,24 @@ def test_get_assets_resolutions(sample_stac_item):
         assert len(resolutions) == 0
 
     # Test with item without any projection info
-    item_without_metadata = {
-        "type": "Feature",
-        "stac_version": "1.0.0",
-        "id": "test-item",
-        "bbox": [0, 0, 10, 10],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
-        },
-        "properties": {"datetime": "2025-01-01T00:00:00Z"},
-        "assets": {
-            "B01": {
-                "href": "https://example.com/B01.tif",
-            }
-        },
-    }
+    item_without_metadata = Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "id": "test-item",
+            "bbox": [0, 0, 10, 10],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+            },
+            "properties": {"datetime": "2025-01-01T00:00:00Z"},
+            "assets": {
+                "B01": {
+                    "href": "https://example.com/B01.tif",
+                }
+            },
+        }
+    )
     with SimpleSTACReader(item_without_metadata) as src_dst:
         resolutions = _get_assets_resolutions(item_without_metadata, src_dst)
         assert "B01" not in resolutions
@@ -295,13 +304,12 @@ def test_multiple_items_resolution(complex_stac_items):
     )
 
     # Test combining bands from different UTM zones
-    item1 = complex_stac_items[0].copy()  # Sentinel in UTM 31N
-    item2 = complex_stac_items[0].copy()  # Create a copy
+    item1 = complex_stac_items[0].full_copy()  # Sentinel in UTM 31N
+    item2 = complex_stac_items[0].full_copy()  # Create a copy
     # Modify to UTM 32N
-    item2["id"] = "sentinel-item-32n"
-    item2["properties"]["proj:epsg"] = 32632
-    for asset in item2["assets"].values():
-        asset["proj:epsg"] = 32632
+    item2.extra_fields["proj:epsg"] = 32632
+    for asset in item2.assets.values():
+        asset.extra_fields["proj:epsg"] = 32632
 
     result = _estimate_output_dimensions(
         [item1, item2],
@@ -370,9 +378,8 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
 
     # Test output size limit with multiple items
     with pytest.raises(OutputLimitExceeded) as exc_info:
-        item2 = copy.deepcopy(sample_stac_item)
-        item2["id"] = "test-item-2"
-        item2["properties"]["datetime"] = "2025-01-02T00:00:00Z"
+        item2 = sample_stac_item.full_copy()  # Create a copy for testing
+        item2.datetime = datetime.datetime(2025, 1, 2)  # Different datetime
         _estimate_output_dimensions(
             [sample_stac_item, item2],
             full_extent,

@@ -63,7 +63,6 @@ class SimpleSTACReader(MultiBaseReader):
 
     """
 
-    input: Dict[str, Any] = attr.ib()
     item: pystac.Item = attr.ib(init=False)
 
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
@@ -80,8 +79,7 @@ class SimpleSTACReader(MultiBaseReader):
 
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
-        # Convert input to pystac.Item
-        self.item = pystac.Item.from_dict(self.input)
+        self.item = self.input
 
         # Get bounding box and default CRS
         self.bounds = self.item.bbox
@@ -118,7 +116,7 @@ class SimpleSTACReader(MultiBaseReader):
         self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
         self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
 
-        self.assets = list(self.input["assets"])
+        self.assets = self.item.get_assets().keys()
 
         if not self.assets:
             raise MissingAssets(
@@ -158,8 +156,7 @@ class SimpleSTACReader(MultiBaseReader):
             )
 
         # Convert to pystac Item and get asset information
-        stac_item = pystac.Item.from_dict(self.input)
-        pystac_asset = stac_item.assets[asset]
+        pystac_asset = self.item.assets[asset]
 
         info = AssetInfo(
             url=pystac_asset.href,
@@ -286,7 +283,7 @@ class SimpleSTACReader(MultiBaseReader):
 
 
 def _get_assets_resolutions(
-    item: Dict,
+    item: pystac.Item,
     src_dst: SimpleSTACReader,
     bands: Optional[list[str]] = None,
 ) -> Dict[str, tuple[float, float, rasterio.crs.CRS]]:
@@ -302,23 +299,20 @@ def _get_assets_resolutions(
     """
     band_resolutions = {}
 
-    # Convert item to pystac.Item to use projection extension
-    stac_item = pystac.Item.from_dict(item)
-
     # If bands specified, only process those bands
-    assets_to_process = set(bands) if bands else set(stac_item.get_assets().keys())
+    assets_to_process = set(bands) if bands else set(item.get_assets().keys())
 
     for band_name in assets_to_process:
-        if band_name not in item.get("assets", {}):
+        if band_name not in item.assets:
             continue
 
-        asset = stac_item.assets[band_name]
+        asset = item.assets[band_name]
         x_res = None
         y_res = None
         asset_crs = None
 
         # Get asset-level projection information
-        if ProjectionExtension.has_extension(stac_item):
+        if ProjectionExtension.has_extension(item):
             asset_proj_ext = ProjectionExtension.ext(asset)
 
             if asset_proj_ext:
@@ -327,6 +321,12 @@ def _get_assets_resolutions(
                     asset_crs = rasterio.crs.CRS.from_epsg(asset_proj_ext.epsg)
                 elif asset_proj_ext.wkt2:
                     asset_crs = rasterio.crs.CRS.from_wkt(asset_proj_ext.wkt2)
+                elif asset_proj_ext.crs_string:
+                    asset_crs = rasterio.crs.CRS.from_string(asset_proj_ext.crs_string)
+                elif asset.extra_fields.get("proj:code"):
+                    asset_crs = rasterio.crs.CRS.from_string(
+                        asset.extra_fields["proj:code"]
+                    )
 
                 # Try to get transform and shape for resolution
                 if asset_proj_ext.transform:
@@ -460,7 +460,7 @@ def _check_pixel_limit(
 
 
 def _get_target_crs_bbox(
-    items: List[Dict],
+    items: List[pystac.Item],
     spatial_extent: Optional[SpatialExtent],
 ) -> Tuple[rasterio.crs.CRS, List[float]]:
     """Get target CRS and bbox from items and spatial extent."""
@@ -559,7 +559,7 @@ def _get_cube_resolutions(
 
 
 def _estimate_output_dimensions(
-    items: List[Dict],
+    items: List[pystac.Item],
     spatial_extent: Optional[SpatialExtent],
     bands: Optional[list[str]],
     width: Optional[int] = None,
