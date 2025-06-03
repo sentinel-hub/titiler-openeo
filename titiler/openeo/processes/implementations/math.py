@@ -1,6 +1,7 @@
 """titiler.openeo processes Math."""
 
 import builtins
+
 import numpy
 
 __all__ = [
@@ -277,25 +278,22 @@ def max(data, ignore_nodata=True):
     # Handle RasterStack
     if isinstance(data, dict):
         # Return a single array with the maximum value for each array items in the stack
-        stacked_arrays = numpy.stack(
-            [v.array for v in data.values()], axis=0
-        )
+        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
         return _max(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
         return _max(data, ignore_nodata=ignore_nodata)
     elif isinstance(data, numpy.ma.MaskedArray):
         return _max(data, ignore_nodata=ignore_nodata)
     else:
-        raise TypeError("Unsupported data type for max function.")\
+        raise TypeError("Unsupported data type for max function.")
+
 
 def min(data, ignore_nodata=True):
     """Return the minimum value of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
         # Return a single array with the minimum value for each array items in the stack
-        stacked_arrays = numpy.stack(
-            [v.array for v in data.values()], axis=0
-        )
+        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
         return _min(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
         return _min(data, ignore_nodata=ignore_nodata)
