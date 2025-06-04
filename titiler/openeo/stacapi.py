@@ -8,7 +8,7 @@ from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
 from openeo_pg_parser_networkx.pg_schema import TemporalInterval
-from pystac import Collection
+from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
@@ -195,7 +195,7 @@ class stacApiBackend:
         limit: Optional[int] = None,
         max_items: Optional[int] = None,
         **kwargs,
-    ) -> List[Dict]:
+    ) -> List[Item]:
         """Return List of STAC Items."""
         limit = limit or 100
         max_items = max_items or 100
@@ -214,7 +214,7 @@ class stacApiBackend:
             limit=limit,
             max_items=max_items,
         )
-        return list(items.items_as_dicts())
+        return list(items.items())
 
 
 @define
@@ -230,8 +230,17 @@ class LoadCollection:
         temporal_extent: Optional[TemporalInterval] = None,
         properties: Optional[dict] = None,
         fields: Optional[List[str]] = None,
-    ) -> List[Dict]:
-        fields = fields or ["assets", "id", "bbox", "collection", "properties"]
+    ) -> List[Item]:
+        fields = fields or [
+            "assets",
+            "id",
+            "bbox",
+            "collection",
+            "properties",
+            "type",
+            "stac_version",
+            "stac_extensions",
+        ]
 
         query_params: Dict[str, Any] = {
             "collections": [id],
@@ -521,10 +530,8 @@ class LoadCollection:
                 )
 
         # If bands parameter is missing, use the first asset from the first item
-        if bands is None and items and "assets" in items[0]:
-            bands = list(items[0]["assets"].keys())[
-                :1
-            ]  # Take the first asset as default
+        if bands is None and items and items[0].assets:
+            bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
@@ -540,7 +547,7 @@ class LoadCollection:
         # Group items by date
         items_by_date: dict[str, list[dict]] = {}
         for item in items:
-            date = _props_to_datename(item["properties"])
+            date = item.datetime.isoformat()
             if date not in items_by_date:
                 items_by_date[date] = []
             items_by_date[date].append(item)
@@ -606,10 +613,8 @@ class LoadCollection:
                 )
 
         # If bands parameter is missing, use the first asset from the first item
-        if bands is None and items and "assets" in items[0]:
-            bands = list(items[0]["assets"].keys())[
-                :1
-            ]  # Take the first asset as default
+        if bands is None and items and items[0].assets:
+            bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
@@ -639,8 +644,8 @@ class LoadCollection:
         key = "reduced"
         if temporal_extent and temporal_extent[0]:
             key = str(temporal_extent[0].to_numpy())
-        elif items and "properties" in items[0]:
-            key = _props_to_datename(items[0]["properties"])
+        elif items:
+            key = items[0].datetime.isoformat()
 
         return {key: img}
 
