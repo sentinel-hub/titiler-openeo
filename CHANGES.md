@@ -1,4 +1,29 @@
-# Changes
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.3.0] (2025-06-04)
+
+### Added
+
+* Added force-release functionality for tile assignment and update documentation [#96](https://github.com/sentinel-hub/titiler-openeo/pull/96)
+* Added tile update functionality [#97](https://github.com/sentinel-hub/titiler-openeo/pull/97)
+* Add width and height parameters to load_collection and load_collection_and_reduce processes [#99](https://github.com/sentinel-hub/titiler-openeo/pull/99)
+* Add tiles_summary process and implement get_all_tiles method in TileAssignmentStore [#101](https://github.com/sentinel-hub/titiler-openeo/pull/101)
+* Add max and min functions with no-data handling [#102](https://github.com/sentinel-hub/titiler-openeo/pull/102)
+
+### Fixed
+
+* Enhances pixel limit check to avoid double counting mosaic items by grouping them by datetime. [#98](https://github.com/sentinel-hub/titiler-openeo/pull/98)
+
+### Changed
+
+* Refactor tile assignment and add spatial extent handling [#100](https://github.com/sentinel-hub/titiler-openeo/pull/100)
+* Refactor STAC reader and enhance output dimension handling [#103](https://github.com/sentinel-hub/titiler-openeo/pull/103)
+* Refactor STAC item handling and enhance metadata retrieval [#104](https://github.com/sentinel-hub/titiler-openeo/pull/104)
 
 ## [0.2.1] (2025-05-21)
 
