@@ -7,7 +7,7 @@ import rasterio
 from pystac import Item
 
 from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models import SpatialExtent
+from titiler.openeo.models.openapi import SpatialExtent
 from titiler.openeo.reader import (
     SimpleSTACReader,
     _calculate_dimensions,

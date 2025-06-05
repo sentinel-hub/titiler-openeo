@@ -17,9 +17,9 @@ from typing_extensions import Annotated
 
 from titiler.core.factory import BaseFactory
 from titiler.openeo import __version__ as titiler_version
-from titiler.openeo import models
+from titiler.openeo.models import openapi
 from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
-from titiler.openeo.models import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
+from titiler.openeo.models.openapi import OPENEO_VERSION, ServiceInput, ServiceUpdateInput
 from titiler.openeo.services import ServicesStore, TileAssignmentStore
 from titiler.openeo.stacapi import stacApiBackend
 
@@ -49,7 +49,7 @@ class EndpointsFactory(BaseFactory):
             "/",
             response_class=JSONResponse,
             summary="Information about the back-end",
-            response_model=models.Capabilities,
+            response_model=openapi.Capabilities,
             response_model_exclude_none=True,
             operation_id="capabilities",
             responses={
@@ -105,7 +105,7 @@ class EndpointsFactory(BaseFactory):
             "/file_formats",
             response_class=JSONResponse,
             summary="Supported file formats",
-            response_model=models.FileFormats,
+            response_model=openapi.FileFormats,
             response_model_exclude_none=True,
             operation_id="list-file-types",
             responses={
@@ -181,7 +181,7 @@ class EndpointsFactory(BaseFactory):
                 "/credentials/oidc",
                 response_class=JSONResponse,
                 summary="OpenID Connect authentication",
-                response_model=models.OIDCProviders,
+                response_model=openapi.OIDCProviders,
                 response_model_exclude_none=True,
                 operation_id="authenticate-oidc",
                 responses={
@@ -202,9 +202,9 @@ class EndpointsFactory(BaseFactory):
                         detail="OpenID Connect authentication not supported",
                     )
 
-                return models.OIDCProviders(
+                return openapi.OIDCProviders(
                     providers=[
-                        models.OIDCProvider(
+                        openapi.OIDCProvider(
                             id="oidc",
                             issuer=self.auth.config["issuer"],
                             title=self.auth.settings.oidc.title or "OpenID Connect",
@@ -212,7 +212,7 @@ class EndpointsFactory(BaseFactory):
                             description=self.auth.settings.oidc.description
                             or "OpenID Connect Provider",
                             default_clients=[
-                                models.OIDCDefaultClient(
+                                openapi.OIDCDefaultClient(
                                     id=self.auth.settings.oidc.client_id,
                                     grant_types=[
                                         "authorization_code+pkce",
@@ -283,7 +283,7 @@ class EndpointsFactory(BaseFactory):
             "/.well-known/openeo",
             response_class=JSONResponse,
             summary="Supported openEO versions",
-            response_model=models.openEOVersions,
+            response_model=openapi.openEOVersions,
             response_model_exclude_none=True,
             operation_id="connect",
             responses={
@@ -312,7 +312,7 @@ class EndpointsFactory(BaseFactory):
             "/processes",
             response_class=JSONResponse,
             summary="Supported predefined processes",
-            response_model=models.Processes,
+            response_model=openapi.Processes,
             response_model_exclude_none=True,
             operation_id="list-processes",
             responses={
@@ -337,7 +337,7 @@ class EndpointsFactory(BaseFactory):
             "/collections",
             response_class=JSONResponse,
             summary="Basic metadata for all datasets",
-            response_model=models.Collections,
+            response_model=openapi.Collections,
             response_model_exclude_none=True,
             operation_id="list-collections",
             responses={
@@ -367,7 +367,7 @@ class EndpointsFactory(BaseFactory):
             r"/collections/{collection_id}",
             response_class=JSONResponse,
             summary="Full metadata for a specific dataset",
-            response_model=models.Collection,
+            response_model=openapi.Collection,
             response_model_exclude_none=True,
             operation_id="describe-collection",
             responses={
@@ -401,7 +401,7 @@ class EndpointsFactory(BaseFactory):
             "/conformance",
             response_class=JSONResponse,
             summary="Conformance classes this API implements",
-            response_model=models.Conformance,
+            response_model=openapi.Conformance,
             response_model_exclude_none=True,
             operation_id="conformance",
             responses={
@@ -425,7 +425,7 @@ class EndpointsFactory(BaseFactory):
             "/services",
             response_class=JSONResponse,
             summary="List all web services",
-            response_model=models.Services,
+            response_model=openapi.Services,
             response_model_exclude_none=True,
             operation_id="list-services",
             responses={
@@ -463,7 +463,7 @@ class EndpointsFactory(BaseFactory):
                                 ]  # Remove the id as it will be generated
 
                             # Create the service
-                            body = models.ServiceInput(**service_config)
+                            body = openapi.ServiceInput(**service_config)
                             self.services_store.add_service(
                                 user.user_id, body.model_dump()
                             )
@@ -506,7 +506,7 @@ class EndpointsFactory(BaseFactory):
             "/services/{service_id}",
             response_class=JSONResponse,
             summary="Full metadata for a service",
-            response_model=models.Service,
+            response_model=openapi.Service,
             response_model_exclude_none=True,
             operation_id="describe-service",
             responses={
@@ -546,7 +546,7 @@ class EndpointsFactory(BaseFactory):
             "/services",
             response_class=Response,
             summary="Publish a new service",
-            response_model=models.Service,
+            response_model=openapi.Service,
             response_model_exclude_none=True,
             operation_id="create-service",
             responses={
@@ -727,7 +727,7 @@ class EndpointsFactory(BaseFactory):
             "/service_types",
             response_class=JSONResponse,
             summary="Supported secondary web service protocols",
-            response_model=models.ServiceTypes,
+            response_model=openapi.ServiceTypes,
             response_model_exclude_none=True,
             operation_id="list-service-types",
             responses={
@@ -854,7 +854,7 @@ class EndpointsFactory(BaseFactory):
             "/result",
             response_class=Response,
             summary="Process and download data synchronously",
-            response_model=models.Service,
+            response_model=openapi.Service,
             response_model_exclude_none=True,
             operation_id="compute-result",
             responses={
@@ -871,7 +871,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_result(
             request: Request,
-            body: models.ResultRequest,
+            body: openapi.ResultRequest,
             user=Depends(self.auth.validate),
         ):
             """Executes a user-defined process directly (synchronously) and the result will be

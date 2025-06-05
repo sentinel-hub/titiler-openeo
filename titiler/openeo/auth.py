@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
+from .models.auth import User, BasicAuthUser
+from .services.base import ServicesStore
+
 from .settings import AuthSettings, OIDCConfig
 
 
@@ -31,25 +34,12 @@ class AuthMethod(Enum):
     oidc = "oidc"
 
 
-class User(BaseModel, extra="allow"):
-    """User Model."""
-
-    user_id: str
-    email: Optional[str] = None
-    name: Optional[str] = None
-
-
-class BasicAuthUser(User):
-    """Basic Auth User Model."""
-
-    password: str
-
-
 @define(kw_only=True)
 class Auth(metaclass=abc.ABCMeta):
     """Auth BaseClass."""
 
     method: AuthMethod = field(init=False)
+    store: ServicesStore = field()
 
     @abc.abstractmethod
     def login(self, authorization: str = Header()) -> Any:
@@ -70,14 +60,14 @@ class Auth(metaclass=abc.ABCMeta):
         return self.validate(authorization)
 
 
-def get_auth(settings: AuthSettings) -> "Auth":
+def get_auth(settings: AuthSettings, store: ServicesStore) -> "Auth":
     """Get Auth instance."""
     if settings.method == AuthMethod.basic.value:
-        return BasicAuth(settings=settings)
+        return BasicAuth(settings=settings, store=store)
     elif settings.method == AuthMethod.oidc.value:
         if not settings.oidc:
             raise ValueError("OIDC configuration required")
-        return OIDCAuth(settings=settings)
+        return OIDCAuth(settings=settings, store=store)
     else:
         raise NotImplementedError(f"Auth method {settings.method} not implemented")
 
@@ -235,11 +225,16 @@ class OIDCAuth(Auth):
             if self.settings.oidc and self.settings.oidc.name_claim:
                 name_claim = payload.get(self.settings.oidc.name_claim)
 
-            return User(
+            user = User(
                 user_id=payload["sub"],
                 email=payload.get("email"),
                 name=name_claim,
             )
+
+            # Track user login
+            self.store.track_user_login(user=user, provider="oidc")
+
+            return user
 
         except Exception as err:
             raise HTTPException(
@@ -353,5 +348,10 @@ class BasicAuth(Auth):
                 detail="Invalid authentication credentials",
             )
 
-        user = self._get_user_from_base64(parsed_token.token)
-        return User(user_id=user.user_id)
+        base_user = self._get_user_from_base64(parsed_token.token)
+        user = User(user_id=base_user.user_id)
+        
+        # Track user login
+        self.store.track_user_login(user=user, provider="basic")
+        
+        return user

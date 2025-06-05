@@ -1,13 +1,14 @@
 """``pytest`` configuration."""
 
 from pathlib import Path
-from typing import Any, Literal, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import pytest
 from fastapi import Header
 from starlette.testclient import TestClient
 
 from titiler.openeo.auth import Auth, User
+from titiler.openeo.services.base import ServicesStore
 
 StoreType = Literal["local", "duckdb", "sqlalchemy"]
 
@@ -40,11 +41,15 @@ def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
     monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
 
     from titiler.openeo.main import create_app
+    from titiler.openeo.services import get_store
 
     app = create_app()
 
-    # Override the auth dependency with the mock auth
-    mock_auth = MockAuth()
+    # Get the store from the path and type
+    store = get_store(f"{store_path}")
+
+    # Override the auth dependency with the mock auth using the store
+    mock_auth = MockAuth(store=store)
     app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
 
     return TestClient(app)
@@ -60,10 +65,12 @@ def app_no_auth(monkeypatch, store_path, store_type) -> TestClient:
     from titiler.openeo.main import create_app
 
     return TestClient(create_app())
-
-
 class MockAuth(Auth):
     """Mock authentication class for testing."""
+
+    def __init__(self, store: ServicesStore):
+        """Initialize auth with store."""
+        self.store = store
 
     def login(self, authorization: str = Header(default=None)) -> Any:
         """Mock login method."""
