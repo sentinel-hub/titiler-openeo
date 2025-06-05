@@ -5,7 +5,7 @@ from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models import SpatialExtent
+from titiler.openeo.models.openapi import SpatialExtent
 from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend

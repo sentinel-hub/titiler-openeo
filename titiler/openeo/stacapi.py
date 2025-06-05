@@ -21,7 +21,7 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
-from titiler.openeo.models import SpatialExtent
+from titiler.openeo.models.openapi import SpatialExtent
 
 from .errors import (
     ItemsLimitExceeded,

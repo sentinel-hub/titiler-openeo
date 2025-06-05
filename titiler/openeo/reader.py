@@ -31,7 +31,7 @@ from shapely.geometry import box
 from typing_extensions import TypedDict
 
 from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models import SpatialExtent
+from titiler.openeo.models.openapi import SpatialExtent
 
 
 class Dims(TypedDict):

@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, Optional
 
 import morecantile
 
-from titiler.openeo.models import SpatialExtent
+from titiler.openeo.models.openapi import SpatialExtent
 
 from .data_model import ImageData, RasterStack
 
