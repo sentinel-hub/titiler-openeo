@@ -21,9 +21,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
-from .models.auth import User, BasicAuthUser
+from .models.auth import BasicAuthUser, User
 from .services.base import ServicesStore
-
 from .settings import AuthSettings, OIDCConfig
 
 
@@ -350,8 +349,8 @@ class BasicAuth(Auth):
 
         base_user = self._get_user_from_base64(parsed_token.token)
         user = User(user_id=base_user.user_id)
-        
+
         # Track user login
         self.store.track_user_login(user=user, provider="basic")
-        
+
         return user

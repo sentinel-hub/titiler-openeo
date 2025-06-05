@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from attrs import define, field
 
 from titiler.openeo.auth import User
+
 from .base import ServicesStore
 
 

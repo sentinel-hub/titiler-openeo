@@ -238,9 +238,7 @@ class ServicesStore(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def track_user_login(
-        self, user: User, provider: str
-    ) -> None:
+    def track_user_login(self, user: User, provider: str) -> None:
         """Track user login activity.
 
         Args:
@@ -248,7 +246,7 @@ class ServicesStore(metaclass=abc.ABCMeta):
             provider: The authentication provider (e.g. 'basic', 'oidc')
         """
         ...
-    
+
     @abc.abstractmethod
     def get_user_tracking(
         self, user_id: str, provider: str

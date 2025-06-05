@@ -5,7 +5,17 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from attrs import define, field
-from sqlalchemy import JSON, Column, DateTime, Integer, StaticPool, String, UniqueConstraint, create_engine, select
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Integer,
+    StaticPool,
+    String,
+    UniqueConstraint,
+    create_engine,
+    select,
+)
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from titiler.openeo.auth import User
@@ -43,7 +53,7 @@ class UserTracking(Base):
     name = Column(String, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint('user_id', 'provider', name='uix_user_provider'),
+        UniqueConstraint("user_id", "provider", name="uix_user_provider"),
     )
 
 
@@ -60,9 +70,12 @@ class SQLAlchemyStore(ServicesStore):
         # Check if the store is a sqlite in memory database
         kwargs = {}
         if self.store == "sqlite:///:memory:":
-            # the same connection object must be shared among threads, 
+            # the same connection object must be shared among threads,
             # since the database exists only within the scope of that connection.
-            kwargs = {"connect_args": {"check_same_thread": False}, "poolclass": StaticPool}
+            kwargs = {
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            }
         self._engine = create_engine(self.store, **kwargs)
         self._session_factory = sessionmaker(bind=self._engine)
 
@@ -169,12 +182,12 @@ class SQLAlchemyStore(ServicesStore):
     def track_user_login(self, user: User, provider: str) -> None:
         """Track user login activity."""
         now = datetime.utcnow()
-        
+
         with Session(self._engine) as session:
             tracking = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user.user_id,
-                    UserTracking.provider == provider
+                    UserTracking.provider == provider,
                 )
             ).scalar_one_or_none()
 
@@ -193,19 +206,20 @@ class SQLAlchemyStore(ServicesStore):
                     last_login=now,
                     login_count=1,
                     email=user.email,
-                    name=user.name
+                    name=user.name,
                 )
                 session.add(tracking)
 
             session.commit()
 
-    def get_user_tracking(self, user_id: str, provider: str) -> Optional[Dict[str, Any]]:
+    def get_user_tracking(
+        self, user_id: str, provider: str
+    ) -> Optional[Dict[str, Any]]:
         """Get user tracking information."""
         with Session(self._engine) as session:
             tracking = session.execute(
                 select(UserTracking).where(
-                    UserTracking.user_id == user_id,
-                    UserTracking.provider == provider
+                    UserTracking.user_id == user_id, UserTracking.provider == provider
                 )
             ).scalar_one_or_none()
 
@@ -219,5 +233,5 @@ class SQLAlchemyStore(ServicesStore):
                 "last_login": tracking.last_login,
                 "login_count": tracking.login_count,
                 "email": tracking.email,
-                "name": tracking.name
+                "name": tracking.name,
             }

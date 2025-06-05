@@ -1,7 +1,7 @@
 """``pytest`` configuration."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 import pytest
 from fastapi import Header
@@ -65,6 +65,8 @@ def app_no_auth(monkeypatch, store_path, store_type) -> TestClient:
     from titiler.openeo.main import create_app
 
     return TestClient(create_app())
+
+
 class MockAuth(Auth):
     """Mock authentication class for testing."""
 

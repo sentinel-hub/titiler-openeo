@@ -1,10 +1,7 @@
 """Test user tracking functionality."""
 
-from datetime import datetime
-
-import pytest
-
 from titiler.openeo.auth import User
+
 
 def test_user_tracking_first_login(store_path):
     """Test first-time user login tracking."""
@@ -12,7 +9,7 @@ def test_user_tracking_first_login(store_path):
 
     store = get_store(f"{store_path}")
     user = User(user_id="test_user", email="test@example.com", name="Test User")
-    
+
     # Track first login
     store.track_user_login(user=user, provider="basic")
 
@@ -26,13 +23,14 @@ def test_user_tracking_first_login(store_path):
     assert tracking["login_count"] == 1
     assert tracking["first_login"] == tracking["last_login"]
 
+
 def test_user_tracking_multiple_logins(store_path):
     """Test tracking multiple logins for the same user."""
     from titiler.openeo.services import get_store
 
     store = get_store(f"{store_path}")
     user = User(user_id="test_user", email="test@example.com", name="Test User")
-    
+
     # First login
     store.track_user_login(user=user, provider="basic")
     first_tracking = store.get_user_tracking(user_id="test_user", provider="basic")
@@ -42,7 +40,7 @@ def test_user_tracking_multiple_logins(store_path):
 
     # Second login
     store.track_user_login(user=user, provider="basic")
-    
+
     # Check updated tracking info
     second_tracking = store.get_user_tracking(user_id="test_user", provider="basic")
     assert second_tracking is not None
@@ -50,13 +48,14 @@ def test_user_tracking_multiple_logins(store_path):
     assert second_tracking["first_login"] == first_login
     assert second_tracking["last_login"] > last_login
 
+
 def test_user_tracking_multiple_providers(store_path):
     """Test tracking user logins with different providers."""
     from titiler.openeo.services import get_store
 
     store = get_store(f"{store_path}")
     user = User(user_id="test_user", email="test@example.com", name="Test User")
-    
+
     # Track logins with different providers
     store.track_user_login(user=user, provider="basic")
     store.track_user_login(user=user, provider="oidc")
@@ -71,16 +70,17 @@ def test_user_tracking_multiple_providers(store_path):
     assert oidc_tracking is not None
     assert oidc_tracking["login_count"] == 1
 
+
 def test_user_tracking_update_info(store_path):
     """Test updating user info on subsequent logins."""
     from titiler.openeo.services import get_store
 
     store = get_store(f"{store_path}")
-    
+
     # First login with initial info
     user1 = User(user_id="test_user", email="old@example.com", name="Old Name")
     store.track_user_login(user=user1, provider="basic")
-    
+
     # Second login with updated info
     user2 = User(user_id="test_user", email="new@example.com", name="New Name")
     store.track_user_login(user=user2, provider="basic")
@@ -91,6 +91,7 @@ def test_user_tracking_update_info(store_path):
     assert tracking["email"] == "new@example.com"
     assert tracking["name"] == "New Name"
     assert tracking["login_count"] == 2
+
 
 def test_get_user_tracking_nonexistent(store_path):
     """Test getting tracking info for nonexistent user."""
