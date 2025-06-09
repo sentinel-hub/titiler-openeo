@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
+from titiler.openeo.auth import User
+
 from .base import ServicesStore
 
 
@@ -17,6 +19,7 @@ class LocalStore(ServicesStore):
     """Local Service STORE, for testing purposes."""
 
     store: Dict = field()
+    tracking_store: Dict = field(factory=dict)
 
     def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
@@ -78,3 +81,32 @@ class LocalStore(ServicesStore):
 
         self.store[item_id]["service"].update(val)
         return item_id
+
+    def track_user_login(self, user: User, provider: str) -> None:
+        """Track user login activity."""
+        from datetime import datetime
+
+        now = datetime.utcnow()
+        key = (user.user_id, provider)
+
+        if key in self.tracking_store:
+            self.tracking_store[key]["last_login"] = now
+            self.tracking_store[key]["login_count"] += 1
+            self.tracking_store[key]["email"] = user.email
+            self.tracking_store[key]["name"] = user.name
+        else:
+            self.tracking_store[key] = {
+                "user_id": user.user_id,
+                "provider": provider,
+                "first_login": now,
+                "last_login": now,
+                "login_count": 1,
+                "email": user.email,
+                "name": user.name,
+            }
+
+    def get_user_tracking(
+        self, user_id: str, provider: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get user tracking information."""
+        return self.tracking_store.get((user_id, provider))

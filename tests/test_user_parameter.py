@@ -5,7 +5,7 @@ from typing import Any, Dict
 from fastapi import HTTPException
 from openeo_pg_parser_networkx.process_registry import Process
 
-from titiler.openeo.models import ResultRequest
+from titiler.openeo.models.openapi import ResultRequest
 from titiler.openeo.processes.implementations.core import process
 from titiler.openeo.processes.implementations.io import SaveResultData
 

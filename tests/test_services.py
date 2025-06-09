@@ -5,6 +5,7 @@ from typing import Any, Union
 from fastapi import Header
 
 from titiler.openeo.auth import Auth, User
+from titiler.openeo.services import get_store
 
 
 def test_add_service(app_with_auth):
@@ -276,7 +277,7 @@ def test_delete_service(app_with_auth):
 #     assert response.status_code == 422
 
 
-def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
+def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
     """Test XYZ service access based on different scopes (private, restricted, public)."""
     # Base service template
     base_service = {
@@ -358,7 +359,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth):
         def login(self, authorization: str = Header()) -> Any:
             return {"access_token": "mock_token"}
 
-    test_auth = TestScopesAuth()
+    test_auth = TestScopesAuth(store=get_store(f"{store_path}"))
 
     # Test each scope
     for scope_name, config in scope_configs.items():

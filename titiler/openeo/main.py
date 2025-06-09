@@ -39,7 +39,7 @@ tile_store = (
     if backend_settings.tile_store_url
     else None
 )
-auth = get_auth(auth_settings)
+auth = get_auth(auth_settings, store=service_store)
 
 ###############################################################################
 

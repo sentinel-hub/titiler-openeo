@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from attrs import define, field
 from starlette import status
 
+from titiler.openeo.auth import User
 from titiler.openeo.errors import OpenEOException
 
 
@@ -234,4 +235,38 @@ class ServicesStore(metaclass=abc.ABCMeta):
         self, user_id: str, item_id: str, val: Dict[str, Any], **kwargs
     ) -> str:
         """Update Service."""
+        ...
+
+    @abc.abstractmethod
+    def track_user_login(self, user: User, provider: str) -> None:
+        """Track user login activity.
+
+        Args:
+            user: The user that authenticated
+            provider: The authentication provider (e.g. 'basic', 'oidc')
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_user_tracking(
+        self, user_id: str, provider: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get user tracking information.
+
+        Args:
+            user_id: The user identifier
+            provider: The authentication provider
+
+        Returns:
+            Dictionary containing tracking information or None if not found
+            {
+                "user_id": str,
+                "provider": str,
+                "first_login": datetime,
+                "last_login": datetime,
+                "login_count": int,
+                "email": Optional[str],
+                "name": Optional[str]
+            }
+        """
         ...
