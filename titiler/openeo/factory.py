@@ -990,6 +990,9 @@ class EndpointsFactory(BaseFactory):
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                "tile_x": x,
+                "tile_y": y,
+                "tile_z": z,
             }
 
             if service_extent := configuration.get("extent"):

@@ -94,7 +94,9 @@ def download_tile(
 
     print(f"Downloading tile: {x}, {y}")
     # tile_url = f"https://openeo.ds.io/services/xyz/5fe543d9-50e0-4851-a3f7-0a9d6a8bd756/tiles/{zoom}/{x}/{y}" # LEGO mosaic
-    tile_url = f"https://openeo.ds.io/services/xyz/b7c52ea4-9120-4300-bb86-84ebe6d2201f/tiles/{zoom}/{x}/{y}"  # RGB mosaic
+    # tile_url = f"https://openeo.ds.io/services/xyz/b7c52ea4-9120-4300-bb86-84ebe6d2201f/tiles/{zoom}/{x}/{y}"  # RGB mosaic
+    tile_url = f"https://openeo.ds.io/services/xyz/943856b7-eda9-447b-bbeb-f5e0f1c554ed/tiles/{zoom}/{x}/{y}" # instructions
+
 
     try:
         response = requests.get(tile_url)
