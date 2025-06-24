@@ -2,17 +2,14 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import Dict, Optional, Tuple
-from textwrap import wrap
 
 import numpy as np
 import requests
 from PIL import Image
-from markdown_it import MarkdownIt
-from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.utils import ImageReader
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.colors import black, grey
+from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
 DEFAULT_COVER = """
@@ -52,42 +49,51 @@ def create_cover_page(
         "CustomBody", parent=styles["Normal"], fontSize=12, spaceAfter=12
     )
     list_style = ParagraphStyle(
-        "CustomList", parent=styles["Normal"], fontSize=12, spaceAfter=12,
-        leftIndent=20, bulletIndent=10
+        "CustomList",
+        parent=styles["Normal"],
+        fontSize=12,
+        spaceAfter=12,
+        leftIndent=20,
+        bulletIndent=10,
     )
 
     # Start at top of page
     y = page_height - 100
 
     # Split content into lines and process each
-    lines = markdown_content.strip().split('\n')
+    lines = markdown_content.strip().split("\n")
     current_style = body_style
 
     for line in lines:
         if not line.strip():
             continue
 
-        if line.startswith('# '):
+        if line.startswith("# "):
             text = line[2:]
             style = title_style
-        elif line.startswith('## '):
+        elif line.startswith("## "):
             text = line[3:]
             style = h2_style
-        elif line.startswith('- '):
+        elif line.startswith("- "):
             # Handle bold text in list items properly
             content = line[2:]
-            text = '•  ' + content.replace('**', '<b>', 1).replace('**', '</b>', 1)
+            text = "•  " + content.replace("**", "<b>", 1).replace("**", "</b>", 1)
             style = list_style
-        elif line.startswith('*') and line.endswith('*'):
-            text = '<i>' + line[1:-1] + '</i>'
+        elif line.startswith("*") and line.endswith("*"):
+            text = "<i>" + line[1:-1] + "</i>"
             style = body_style
-        elif line.startswith('1. ') or line.startswith('2. ') or line.startswith('3. ') or line.startswith('4. '):
+        elif (
+            line.startswith("1. ")
+            or line.startswith("2. ")
+            or line.startswith("3. ")
+            or line.startswith("4. ")
+        ):
             # Handle numbered lists
             text = line
             style = list_style
         else:
             # Handle bold text in regular paragraphs
-            text = line.replace('**', '<b>', 1).replace('**', '</b>', 1)
+            text = line.replace("**", "<b>", 1).replace("**", "</b>", 1)
             style = body_style
 
         p = Paragraph(text, style)
