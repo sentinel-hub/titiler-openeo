@@ -236,6 +236,31 @@ def test_create_data_cube():
     assert len(result) == 0
 
 
+def test_filter_bands(sample_raster_stack):
+    """Test the filter_bands function."""
+    from titiler.openeo.processes.implementations.filter_bands import filter_bands
+
+    # Test filtering by band names
+    result = filter_bands(sample_raster_stack, bands=["red", "blue"])
+
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+
+    # Each result should be an ImageData with 2 bands in specified order
+    for _key, img_data in result.items():
+        assert isinstance(img_data, ImageData)
+        assert img_data.count == 2
+        assert img_data.band_names == ["red", "blue"]
+
+    # Test error when no bands match
+    with pytest.raises(ValueError, match="No bands match the filter criteria"):
+        filter_bands(sample_raster_stack, bands=["nonexistent"])
+
+    # Test error when no filter parameters provided
+    with pytest.raises(ValueError, match="BandFilterParameterMissing"):
+        filter_bands(sample_raster_stack)
+
+
 def test_add_dimension():
     """Test add_dimension function."""
     # Test with empty data cube
