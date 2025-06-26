@@ -64,7 +64,7 @@
                             "data": {
                                 "from_node": "3"
                             },
-                            "formula": "Gamma RGB 1.5 Sigmoidal RGB 10 0.3 Saturation 1"
+                            "formula": "Gamma R 2 Gamma G 2.1 Gamma B 2.1 Sigmoidal RGB 10 0.2 Saturation 1"
                         },
                         "process_id": "color_formula"
                     },

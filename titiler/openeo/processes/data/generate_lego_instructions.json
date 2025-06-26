@@ -1,0 +1,56 @@
+{
+    "id": "generate_lego_instructions",
+    "summary": "Generate building instructions image for LEGO mosaic.",
+    "description": "Creates an instruction image from a legofied image using the stored brick information.",
+    "categories": [
+        "images",
+        "visualization",
+        "lego"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "A legofied image with brick information in metadata.",
+            "schema": {
+                "type": "object",
+                "subtype": "imagedata"
+            }
+        },
+        {
+            "name": "grid_size",
+            "description": "Size of each grid cell in pixels for the instruction image.",
+            "schema": {
+                "type": "integer",
+                "minimum": 30,
+                "default": 50
+            }
+        },
+        {
+            "name": "tile_info",
+            "description": "object containing tile information for the instruction image.",
+            "schema": {
+                "type": "object"
+            }
+        },
+        {
+            "name": "include_legend",
+            "description": "Whether to include a color legend with brick counts.",
+            "schema": {
+                "type": "boolean",
+                "default": true
+            }
+        }
+    ],
+    "returns": {
+        "description": "An image containing the building instructions.",
+        "schema": {
+            "type": "object",
+            "subtype": "imagedata"
+        }
+    },
+    "exceptions": {
+        "InvalidInput": {
+            "message": "The input image must be legofied with brick information in metadata."
+        }
+    }
+}

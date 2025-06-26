@@ -1,0 +1,66 @@
+{
+  "id": "lego-base-service",
+  "type": "XYZ",
+  "configuration": {
+    "scope": "public",
+    "tile_size": 256,
+    "minzoom": 7,
+    "maxzoom": 7
+  },
+  "title": "Lego Brick Sentinel-2 Global Mosaic",
+  "description": "Public base service for viewing the Lego brick mosaic",
+  "enabled": true,
+  "process": {
+    "parameters": [],
+    "process_graph": {
+      "load": {
+        "process_id": "load_collection_and_reduce",
+        "arguments": {
+          "bands": ["B04", "B03", "B02"],
+          "id": "sentinel-2-global-mosaics",
+          "spatial_extent": {
+            "east": { "from_parameter": "spatial_extent_east" },
+            "north": { "from_parameter": "spatial_extent_north" },
+            "south": { "from_parameter": "spatial_extent_south" },
+            "west": { "from_parameter": "spatial_extent_west" },
+            "crs": { "from_parameter": "spatial_extent_crs" }
+          },
+          "temporal_extent": ["2024-04-01T00:00:00Z", "2024-04-30T23:59:59Z"]
+        }
+      },
+      "scale": {
+        "process_id": "linear_scale_range",
+        "arguments": {
+          "x": { "from_node": "load" },
+          "inputMin": 0,
+          "inputMax": 10000,
+          "outputMax": 255
+        }
+      },
+      "color": {
+        "process_id": "color_formula",
+        "arguments": {
+          "data": { "from_node": "scale" },
+          "formula": "Gamma R 2 Gamma G 2.32 Gamma B 2.2 Sigmoidal RGB 10 0.237 Saturation 1.15"
+        }
+      },
+      "lego": {
+        "process_id": "legofication",
+        "arguments": {
+          "data": { "from_node": "color" },
+          "nbbricks": 4,
+          "bricksize": 64,
+          "water_threshold": 0.1
+        }
+      },
+      "save": {
+        "process_id": "save_result",
+        "arguments": {
+          "data": { "from_node": "lego" },
+          "format": "PNG"
+        },
+        "result": true
+      }
+    }
+  }
+}

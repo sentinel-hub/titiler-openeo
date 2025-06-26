@@ -16,6 +16,10 @@ data:
   default_services.json: |-
     {{ .Files.Get .Values.database.defaultServices | nindent 4 }}
   {{- end }}
+  {{- if .Values.lego.colors.configFile }}
+  lego_colors.json: |-
+    {{ .Files.Get .Values.lego.colors.configFile | nindent 4 }}
+  {{- end }}
   {{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled }}
   basic-auth-users: {{ toJson .Values.auth.basic.users | quote }}
   {{- end }}

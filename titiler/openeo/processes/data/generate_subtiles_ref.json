@@ -1,0 +1,56 @@
+{
+    "id": "generate_subtiles_ref",
+    "summary": "Select indexes from a datacube.",
+    "description": "Generate subtiles reference for a given tile (XYZ) necessary to make a mosaic and form the complete tile",
+    "categories": [
+        "images",
+        "tiles"
+    ],
+    "parameters": [
+        {
+            "name": "x",
+            "description": "The x coordinate of the tile.",
+            "schema": {
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        {
+            "name": "y",
+            "description": "The y coordinate of the tile.",
+            "schema": {
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        {
+            "name": "z",
+            "description": "The zoom level of the tile.",
+            "schema": {
+                "type": "integer",
+                "minimum": 0
+            }
+        },
+        {
+            "name": "zoom",
+            "description": "The zoom of the subtiles.",
+            "schema": {
+                "type": "integer",
+                "minimum": 1
+            }
+        }
+    ],
+    "returns": {
+        "description": "An array of subtiles references.",
+        "schema": {
+            "type": "object",
+            "subtype": "array"
+        }
+    },
+    "exceptions": {
+        "IndexError": {
+            "message": "The x,y,z values are invalid and must be >= 1."
+        }
+    },
+    "examples": []
+}
