@@ -303,6 +303,11 @@ def save_result(
             return _save_single_result(data, format, options)
         return _handle_json_format(data, format)
 
+    # Handle json for dictionaries structure
+    if format.lower() in ["json", "geojson"] and isinstance(data, dict):
+        data = json.dumps(data).encode("utf-8")
+        return SaveResultData(data=data, media_type="application/json")
+
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
         # Create a RasterStack with a single ImageData

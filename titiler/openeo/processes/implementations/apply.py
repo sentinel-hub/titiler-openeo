@@ -8,7 +8,7 @@ from titiler.openeo.models.openapi import SpatialExtent
 
 from .data_model import ImageData, RasterStack
 
-__all__ = ["apply", "xyz_to_bbox"]
+__all__ = ["apply", "xyz_to_bbox", "xyz_to_tileinfo"]
 
 
 def apply(
@@ -62,3 +62,20 @@ def xyz_to_bbox(
     )
 
     return bbox
+
+def xyz_to_tileinfo(
+    x: int,
+    y: int,
+    z: int,
+    stage: str = "test",
+    context: Optional[Dict] = None,
+) -> Dict:
+    """Convert XYZ coordinates to tile information."""
+
+    return {
+        "x": x,
+        "y": y,
+        "z": z,
+        "stage": stage,
+        "context": context or {},
+    }

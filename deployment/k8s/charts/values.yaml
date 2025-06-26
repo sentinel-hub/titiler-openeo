@@ -118,6 +118,7 @@ affinity: {}
 logging:
   configFile: "files/log_config.yaml"
 
+enableTileStore: false
 # PostgreSQL subchart configuration
 postgresql:
   enabled: false
