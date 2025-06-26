@@ -1058,7 +1058,10 @@ def _get_media_type(process_graph: Dict[str, Any]) -> str:
                 return "image/tiff"
             elif node["arguments"]["format"] == "txt":
                 return "text/plain"
-            elif node["arguments"]["format"] == "json" or node["arguments"]["format"] == "metajson":
+            elif (
+                node["arguments"]["format"] == "json"
+                or node["arguments"]["format"] == "metajson"
+            ):
                 return "application/json"
             else:
                 return "application/PNG"
