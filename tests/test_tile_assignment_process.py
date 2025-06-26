@@ -96,7 +96,7 @@ class MockTileStore(TileAssignmentStore):
                 released_tile = {**tile, "stage": "released"}
                 del self.assignments[key]
                 return released_tile
-        raise TileNotAssignedError("No tile found with these coordinates")
+        raise TileNotAssignedError(service_id, "Any")
 
     def get_user_tile(self, service_id, user_id):
         """Mock get user tile."""

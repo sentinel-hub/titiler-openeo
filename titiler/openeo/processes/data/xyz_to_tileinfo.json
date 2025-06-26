@@ -1,0 +1,69 @@
+{
+  "id": "xyz_to_tileinfo",
+  "summary": "Convert XYZ tile coordinates to tile information",
+  "description": "Embeds web mercator tile coordinates (x, y, z) into a tile information object.",
+  "categories": ["cubes", "spatial"],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "Tile coordinates in XYZ format",
+      "schema": {
+        "type": "object",
+        "required": ["x", "y", "z"],
+        "properties": {
+          "x": {
+            "type": "integer",
+            "description": "Tile x coordinate"
+          },
+          "y": {
+            "type": "integer",
+            "description": "Tile y coordinate"
+          },
+          "z": {
+            "type": "integer",
+            "description": "Tile zoom level"
+          },
+          "stage": {
+            "type": "string",
+            "description": "Stage of the tile, e.g., 'raw', 'processed', etc.",
+            "default": "raw"
+          }
+        }
+      }
+    }
+  ],
+  "returns": {
+    "description": "A dictionary containing tile coordinates and metadata",
+    "schema": {
+      "type": "object",
+      "required": ["x", "y", "z", "stage"],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "Tile x coordinate"
+        },
+        "y": {
+          "type": "integer",
+          "description": "Tile y coordinate"
+        },
+        "z": {
+          "type": "integer",
+          "description": "Tile zoom level"
+        },
+        "stage": {
+          "type": "string",
+          "description": "Stage of the tile, e.g., 'raw', 'processed', etc.",
+          "default": "raw"
+        }
+      }
+    }
+  },
+  "examples": [],
+  "links": [
+    {
+      "rel": "about",
+      "href": "https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames",
+      "title": "Slippy Map Tilenames Specification"
+    }
+  ]
+}

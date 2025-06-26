@@ -56,6 +56,10 @@ spec:
           env:
             - name: TITILER_OPENEO_SERVICE_STORE_URL
               value: {{ include "database.url" . | quote }}
+            {{- if .Values.enableTileStore }}
+            - name: TITILER_OPENEO_TILE_STORE_URL
+              value: {{ include "database.url" . | quote }}
+            {{- end }}
             {{- if .Values.database.defaultServices }}
             - name: TITILER_OPENEO_DEFAULT_SERVICES_FILE
               value: "/config/default_services.json"
@@ -119,12 +123,14 @@ spec:
             httpGet:
               path: /api
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
           readinessProbe:
             httpGet:
               path: /api
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

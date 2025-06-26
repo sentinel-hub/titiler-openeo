@@ -990,6 +990,9 @@ class EndpointsFactory(BaseFactory):
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                "tile_x": x,
+                "tile_y": y,
+                "tile_z": z,
             }
 
             if service_extent := configuration.get("extent"):
@@ -1055,7 +1058,10 @@ def _get_media_type(process_graph: Dict[str, Any]) -> str:
                 return "image/tiff"
             elif node["arguments"]["format"] == "txt":
                 return "text/plain"
-            elif node["arguments"]["format"] == "json":
+            elif (
+                node["arguments"]["format"] == "json"
+                or node["arguments"]["format"] == "metajson"
+            ):
                 return "application/json"
             else:
                 return "application/PNG"
