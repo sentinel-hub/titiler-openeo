@@ -139,7 +139,7 @@ def _apply_temporal_dimension(
     # Apply the process to the temporal dimension
     # The process receives the entire stack and should return modified data
     result_array = process(
-        data=data,
+        data,  # Pass as positional argument
         positional_parameters=positional_parameters,
         named_parameters=named_parameters,
     )
@@ -213,7 +213,7 @@ def _apply_spectral_dimension_single_image(
     """
     # Apply process to the spectral dimension
     result_array = process(
-        data=data,
+        data,  # Pass as positional argument
         positional_parameters=positional_parameters,
         named_parameters=named_parameters,
     )
@@ -259,7 +259,7 @@ def _apply_spectral_dimension_stack(
     result = {}
     for key, img in data.items():
         result_array = process(
-            data=img,
+            img,  # Pass as positional argument
             positional_parameters=positional_parameters,
             named_parameters=named_parameters,
         )
