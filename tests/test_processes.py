@@ -9,6 +9,7 @@ from titiler.openeo.processes.implementations.apply import (
     apply,
     apply_dimension,
 )
+from titiler.openeo.processes.implementations.logic import if_
 from titiler.openeo.processes.implementations.arrays import (
     add_dimension,
     array_create,
@@ -441,6 +442,82 @@ def test_apply_dimension_unsupported_dimension(sample_raster_stack):
         apply_dimension(sample_raster_stack, dummy_process, "xyz")
 
     assert "xyz" in str(excinfo.value)
+
+
+def test_if_basic():
+    """Test basic if function behavior."""
+    # Test true condition
+    assert if_(True, "A", "B") == "A"
+    
+    # Test false condition
+    assert if_(False, "A", "B") == "B"
+    
+    # Test null/None condition (treated as false)
+    assert if_(None, "A", "B") == "B"
+
+
+def test_if_with_arrays():
+    """Test if function with array values."""
+    # Test with lists
+    result = if_(False, [1, 2, 3], [4, 5, 6])
+    assert result == [4, 5, 6]
+    
+    result = if_(True, [1, 2, 3], [4, 5, 6])
+    assert result == [1, 2, 3]
+
+
+def test_if_with_numeric_values():
+    """Test if function with numeric values."""
+    # Test with integers
+    assert if_(True, 123, 456) == 123
+    assert if_(False, 123, 456) == 456
+    
+    # Test with floats
+    assert if_(True, 1.5, 2.5) == 1.5
+    assert if_(False, 1.5, 2.5) == 2.5
+
+
+def test_if_default_reject():
+    """Test if function with default reject value (None)."""
+    # When value is true, return accept
+    assert if_(True, 123) == 123
+    
+    # When value is false and reject is not provided, return None
+    assert if_(False, 1) is None
+    
+    # When value is None and reject is not provided, return None
+    assert if_(None, 1) is None
+
+
+def test_if_with_complex_types():
+    """Test if function with complex data types."""
+    # Test with dictionaries
+    accept_dict = {"key": "value1"}
+    reject_dict = {"key": "value2"}
+    assert if_(True, accept_dict, reject_dict) == accept_dict
+    assert if_(False, accept_dict, reject_dict) == reject_dict
+    
+    # Test with mixed types
+    assert if_(True, "string", 123) == "string"
+    assert if_(False, "string", 123) == 123
+
+
+def test_if_with_image_data(sample_image_data):
+    """Test if function with ImageData objects."""
+    # Create two different ImageData objects
+    data1 = sample_image_data
+    data2_array = np.ma.array(
+        np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
+        mask=np.zeros((3, 10, 10), dtype=bool),
+    )
+    data2 = ImageData(data2_array, band_names=["red", "green", "blue"])
+    
+    # Test that if returns the correct ImageData
+    result = if_(True, data1, data2)
+    assert result is data1
+    
+    result = if_(False, data1, data2)
+    assert result is data2
 
 
 def test_apply_dimension_dimension_name_normalization(sample_raster_stack):
