@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-__all__ = ["if_"]
+__all__ = ["if_", "lt", "lte", "gt", "gte", "eq", "neq"]
 
 
 def if_(
@@ -45,3 +45,131 @@ def if_(
 
 # Set the process name to match the JSON specification
 if_.__name__ = "if"
+
+
+def lt(x: Any, y: Any) -> bool:
+    """Less than comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+
+    Returns:
+        True if x is less than y, False otherwise
+
+    Examples:
+        >>> lt(1, 2)
+        True
+        >>> lt(2, 1)
+        False
+        >>> lt(1, 1)
+        False
+    """
+    return x < y
+
+
+def lte(x: Any, y: Any) -> bool:
+    """Less than or equal comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+    Returns:
+        True if x is less than or equal to y, False otherwise
+    Examples:
+        >>> lte(1, 2)
+        True
+        >>> lte(2, 1)
+        False
+        >>> lte(1, 1)
+        True
+    """
+    return x <= y
+
+
+def gt(x: Any, y: Any) -> bool:
+    """Greater than comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+
+    Returns:
+        True if x is greater than y, False otherwise
+
+    Examples:
+        >>> gt(2, 1)
+        True
+        >>> gt(1, 2)
+        False
+        >>> gt(1, 1)
+        False
+    """
+    return x > y
+
+
+def gte(x: Any, y: Any) -> bool:
+    """Greater than or equal comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+
+    Returns:
+        True if x is greater than or equal to y, False otherwise
+
+    Examples:
+        >>> gte(2, 1)
+        True
+        >>> gte(1, 2)
+        False
+        >>> gte(1, 1)
+        True
+    """
+    return x >= y
+
+
+def eq(x: Any, y: Any) -> bool:
+    """Equality comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+
+    Returns:
+        True if x is equal to y, False otherwise
+
+    Examples:
+        >>> eq(1, 1)
+        True
+        >>> eq(1, 2)
+        False
+        >>> eq("a", "a")
+        True
+        >>> eq("a", "b")
+        False
+    """
+    return x == y
+
+
+def neq(x: Any, y: Any) -> bool:
+    """Inequality comparison.
+
+    Args:
+        x: First value to compare
+        y: Second value to compare
+
+    Returns:
+        True if x is not equal to y, False otherwise
+
+    Examples:
+        >>> neq(1, 2)
+        True
+        >>> neq(1, 1)
+        False
+        >>> neq("a", "b")
+        True
+        >>> neq("a", "a")
+        False
+    """
+    return x != y
