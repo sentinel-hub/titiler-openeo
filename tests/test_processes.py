@@ -522,28 +522,28 @@ def test_if_with_image_data(sample_image_data):
 
 def test_apply_dimension_water_mask_preserves_dimensions(sample_raster_stack):
     """Test that water mask calculation preserves spatial dimensions."""
-    
+
     def water_mask_proc(data, **kwargs):
         """Create a simple water mask - similar to user's example."""
         # data is a numpy array (bands, height, width)
         # Simulate simple water detection
         band1, band2, band3 = data[0], data[1], data[2]
-        
+
         # Create boolean conditions
         condition1 = band1 > 100
         condition2 = band2 < 50
         condition3 = band3 > 150
-        
+
         # Use nested if_ statements
         water_mask = if_(condition1, 1, if_(condition2, 1, if_(condition3, 1, 0)))
-        
+
         return water_mask
-    
+
     result = apply_dimension(sample_raster_stack, water_mask_proc, "spectral")
-    
+
     assert isinstance(result, dict)
     assert len(result) == len(sample_raster_stack)
-    
+
     # Each result should maintain spatial dimensions
     for key, img_data in result.items():
         assert isinstance(img_data, ImageData)

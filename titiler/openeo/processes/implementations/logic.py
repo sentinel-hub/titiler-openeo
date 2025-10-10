@@ -46,7 +46,7 @@ def if_(
         # Use numpy.where for element-wise if-then-else
         reject_val = reject if reject is not None else 0
         return numpy.where(value, accept, reject_val)
-    
+
     # Handle scalar boolean values
     # Return accept if value is exactly True, otherwise return reject
     # Note: null/None is treated as false
@@ -57,6 +57,7 @@ def if_(
 
 # Set the process name to match the JSON specification
 if_.__name__ = "if"
+
 
 def and_(x: Any, y: Any) -> Any:
     """Logical AND operation.
@@ -84,9 +85,10 @@ def and_(x: Any, y: Any) -> Any:
     # Handle numpy arrays - use element-wise logical AND
     if isinstance(x, numpy.ndarray) or isinstance(y, numpy.ndarray):
         return numpy.logical_and(x, y)
-    
+
     # Handle scalar boolean values
     return bool(x) and bool(y)
+
 
 and_.__name__ = "and"
 
