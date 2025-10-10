@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 import numpy
 
-__all__ = ["if_", "lt", "lte", "gt", "gte", "eq", "neq"]
+__all__ = ["if_", "and_", "lt", "lte", "gt", "gte", "eq", "neq"]
 
 
 def if_(
@@ -57,6 +57,38 @@ def if_(
 
 # Set the process name to match the JSON specification
 if_.__name__ = "if"
+
+def and_(x: Any, y: Any) -> Any:
+    """Logical AND operation.
+
+    Args:
+        x: First boolean value or array
+        y: Second boolean value or array
+
+    Returns:
+        True if both x and y are true, False otherwise
+
+    Examples:
+        >>> and_(True, True)
+        True
+        >>> and_(True, False)
+        False
+        >>> and_(False, True)
+        False
+        >>> and_(False, False)
+        False
+        >>> import numpy as np
+        >>> and_(np.array([True, False]), np.array([True, True]))
+        array([ True, False])
+    """
+    # Handle numpy arrays - use element-wise logical AND
+    if isinstance(x, numpy.ndarray) or isinstance(y, numpy.ndarray):
+        return numpy.logical_and(x, y)
+    
+    # Handle scalar boolean values
+    return bool(x) and bool(y)
+
+and_.__name__ = "and"
 
 
 def lt(x: Any, y: Any) -> bool:
