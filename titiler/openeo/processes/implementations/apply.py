@@ -212,11 +212,30 @@ def _apply_spectral_dimension_single_image(
         An ImageData with the process applied to the spectral dimension
     """
     # Apply process to the spectral dimension
+    # Pass the array (bands, height, width) to the process
     result_array = process(
-        data,  # Pass as positional argument
+        data.array,  # Pass the numpy array, not the ImageData object
         positional_parameters=positional_parameters,
         named_parameters=named_parameters,
     )
+    
+    # Ensure result maintains spatial dimensions
+    # If result is scalar or 1D, broadcast it to spatial dimensions
+    if isinstance(result_array, (int, float, numpy.number)):
+        # Scalar result - broadcast to spatial shape
+        result_array = numpy.full((data.height, data.width), result_array)
+    elif result_array.ndim == 1:
+        # 1D array - needs to be reshaped
+        if len(result_array) == 1:
+            # Single value - broadcast to spatial shape
+            result_array = numpy.full((data.height, data.width), result_array[0])
+        else:
+            # Multiple values - this shouldn't happen for spectral reduction to scalar
+            result_array = result_array.reshape((len(result_array), data.height, data.width))
+    elif result_array.ndim == 2:
+        # 2D array (height, width) - add band dimension
+        result_array = result_array[numpy.newaxis, :]
+    # else: 3D array (bands, height, width) - already correct shape
 
     return ImageData(
         result_array,
@@ -258,8 +277,9 @@ def _apply_spectral_dimension_stack(
     # Apply the process to each image in the stack
     result = {}
     for key, img in data.items():
+        # Pass the array (bands, height, width) to the process
         result_array = process(
-            img,  # Pass as positional argument
+            img.array,  # Pass the numpy array, not the ImageData object
             positional_parameters=positional_parameters,
             named_parameters=named_parameters,
         )
@@ -269,6 +289,24 @@ def _apply_spectral_dimension_stack(
             raise ValueError(
                 "The process must return a numpy array for spectral dimension processing"
             )
+        
+        # Ensure result maintains spatial dimensions
+        # If result is scalar or 1D, broadcast it to spatial dimensions
+        if isinstance(result_array, (int, float, numpy.number)):
+            # Scalar result - broadcast to spatial shape
+            result_array = numpy.full((img.height, img.width), result_array)
+        elif result_array.ndim == 1:
+            # 1D array - needs to be reshaped
+            if len(result_array) == 1:
+                # Single value - broadcast to spatial shape
+                result_array = numpy.full((img.height, img.width), result_array[0])
+            else:
+                # Multiple values
+                result_array = result_array.reshape((len(result_array), img.height, img.width))
+        elif result_array.ndim == 2:
+            # 2D array (height, width) - add band dimension
+            result_array = result_array[numpy.newaxis, :]
+        # else: 3D array (bands, height, width) - already correct shape
 
         result[key] = ImageData(
             result_array,

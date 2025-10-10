@@ -343,8 +343,8 @@ def test_apply_dimension_spectral_single_image(sample_image_data):
     # Define a process that normalizes bands
     def normalize_process(data, **kwargs):
         """Process that normalizes band values."""
-        # data is an ImageData
-        array = data.array.astype(float)
+        # data is now a numpy array (bands, height, width)
+        array = data.astype(float)
         # Normalize to 0-1
         normalized = (array - array.min()) / (array.max() - array.min() + 1e-10)
         return normalized
@@ -369,8 +369,8 @@ def test_apply_dimension_spectral_stack(sample_raster_stack):
     # Define a process that adds a constant to each band
     def add_constant_process(data, **kwargs):
         """Process that adds 10 to all band values."""
-        # data is an ImageData
-        return data.array + 10
+        # data is now a numpy array (bands, height, width)
+        return data + 10
 
     result = apply_dimension(sample_raster_stack, add_constant_process, "bands")
 
@@ -520,6 +520,42 @@ def test_if_with_image_data(sample_image_data):
     assert result is data2
 
 
+def test_apply_dimension_water_mask_preserves_dimensions(sample_raster_stack):
+    """Test that water mask calculation preserves spatial dimensions."""
+    
+    def water_mask_proc(data, **kwargs):
+        """Create a simple water mask - similar to user's example."""
+        # data is a numpy array (bands, height, width)
+        # Simulate simple water detection
+        band1, band2, band3 = data[0], data[1], data[2]
+        
+        # Create boolean conditions
+        condition1 = band1 > 100
+        condition2 = band2 < 50
+        condition3 = band3 > 150
+        
+        # Use nested if_ statements
+        water_mask = if_(condition1, 1, if_(condition2, 1, if_(condition3, 1, 0)))
+        
+        return water_mask
+    
+    result = apply_dimension(sample_raster_stack, water_mask_proc, "spectral")
+    
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+    
+    # Each result should maintain spatial dimensions
+    for key, img_data in result.items():
+        assert isinstance(img_data, ImageData)
+        # Should have spatial dimensions preserved
+        assert img_data.height == sample_raster_stack[key].height
+        assert img_data.width == sample_raster_stack[key].width
+        # Should have 1 band (the mask)
+        assert img_data.count == 1
+        # Values should be binary (0 or 1)
+        assert set(np.unique(img_data.array.data)).issubset({0, 1})
+
+
 def test_apply_dimension_dimension_name_normalization(sample_raster_stack):
     """Test that dimension names are normalized correctly."""
 
@@ -529,12 +565,9 @@ def test_apply_dimension_dimension_name_normalization(sample_raster_stack):
         return np.array(arrays)
 
     def spectral_process(data, **kwargs):
-        """Process for spectral dimension - receives ImageData."""
-        if isinstance(data, ImageData):
-            return data.array * 2
-        # Fallback for RasterStack (shouldn't happen in this test)
-        arrays = [img.array * 2 for img in data.values()]
-        return np.array(arrays)
+        """Process for spectral dimension - receives numpy array."""
+        # data is now a numpy array (bands, height, width)
+        return data * 2
 
     # Test various temporal dimension names
     for dim_name in ["temporal", "time", "t"]:

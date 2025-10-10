@@ -2,11 +2,13 @@
 
 from typing import Any, Optional
 
+import numpy
+
 __all__ = ["if_", "lt", "lte", "gt", "gte", "eq", "neq"]
 
 
 def if_(
-    value: Optional[bool],
+    value: Any,
     accept: Any,
     reject: Optional[Any] = None,
 ) -> Any:
@@ -16,7 +18,7 @@ def if_(
     otherwise returns the value of the `reject` parameter.
 
     Args:
-        value: A boolean value (or null which is treated as false)
+        value: A boolean value (or null which is treated as false), can be array
         accept: A value that is returned if the boolean value is true
         reject: A value that is returned if the boolean value is not true.
                 Defaults to None (null)
@@ -35,7 +37,17 @@ def if_(
         123
         >>> if_(False, 1)
         None
+        >>> import numpy as np
+        >>> if_(np.array([True, False, True]), 1, 0)
+        array([1, 0, 1])
     """
+    # Handle numpy arrays - use element-wise conditional
+    if isinstance(value, numpy.ndarray):
+        # Use numpy.where for element-wise if-then-else
+        reject_val = reject if reject is not None else 0
+        return numpy.where(value, accept, reject_val)
+    
+    # Handle scalar boolean values
     # Return accept if value is exactly True, otherwise return reject
     # Note: null/None is treated as false
     if value is True:
