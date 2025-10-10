@@ -668,7 +668,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     Returns:
         ImageData object
     """
-    max_retries = 4
+    max_retries = 10
     retry_delay = 1.0  # seconds
     retries = 0
 
