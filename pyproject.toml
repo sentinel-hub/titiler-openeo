@@ -2,7 +2,7 @@
 name = "titiler-openeo"
 description = "TiTiler backend for openEO."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
     { name = "Vincent Sarago", email = "vincent@developmentseed.com" },
     { name = "Emmanuel Mathot", email = "emmanuel@developmentseed.com" },
@@ -31,13 +31,15 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "titiler.core==0.21.0",
+    "titiler.core>=0.21.0",
     "rio-tiler>=7.4.0,<8.0",
     "starlette-cramjam>=0.4,<0.5",
     "openeo-pg-parser-networkx==2024.10.1",
     "pystac-client",
     "pydantic-settings~=2.0",
     "jsonpath-ng~=1.7.0",
+    "titiler-eopf@git+https://github.com/EOPF-Explorer/titiler-eopf.git",
+    "xarray>=2025.9.0"
 ]
 
 [project.optional-dependencies]

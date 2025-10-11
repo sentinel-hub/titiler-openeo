@@ -1,0 +1,46 @@
+{
+  "id": "load_zarr",
+  "summary": "Load data from a Zarr store",
+  "description": "Loads data from a Zarr store. Supports local file paths and remote URLs (HTTP, HTTPS, S3). Each variable in the Zarr store becomes accessible as a separate band in the returned data cube.",
+  "categories": [
+    "cubes",
+    "import"
+  ],
+  "experimental": true,
+  "parameters": [
+    {
+      "name": "url",
+      "description": "The URL or path to the Zarr store. Supports local file paths, HTTP/HTTPS URLs, and S3 URLs (e.g., 's3://bucket/path/to/dataset.zarr'). Authentication details such as API keys or tokens may need to be included in the URL or configured via environment variables.",
+      "schema": {
+        "title": "URL",
+        "type": "string",
+        "format": "uri"
+      }
+    },
+    {
+      "name": "options",
+      "description": "Additional reading options for the Zarr store. Supported options include: `sel` (array of dimension selections in format 'dimension=value', e.g., ['time=2020-01-01']), and `method` (selection method: 'nearest', 'pad', 'ffill', 'backfill', or 'bfill').",
+      "schema": {
+        "type": "object",
+        "subtype": "input-format-options"
+      },
+      "default": {},
+      "optional": true
+    }
+  ],
+  "returns": {
+    "description": "A data cube for further processing. Each variable in the Zarr store is accessible as a separate band, with keys in the format 'group:variable' (e.g., 'measurements:red').",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube"
+    }
+  },
+  "exceptions": {
+    "FormatUnsuitable": {
+      "message": "Data can't be loaded as a Zarr store."
+    },
+    "MissingVariables": {
+      "message": "The specified variable could not be found in the Zarr store."
+    }
+  }
+}

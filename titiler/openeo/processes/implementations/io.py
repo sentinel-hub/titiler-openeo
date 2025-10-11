@@ -12,10 +12,12 @@ from rio_tiler.io import COGReader
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
+from titiler.eopf.reader import GeoZarrReader
+
 from ...reader import _reader
 from .data_model import LazyRasterStack, RasterStack
 
-__all__ = ["save_result", "SaveResultData", "load_url"]
+__all__ = ["save_result", "SaveResultData", "load_url", "load_zarr"]
 
 
 def load_url(
@@ -65,6 +67,154 @@ def load_url(
         tasks=tasks,
         date_name_fn=lambda _: "data",  # Single timestamp since it's a single COG
         allowed_exceptions=(),
+    )
+
+
+class LazyZarrRasterStack(Dict[str, ImageData]):
+    """A RasterStack that lazily loads zarr time slices when accessed.
+
+    This class wraps a GeoZarrReader and organizes data by the TIME dimension.
+    Each key in the RasterStack represents a time step, and each value is an
+    ImageData containing all spectral bands (x, y, bands) for that time.
+    """
+
+    def __init__(
+        self,
+        reader: GeoZarrReader,
+        variables: list[str],
+        time_values: list[str],
+        options: Optional[Dict] = None,
+    ):
+        """Initialize a LazyZarrRasterStack.
+
+        Args:
+            reader: The GeoZarrReader instance
+            variables: List of variables to load (spectral bands)
+            time_values: List of time values (ISO strings)
+            options: Additional reading options
+        """
+        super().__init__()
+        self._reader = reader
+        self._variables = variables
+        self._time_values = time_values
+        self._options = options or {}
+        self._loaded_times = set[str]()
+
+    def _load_time_slice(self, time_key: str) -> ImageData:
+        """Load all spectral bands for a specific time slice.
+
+        Args:
+            time_key: Time value (ISO string) to load
+
+        Returns:
+            ImageData: Multi-band image with all spectral bands for this time
+        """
+        # Use the reader's part() method to load data for all variables at this time
+        # by selecting the time dimension
+        img = self._reader.part(
+            bbox=self._reader.bounds,
+            variables=self._variables,
+            sel=[f"time={time_key}"] if self.__len__() > 1 else None,
+            method=self._options.get("method", "nearest"),
+            width=self._options.get("width"),
+            height=self._options.get("height"),
+        )
+
+        return img
+
+    def __getitem__(self, key: str) -> ImageData:
+        """Get ImageData for a time slice, loading it if necessary."""
+        if key not in self._loaded_times:
+            # Load the time slice and cache it
+            super().__setitem__(key, self._load_time_slice(key))
+            self._loaded_times.add(key)
+        return super().__getitem__(key)
+
+    def __iter__(self):
+        """Iterate over time values."""
+        return iter(self._time_values)
+
+    def __len__(self) -> int:
+        """Return the number of time steps."""
+        return len(self._time_values)
+
+    def __contains__(self, key: object) -> bool:
+        """Check if a time value is available."""
+        return key in self._time_values
+
+    def keys(self):
+        """Return the time values."""
+        return self._time_values
+
+    def values(self):
+        """Return the values, loading all time slices if necessary."""
+        for time_key in self._time_values:
+            if time_key not in self._loaded_times:
+                self[time_key]  # Trigger loading
+        return super().values()
+
+    def items(self):
+        """Return the items, loading all time slices if necessary."""
+        for time_key in self._time_values:
+            if time_key not in self._loaded_times:
+                self[time_key]  # Trigger loading
+        return super().items()
+
+
+def load_zarr(url: str, options: Optional[Dict] = None) -> RasterStack:
+    """Load data from a Zarr store.
+
+    Args:
+        url: The URL or path to the Zarr store
+        options: Additional reading options (e.g., variables to load, sel, method)
+
+    Returns:
+        RasterStack: A data cube organized by time dimension.
+                    Each key represents a time step, and each value is an ImageData
+                    containing all spectral bands (x, y, bands) for that time.
+
+    Example:
+        >>> # Load a zarr store
+        >>> data = load_zarr("s3://bucket/dataset.zarr")
+        >>> # Access specific time slice
+        >>> time_slice = data["2020-01-01T00:00:00"]
+        >>> # Or specify variables to load
+        >>> data = load_zarr("path/to/data.zarr", options={"variables": ["group:band1", "group:band2"]})
+    """
+    options = options or {}
+
+    # Open the zarr store with GeoZarrReader
+    reader = GeoZarrReader(url)
+
+    # Get variables to load (all variables if not specified)
+    variables = options.get("variables", reader.variables)
+
+    # Extract time values from the zarr dataset
+    # We need to get the time dimension values from the first variable
+    time_values = []
+    if variables:
+        # Get the first variable to extract time dimension
+        first_var = variables[0]
+        group, variable = first_var.split(":") if ":" in first_var else ("/", first_var)
+
+        # Get the data array to access time coordinate
+        da = reader._get_variable(group, variable)
+
+        # Check if time dimension exists
+        if "time" in da.dims:
+            # Extract time values and convert to ISO strings
+            time_coord = da.coords["time"]
+            time_values = [str(t.values) for t in time_coord]
+        else:
+            # If no time dimension, create a single time entry
+            time_values = ["data"]
+
+    # Return a lazy RasterStack organized by time
+    return LazyZarrRasterStack(
+        reader=reader,
+        variables=variables,
+        time_values=time_values,
+        options=options,
     )
 
 
