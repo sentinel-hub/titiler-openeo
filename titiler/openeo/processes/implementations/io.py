@@ -111,6 +111,7 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
         """
         # Get spatial extent from options or use reader's full bounds
         spatial_extent = self._options.get("spatial_extent")
+        crs = 4326
         if spatial_extent:
             # Handle both BoundingBox object and dictionary formats
             if hasattr(spatial_extent, "west"):
@@ -129,6 +130,8 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
                     spatial_extent["east"],
                     spatial_extent["north"],
                 ]
+            if hasattr(spatial_extent, "crs"):
+                crs = spatial_extent.crs
         else:
             bbox = self._reader.bounds
 
@@ -136,11 +139,13 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
         # by selecting the time dimension
         img = self._reader.part(
             bbox=bbox,
+            bounds_crs=crs,
+            dst_crs=crs,
             variables=self._variables,
             sel=[f"time={time_key}"] if self.__len__() > 1 else None,
             method=self._options.get("method", "nearest"),
-            width=self._options.get("width"),
-            height=self._options.get("height"),
+            width=int(self._options.get("width")),
+            height=int(self._options.get("height"))
         )
 
         return img
@@ -185,7 +190,7 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
 
 
 def load_zarr(
-    url: str, spatial_extent: Optional[Dict] = None, options: Optional[Dict] = None
+    url: str, spatial_extent: Optional[Dict] = None, width: Optional[int] = None, height: Optional[int] = None, options: Optional[Dict] = None
 ) -> RasterStack:
     """Load data from a Zarr store.
 
@@ -216,6 +221,12 @@ def load_zarr(
     # Store spatial extent in options for use by LazyZarrRasterStack
     if spatial_extent is not None:
         options["spatial_extent"] = spatial_extent
+
+    if width is not None:
+        options["width"] = width
+
+    if height is not None:
+        options["height"] = height
 
     # Open the zarr store with GeoZarrReader
     reader = GeoZarrReader(url)

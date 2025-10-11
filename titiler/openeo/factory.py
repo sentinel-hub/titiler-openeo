@@ -1074,7 +1074,8 @@ def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, A
     return [
         node
         for _, node in process_graph.items()
-        if node["process_id"] in ["load_collection", "load_collection_and_reduce"]
+        if node["process_id"]
+        in ["load_collection", "load_collection_and_reduce", "load_zarr"]
     ]
 
 

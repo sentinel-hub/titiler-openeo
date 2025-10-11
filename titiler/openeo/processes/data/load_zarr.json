@@ -17,6 +17,7 @@
         "format": "uri"
       }
     },
+
     {
       "name": "spatial_extent",
       "description": "Limits the data to load to the specified bounding box or polygons.\n\nFor raster data, the process loads the pixel into the data cube if the point at the pixel center intersects with the bounding box or any of the polygons (as defined in the Simple Features standard by the OGC).\n\nSet this parameter to `null` to set no limit for the spatial extent. Be careful with this when loading large datasets!",
@@ -69,6 +70,25 @@
               "default": 4326
             }
           }
+        },
+        {
+            "name": "width",
+            "description": "The width of the output image in pixels. If only width is provided, height will be calculated to maintain the aspect ratio. Defaults to 1024 to prevent loading in native resolution.",
+            "schema": {
+                "type": "number",
+                "minimum": 1
+            },
+            "default": 1024,
+            "optional": true
+        },
+        {
+            "name": "height",
+            "description": "The height of the output image in pixels. If only height is provided, width will be calculated to maintain the aspect ratio.",
+            "schema": {
+                "type": "number",
+                "minimum": 1
+            },
+            "optional": true
         },
         {
           "title": "No filter",
