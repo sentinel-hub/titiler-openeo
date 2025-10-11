@@ -109,10 +109,33 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
         Returns:
             ImageData: Multi-band image with all spectral bands for this time
         """
+        # Get spatial extent from options or use reader's full bounds
+        spatial_extent = self._options.get("spatial_extent")
+        if spatial_extent:
+            # Handle both BoundingBox object and dictionary formats
+            if hasattr(spatial_extent, "west"):
+                # BoundingBox object
+                bbox = [
+                    spatial_extent.west,
+                    spatial_extent.south,
+                    spatial_extent.east,
+                    spatial_extent.north,
+                ]
+            else:
+                # Dictionary format
+                bbox = [
+                    spatial_extent["west"],
+                    spatial_extent["south"],
+                    spatial_extent["east"],
+                    spatial_extent["north"],
+                ]
+        else:
+            bbox = self._reader.bounds
+        
         # Use the reader's part() method to load data for all variables at this time
         # by selecting the time dimension
         img = self._reader.part(
-            bbox=self._reader.bounds,
+            bbox=bbox,
             variables=self._variables,
             sel=[f"time={time_key}"] if self.__len__() > 1 else None,
             method=self._options.get("method", "nearest"),
@@ -161,11 +184,14 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
         return super().items()
 
 
-def load_zarr(url: str, options: Optional[Dict] = None) -> RasterStack:
+def load_zarr(
+    url: str, spatial_extent: Optional[Dict] = None, options: Optional[Dict] = None
+) -> RasterStack:
     """Load data from a Zarr store.
 
     Args:
         url: The URL or path to the Zarr store
+        spatial_extent: Optional bounding box to limit the spatial extent
         options: Additional reading options (e.g., variables to load, sel, method)
 
     Returns:
@@ -178,17 +204,25 @@ def load_zarr(url: str, options: Optional[Dict] = None) -> RasterStack:
         >>> data = load_zarr("s3://bucket/dataset.zarr")
         >>> # Access specific time slice
         >>> time_slice = data["2020-01-01T00:00:00"]
-        >>> # Or specify variables to load
-        >>> data = load_zarr("path/to/data.zarr", options={"variables": ["group:band1", "group:band2"]})
+        >>> # Or specify variables and spatial extent
+        >>> data = load_zarr(
+        ...     "path/to/data.zarr",
+        ...     spatial_extent={"west": -10, "south": 40, "east": 10, "north": 50},
+        ...     options={"variables": ["group:band1", "group:band2"]}
+        ... )
     """
     options = options or {}
-
+    
+    # Store spatial extent in options for use by LazyZarrRasterStack
+    if spatial_extent is not None:
+        options["spatial_extent"] = spatial_extent
+    
     # Open the zarr store with GeoZarrReader
     reader = GeoZarrReader(url)
-
+    
     # Get variables to load (all variables if not specified)
     variables = options.get("variables", reader.variables)
-
+    
     # Extract time values from the zarr dataset
     # We need to get the time dimension values from the first variable
     time_values = []
@@ -196,10 +230,10 @@ def load_zarr(url: str, options: Optional[Dict] = None) -> RasterStack:
         # Get the first variable to extract time dimension
         first_var = variables[0]
         group, variable = first_var.split(":") if ":" in first_var else ("/", first_var)
-
+        
         # Get the data array to access time coordinate
         da = reader._get_variable(group, variable)
-
+        
         # Check if time dimension exists
         if "time" in da.dims:
             # Extract time values and convert to ISO strings
@@ -208,7 +242,7 @@ def load_zarr(url: str, options: Optional[Dict] = None) -> RasterStack:
         else:
             # If no time dimension, create a single time entry
             time_values = ["data"]
-
+    
     # Return a lazy RasterStack organized by time
     return LazyZarrRasterStack(
         reader=reader,
