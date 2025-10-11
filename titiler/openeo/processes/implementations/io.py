@@ -131,7 +131,7 @@ class LazyZarrRasterStack(Dict[str, ImageData]):
                 ]
         else:
             bbox = self._reader.bounds
-        
+
         # Use the reader's part() method to load data for all variables at this time
         # by selecting the time dimension
         img = self._reader.part(
@@ -212,17 +212,17 @@ def load_zarr(
         ... )
     """
     options = options or {}
-    
+
     # Store spatial extent in options for use by LazyZarrRasterStack
     if spatial_extent is not None:
         options["spatial_extent"] = spatial_extent
-    
+
     # Open the zarr store with GeoZarrReader
     reader = GeoZarrReader(url)
-    
+
     # Get variables to load (all variables if not specified)
     variables = options.get("variables", reader.variables)
-    
+
     # Extract time values from the zarr dataset
     # We need to get the time dimension values from the first variable
     time_values = []
@@ -230,10 +230,10 @@ def load_zarr(
         # Get the first variable to extract time dimension
         first_var = variables[0]
         group, variable = first_var.split(":") if ":" in first_var else ("/", first_var)
-        
+
         # Get the data array to access time coordinate
         da = reader._get_variable(group, variable)
-        
+
         # Check if time dimension exists
         if "time" in da.dims:
             # Extract time values and convert to ISO strings
@@ -242,7 +242,7 @@ def load_zarr(
         else:
             # If no time dimension, create a single time entry
             time_values = ["data"]
-    
+
     # Return a lazy RasterStack organized by time
     return LazyZarrRasterStack(
         reader=reader,
