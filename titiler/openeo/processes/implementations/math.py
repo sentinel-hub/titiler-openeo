@@ -225,8 +225,8 @@ def normalized_difference(x, y):
     return (x - y) / (x + y)
 
 
-def clip(x, in_min, in_max):
-    return numpy.clip(x, in_min, in_max)
+def clip(x, min, max):
+    return numpy.clip(x, min, max)
 
 
 def linear_scale_range(

@@ -81,15 +81,15 @@ def array_create(data: Optional[ArrayLike] = None, repeat: int = 1) -> ArrayLike
     # Handle both numpy arrays and other array-like inputs
     arr = numpy.asanyarray(data)
 
-    # check that the array is 2D
-    if arr.ndim != 2:
-        raise ValueError("Array must be 2D")
-    if arr.shape[0] == 0 or arr.shape[1] == 0:
-        raise ValueError("Array must not be empty")
-    # conceptually, repeating a 2d array is like stacking it in the third dimension
-    # so we cannot repeat it in this function
-    if repeat != 1:
-        raise ValueError("Cannot repeat a 2D array")
+    # # check that the array is no more than 2D
+    # if arr.ndim > 2:
+    #     raise ValueError("Array must be 1D or 2D")
+    # if arr.shape[0] == 0 or arr.shape[1] == 0:
+    #     raise ValueError("Array must not be empty")
+    # # conceptually, repeating a 2d array is like stacking it in the third dimension
+    # # so we cannot repeat it in this function
+    # if repeat != 1:
+    #     raise ValueError("Cannot repeat a 2D array")
 
     return arr
 
