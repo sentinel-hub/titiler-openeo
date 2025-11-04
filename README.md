@@ -34,7 +34,7 @@ To install [`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blo
 ```bash
 git clone https://github.com/sentinel-hub/titiler-openeo.git
 cd titiler-openeo
-python -m pip install -e .
+python -m pip install -e ".[server]"
 ```
 
 ## Usage
