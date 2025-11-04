@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from geojson_pydantic import Polygon
 from pydantic import AnyUrl, BaseModel, Field, RootModel
-from typing_extensions import Self
 
 OPENEO_VERSION = "1.2.0"
 
@@ -401,7 +400,7 @@ class JsonSchema(BaseModel, extra="allow"):
             "description": "The maximum number of items required in an array."
         },
     )
-    items: Optional[Union[List[Self], Self]] = Field(
+    items: Optional[Union[List["JsonSchema"], "JsonSchema"]] = Field(
         None,
         json_schema_extra={
             "description": "Specifies schemas for the items in an array."
@@ -791,7 +790,7 @@ class ProcessArgumentValue(RootModel):
     #     str,
     #     float,
     #     bool,
-    #     List[Self],
+    #     List["JsonSchema"],
     #     ProcessGraphWithMetadata,
     #     ProcessArgumentValue2,
     #     ProcessArgumentValue3,

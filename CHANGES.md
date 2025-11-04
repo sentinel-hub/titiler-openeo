@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * Add user tracking functionality across all store implementations (SQLAlchemy, DuckDB, Local) to monitor user authentication history and activity
+* Update `titiler` dependency to `>=0.24.0,<0.25`
+* Update `openeo-pg-parser-networkx` to `==2025.10.1`
 
 ## [0.3.0] (2025-06-04)
 
