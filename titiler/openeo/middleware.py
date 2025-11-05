@@ -4,7 +4,7 @@ from typing import Sequence
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from titiler.openeo.settings import ApiSettings
+from .settings import ApiSettings
 
 
 class DynamicCacheControlMiddleware:

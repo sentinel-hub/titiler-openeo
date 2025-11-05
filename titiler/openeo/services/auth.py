@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 from attrs import define
 from fastapi import HTTPException
 
-from titiler.openeo.auth import User
+from ..models.auth import User
 
 
 @define

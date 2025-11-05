@@ -8,15 +8,15 @@ from openeo_pg_parser_networkx.process_registry import Process
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
-from titiler.openeo import __version__ as titiler_version
-from titiler.openeo.auth import get_auth
-from titiler.openeo.errors import ExceptionHandler, OpenEOException
-from titiler.openeo.factory import EndpointsFactory
-from titiler.openeo.middleware import DynamicCacheControlMiddleware
-from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
-from titiler.openeo.services import get_store, get_tile_store
-from titiler.openeo.settings import ApiSettings, AuthSettings, BackendSettings
-from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
+from . import __version__ as titiler_version
+from .auth import get_auth
+from .errors import ExceptionHandler, OpenEOException
+from .factory import EndpointsFactory
+from .middleware import DynamicCacheControlMiddleware
+from .processes import PROCESS_SPECIFICATIONS, process_registry
+from .services import get_store, get_tile_store
+from .settings import ApiSettings, AuthSettings, BackendSettings
+from .stacapi import LoadCollection, LoadStac, stacApiBackend
 
 STAC_VERSION = "1.0.0"
 

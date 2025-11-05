@@ -1,11 +1,10 @@
 """Titiler-openEO API settings."""
 
-from typing import Any, Dict, Optional, Union
+from typing import Annotated, Any, Dict, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
-from typing_extensions import Annotated
 
 
 class OIDCConfig(BaseSettings):

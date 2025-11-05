@@ -1,7 +1,7 @@
 """titiler.openeo.services SQLAlchemy."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from attrs import define, field
@@ -18,8 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from titiler.openeo.auth import User
-
+from ..models.auth import User
 from .base import ServicesStore
 
 
@@ -181,7 +180,7 @@ class SQLAlchemyStore(ServicesStore):
 
     def track_user_login(self, user: User, provider: str) -> None:
         """Track user login activity."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         with Session(self._engine) as session:
             tracking = session.execute(

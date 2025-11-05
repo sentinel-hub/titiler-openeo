@@ -1,7 +1,7 @@
 """titiler.openeo endpoint Factory."""
 
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import morecantile
 import pyproj
@@ -13,19 +13,15 @@ from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
-from typing_extensions import Annotated
 
 from titiler.core.factory import BaseFactory
-from titiler.openeo import __version__ as titiler_version
-from titiler.openeo.auth import Auth, CredentialsBasic, OIDCAuth, User
-from titiler.openeo.models import openapi
-from titiler.openeo.models.openapi import (
-    OPENEO_VERSION,
-    ServiceInput,
-    ServiceUpdateInput,
-)
-from titiler.openeo.services import ServicesStore, TileAssignmentStore
-from titiler.openeo.stacapi import stacApiBackend
+
+from . import __version__ as titiler_version
+from .auth import Auth, CredentialsBasic, OIDCAuth
+from .models import openapi
+from .models.auth import User
+from .services import ServicesStore, TileAssignmentStore
+from .stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
 
@@ -72,7 +68,7 @@ class EndpointsFactory(BaseFactory):
 
             """
             return {
-                "api_version": OPENEO_VERSION,
+                "api_version": openapi.OPENEO_VERSION,
                 "backend_version": titiler_version,
                 "stac_version": STAC_VERSION,
                 "type": "Catalog",
@@ -305,7 +301,7 @@ class EndpointsFactory(BaseFactory):
                 "versions": [
                     {
                         "url": self.url_for(request, "openeo_root"),
-                        "api_version": OPENEO_VERSION,
+                        "api_version": openapi.OPENEO_VERSION,
                     },
                 ]
             }
@@ -584,7 +580,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_service_create(
             request: Request,
-            body: ServiceInput,
+            body: openapi.ServiceInput,
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
@@ -693,7 +689,7 @@ class EndpointsFactory(BaseFactory):
             tags=["Secondary Services"],
         )
         def openeo_service_update(
-            body: ServiceUpdateInput,
+            body: openapi.ServiceUpdateInput,
             service_id: str = Path(
                 description="A per-backend unique identifier of the secondary web service.",
             ),

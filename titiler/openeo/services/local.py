@@ -5,16 +5,16 @@ NOTE: This should be used only for Testing Purposes.
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from attrs import define, field
 
-from titiler.openeo.auth import User
-
+from ..models.auth import User
 from .base import ServicesStore
 
 
-@define()
+@define
 class LocalStore(ServicesStore):
     """Local Service STORE, for testing purposes."""
 
@@ -84,9 +84,7 @@ class LocalStore(ServicesStore):
 
     def track_user_login(self, user: User, provider: str) -> None:
         """Track user login activity."""
-        from datetime import datetime
-
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         key = (user.user_id, provider)
 
         if key in self.tracking_store:
