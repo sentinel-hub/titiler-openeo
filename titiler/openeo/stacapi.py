@@ -21,8 +21,6 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
-from titiler.openeo.models.openapi import SpatialExtent
-
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -31,6 +29,7 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
+from .models.openapi import SpatialExtent
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader

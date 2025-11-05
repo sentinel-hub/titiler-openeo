@@ -8,12 +8,7 @@ from base64 import b64decode
 from enum import Enum
 from typing import Any, Dict, Literal, Optional
 
-import httpx
 from attrs import define, field
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
 from fastapi import Header
 from fastapi.exceptions import HTTPException
 from fastapi.security.utils import get_authorization_scheme_param
@@ -24,6 +19,25 @@ from typing_extensions import Self
 from .models.auth import BasicAuthUser, User
 from .services.base import ServicesStore
 from .settings import AuthSettings, OIDCConfig
+
+try:
+    import httpx
+except ImportError:  # pragma: nocover
+    httpx = None  # type: ignore
+
+try:
+    import cryptography
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+except ImportError:  # pragma: nocover
+    httpx = None  # type: ignore
+    cryptography = None  # type: ignore
+    InvalidSignature = None  # type: ignore
+    hashes = None  # type: ignore
+    padding = None  # type: ignore
+    RSAPublicNumbers = None  # type: ignore
 
 
 class AuthMethod(Enum):
@@ -83,8 +97,14 @@ class OIDCAuth(Auth):
 
     def __attrs_post_init__(self):
         """Validate OIDC configuration on initialization."""
+        assert httpx, "`httpx` module must be installed to use OIDC Auth method"
+        assert (
+            cryptography
+        ), "`cryptography` module must be installed to use OIDC Auth method"
+
         if not self.settings.oidc:
             raise ValueError("OIDC configuration required")
+
         self._oidc_config = self.settings.oidc
 
     @property

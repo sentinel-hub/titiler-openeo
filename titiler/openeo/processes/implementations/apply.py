@@ -5,8 +5,7 @@ from typing import Any, Callable, Dict, Optional
 import morecantile
 import numpy
 
-from titiler.openeo.models.openapi import SpatialExtent
-
+from ...models.openapi import SpatialExtent
 from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]

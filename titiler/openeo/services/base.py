@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from attrs import define, field
 from starlette import status
 
-from titiler.openeo.auth import User
-from titiler.openeo.errors import OpenEOException
+from ..errors import OpenEOException
+from ..models.auth import User
 
 
 class TileAssignmentError(OpenEOException):
@@ -191,7 +191,7 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
         ...
 
 
-@define()
+@define
 class ServicesStore(metaclass=abc.ABCMeta):
     """ABC Class defining STAC Backends."""
 

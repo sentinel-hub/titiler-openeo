@@ -30,8 +30,8 @@ from rio_tiler.utils import cast_to_sequence
 from shapely.geometry import box
 from typing_extensions import TypedDict
 
-from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models.openapi import SpatialExtent
+from .errors import OutputLimitExceeded
+from .models.openapi import SpatialExtent
 
 
 class Dims(TypedDict):

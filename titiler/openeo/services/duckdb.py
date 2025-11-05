@@ -2,14 +2,13 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import duckdb
 from attrs import define, field
 
-from titiler.openeo.auth import User
-
+from ..models.auth import User
 from .base import ServicesStore
 
 
@@ -173,7 +172,7 @@ class DuckDBStore(ServicesStore):
 
     def track_user_login(self, user: User, provider: str) -> None:
         """Track user login activity."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         with duckdb.connect(self.store) as con:
             # Begin transaction for atomic operation

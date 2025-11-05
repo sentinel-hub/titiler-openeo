@@ -2,8 +2,7 @@
 
 from urllib.parse import urlparse
 
-from .base import ServicesStore, TileAssignmentStore  # noqa
-from .sqlalchemy_tile import SQLAlchemyTileStore  # noqa
+from .base import ServicesStore, TileAssignmentStore
 
 
 def get_store(store_uri: str) -> ServicesStore:
@@ -53,6 +52,8 @@ def get_tile_store(store_uri: str) -> TileAssignmentStore:
         or parsed.scheme.startswith("postgresql")
         or parsed.scheme.startswith("sqlite")
     ):
+        from .sqlalchemy_tile import SQLAlchemyTileStore  # noqa
+
         return SQLAlchemyTileStore(store=store_uri)
 
     raise ValueError(f"Tile store not supported for {store_uri}")
