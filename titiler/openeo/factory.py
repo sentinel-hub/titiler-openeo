@@ -5,7 +5,7 @@ from typing import Annotated, Any, Dict, List, Optional
 
 import morecantile
 import pyproj
-from attrs import define
+from attrs import define, field
 from fastapi import Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -36,6 +36,9 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
+    load_nodes_ids: List[str] = field(
+        factory=lambda: ["load_collection", "load_collection_and_reduce"]
+    )
 
     def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
         for _, node in process_graph.items():
@@ -60,14 +63,12 @@ class EndpointsFactory(BaseFactory):
 
         raise ValueError("Couldn't find a `save_result` process in the process graph")
 
-    def get_load_collection_nodes(
-        self, process_graph: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def get_load_nodes(self, process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find all `load_collection/load_collection_and_reduce` processes"""
         return [
             node
             for _, node in process_graph.items()
-            if node["process_id"] in ["load_collection", "load_collection_and_reduce"]
+            if node["process_id"] in self.load_nodes_ids
         ]
 
     def resolves_process_graph_parameters(self, pg, parameters):
@@ -1019,15 +1020,12 @@ class EndpointsFactory(BaseFactory):
 
             process = deepcopy(service["process"])
 
-            load_collection_nodes = self.get_load_collection_nodes(
-                process["process_graph"]
-            )
+            load_nodes = self.get_load_nodes(process["process_graph"])
 
             # Check that nodes have spatial-extent
             assert all(
-                node["arguments"].get("spatial_extent")
-                for node in load_collection_nodes
-            ), "Invalid load_collection process, Missing spatial_extent"
+                node["arguments"].get("spatial_extent") for node in load_nodes
+            ), "Invalid `load` process, Missing spatial_extent"
 
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
             args = {
@@ -1060,7 +1058,7 @@ class EndpointsFactory(BaseFactory):
                         f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
                     )
 
-            for node in load_collection_nodes:
+            for node in load_nodes:
                 # Adapt spatial extent with tile bounds
                 self.resolves_process_graph_parameters(process["process_graph"], args)
 
