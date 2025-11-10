@@ -37,6 +37,54 @@ class EndpointsFactory(BaseFactory):
     auth: Auth
     default_services_file: Optional[str] = None
 
+    def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
+        for _, node in process_graph.items():
+            if node["process_id"] == "save_result":
+                if node["arguments"]["format"] == "PNG":
+                    return "image/png"
+                elif node["arguments"]["format"] == "JPEG":
+                    return "image/jpeg"
+                elif node["arguments"]["format"] == "JPEG":
+                    return "image/jpg"
+                elif node["arguments"]["format"] == "GTiff":
+                    return "image/tiff"
+                elif node["arguments"]["format"] == "txt":
+                    return "text/plain"
+                elif (
+                    node["arguments"]["format"] == "json"
+                    or node["arguments"]["format"] == "metajson"
+                ):
+                    return "application/json"
+                else:
+                    return "application/PNG"
+
+        raise ValueError("Couldn't find a `save_result` process in the process graph")
+
+    def get_load_collection_nodes(
+        self, process_graph: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Find all `load_collection/load_collection_and_reduce` processes"""
+        return [
+            node
+            for _, node in process_graph.items()
+            if node["process_id"] in ["load_collection", "load_collection_and_reduce"]
+        ]
+
+    def resolves_process_graph_parameters(self, pg, parameters):
+        """Replace `from_parameters` values in process-graph."""
+        iterator = enumerate(pg) if isinstance(pg, list) else pg.items()
+        for key, value in iterator:
+            if (
+                isinstance(value, dict)
+                and len(value) == 1
+                and "from_parameter" in value
+            ):
+                if value["from_parameter"] in parameters:
+                    pg[key] = parameters[value["from_parameter"]]
+
+            elif isinstance(value, dict) or isinstance(value, list):
+                self.resolves_process_graph_parameters(value, parameters)
+
     def register_routes(self):  # noqa: C901
         """Register Routes."""
 
@@ -971,7 +1019,9 @@ class EndpointsFactory(BaseFactory):
 
             process = deepcopy(service["process"])
 
-            load_collection_nodes = get_load_collection_nodes(process["process_graph"])
+            load_collection_nodes = self.get_load_collection_nodes(
+                process["process_graph"]
+            )
 
             # Check that nodes have spatial-extent
             assert all(
@@ -1012,7 +1062,7 @@ class EndpointsFactory(BaseFactory):
 
             for node in load_collection_nodes:
                 # Adapt spatial extent with tile bounds
-                resolves_process_graph_parameters(process["process_graph"], args)
+                self.resolves_process_graph_parameters(process["process_graph"], args)
 
                 # We also add Width/Height/TileBuffer to the load_collection process
                 node["arguments"]["width"] = int(tile_size)
@@ -1020,7 +1070,7 @@ class EndpointsFactory(BaseFactory):
                 if tile_buffer:
                     node["arguments"]["tile_buffer"] = tile_buffer
 
-            media_type = _get_media_type(process["process_graph"])
+            media_type = self._get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
@@ -1039,48 +1089,3 @@ class EndpointsFactory(BaseFactory):
 
             img = pg_callable(named_parameters=named_params)
             return Response(img.data, media_type=media_type)
-
-
-def _get_media_type(process_graph: Dict[str, Any]) -> str:
-    for _, node in process_graph.items():
-        if node["process_id"] == "save_result":
-            if node["arguments"]["format"] == "PNG":
-                return "image/png"
-            elif node["arguments"]["format"] == "JPEG":
-                return "image/jpeg"
-            elif node["arguments"]["format"] == "JPEG":
-                return "image/jpg"
-            elif node["arguments"]["format"] == "GTiff":
-                return "image/tiff"
-            elif node["arguments"]["format"] == "txt":
-                return "text/plain"
-            elif (
-                node["arguments"]["format"] == "json"
-                or node["arguments"]["format"] == "metajson"
-            ):
-                return "application/json"
-            else:
-                return "application/PNG"
-
-    raise ValueError("Couldn't find a `save_result` process in the process graph")
-
-
-def get_load_collection_nodes(process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Find all `load_collection/load_collection_and_reduce` processes"""
-    return [
-        node
-        for _, node in process_graph.items()
-        if node["process_id"] in ["load_collection", "load_collection_and_reduce"]
-    ]
-
-
-def resolves_process_graph_parameters(pg, parameters):
-    """Replace `from_parameters` values in process-graph."""
-    iterator = enumerate(pg) if isinstance(pg, list) else pg.items()
-    for key, value in iterator:
-        if isinstance(value, dict) and len(value) == 1 and "from_parameter" in value:
-            if value["from_parameter"] in parameters:
-                pg[key] = parameters[value["from_parameter"]]
-
-        elif isinstance(value, dict) or isinstance(value, list):
-            resolves_process_graph_parameters(value, parameters)
