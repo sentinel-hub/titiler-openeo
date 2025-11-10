@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+* move `get_load_collection_nodes` and `resolves_process_graph_parameters` method within the `EndpointsFactory` class
+
 ## [0.5.0] (2025-11-05)
 
 ### Fixed
