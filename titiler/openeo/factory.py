@@ -80,19 +80,19 @@ class EndpointsFactory(BaseFactory):
         if load_node["arguments"]["spatial_extent"] is None:
             load_node["arguments"]["spatial_extent"] = {}
         else:
-            for cardinal_direction in ["east", "west", "south", "north"]:
-                cardinal_direction_value = load_node["arguments"]["spatial_extent"][
-                    cardinal_direction
-                ]
-                if (
-                    isinstance(cardinal_direction_value, dict)
-                    and "from_parameter" in cardinal_direction_value
+            for spatia_arg in ["east", "west", "south", "north", "crs"]:
+                spatia_arg_value = load_node["arguments"]["spatial_extent"].get(
+                    spatia_arg
+                )
+                if spatia_arg_value and (
+                    isinstance(spatia_arg_value, dict)
+                    and "from_parameter" in spatia_arg_value
                 ):
                     return
 
-        for cardinal_direction in ["east", "west", "south", "north"]:
-            load_node["arguments"]["spatial_extent"][cardinal_direction] = {
-                "from_parameter": f"spatial_extent_{cardinal_direction}"
+        for spatia_arg in ["east", "west", "south", "north", "crs"]:
+            load_node["arguments"]["spatial_extent"][spatia_arg] = {
+                "from_parameter": f"spatial_extent_{spatia_arg}"
             }
 
         return
@@ -1031,7 +1031,7 @@ class EndpointsFactory(BaseFactory):
             auth_manager.authorize(service, user)
 
             # Get service configuration
-            configuration = service.get("configuration", {})
+            configuration = service.get("configuration") or {}
             tile_size = configuration.get("tile_size", 256)
             tile_buffer = configuration.get("buffer")
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
