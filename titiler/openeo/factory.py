@@ -18,6 +18,7 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
+from .errors import InvalidProcessGraph
 from .models import openapi
 from .models.auth import User
 from .services import ServicesStore, TileAssignmentStore
@@ -70,6 +71,31 @@ class EndpointsFactory(BaseFactory):
             for _, node in process_graph.items()
             if node["process_id"] in self.load_nodes_ids
         ]
+
+    def overwrite_spatial_extent_without_parameters(self, load_node):
+        """Overwrite services Spatial Extent.
+
+        Adapted from https://github.com/Open-EO/openeo-sentinelhub-python-driver/blob/f046ca4e89105bfc4e7474eeffb864d147a05efd/rest/processing/utils.py#L307-L324
+        """
+        if load_node["arguments"]["spatial_extent"] is None:
+            load_node["arguments"]["spatial_extent"] = {}
+        else:
+            for cardinal_direction in ["east", "west", "south", "north"]:
+                cardinal_direction_value = load_node["arguments"]["spatial_extent"][
+                    cardinal_direction
+                ]
+                if (
+                    isinstance(cardinal_direction_value, dict)
+                    and "from_parameter" in cardinal_direction_value
+                ):
+                    return
+
+        for cardinal_direction in ["east", "west", "south", "north"]:
+            load_node["arguments"]["spatial_extent"][cardinal_direction] = {
+                "from_parameter": f"spatial_extent_{cardinal_direction}"
+            }
+
+        return
 
     def resolves_process_graph_parameters(self, pg, parameters):
         """Replace `from_parameters` values in process-graph."""
@@ -633,26 +659,25 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
-            # process = body.process.model_dump()
+            service_def = body.model_dump()
 
-            # TODO Validate process graph
-            # try:
-            #     # Parse and validate process graph structure
-            #     parsed_graph = OpenEOProcessGraph(pg_data=process)
+            try:
+                # Parse and validate process graph structure
+                parsed_graph = OpenEOProcessGraph(pg_data=service_def["process"])
 
-            #     # Check if all processes exist in registry
-            #     for node in parsed_graph.nodes:
-            #         process_id = node[1].get("process_id")
-            #         if process_id and process_id not in self.process_registry[None]:
-            #             raise InvalidProcessGraph(
-            #                 f"Process '{process_id}' not found in registry"
-            #             )
+                # Check if all processes exist in registry
+                for node in parsed_graph.nodes:
+                    process_id = node[1].get("process_id")
+                    if process_id and process_id not in self.process_registry[None]:
+                        raise InvalidProcessGraph(
+                            f"Process '{process_id}' not found in registry"
+                        )
 
-            #     # Try to create callable to validate parameter types
-            #     parsed_graph.to_callable(process_registry=self.process_registry)
+                # Try to create callable to validate parameter types
+                parsed_graph.to_callable(process_registry=self.process_registry)
 
-            # except Exception as e:
-            #     raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+            except Exception as e:
+                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
 
             # Check process and type are present
             if not body.process or not body.type:
@@ -661,12 +686,14 @@ class EndpointsFactory(BaseFactory):
                     detail="Both 'process' and 'type' fields are required.",
                 )
 
-            service_id = self.services_store.add_service(
-                user.user_id, body.model_dump()
-            )
+            for node in self.get_load_nodes(service_def["process"]["process_graph"]):
+                self.overwrite_spatial_extent_without_parameters(node)
+
+            service_id = self.services_store.add_service(user.user_id, service_def)
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
             service_url = self.url_for(
                 request, "openeo_service", service_id=service["id"]
             )

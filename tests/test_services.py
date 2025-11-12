@@ -135,6 +135,23 @@ def test_get_service(app_with_auth):
     assert service["title"] == service_input["title"]
     assert service["type"] == service_input["type"]
 
+    # Make sure we overwrite the Extent Parameters
+    load_node = service["process"]["process_graph"]["loadco1"]
+    arguments = load_node["arguments"]  # ["spatial_extent"]
+    assert arguments["id"] == "S2"
+    assert arguments["spatial_extent"]["west"] == {
+        "from_parameter": "spatial_extent_west"
+    }
+    assert arguments["spatial_extent"]["east"] == {
+        "from_parameter": "spatial_extent_east"
+    }
+    assert arguments["spatial_extent"]["north"] == {
+        "from_parameter": "spatial_extent_north"
+    }
+    assert arguments["spatial_extent"]["south"] == {
+        "from_parameter": "spatial_extent_south"
+    }
+
 
 def test_get_user_services(app_with_auth):
     """Test getting services for a specific user."""
