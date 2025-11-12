@@ -151,6 +151,7 @@ def test_get_service(app_with_auth):
     assert arguments["spatial_extent"]["south"] == {
         "from_parameter": "spatial_extent_south"
     }
+    assert arguments["spatial_extent"].get("crs")
 
 
 def test_get_user_services(app_with_auth):
