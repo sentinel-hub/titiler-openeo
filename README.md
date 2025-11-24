@@ -29,17 +29,15 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 
 ## Installation
 
-To install [`titiler-openeo`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/main.py), clone the repository and install the dependencies:
+[`uv`](https://docs.astral.sh/uv/) is the recommended way to install the project's runtime dependencies:
 
 ```bash
-git clone https://github.com/sentinel-hub/titiler-openeo.git
-cd titiler-openeo
-python -m pip install -e ".[server]"
+uv sync
 ```
 
 ## Usage
 
-To run the application, use the following command:
+Once dependencies are installed, copy one of the sample environment files (e.g. `.env.eoapi`) and start the API:
 
 ```bash
 cp .env.eoapi .env
@@ -88,39 +86,9 @@ In this repository, 2 `.env` sample files are provided:
 
 visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
 
-## Development
+## Contributing
 
-To set up a development environment, install the development dependencies:
-
-```bash
-python -m pip install -e ".[test,dev]"
-pre-commit install
-```
-
-### Running Tests
-
-To run the tests, use the following command:
-
-```bash
-python -m pytest
-```
-
-### Use the openEO editor
-
-To use the openEO editor, you can use Docker Compose to start all services:
-
-```bash
-docker compose up
-```
-
-This will start:
-- API service at http://localhost:8081
-- openEO Web Editor at http://localhost:8080
-- Keycloak at http://localhost:8082
-
-Access the editor at http://localhost:8080 and set the backend URL to http://localhost:8081.
-
-For authentication setup and testing, see the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, testing, and documentation workflows.
 
 ## License
 
