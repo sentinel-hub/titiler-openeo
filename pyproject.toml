@@ -38,7 +38,7 @@ dependencies = [
     "jsonpath-ng~=1.7.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 test = [
     "pytest",
     "pytest-cov",
@@ -49,7 +49,6 @@ test = [
     "sqlalchemy>=2.0.0",
     "cryptography",
 ]
-dev = ["pre-commit", "bump-my-version"]
 docs = [
     "ipython~=8.0.0",
     "mkdocs>=1.6.1",
@@ -58,6 +57,12 @@ docs = [
     "griffe-inherited-docstrings>=1.1.1",
     "mkdocstrings[python]>=0.29.1",
 ]
+dev = [
+    "pre-commit",
+    "bump-my-version",
+]
+
+[project.optional-dependencies]
 server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
 duckdb = ["duckdb"]
 postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary"]
