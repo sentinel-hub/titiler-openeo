@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from ..models.auth import User
-from .base import ServicesStore
+from .base import ServicesStore, UdpStore
 
 
 class Base(DeclarativeBase):
@@ -53,6 +53,22 @@ class UserTracking(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uix_user_provider"),
+    )
+
+
+class UdpDefinition(Base):
+    """SQLAlchemy UDP Definition Model."""
+
+    __tablename__ = "udp_definitions"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False)
+    process_graph = Column(JSON, nullable=False)
+    parameters = Column(JSON, nullable=True)
+    metadata = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
 
@@ -234,3 +250,120 @@ class SQLAlchemyStore(ServicesStore):
                 "email": tracking.email,
                 "name": tracking.name,
             }
+
+
+@define(kw_only=True)
+class SQLAlchemyUdpStore(UdpStore):
+    """SQLAlchemy UDP Store."""
+
+    store: str = field()
+    _engine: Any = field(default=None, init=False)
+    _session_factory: Any = field(default=None, init=False)
+
+    def __attrs_post_init__(self):
+        """Post init: create engine and session factory."""
+        kwargs = {}
+        if self.store == "sqlite:///:memory:":
+            kwargs = {
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            }
+        self._engine = create_engine(self.store, **kwargs)
+        self._session_factory = sessionmaker(bind=self._engine)
+        Base.metadata.create_all(self._engine)
+
+    def list_udps(
+        self, user_id: str, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """List UDPs for a user."""
+        with Session(self._engine) as session:
+            results = (
+                session.execute(
+                    select(UdpDefinition)
+                    .where(UdpDefinition.user_id == user_id)
+                    .order_by(UdpDefinition.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                .scalars()
+                .all()
+            )
+
+            return [self._to_dict(item) for item in results]
+
+    def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single UDP for a user."""
+        with Session(self._engine) as session:
+            result = session.execute(
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
+            ).scalar_one_or_none()
+
+            return self._to_dict(result) if result else None
+
+    def upsert_udp(
+        self,
+        user_id: str,
+        udp_id: str,
+        process_graph: Dict[str, Any],
+        parameters: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create or replace a UDP for a user."""
+        now = datetime.utcnow()
+        with Session(self._engine) as session:
+            existing = session.execute(
+                select(UdpDefinition).where(UdpDefinition.id == udp_id)
+            ).scalar_one_or_none()
+
+            if existing and existing.user_id != user_id:
+                raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
+
+            if existing:
+                existing.process_graph = process_graph
+                existing.parameters = parameters
+                existing.metadata = metadata
+                existing.updated_at = now
+            else:
+                new_udp = UdpDefinition(
+                    id=udp_id,
+                    user_id=user_id,
+                    process_graph=process_graph,
+                    parameters=parameters,
+                    metadata=metadata,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_udp)
+
+            session.commit()
+            return udp_id
+
+    def delete_udp(self, user_id: str, udp_id: str) -> bool:
+        """Delete a UDP for a user."""
+        with Session(self._engine) as session:
+            result = session.execute(
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
+            ).scalar_one_or_none()
+
+            if not result:
+                raise ValueError(f"Could not find UDP {udp_id} for user {user_id}")
+
+            session.delete(result)
+            session.commit()
+            return True
+
+    def _to_dict(self, udp: UdpDefinition) -> Dict[str, Any]:
+        """Serialize UDP model to dict."""
+        return {
+            "id": udp.id,
+            "user_id": udp.user_id,
+            "process_graph": udp.process_graph,
+            "parameters": udp.parameters,
+            "metadata": udp.metadata,
+            "created_at": udp.created_at,
+            "updated_at": udp.updated_at,
+        }

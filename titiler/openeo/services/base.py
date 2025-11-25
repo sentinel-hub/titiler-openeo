@@ -192,6 +192,46 @@ class TileAssignmentStore(metaclass=abc.ABCMeta):
 
 
 @define
+class UdpStore(metaclass=abc.ABCMeta):
+    """ABC class defining UDP storage operations."""
+
+    store: Any = field()
+
+    def __init__(self, store: Any):
+        """Initialize the UDP Store."""
+        self.store = store
+
+    @abc.abstractmethod
+    def list_udps(
+        self, user_id: str, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """List UDP definitions for a user."""
+        ...
+
+    @abc.abstractmethod
+    def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single UDP definition."""
+        ...
+
+    @abc.abstractmethod
+    def upsert_udp(
+        self,
+        user_id: str,
+        udp_id: str,
+        process_graph: Dict[str, Any],
+        parameters: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create or replace a UDP for a user."""
+        ...
+
+    @abc.abstractmethod
+    def delete_udp(self, user_id: str, udp_id: str) -> bool:
+        """Delete a UDP for a user."""
+        ...
+
+
+@define
 class ServicesStore(metaclass=abc.ABCMeta):
     """ABC Class defining STAC Backends."""
 
