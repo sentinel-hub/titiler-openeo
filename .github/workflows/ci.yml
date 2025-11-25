@@ -29,7 +29,7 @@ jobs:
 
       - name: Sync dependencies
         run: |
-          uv sync --group test --group dev
+          uv sync
 
       - name: Test titiler.openeo
         run: |

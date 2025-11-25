@@ -968,7 +968,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371 }
 wheels = [
@@ -1238,7 +1238,7 @@ name = "importlib-metadata"
 version = "8.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/76/66/650a33bd90f786193e4de4b3ad86ea60b53c89b669a5c7be931fac31cdb0/importlib_metadata-8.7.0.tar.gz", hash = "sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000", size = 56641 }
 wheels = [
@@ -3552,18 +3552,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "bump-my-version" },
-    { name = "pre-commit" },
-]
-docs = [
-    { name = "griffe-inherited-docstrings" },
-    { name = "ipython" },
-    { name = "mkdocs" },
-    { name = "mkdocs-jupyter" },
-    { name = "mkdocs-material", extra = ["imaging"] },
-    { name = "mkdocstrings", extra = ["python"] },
-]
 duckdb = [
     { name = "duckdb" },
 ]
@@ -3578,11 +3566,21 @@ postgres = [
 server = [
     { name = "uvicorn", extra = ["standard"] },
 ]
-test = [
+
+[package.dev-dependencies]
+dev = [
     { name = "brotlipy" },
+    { name = "bump-my-version" },
     { name = "cryptography" },
     { name = "duckdb" },
+    { name = "griffe-inherited-docstrings" },
     { name = "httpx" },
+    { name = "ipython" },
+    { name = "mkdocs" },
+    { name = "mkdocs-jupyter" },
+    { name = "mkdocs-material", extra = ["imaging"] },
+    { name = "mkdocstrings", extra = ["python"] },
+    { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -3591,34 +3589,38 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "brotlipy", marker = "extra == 'test'" },
-    { name = "bump-my-version", marker = "extra == 'dev'" },
     { name = "cryptography", marker = "extra == 'oidc'" },
-    { name = "cryptography", marker = "extra == 'test'" },
     { name = "duckdb", marker = "extra == 'duckdb'" },
-    { name = "duckdb", marker = "extra == 'test'" },
-    { name = "griffe-inherited-docstrings", marker = "extra == 'docs'", specifier = ">=1.1.1" },
     { name = "httpx", marker = "extra == 'oidc'" },
-    { name = "httpx", marker = "extra == 'test'" },
-    { name = "ipython", marker = "extra == 'docs'", specifier = "~=8.0.0" },
     { name = "jsonpath-ng", specifier = "~=1.7.0" },
-    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.1" },
-    { name = "mkdocs-jupyter", marker = "extra == 'docs'", specifier = "~=0.24.0" },
-    { name = "mkdocs-material", extras = ["imaging"], marker = "extra == 'docs'", specifier = ">=9.6.14" },
-    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.29.1" },
     { name = "openeo-pg-parser-networkx", specifier = "==2025.10.1" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'" },
     { name = "pydantic-settings", specifier = "~=2.0" },
     { name = "pystac-client" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "pytest-asyncio", marker = "extra == 'test'" },
-    { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.0" },
-    { name = "sqlalchemy", marker = "extra == 'test'", specifier = ">=2.0.0" },
     { name = "starlette-cramjam", specifier = ">=0.4,<0.6" },
     { name = "titiler-core", specifier = ">=0.24.0,<0.25" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.12.0,<0.19.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "brotlipy" },
+    { name = "bump-my-version" },
+    { name = "cryptography" },
+    { name = "duckdb" },
+    { name = "griffe-inherited-docstrings", specifier = ">=1.1.1" },
+    { name = "httpx" },
+    { name = "ipython", specifier = "~=8.0.0" },
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-jupyter", specifier = "~=0.24.0" },
+    { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.6.14" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.29.1" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "sqlalchemy", specifier = ">=2.0.0" },
 ]
 
 [[package]]

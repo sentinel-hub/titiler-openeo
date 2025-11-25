@@ -7,7 +7,7 @@ Issues and pull requests are more than welcome: https://github.com/sentinel-hub/
 It is easiest to bootstrap a development environment with [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync --group dev --group test --group docs --all-extras
+uv sync
 cp .env.eoapi .env
 export $(cat .env | xargs)
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8081
@@ -84,10 +84,10 @@ The Keycloak server will be available at http://localhost:8082 for testing OIDC 
 
 ## Docs
 
-Install the documentation extras with `uv`:
+Install the documentation dependencies (included in the dev group) with `uv`:
 
 ```bash
-uv sync --group docs
+uv sync
 ```
 
 Hot-reloading docs:
