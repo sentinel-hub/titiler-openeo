@@ -21,7 +21,7 @@ from .auth import Auth, CredentialsBasic, OIDCAuth
 from .errors import InvalidProcessGraph
 from .models import openapi
 from .models.auth import User
-from .services import ServicesStore, TileAssignmentStore
+from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
@@ -32,6 +32,7 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
+    udp_store: Optional[UdpStore] = None
     tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
