@@ -27,7 +27,7 @@ export $(cat .env | xargs)
 This sets up:
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
-TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
+TITILER_OPENEO_STORE_URL="services/eoapi.json"
 ```
 
 2. CDSE Configuration
@@ -39,7 +39,7 @@ export $(cat .env | xargs)
 This configures:
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
-TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
+TITILER_OPENEO_STORE_URL="services/copernicus.json"
 ```
 
 For CDSE, additional environment variables are required for efficient data access:

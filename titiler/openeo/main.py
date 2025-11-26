@@ -4,7 +4,9 @@ import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
-from openeo_pg_parser_networkx.process_registry import Process
+from openeo_pg_parser_networkx.process_registry import (
+    Process,  # type: ignore[import-untyped]
+)
 from starlette.middleware.cors import CORSMiddleware
 from starlette_cramjam.middleware import CompressionMiddleware
 
@@ -15,7 +17,6 @@ from .factory import EndpointsFactory
 from .middleware import DynamicCacheControlMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
-from .services.local import LocalUdpStore
 from .settings import ApiSettings, AuthSettings, BackendSettings
 from .stacapi import LoadCollection, LoadStac, stacApiBackend
 
@@ -24,22 +25,18 @@ STAC_VERSION = "1.0.0"
 api_settings = ApiSettings()
 auth_settings = AuthSettings()
 
-# BackendSettings requires stac_api_url and service_store_url to be set via environment variables
+# BackendSettings requires stac_api_url and store_url to be set via environment variables
 try:
-    backend_settings = BackendSettings()
+    backend_settings = BackendSettings()  # type: ignore[call-arg]
 except Exception as err:
     raise ValueError(
         "Missing required environment variables for BackendSettings. "
-        "Please set TITILER_OPENEO_STAC_API_URL and TITILER_OPENEO_SERVICE_STORE_URL"
+        "Please set TITILER_OPENEO_STAC_API_URL and TITILER_OPENEO_STORE_URL"
     ) from err
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
-service_store = get_store(str(backend_settings.service_store_url))
-udp_store = (
-    get_udp_store(str(backend_settings.udp_store_url))
-    if backend_settings.udp_store_url
-    else LocalUdpStore()
-)
+service_store = get_store(str(backend_settings.store_url))
+udp_store = get_udp_store(str(backend_settings.store_url))
 tile_store = (
     get_tile_store(backend_settings.tile_store_url)
     if backend_settings.tile_store_url

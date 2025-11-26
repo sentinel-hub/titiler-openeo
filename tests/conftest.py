@@ -38,7 +38,7 @@ def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
 def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
     """Create App with authentication for testing."""
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
-    monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
+    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
 
     from titiler.openeo.main import create_app
     from titiler.openeo.services import get_store
@@ -59,7 +59,7 @@ def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
 def app_no_auth(monkeypatch, store_path, store_type) -> TestClient:
     """Create App without authentication for testing."""
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
-    monkeypatch.setenv("TITILER_OPENEO_SERVICE_STORE_URL", f"{store_path}")
+    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
     monkeypatch.setenv("TITILER_OPENEO_REQUIRE_AUTH", "false")
 
     from titiler.openeo.main import create_app

@@ -78,7 +78,7 @@ The reduce process includes a parameter to choose the [pixel selection method](h
 
 ## Collections and STAC Integration
 
-openEO by TiTiler integrates with external STAC API services to provide collections. It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API, configured through the `TITILER_OPENEO_SERVICE_STORE_URL` environment variable.
+openEO by TiTiler integrates with external STAC API services to provide collections. It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API, configured through the `TITILER_OPENEO_STORE_URL` environment variable.
 
 ### OpenEO Process Graph to CQL2-JSON Conversion
 
