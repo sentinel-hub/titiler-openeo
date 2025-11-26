@@ -141,8 +141,16 @@ class LocalUdpStore(UdpStore):
         user_id: str,
         udp_id: str,
         process_graph: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        returns: Optional[Dict[str, Any]] = None,
+        categories: Optional[List[str]] = None,
+        deprecated: bool = False,
+        experimental: bool = False,
+        exceptions: Optional[Dict[str, Any]] = None,
+        examples: Optional[List[Dict[str, Any]]] = None,
+        links: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Create or replace a UDP for a user."""
         now = datetime.utcnow()
@@ -153,14 +161,30 @@ class LocalUdpStore(UdpStore):
         if existing is not None:
             existing["process_graph"] = process_graph
             existing["parameters"] = parameters
-            existing["metadata"] = metadata
+            existing["summary"] = summary
+            existing["description"] = description
+            existing["returns"] = returns
+            existing["categories"] = categories or []
+            existing["deprecated"] = deprecated
+            existing["experimental"] = experimental
+            existing["exceptions"] = exceptions
+            existing["examples"] = examples
+            existing["links"] = links
             existing["updated_at"] = now
         else:
             self.store[udp_id] = {
                 "user_id": user_id,
                 "process_graph": process_graph,
                 "parameters": parameters,
-                "metadata": metadata,
+                "summary": summary,
+                "description": description,
+                "returns": returns,
+                "categories": categories or [],
+                "deprecated": deprecated,
+                "experimental": experimental,
+                "exceptions": exceptions,
+                "examples": examples,
+                "links": links,
                 "created_at": now,
                 "updated_at": now,
             }
@@ -181,7 +205,15 @@ class LocalUdpStore(UdpStore):
             "user_id": data["user_id"],
             "process_graph": data["process_graph"],
             "parameters": data["parameters"],
-            "metadata": data["metadata"],
+            "summary": data["summary"],
+            "description": data["description"],
+            "returns": data["returns"],
+            "categories": data["categories"],
+            "deprecated": data["deprecated"],
+            "experimental": data["experimental"],
+            "exceptions": data["exceptions"],
+            "examples": data["examples"],
+            "links": data["links"],
             "created_at": data["created_at"],
             "updated_at": data["updated_at"],
         }

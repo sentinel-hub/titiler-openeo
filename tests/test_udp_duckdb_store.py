@@ -18,15 +18,23 @@ def test_upsert_and_get_udp(udp_store: DuckDBUdpStore):
     """Ensure UDPs can be created and retrieved."""
     udp_id = "udp-1"
     process_graph = {"process_id": "noop"}
-    parameters = {"param": "value"}
-    metadata = {"label": "test"}
+    parameters = [{"param": "value"}]
+    returns = {"schema": {"type": "object"}}
 
     udp_store.upsert_udp(
         user_id="user1",
         udp_id=udp_id,
         process_graph=process_graph,
         parameters=parameters,
-        metadata=metadata,
+        returns=returns,
+        summary="Test process",
+        description="Desc",
+        categories=["cat"],
+        deprecated=True,
+        experimental=True,
+        exceptions={"SomeError": {"message": "bad"}},
+        examples=[{"title": "ex"}],
+        links=[{"href": "https://example.com"}],
     )
 
     stored = udp_store.get_udp(user_id="user1", udp_id=udp_id)
@@ -34,7 +42,15 @@ def test_upsert_and_get_udp(udp_store: DuckDBUdpStore):
     assert stored["id"] == udp_id
     assert stored["process_graph"] == process_graph
     assert stored["parameters"] == parameters
-    assert stored["metadata"] == metadata
+    assert stored["returns"] == returns
+    assert stored["summary"] == "Test process"
+    assert stored["description"] == "Desc"
+    assert stored["categories"] == ["cat"]
+    assert stored["deprecated"] is True
+    assert stored["experimental"] is True
+    assert stored["exceptions"] == {"SomeError": {"message": "bad"}}
+    assert stored["examples"] == [{"title": "ex"}]
+    assert stored["links"] == [{"href": "https://example.com"}]
     assert stored["user_id"] == "user1"
 
 
@@ -45,23 +61,22 @@ def test_upsert_replaces_existing(udp_store: DuckDBUdpStore):
         user_id="user1",
         udp_id=udp_id,
         process_graph={"process_id": "first"},
-        parameters={"a": 1},
-        metadata={"m": 1},
+        parameters=[{"a": 1}],
     )
 
     udp_store.upsert_udp(
         user_id="user1",
         udp_id=udp_id,
         process_graph={"process_id": "second"},
-        parameters={"a": 2},
-        metadata={"m": 2},
+        parameters=[{"a": 2}],
+        summary="updated",
     )
 
     stored = udp_store.get_udp(user_id="user1", udp_id=udp_id)
     assert stored is not None
     assert stored["process_graph"] == {"process_id": "second"}
-    assert stored["parameters"] == {"a": 2}
-    assert stored["metadata"] == {"m": 2}
+    assert stored["parameters"] == [{"a": 2}]
+    assert stored["summary"] == "updated"
 
 
 def test_user_isolation_on_upsert_and_delete(udp_store: DuckDBUdpStore):

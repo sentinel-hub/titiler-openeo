@@ -245,14 +245,14 @@ class DuckDBStore(ServicesStore):
             }
 
 
-def _serialize_json(value: Optional[Dict[str, Any]]) -> Optional[str]:
+def _serialize_json(value: Optional[Any]) -> Optional[str]:
     """Serialize JSON-like values for duckdb storage."""
     if value is None:
         return None
     return json.dumps(value)
 
 
-def _deserialize_json(value: Optional[Any]) -> Optional[Dict[str, Any]]:
+def _deserialize_json(value: Optional[Any]) -> Optional[Any]:
     """Deserialize JSON values read from duckdb."""
     if value is None:
         return None
@@ -276,8 +276,16 @@ class DuckDBUdpStore(UdpStore):
                     id VARCHAR PRIMARY KEY,
                     user_id VARCHAR NOT NULL,
                     process_graph JSON NOT NULL,
+                    summary VARCHAR,
+                    description VARCHAR,
                     parameters JSON,
-                    metadata JSON,
+                    returns JSON,
+                    categories JSON,
+                    deprecated BOOLEAN DEFAULT FALSE,
+                    experimental BOOLEAN DEFAULT FALSE,
+                    exceptions JSON,
+                    examples JSON,
+                    links JSON,
                     created_at TIMESTAMP NOT NULL,
                     updated_at TIMESTAMP NOT NULL
                 );
@@ -294,8 +302,16 @@ class DuckDBUdpStore(UdpStore):
                 SELECT id,
                        user_id,
                        process_graph,
+                       summary,
+                       description,
                        parameters,
-                       metadata,
+                       returns,
+                       categories,
+                       deprecated,
+                       experimental,
+                       exceptions,
+                       examples,
+                       links,
                        created_at,
                        updated_at
                 FROM udp_definitions
@@ -317,8 +333,16 @@ class DuckDBUdpStore(UdpStore):
                 SELECT id,
                        user_id,
                        process_graph,
+                       summary,
+                       description,
                        parameters,
-                       metadata,
+                       returns,
+                       categories,
+                       deprecated,
+                       experimental,
+                       exceptions,
+                       examples,
+                       links,
                        created_at,
                        updated_at
                 FROM udp_definitions
@@ -337,8 +361,16 @@ class DuckDBUdpStore(UdpStore):
         user_id: str,
         udp_id: str,
         process_graph: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        returns: Optional[Dict[str, Any]] = None,
+        categories: Optional[List[str]] = None,
+        deprecated: bool = False,
+        experimental: bool = False,
+        exceptions: Optional[Dict[str, Any]] = None,
+        examples: Optional[List[Dict[str, Any]]] = None,
+        links: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Create or replace a UDP for a user."""
         now = datetime.utcnow()
@@ -360,15 +392,31 @@ class DuckDBUdpStore(UdpStore):
                     """
                     UPDATE udp_definitions
                     SET process_graph = ?,
+                        summary = ?,
+                        description = ?,
                         parameters = ?,
-                        metadata = ?,
+                        returns = ?,
+                        categories = ?,
+                        deprecated = ?,
+                        experimental = ?,
+                        exceptions = ?,
+                        examples = ?,
+                        links = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
                     [
                         _serialize_json(process_graph),
+                        summary,
+                        description,
                         _serialize_json(parameters),
-                        _serialize_json(metadata),
+                        _serialize_json(returns),
+                        _serialize_json(categories or []),
+                        deprecated,
+                        experimental,
+                        _serialize_json(exceptions),
+                        _serialize_json(examples),
+                        _serialize_json(links),
                         now,
                         udp_id,
                     ],
@@ -377,15 +425,24 @@ class DuckDBUdpStore(UdpStore):
                 con.execute(
                     """
                     INSERT INTO udp_definitions
-                    (id, user_id, process_graph, parameters, metadata, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, user_id, process_graph, summary, description, parameters, returns, categories,
+                     deprecated, experimental, exceptions, examples, links, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         udp_id,
                         user_id,
                         _serialize_json(process_graph),
+                        summary,
+                        description,
                         _serialize_json(parameters),
-                        _serialize_json(metadata),
+                        _serialize_json(returns),
+                        _serialize_json(categories or []),
+                        deprecated,
+                        experimental,
+                        _serialize_json(exceptions),
+                        _serialize_json(examples),
+                        _serialize_json(links),
                         now,
                         now,
                     ],
@@ -416,8 +473,16 @@ class DuckDBUdpStore(UdpStore):
             "id": row[0],
             "user_id": row[1],
             "process_graph": _deserialize_json(row[2]),
-            "parameters": _deserialize_json(row[3]),
-            "metadata": _deserialize_json(row[4]),
-            "created_at": row[5],
-            "updated_at": row[6],
+            "summary": row[3],
+            "description": row[4],
+            "parameters": _deserialize_json(row[5]),
+            "returns": _deserialize_json(row[6]),
+            "categories": _deserialize_json(row[7]) or [],
+            "deprecated": bool(row[8]),
+            "experimental": bool(row[9]),
+            "exceptions": _deserialize_json(row[10]),
+            "examples": _deserialize_json(row[11]),
+            "links": _deserialize_json(row[12]),
+            "created_at": row[13],
+            "updated_at": row[14],
         }

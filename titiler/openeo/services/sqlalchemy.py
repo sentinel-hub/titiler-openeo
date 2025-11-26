@@ -7,10 +7,12 @@ from typing import Any, Dict, List, Optional
 from attrs import define, field
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Integer,
     StaticPool,
     String,
+    Text,
     UniqueConstraint,
     create_engine,
     select,
@@ -63,11 +65,20 @@ class UdpDefinition(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     process_graph: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
-    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    # metadata is a reserved variable
-    udp_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        "metadata", JSON, nullable=True
+    summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parameters: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True
     )
+    returns: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    categories: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    deprecated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    experimental: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    exceptions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    examples: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True
+    )
+    links: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
@@ -311,8 +322,16 @@ class SQLAlchemyUdpStore(UdpStore):
         user_id: str,
         udp_id: str,
         process_graph: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        returns: Optional[Dict[str, Any]] = None,
+        categories: Optional[List[str]] = None,
+        deprecated: bool = False,
+        experimental: bool = False,
+        exceptions: Optional[Dict[str, Any]] = None,
+        examples: Optional[List[Dict[str, Any]]] = None,
+        links: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Create or replace a UDP for a user."""
         now = datetime.utcnow()
@@ -327,7 +346,15 @@ class SQLAlchemyUdpStore(UdpStore):
             if existing is not None:
                 existing.process_graph = process_graph
                 existing.parameters = parameters
-                existing.udp_metadata = metadata
+                existing.summary = summary
+                existing.description = description
+                existing.returns = returns
+                existing.categories = categories or []
+                existing.deprecated = deprecated
+                existing.experimental = experimental
+                existing.exceptions = exceptions
+                existing.examples = examples
+                existing.links = links
                 existing.updated_at = now
             else:
                 new_udp = UdpDefinition(
@@ -335,7 +362,15 @@ class SQLAlchemyUdpStore(UdpStore):
                     user_id=user_id,
                     process_graph=process_graph,
                     parameters=parameters,
-                    udp_metadata=metadata,
+                    summary=summary,
+                    description=description,
+                    returns=returns,
+                    categories=categories or [],
+                    deprecated=deprecated,
+                    experimental=experimental,
+                    exceptions=exceptions,
+                    examples=examples,
+                    links=links,
                     created_at=now,
                     updated_at=now,
                 )
@@ -367,7 +402,15 @@ class SQLAlchemyUdpStore(UdpStore):
             "user_id": udp.user_id,
             "process_graph": udp.process_graph,
             "parameters": udp.parameters,
-            "metadata": udp.udp_metadata,
+            "summary": udp.summary,
+            "description": udp.description,
+            "returns": udp.returns,
+            "categories": udp.categories or [],
+            "deprecated": udp.deprecated,
+            "experimental": udp.experimental,
+            "exceptions": udp.exceptions,
+            "examples": udp.examples,
+            "links": udp.links,
             "created_at": udp.created_at,
             "updated_at": udp.updated_at,
         }
