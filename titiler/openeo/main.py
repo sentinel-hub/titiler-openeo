@@ -15,6 +15,7 @@ from .factory import EndpointsFactory
 from .middleware import DynamicCacheControlMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
+from .services.local import LocalUdpStore
 from .settings import ApiSettings, AuthSettings, BackendSettings
 from .stacapi import LoadCollection, LoadStac, stacApiBackend
 
@@ -34,8 +35,10 @@ except Exception as err:
 
 stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
 service_store = get_store(str(backend_settings.service_store_url))
-udp_store = get_udp_store(
-    str(backend_settings.udp_store_url or backend_settings.service_store_url)
+udp_store = (
+    get_udp_store(str(backend_settings.udp_store_url))
+    if backend_settings.udp_store_url
+    else LocalUdpStore()
 )
 tile_store = (
     get_tile_store(backend_settings.tile_store_url)
@@ -43,8 +46,6 @@ tile_store = (
     else None
 )
 auth = get_auth(auth_settings, store=service_store)
-
-###############################################################################
 
 
 def create_app():
