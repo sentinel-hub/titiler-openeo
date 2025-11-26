@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from attrs import define, field
 from sqlalchemy import (
     JSON,
-    Column,
     DateTime,
     Integer,
     StaticPool,
@@ -16,7 +15,7 @@ from sqlalchemy import (
     create_engine,
     select,
 )
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
 from .base import ServicesStore, UdpStore
@@ -33,9 +32,9 @@ class Service(Base):
 
     __tablename__ = "services"
 
-    service_id = Column(String, primary_key=True)
-    user_id = Column(String)
-    service = Column(JSON)
+    service_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String)
+    service: Mapped[Dict[str, Any]] = mapped_column(JSON)
 
 
 class UserTracking(Base):
@@ -43,13 +42,13 @@ class UserTracking(Base):
 
     __tablename__ = "user_tracking"
 
-    user_id = Column(String, primary_key=True)
-    provider = Column(String, primary_key=True)
-    first_login = Column(DateTime, nullable=False)
-    last_login = Column(DateTime, nullable=False)
-    login_count = Column(Integer, default=1, nullable=False)
-    email = Column(String, nullable=True)
-    name = Column(String, nullable=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    first_login: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    login_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uix_user_provider"),
@@ -61,13 +60,18 @@ class UdpDefinition(Base):
 
     __tablename__ = "udp_definitions"
 
-    id = Column(String, primary_key=True)
-    user_id = Column(String, nullable=False)
-    process_graph = Column(JSON, nullable=False)
-    parameters = Column(JSON, nullable=True)
-    metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    process_graph: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # metadata is a reserved variable
+    udp_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        "metadata", JSON, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
@@ -323,7 +327,7 @@ class SQLAlchemyUdpStore(UdpStore):
             if existing:
                 existing.process_graph = process_graph
                 existing.parameters = parameters
-                existing.metadata = metadata
+                existing.udp_metadata = metadata
                 existing.updated_at = now
             else:
                 new_udp = UdpDefinition(
@@ -331,7 +335,7 @@ class SQLAlchemyUdpStore(UdpStore):
                     user_id=user_id,
                     process_graph=process_graph,
                     parameters=parameters,
-                    metadata=metadata,
+                    udp_metadata=metadata,
                     created_at=now,
                     updated_at=now,
                 )
@@ -363,7 +367,7 @@ class SQLAlchemyUdpStore(UdpStore):
             "user_id": udp.user_id,
             "process_graph": udp.process_graph,
             "parameters": udp.parameters,
-            "metadata": udp.metadata,
+            "metadata": udp.udp_metadata,
             "created_at": udp.created_at,
             "updated_at": udp.updated_at,
         }
