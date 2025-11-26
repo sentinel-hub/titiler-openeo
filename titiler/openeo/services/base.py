@@ -219,8 +219,16 @@ class UdpStore(metaclass=abc.ABCMeta):
         user_id: str,
         udp_id: str,
         process_graph: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        returns: Optional[Dict[str, Any]] = None,
+        categories: Optional[List[str]] = None,
+        deprecated: bool = False,
+        experimental: bool = False,
+        exceptions: Optional[Dict[str, Any]] = None,
+        examples: Optional[List[Dict[str, Any]]] = None,
+        links: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Create or replace a UDP for a user."""
         ...
