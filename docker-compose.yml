@@ -8,6 +8,8 @@ services:
     ports:
       - "8081:80"
     environment:
+      - UV_PROJECT_ENVIRONMENT=/opt/venv
+      - UV_LINK_MODE=copy
       # GDAL Config
       # This option controls the default GDAL raster block cache size.
       # If its value is small (less than 100000), it is assumed to be measured in megabytes, otherwise in bytes.

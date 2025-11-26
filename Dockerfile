@@ -12,26 +12,30 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONDONTWRITEBYTECODE=1
 
 # Install build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    libexpat1 && \
+    libexpat1 curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Create and activate virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Configure uv-managed virtual environment
+ENV UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}"
 
 # Install application
-WORKDIR /tmp
+WORKDIR /tmp/app
 COPY titiler/ titiler/
-COPY pyproject.toml .
-COPY README.md .
-RUN pip install --no-cache-dir --upgrade uvicorn PyYAML ".[pystac,oidc,postgres]"
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --extra server --extra oidc --extra postgres && \
+    uv pip install PyYAML && \
+    uv pip install --no-deps .
 
 # Runtime stage
 FROM python:${PYTHON_VERSION}-slim
