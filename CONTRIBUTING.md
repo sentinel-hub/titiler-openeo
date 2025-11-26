@@ -24,7 +24,7 @@ pre-commit install
 ## Running tests
 
 ```bash
-python -m pytest
+uv run pytest
 ```
 
 Add coverage options (e.g. `--cov=titiler.openeo`) when validating locally before release.
