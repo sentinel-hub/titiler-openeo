@@ -32,7 +32,7 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
-    udp_store: Optional[UdpStore] = None
+    udp_store: UdpStore
     tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
