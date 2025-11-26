@@ -36,7 +36,7 @@ services:
       # TiTiler STAC API Config
       - TITILER_OPENEO_API_DEBUG=TRUE
       - TITILER_OPENEO_STAC_API_URL=https://stac.eoapi.dev
-      - TITILER_OPENEO_SERVICE_STORE_URL=/tmp/services/eoapi.json
+      - TITILER_OPENEO_STORE_URL=/tmp/services/eoapi.json
       # Keycloak Config
       - TITILER_OPENEO_AUTH_METHOD=oidc
       - TITILER_OPENEO_AUTH_OIDC_CLIENT_ID=titiler-openeo
