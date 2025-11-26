@@ -105,11 +105,11 @@ class SQLAlchemyStore(ServicesStore):
     def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == service_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 return None
 
             return {
@@ -163,11 +163,11 @@ class SQLAlchemyStore(ServicesStore):
     def delete_service(self, service_id: str, **kwargs) -> bool:
         """Delete Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == service_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 raise ValueError(f"Could not find service: {service_id}")
 
             session.delete(result)
@@ -180,11 +180,11 @@ class SQLAlchemyStore(ServicesStore):
     ) -> str:
         """Update Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == item_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 raise ValueError(f"Could not find service: {item_id}")
 
             if result.user_id != user_id:
@@ -203,14 +203,14 @@ class SQLAlchemyStore(ServicesStore):
         now = datetime.now(timezone.utc)
 
         with Session(self._engine) as session:
-            tracking = session.execute(
+            tracking: Optional[UserTracking] = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user.user_id,
                     UserTracking.provider == provider,
                 )
             ).scalar_one_or_none()
 
-            if tracking:
+            if tracking is not None:
                 tracking.last_login = now
                 tracking.login_count += 1
                 if user.email:
@@ -236,13 +236,13 @@ class SQLAlchemyStore(ServicesStore):
     ) -> Optional[Dict[str, Any]]:
         """Get user tracking information."""
         with Session(self._engine) as session:
-            tracking = session.execute(
+            tracking: Optional[UserTracking] = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user_id, UserTracking.provider == provider
                 )
             ).scalar_one_or_none()
 
-            if not tracking:
+            if tracking is None:
                 return None
 
             return {
@@ -298,13 +298,13 @@ class SQLAlchemyUdpStore(UdpStore):
     def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
         """Get a single UDP for a user."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[UdpDefinition] = session.execute(
                 select(UdpDefinition).where(
                     UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
                 )
             ).scalar_one_or_none()
 
-            return self._to_dict(result) if result else None
+            return self._to_dict(result) if result is not None else None
 
     def upsert_udp(
         self,
@@ -317,14 +317,14 @@ class SQLAlchemyUdpStore(UdpStore):
         """Create or replace a UDP for a user."""
         now = datetime.utcnow()
         with Session(self._engine) as session:
-            existing = session.execute(
+            existing: Optional[UdpDefinition] = session.execute(
                 select(UdpDefinition).where(UdpDefinition.id == udp_id)
             ).scalar_one_or_none()
 
-            if existing and existing.user_id != user_id:
+            if existing is not None and existing.user_id != user_id:
                 raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
 
-            if existing:
+            if existing is not None:
                 existing.process_graph = process_graph
                 existing.parameters = parameters
                 existing.udp_metadata = metadata
@@ -347,13 +347,13 @@ class SQLAlchemyUdpStore(UdpStore):
     def delete_udp(self, user_id: str, udp_id: str) -> bool:
         """Delete a UDP for a user."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[UdpDefinition] = session.execute(
                 select(UdpDefinition).where(
                     UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
                 )
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 raise ValueError(f"Could not find UDP {udp_id} for user {user_id}")
 
             session.delete(result)
