@@ -23,6 +23,7 @@ from rio_tiler.errors import (
 )
 from rio_tiler.io import Reader
 from rio_tiler.io.base import BaseReader, MultiBaseReader
+from rio_tiler.io.stac import STAC_ALTERNATE_KEY
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
@@ -45,25 +46,7 @@ class Dims(TypedDict):
 
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
-    """Simplified STAC Reader.
-
-    Inputs should be in form of:
-    ```json
-    {
-        "id": "IAMASTACITEM",
-        "collection": "mycollection",
-        "bbox": (0, 0, 10, 10),
-        "assets": {
-            "COG": {
-                "href": "https://somewhereovertherainbow.io/cog.tif"
-            }
-        }
-    }
-    ```
-
-    """
-
-    item: pystac.Item = attr.ib(init=False)
+    """Simplified STAC Reader."""
 
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
     minzoom: int = attr.ib(default=None)
@@ -76,6 +59,8 @@ class SimpleSTACReader(MultiBaseReader):
     reader_options: Dict = attr.ib(factory=dict)
 
     ctx: Any = attr.ib(default=rasterio.Env)
+
+    item: pystac.Item = attr.ib(init=False)
 
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
@@ -141,50 +126,63 @@ class SimpleSTACReader(MultiBaseReader):
         return asset, None
 
     def _get_asset_info(self, asset: str) -> AssetInfo:
-        """Validate asset names and return asset's url and metadata.
+        """Validate asset names and return asset's info.
 
         Args:
             asset (str): STAC asset name.
 
         Returns:
-            AssetInfo: Asset URL and metadata.
+            AssetInfo: STAC asset info.
+
         """
         asset, vrt_options = self._parse_vrt_asset(asset)
         if asset not in self.assets:
             raise InvalidAssetName(
-                f"{asset} is not valid. Should be one of {self.assets}"
+                f"'{asset}' is not valid, should be one of {self.assets}"
             )
 
-        # Convert to pystac Item and get asset information
-        pystac_asset = self.item.assets[asset]
+        asset_info = self.item.assets[asset]
+        extras = asset_info.extra_fields
 
         info = AssetInfo(
-            url=pystac_asset.href,
-            env={},
+            url=asset_info.get_absolute_href() or asset_info.href,
+            metadata=extras if not vrt_options else None,
         )
 
-        # Add media type if available
-        if pystac_asset.media_type:
-            info["media_type"] = pystac_asset.media_type
+        if STAC_ALTERNATE_KEY and extras.get("alternate"):
+            if alternate := extras["alternate"].get(STAC_ALTERNATE_KEY):
+                info["url"] = alternate["href"]
 
-        # Add any asset-specific metadata
-        if pystac_asset.extra_fields:
-            # Handle file:header_size
-            if header_size := pystac_asset.extra_fields.get("file:header_size"):
-                info["env"]["GDAL_INGESTED_BYTES_AT_OPEN"] = header_size
+        if asset_info.media_type:
+            info["media_type"] = asset_info.media_type
 
-            # Handle raster:bands statistics
-            if bands := pystac_asset.extra_fields.get("raster:bands"):
-                stats = [
-                    (b["statistics"]["minimum"], b["statistics"]["maximum"])
-                    for b in bands
-                    if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
-                ]
-                if len(stats) == len(bands):
-                    info["dataset_statistics"] = stats
+        # https://github.com/stac-extensions/file
+        if head := extras.get("file:header_size"):
+            info["env"] = {"GDAL_INGESTED_BYTES_AT_OPEN": head}
+
+        # https://github.com/stac-extensions/raster
+        if extras.get("raster:bands") and not vrt_options:
+            bands = extras.get("raster:bands")
+            stats = [
+                (b["statistics"]["minimum"], b["statistics"]["maximum"])
+                for b in bands
+                if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
+            ]
+            # check that stats data are all double and make warning if not
+            if (
+                stats
+                and all(isinstance(v, (int, float)) for stat in stats for v in stat)
+                and len(stats) == len(bands)
+            ):
+                info["dataset_statistics"] = stats
+            else:
+                warnings.warn(
+                    "Some statistics data in STAC are invalid, they will be ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         if vrt_options:
-            # Construct VRT url
             info["url"] = f"vrt://{info['url']}?{vrt_options}"
 
         return info

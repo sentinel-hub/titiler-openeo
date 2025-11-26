@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * add `load_nodes_ids` attribute in `EndpointsFactory` 
-
+* add STAC `extras` for STACReader asset's info (e.g Band/proj extensions)
 
 ### Fixed
 
