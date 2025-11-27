@@ -158,6 +158,80 @@ def _handle_special_args(
             resolved_kwargs.pop(arg, None)
 
 
+def _is_array_like_union(non_none_types: list, args: tuple) -> str:
+    """Check if a Union type represents an ArrayLike type.
+
+    Args:
+        non_none_types: Types in the Union excluding None
+        args: All arguments in the Union including None
+
+    Returns:
+        Array type name if it's array-like, empty string otherwise
+    """
+    type_strs = [str(arg) for arg in non_none_types]
+
+    # Count array-like indicators
+    array_indicators = sum(
+        1
+        for ts in type_strs
+        if "array" in ts.lower()
+        or "sequence" in ts.lower()
+        or "_SupportsArray" in ts
+        or "ndarray" in ts
+    )
+
+    # Count basic primitive types that are part of array-like
+    primitive_indicators = sum(
+        1 for arg in non_none_types if arg in (bool, int, float, complex, str, bytes)
+    )
+
+    # If we have array indicators and/or multiple primitives, it's likely ArrayLike
+    total_array_like = array_indicators + primitive_indicators
+    if total_array_like >= len(non_none_types) * 0.7:  # 70% threshold
+        # This is likely ArrayLike or similar
+        if type(None) in args:
+            return "array or null"
+        return "array"
+
+    return ""
+
+
+def _handle_union_types(args: tuple) -> str:
+    """Handle Union/Optional type annotations.
+
+    Args:
+        args: Arguments from get_args() of Union type
+
+    Returns:
+        Human-readable type name
+    """
+    # Filter out NoneType
+    non_none_types = [arg for arg in args if arg is not type(None)]
+
+    if len(non_none_types) == 1:
+        # It's an Optional type
+        base_name = _type_to_openeo_name(non_none_types[0])
+        if type(None) in args:
+            return f"{base_name} or null"
+        return base_name
+
+    # Check if this is a complex array-like union (like numpy's ArrayLike)
+    array_like_result = _is_array_like_union(non_none_types, args)
+    if array_like_result:
+        return array_like_result
+
+    # Multiple distinct types in Union
+    type_names = [_type_to_openeo_name(arg) for arg in non_none_types]
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_names = []
+    for name in type_names:
+        if name not in seen:
+            seen.add(name)
+            unique_names.append(name)
+    return " or ".join(unique_names)
+
+
 def _type_to_openeo_name(param_type: Any) -> str:
     """Convert a Python type annotation to a human-readable OpenEO type name.
 
@@ -167,7 +241,6 @@ def _type_to_openeo_name(param_type: Any) -> str:
     Returns:
         Human-readable type name for error messages
     """
-
     # Handle None type
     if param_type is type(None):
         return "null"
@@ -181,53 +254,7 @@ def _type_to_openeo_name(param_type: Any) -> str:
     origin = get_origin(param_type)
     if origin is Union:
         args = get_args(param_type)
-        # Filter out NoneType
-        non_none_types = [arg for arg in args if arg is not type(None)]
-        if len(non_none_types) == 1:
-            # It's an Optional type
-            base_name = _type_to_openeo_name(non_none_types[0])
-            if type(None) in args:
-                return f"{base_name} or null"
-            return base_name
-        else:
-            # Check if this is a complex array-like union (like numpy's ArrayLike)
-            type_strs = [str(arg) for arg in non_none_types]
-
-            # Count array-like indicators
-            array_indicators = sum(
-                1
-                for ts in type_strs
-                if "array" in ts.lower()
-                or "sequence" in ts.lower()
-                or "_SupportsArray" in ts
-                or "ndarray" in ts
-            )
-
-            # Count basic primitive types that are part of array-like
-            primitive_indicators = sum(
-                1
-                for arg in non_none_types
-                if arg in (bool, int, float, complex, str, bytes)
-            )
-
-            # If we have array indicators and/or multiple primitives, it's likely ArrayLike
-            total_array_like = array_indicators + primitive_indicators
-            if total_array_like >= len(non_none_types) * 0.7:  # 70% threshold
-                # This is likely ArrayLike or similar
-                if type(None) in args:
-                    return "array or null"
-                return "array"
-
-            # Multiple distinct types in Union
-            type_names = [_type_to_openeo_name(arg) for arg in non_none_types]
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_names = []
-            for name in type_names:
-                if name not in seen:
-                    seen.add(name)
-                    unique_names.append(name)
-            return " or ".join(unique_names)
+        return _handle_union_types(args)
 
     # Handle dict/RasterStack types
     if param_type is dict or (
@@ -376,7 +403,7 @@ def _validate_parameter_types(
                 f"Parameter '{param_name}' in process '{func_name}': "
                 f"expected '{expected_type_name}' but got '{actual_type_name}'. "
                 f"Details: {e}"
-            )
+            ) from e
         except Exception:
             # Skip validation if TypeAdapter can't handle the type
             # (e.g., for complex custom types that Pydantic doesn't understand)
