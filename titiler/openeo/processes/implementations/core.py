@@ -3,7 +3,7 @@
 import inspect
 import logging
 from functools import wraps
-from typing import Any, Dict, Optional, Tuple, Union, get_origin, get_args
+from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
 from pydantic import TypeAdapter, ValidationError
@@ -158,6 +158,140 @@ def _handle_special_args(
             resolved_kwargs.pop(arg, None)
 
 
+def _type_to_openeo_name(param_type: Any) -> str:
+    """Convert a Python type annotation to a human-readable OpenEO type name.
+
+    Args:
+        param_type: Python type annotation
+
+    Returns:
+        Human-readable type name for error messages
+    """
+
+    # Handle None type
+    if param_type is type(None):
+        return "null"
+
+    # Handle ArrayLike and similar array types first (before Union handling)
+    type_str = str(param_type)
+    if "ArrayLike" in type_str or "ndarray" in type_str:
+        return "array"
+
+    # Handle Union/Optional types
+    origin = get_origin(param_type)
+    if origin is Union:
+        args = get_args(param_type)
+        # Filter out NoneType
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if len(non_none_types) == 1:
+            # It's an Optional type
+            base_name = _type_to_openeo_name(non_none_types[0])
+            if type(None) in args:
+                return f"{base_name} or null"
+            return base_name
+        else:
+            # Check if this is a complex array-like union (like numpy's ArrayLike)
+            type_strs = [str(arg) for arg in non_none_types]
+
+            # Count array-like indicators
+            array_indicators = sum(
+                1
+                for ts in type_strs
+                if "array" in ts.lower()
+                or "sequence" in ts.lower()
+                or "_SupportsArray" in ts
+                or "ndarray" in ts
+            )
+
+            # Count basic primitive types that are part of array-like
+            primitive_indicators = sum(
+                1
+                for arg in non_none_types
+                if arg in (bool, int, float, complex, str, bytes)
+            )
+
+            # If we have array indicators and/or multiple primitives, it's likely ArrayLike
+            total_array_like = array_indicators + primitive_indicators
+            if total_array_like >= len(non_none_types) * 0.7:  # 70% threshold
+                # This is likely ArrayLike or similar
+                if type(None) in args:
+                    return "array or null"
+                return "array"
+
+            # Multiple distinct types in Union
+            type_names = [_type_to_openeo_name(arg) for arg in non_none_types]
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_names = []
+            for name in type_names:
+                if name not in seen:
+                    seen.add(name)
+                    unique_names.append(name)
+            return " or ".join(unique_names)
+
+    # Handle dict/RasterStack types
+    if param_type is dict or (
+        hasattr(param_type, "__origin__") and param_type.__origin__ is dict
+    ):
+        return "datacube"
+
+    # Handle basic types
+    if param_type is int:
+        return "integer"
+    if param_type is float:
+        return "number"
+    if param_type is str:
+        return "string"
+    if param_type is bool:
+        return "boolean"
+
+    # Handle custom types
+    if hasattr(param_type, "__name__"):
+        name = param_type.__name__
+        if name == "LazyRasterStack":
+            return "datacube"
+        if name == "RasterStack":
+            return "datacube"
+        return name
+
+    # Fallback to string representation
+    return str(param_type)
+
+
+def _value_to_openeo_name(value: Any) -> str:
+    """Convert a value's type to a human-readable OpenEO type name.
+
+    Args:
+        value: The value whose type to describe
+
+    Returns:
+        Human-readable type name
+    """
+    from .data_model import LazyRasterStack
+
+    if value is None:
+        return "null"
+
+    value_type = type(value)
+
+    if isinstance(value, dict):
+        return "datacube"
+    if isinstance(value, LazyRasterStack):
+        return "datacube"
+    if hasattr(value, "__array__"):
+        return "array"
+    if value_type is int:
+        return "integer"
+    if value_type is float:
+        return "number"
+    if value_type is str:
+        return "string"
+    if value_type is bool:
+        return "boolean"
+
+    return value_type.__name__
+
+
 def _validate_parameter_types(
     resolved_kwargs: Dict[str, Any],
     param_types: Dict[str, Any],
@@ -174,17 +308,17 @@ def _validate_parameter_types(
         TypeError: If a parameter has an invalid type
     """
     from .data_model import LazyRasterStack
-    
+
     for param_name, param_value in resolved_kwargs.items():
         if param_name not in param_types:
             continue
-            
+
         param_type = param_types[param_name]
-        
+
         # Skip validation for parameters without type annotations or with Any type
         if param_type is inspect.Parameter.empty or param_type is Any:
             continue
-        
+
         # Handle None values for Optional types
         if param_value is None:
             origin = get_origin(param_type)
@@ -197,46 +331,51 @@ def _validate_parameter_types(
             raise TypeError(
                 f"Parameter '{param_name}' in process '{func_name}' cannot be None"
             )
-        
+
         # Check for dict/RasterStack being passed to ArrayLike parameters
         # This is a common mistake we want to catch
         # Note: RasterStack is just Dict[str, ImageData], so we check isinstance(dict)
         if isinstance(param_value, (dict, LazyRasterStack)):
             # Check if the expected type is array-like (not a dict/RasterStack)
             origin = get_origin(param_type)
-            
+
             # Handle Optional types
             if origin is Union:
                 args = get_args(param_type)
                 # Filter out NoneType to get the actual types
                 actual_types = [arg for arg in args if arg is not type(None)]
-                
+
                 # Check if any of the actual types are dict-based
                 is_dict_expected = any(
-                    arg is dict or 
-                    (hasattr(arg, '__origin__') and arg.__origin__ is dict)
+                    arg is dict
+                    or (hasattr(arg, "__origin__") and arg.__origin__ is dict)
                     for arg in actual_types
                 )
             else:
-                is_dict_expected = param_type is dict or \
-                    (hasattr(param_type, '__origin__') and param_type.__origin__ is dict)
-            
-            if not is_dict_expected:
-                raise TypeError(
-                    f"Parameter '{param_name}' in process '{func_name}' expected "
-                    f"'{param_type}' but got '{type(param_value).__name__}'. "
-                    f"RasterStack/dict types are not compatible with array-like parameters."
+                is_dict_expected = param_type is dict or (
+                    hasattr(param_type, "__origin__") and param_type.__origin__ is dict
                 )
-        
+
+            if not is_dict_expected:
+                expected_type_name = _type_to_openeo_name(param_type)
+                actual_type_name = _value_to_openeo_name(param_value)
+                raise TypeError(
+                    f"Parameter '{param_name}' in process '{func_name}': "
+                    f"expected '{expected_type_name}' but got '{actual_type_name}'"
+                )
+
         # Use Pydantic TypeAdapter for general validation
         try:
             adapter = TypeAdapter(param_type)
             # Validate the value - this will raise ValidationError if invalid
             adapter.validate_python(param_value)
         except ValidationError as e:
+            expected_type_name = _type_to_openeo_name(param_type)
+            actual_type_name = _value_to_openeo_name(param_value)
             raise TypeError(
-                f"Parameter '{param_name}' in process '{func_name}' has invalid type. "
-                f"Expected '{param_type}' but validation failed: {e}"
+                f"Parameter '{param_name}' in process '{func_name}': "
+                f"expected '{expected_type_name}' but got '{actual_type_name}'. "
+                f"Details: {e}"
             )
         except Exception:
             # Skip validation if TypeAdapter can't handle the type

@@ -13,7 +13,7 @@ def test_array_create_with_valid_array():
     print("Test 1: array_create with valid array input...")
     try:
         result = array_create(data=[1, 2, 3], repeat=1)
-        print(f"✓ Success: array_create accepted array input")
+        print("✓ Success: array_create accepted array input")
         print(f"  Result: {result}")
     except TypeError as e:
         print(f"✗ Failed: {e}")
@@ -26,7 +26,7 @@ def test_array_create_with_none():
     print("\nTest 2: array_create with None input...")
     try:
         result = array_create(data=None, repeat=1)
-        print(f"✓ Success: array_create accepted None input")
+        print("✓ Success: array_create accepted None input")
         print(f"  Result shape: {result.shape}")
     except TypeError as e:
         print(f"✗ Failed: {e}")
@@ -37,23 +37,21 @@ def test_array_create_with_none():
 def test_array_create_with_raster_stack():
     """Test that array_create rejects RasterStack input."""
     print("\nTest 3: array_create with RasterStack (should fail)...")
-    
+
     # Create a RasterStack
     raster_stack: RasterStack = {
         "band1": ImageData(
-            np.array([[[1, 2], [3, 4]]]),
-            bounds=(0, 0, 1, 1),
-            crs="EPSG:4326"
+            np.array([[[1, 2], [3, 4]]]), bounds=(0, 0, 1, 1), crs="EPSG:4326"
         )
     }
-    
+
     try:
         result = array_create(data=raster_stack, repeat=1)
-        print(f"✗ Failed: array_create should have rejected RasterStack but accepted it")
+        print("✗ Failed: array_create should have rejected RasterStack but accepted it")
         print(f"  Result: {result}")
         return False
     except TypeError as e:
-        print(f"✓ Success: array_create correctly rejected RasterStack")
+        print("✓ Success: array_create correctly rejected RasterStack")
         print(f"  Error message: {e}")
         return True
 
@@ -63,7 +61,7 @@ def test_array_create_with_numpy_array():
     print("\nTest 4: array_create with numpy array...")
     try:
         result = array_create(data=np.array([1, 2, 3]), repeat=1)
-        print(f"✓ Success: array_create accepted numpy array")
+        print("✓ Success: array_create accepted numpy array")
         print(f"  Result: {result}")
     except TypeError as e:
         print(f"✗ Failed: {e}")
@@ -75,14 +73,14 @@ if __name__ == "__main__":
     print("=" * 70)
     print("Type Validation Test Suite")
     print("=" * 70)
-    
+
     tests = [
         test_array_create_with_valid_array,
         test_array_create_with_none,
         test_array_create_with_raster_stack,
         test_array_create_with_numpy_array,
     ]
-    
+
     results = []
     for test in tests:
         try:
@@ -90,11 +88,11 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"✗ Test raised unexpected exception: {e}")
             results.append(False)
-    
+
     print("\n" + "=" * 70)
     print(f"Results: {sum(results)}/{len(results)} tests passed")
     print("=" * 70)
-    
+
     if all(results):
         print("✓ All tests passed!")
         exit(0)
