@@ -3,9 +3,10 @@
 import inspect
 import logging
 from functools import wraps
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, get_origin, get_args
 
 from openeo_pg_parser_networkx.pg_schema import ParameterReference
+from pydantic import TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
 
@@ -157,6 +158,94 @@ def _handle_special_args(
             resolved_kwargs.pop(arg, None)
 
 
+def _validate_parameter_types(
+    resolved_kwargs: Dict[str, Any],
+    param_types: Dict[str, Any],
+    func_name: str,
+) -> None:
+    """Validate parameter types using Pydantic.
+
+    Args:
+        resolved_kwargs: Dictionary of resolved keyword arguments
+        param_types: Dictionary of parameter type annotations
+        func_name: Name of the function for error messages
+
+    Raises:
+        TypeError: If a parameter has an invalid type
+    """
+    from .data_model import LazyRasterStack
+    
+    for param_name, param_value in resolved_kwargs.items():
+        if param_name not in param_types:
+            continue
+            
+        param_type = param_types[param_name]
+        
+        # Skip validation for parameters without type annotations or with Any type
+        if param_type is inspect.Parameter.empty or param_type is Any:
+            continue
+        
+        # Handle None values for Optional types
+        if param_value is None:
+            origin = get_origin(param_type)
+            if origin is Union:
+                args = get_args(param_type)
+                if type(None) in args:
+                    # None is allowed for Optional types
+                    continue
+            # If we get here, None is not allowed
+            raise TypeError(
+                f"Parameter '{param_name}' in process '{func_name}' cannot be None"
+            )
+        
+        # Check for dict/RasterStack being passed to ArrayLike parameters
+        # This is a common mistake we want to catch
+        # Note: RasterStack is just Dict[str, ImageData], so we check isinstance(dict)
+        if isinstance(param_value, (dict, LazyRasterStack)):
+            # Check if the expected type is array-like (not a dict/RasterStack)
+            origin = get_origin(param_type)
+            
+            # Handle Optional types
+            if origin is Union:
+                args = get_args(param_type)
+                # Filter out NoneType to get the actual types
+                actual_types = [arg for arg in args if arg is not type(None)]
+                
+                # Check if any of the actual types are dict-based
+                is_dict_expected = any(
+                    arg is dict or 
+                    (hasattr(arg, '__origin__') and arg.__origin__ is dict)
+                    for arg in actual_types
+                )
+            else:
+                is_dict_expected = param_type is dict or \
+                    (hasattr(param_type, '__origin__') and param_type.__origin__ is dict)
+            
+            if not is_dict_expected:
+                raise TypeError(
+                    f"Parameter '{param_name}' in process '{func_name}' expected "
+                    f"'{param_type}' but got '{type(param_value).__name__}'. "
+                    f"RasterStack/dict types are not compatible with array-like parameters."
+                )
+        
+        # Use Pydantic TypeAdapter for general validation
+        try:
+            adapter = TypeAdapter(param_type)
+            # Validate the value - this will raise ValidationError if invalid
+            adapter.validate_python(param_value)
+        except ValidationError as e:
+            raise TypeError(
+                f"Parameter '{param_name}' in process '{func_name}' has invalid type. "
+                f"Expected '{param_type}' but validation failed: {e}"
+            )
+        except Exception:
+            # Skip validation if TypeAdapter can't handle the type
+            # (e.g., for complex custom types that Pydantic doesn't understand)
+            logger.debug(
+                f"Could not validate type for parameter '{param_name}' with type '{param_type}'"
+            )
+
+
 def process(f):
     """Handle parameter resolution in the OpenEO processing pipeline.
 
@@ -207,6 +296,9 @@ def process(f):
 
         # Handle special parameters
         _handle_special_args(resolved_kwargs, sig)
+
+        # Validate parameter types
+        _validate_parameter_types(resolved_kwargs, param_types, f.__name__)
 
         # Debug logging
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
