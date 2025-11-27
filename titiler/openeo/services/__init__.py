@@ -1,6 +1,5 @@
 """titiler.openeo.services."""
 
-import json
 from urllib.parse import urlparse
 
 from .base import ServicesStore, TileAssignmentStore, UdpStore
@@ -20,9 +19,10 @@ def get_store(store_uri: str) -> ServicesStore:
     parsed = urlparse(store_uri)
 
     if parsed.path.endswith(".json"):
-        from .local import LocalStore  # noqa
+        from .local import LocalServiceStore, load_local_store_data  # noqa
 
-        return LocalStore(json.load(open(store_uri)))  # type: ignore
+        services_data, _ = load_local_store_data(store_uri)
+        return LocalServiceStore(store=services_data, path=store_uri)  # type: ignore[arg-type]
 
     if parsed.path.endswith(".db"):
         from .duckdb import DuckDBStore  # noqa
@@ -42,13 +42,10 @@ def get_udp_store(store_uri: str) -> UdpStore:
     parsed = urlparse(store_uri)
 
     if parsed.path.endswith(".json"):
-        from .local import LocalUdpStore  # noqa
+        from .local import LocalUdpStore, load_local_store_data  # noqa
 
-        try:
-            data = json.load(open(store_uri))
-        except FileNotFoundError:
-            data = {}
-        return LocalUdpStore(store=data)  # type: ignore[arg-type]
+        _, udp_data = load_local_store_data(store_uri)
+        return LocalUdpStore(store=udp_data, path=store_uri)  # type: ignore[arg-type]
 
     if parsed.path.endswith(".db") or parsed.scheme == "duckdb":
         from .duckdb import DuckDBUdpStore  # noqa
