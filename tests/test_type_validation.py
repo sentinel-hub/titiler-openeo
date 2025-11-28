@@ -67,4 +67,3 @@ def test_array_create_with_numpy_array():
         print(f"✗ Failed: {e}")
         return False
     return True
-
