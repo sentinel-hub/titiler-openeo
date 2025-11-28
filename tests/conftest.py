@@ -1,5 +1,6 @@
 """``pytest`` configuration."""
 
+import json
 from pathlib import Path
 from typing import Any, Literal, Union
 
@@ -25,7 +26,7 @@ def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
     tmp_path.mkdir(exist_ok=True)
     if store_type == "local":
         path = tmp_path / "services.json"
-        path.write_text("{}")
+        path.write_text(json.dumps({"services": {}, "udp_definitions": {}}))
         return path
     elif store_type == "duckdb":
         path = tmp_path / "services.db"
@@ -89,7 +90,7 @@ def clean_services(app_no_auth, store_path, store_type):
     yield
     # Reset store to empty state
     if store_type == "local":
-        store_path.write_text("{}")
+        store_path.write_text(json.dumps({"services": {}, "udp_definitions": {}}))
     elif store_type == "duckdb":
         if store_path.exists():
             store_path.unlink()

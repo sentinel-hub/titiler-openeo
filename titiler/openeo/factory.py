@@ -6,7 +6,7 @@ from typing import Annotated, Any, Dict, List, Optional
 import morecantile
 import pyproj
 from attrs import define, field
-from fastapi import Depends, HTTPException, Path, Request
+from fastapi import Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
@@ -617,6 +617,53 @@ class EndpointsFactory(BaseFactory):
                     y="{y}",
                 ),
             }
+
+        @self.router.get(
+            "/process_graphs",
+            response_class=JSONResponse,
+            summary="List user-defined processes",
+            response_model=openapi.Processes,
+            response_model_exclude_none=True,
+            operation_id="list-udp",
+            tags=["Data Processing"],
+        )
+        def list_udps(
+            request: Request,
+            limit: int = Query(
+                100, ge=0, description="Maximum number of UDPs to return"
+            ),
+            offset: int = Query(0, ge=0, description="Offset for pagination"),
+            user=Depends(self.auth.validate),
+        ):
+            """List UDPs for the authenticated user."""
+            udps = self.udp_store.list_udps(
+                user_id=user.user_id, limit=limit, offset=offset
+            )
+
+            processes = []
+            for udp in udps:
+                processes.append(
+                    {
+                        "id": udp["id"],
+                        "summary": udp.get("summary"),
+                        "description": udp.get("description"),
+                        "parameters": udp.get("parameters"),
+                        "returns": udp.get("returns"),
+                        "categories": udp.get("categories", []),
+                        "deprecated": udp.get("deprecated", False),
+                        "experimental": udp.get("experimental", False),
+                        "process_graph": udp["process_graph"],
+                    }
+                )
+
+            links = [
+                {
+                    "href": self.url_for(request, "list_udps"),
+                    "rel": "self",
+                }
+            ]
+
+            return {"processes": processes, "links": links}
 
         @self.router.post(
             "/services",
