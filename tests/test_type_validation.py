@@ -68,34 +68,3 @@ def test_array_create_with_numpy_array():
         return False
     return True
 
-
-if __name__ == "__main__":
-    print("=" * 70)
-    print("Type Validation Test Suite")
-    print("=" * 70)
-
-    tests = [
-        test_array_create_with_valid_array,
-        test_array_create_with_none,
-        test_array_create_with_raster_stack,
-        test_array_create_with_numpy_array,
-    ]
-
-    results = []
-    for test in tests:
-        try:
-            results.append(test())
-        except Exception as e:
-            print(f"✗ Test raised unexpected exception: {e}")
-            results.append(False)
-
-    print("\n" + "=" * 70)
-    print(f"Results: {sum(results)}/{len(results)} tests passed")
-    print("=" * 70)
-
-    if all(results):
-        print("✓ All tests passed!")
-        exit(0)
-    else:
-        print("✗ Some tests failed")
-        exit(1)
