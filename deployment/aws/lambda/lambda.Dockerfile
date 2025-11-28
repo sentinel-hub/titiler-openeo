@@ -40,7 +40,7 @@ WORKDIR /asset
 
 # Set the ENV to test the handler
 ENV TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
-ENV TITILER_OPENEO_SERVICE_STORE_URL="/asset/services/eoapi.json"
+ENV TITILER_OPENEO_STORE_URL="/asset/services/eoapi.json"
 
 RUN python -c "from handler import handler; print('All Good')"
 

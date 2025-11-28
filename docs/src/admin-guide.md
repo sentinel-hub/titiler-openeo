@@ -20,7 +20,7 @@ TITILER_OPENEO_API_DEBUG=false
 #### Backend Settings ([`BackendSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L127))
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://your-stac-api"
-TITILER_OPENEO_SERVICE_STORE_URL="path-to-services-config"
+TITILER_OPENEO_STORE_URL="path-to-services-config"
 TITILER_OPENEO_TILE_STORE_URL="optional-tile-store-url"
 ```
 

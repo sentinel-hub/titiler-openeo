@@ -7,19 +7,20 @@ from typing import Any, Dict, List, Optional
 from attrs import define, field
 from sqlalchemy import (
     JSON,
-    Column,
+    Boolean,
     DateTime,
     Integer,
     StaticPool,
     String,
+    Text,
     UniqueConstraint,
     create_engine,
     select,
 )
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
-from .base import ServicesStore
+from .base import ServicesStore, UdpStore
 
 
 class Base(DeclarativeBase):
@@ -33,9 +34,9 @@ class Service(Base):
 
     __tablename__ = "services"
 
-    service_id = Column(String, primary_key=True)
-    user_id = Column(String)
-    service = Column(JSON)
+    service_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String)
+    service: Mapped[Dict[str, Any]] = mapped_column(JSON)
 
 
 class UserTracking(Base):
@@ -43,16 +44,46 @@ class UserTracking(Base):
 
     __tablename__ = "user_tracking"
 
-    user_id = Column(String, primary_key=True)
-    provider = Column(String, primary_key=True)
-    first_login = Column(DateTime, nullable=False)
-    last_login = Column(DateTime, nullable=False)
-    login_count = Column(Integer, default=1, nullable=False)
-    email = Column(String, nullable=True)
-    name = Column(String, nullable=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    first_login: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    login_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uix_user_provider"),
+    )
+
+
+class UdpDefinition(Base):
+    """SQLAlchemy UDP Definition Model."""
+
+    __tablename__ = "udp_definitions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    process_graph: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parameters: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True
+    )
+    returns: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    categories: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    deprecated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    experimental: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    exceptions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    examples: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True
+    )
+    links: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
 
@@ -85,11 +116,11 @@ class SQLAlchemyStore(ServicesStore):
     def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == service_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 return None
 
             return {
@@ -143,11 +174,11 @@ class SQLAlchemyStore(ServicesStore):
     def delete_service(self, service_id: str, **kwargs) -> bool:
         """Delete Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == service_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 raise ValueError(f"Could not find service: {service_id}")
 
             session.delete(result)
@@ -160,11 +191,11 @@ class SQLAlchemyStore(ServicesStore):
     ) -> str:
         """Update Service."""
         with Session(self._engine) as session:
-            result = session.execute(
+            result: Optional[Service] = session.execute(
                 select(Service).where(Service.service_id == item_id)
             ).scalar_one_or_none()
 
-            if not result:
+            if result is None:
                 raise ValueError(f"Could not find service: {item_id}")
 
             if result.user_id != user_id:
@@ -183,14 +214,14 @@ class SQLAlchemyStore(ServicesStore):
         now = datetime.now(timezone.utc)
 
         with Session(self._engine) as session:
-            tracking = session.execute(
+            tracking: Optional[UserTracking] = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user.user_id,
                     UserTracking.provider == provider,
                 )
             ).scalar_one_or_none()
 
-            if tracking:
+            if tracking is not None:
                 tracking.last_login = now
                 tracking.login_count += 1
                 if user.email:
@@ -216,13 +247,13 @@ class SQLAlchemyStore(ServicesStore):
     ) -> Optional[Dict[str, Any]]:
         """Get user tracking information."""
         with Session(self._engine) as session:
-            tracking = session.execute(
+            tracking: Optional[UserTracking] = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user_id, UserTracking.provider == provider
                 )
             ).scalar_one_or_none()
 
-            if not tracking:
+            if tracking is None:
                 return None
 
             return {
@@ -234,3 +265,152 @@ class SQLAlchemyStore(ServicesStore):
                 "email": tracking.email,
                 "name": tracking.name,
             }
+
+
+@define(kw_only=True)
+class SQLAlchemyUdpStore(UdpStore):
+    """SQLAlchemy UDP Store."""
+
+    store: str = field()
+    _engine: Any = field(default=None, init=False)
+    _session_factory: Any = field(default=None, init=False)
+
+    def __attrs_post_init__(self):
+        """Post init: create engine and session factory."""
+        kwargs = {}
+        if self.store == "sqlite:///:memory:":
+            kwargs = {
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            }
+        self._engine = create_engine(self.store, **kwargs)
+        self._session_factory = sessionmaker(bind=self._engine)
+        Base.metadata.create_all(self._engine)
+
+    def list_udps(
+        self, user_id: str, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """List UDPs for a user."""
+        with Session(self._engine) as session:
+            results = (
+                session.execute(
+                    select(UdpDefinition)
+                    .where(UdpDefinition.user_id == user_id)
+                    .order_by(UdpDefinition.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                .scalars()
+                .all()
+            )
+
+            return [self._to_dict(item) for item in results]
+
+    def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single UDP for a user."""
+        with Session(self._engine) as session:
+            result: Optional[UdpDefinition] = session.execute(
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
+            ).scalar_one_or_none()
+
+            return self._to_dict(result) if result is not None else None
+
+    def upsert_udp(
+        self,
+        user_id: str,
+        udp_id: str,
+        process_graph: Dict[str, Any],
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        parameters: Optional[List[Dict[str, Any]]] = None,
+        returns: Optional[Dict[str, Any]] = None,
+        categories: Optional[List[str]] = None,
+        deprecated: bool = False,
+        experimental: bool = False,
+        exceptions: Optional[Dict[str, Any]] = None,
+        examples: Optional[List[Dict[str, Any]]] = None,
+        links: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Create or replace a UDP for a user."""
+        now = datetime.utcnow()
+        with Session(self._engine) as session:
+            existing: Optional[UdpDefinition] = session.execute(
+                select(UdpDefinition).where(UdpDefinition.id == udp_id)
+            ).scalar_one_or_none()
+
+            if existing is not None and existing.user_id != user_id:
+                raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
+
+            if existing is not None:
+                existing.process_graph = process_graph
+                existing.parameters = parameters
+                existing.summary = summary
+                existing.description = description
+                existing.returns = returns
+                existing.categories = categories or []
+                existing.deprecated = deprecated
+                existing.experimental = experimental
+                existing.exceptions = exceptions
+                existing.examples = examples
+                existing.links = links
+                existing.updated_at = now
+            else:
+                new_udp = UdpDefinition(
+                    id=udp_id,
+                    user_id=user_id,
+                    process_graph=process_graph,
+                    parameters=parameters,
+                    summary=summary,
+                    description=description,
+                    returns=returns,
+                    categories=categories or [],
+                    deprecated=deprecated,
+                    experimental=experimental,
+                    exceptions=exceptions,
+                    examples=examples,
+                    links=links,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_udp)
+
+            session.commit()
+            return udp_id
+
+    def delete_udp(self, user_id: str, udp_id: str) -> bool:
+        """Delete a UDP for a user."""
+        with Session(self._engine) as session:
+            result: Optional[UdpDefinition] = session.execute(
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
+            ).scalar_one_or_none()
+
+            if result is None:
+                raise ValueError(f"Could not find UDP {udp_id} for user {user_id}")
+
+            session.delete(result)
+            session.commit()
+            return True
+
+    def _to_dict(self, udp: UdpDefinition) -> Dict[str, Any]:
+        """Serialize UDP model to dict."""
+        return {
+            "id": udp.id,
+            "user_id": udp.user_id,
+            "process_graph": udp.process_graph,
+            "parameters": udp.parameters,
+            "summary": udp.summary,
+            "description": udp.description,
+            "returns": udp.returns,
+            "categories": udp.categories or [],
+            "deprecated": udp.deprecated,
+            "experimental": udp.experimental,
+            "exceptions": udp.exceptions,
+            "examples": udp.examples,
+            "links": udp.links,
+            "created_at": udp.created_at,
+            "updated_at": udp.updated_at,
+        }

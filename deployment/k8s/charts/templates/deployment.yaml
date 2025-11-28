@@ -54,7 +54,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
-            - name: TITILER_OPENEO_SERVICE_STORE_URL
+            - name: TITILER_OPENEO_STORE_URL
               value: {{ include "database.url" . | quote }}
             {{- if .Values.enableTileStore }}
             - name: TITILER_OPENEO_TILE_STORE_URL
@@ -102,7 +102,7 @@ spec:
             {{- end }}
             {{- end }}
             {{- range $key, $val := .Values.env }}
-            {{- if ne $key "TITILER_OPENEO_SERVICE_STORE_URL" }}
+            {{- if ne $key "TITILER_OPENEO_STORE_URL" }}
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
