@@ -22,9 +22,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
+          version: "0.9.*" 
+          enable-cache: true
           python-version: ${{ matrix.python-version }}
 
       - name: Sync dependencies
@@ -46,8 +48,8 @@ jobs:
         with:
           files: ./coverage.xml
           flags: unittests
-          name: ${{ matrix.python-version }}
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
 
   publish-docker:
