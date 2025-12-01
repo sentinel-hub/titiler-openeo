@@ -68,7 +68,8 @@ def _is_string_type(param_type: Any) -> bool:
     Returns:
         True if the type is string or Optional[str]
     """
-    return param_type == str or (
+    # TODO: refactor with isinstance
+    return param_type == str or (  # noqa: E721
         hasattr(param_type, "__origin__")
         and param_type.__origin__ is Union
         and str in param_type.__args__

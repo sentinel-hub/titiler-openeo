@@ -87,7 +87,7 @@ The Keycloak server will be available at http://localhost:8082 for testing OIDC 
 Install the documentation dependencies (included in the dev group) with `uv`:
 
 ```bash
-uv sync
+uv sync --group docs
 ```
 
 Hot-reloading docs:
