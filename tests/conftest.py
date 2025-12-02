@@ -11,6 +11,33 @@ from starlette.testclient import TestClient
 from titiler.openeo.auth import Auth, User
 from titiler.openeo.services.base import ServicesStore
 
+# Silence noisy pydantic v1 deprecation warnings from openeo_pg_parser_networkx
+try:  # pragma: no cover - best effort suppression
+    import warnings
+
+    from pydantic.warnings import PydanticDeprecatedSince20
+
+    warnings.filterwarnings(
+        "ignore",
+        category=PydanticDeprecatedSince20,
+        module=r"openeo_pg_parser_networkx.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="The `parse_obj` method is deprecated",
+        category=DeprecationWarning,
+        module=r"openeo_pg_parser_networkx.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=".*allow_reuse.*",
+        category=DeprecationWarning,
+        module=r"openeo_pg_parser_networkx.*",
+    )
+except Exception:
+    pass
+
+
 StoreType = Literal["local", "duckdb", "sqlalchemy"]
 
 
