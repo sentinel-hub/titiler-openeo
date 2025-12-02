@@ -665,6 +665,42 @@ class EndpointsFactory(BaseFactory):
 
             return {"processes": processes, "links": links}
 
+        @self.router.get(
+            "/process_graphs/{process_graph_id}",
+            response_class=JSONResponse,
+            summary="Full metadata for a user-defined process",
+            response_model=openapi.ProcessGraphWithMetadata,
+            response_model_exclude_none=True,
+            operation_id="describe-custom-process",
+            tags=["Data Processing"],
+        )
+        def get_udp(
+            process_graph_id: str,
+            user=Depends(self.auth.validate),
+        ):
+            """Return full UDP definition for the authenticated user."""
+            udp = self.udp_store.get_udp(user_id=user.user_id, udp_id=process_graph_id)
+            if not udp:
+                raise HTTPException(404, f"Could not find UDP: {process_graph_id}")
+
+            process = {
+                "id": udp["id"],
+                "summary": udp.get("summary"),
+                "description": udp.get("description"),
+                "parameters": udp.get("parameters"),
+                "returns": udp.get("returns"),
+                "categories": udp.get("categories", []),
+                "deprecated": udp.get("deprecated", False),
+                "experimental": udp.get("experimental", False),
+                "process_graph": udp["process_graph"],
+            }
+
+            for extra_field in ("exceptions", "examples", "links"):
+                if udp.get(extra_field) is not None:
+                    process[extra_field] = udp[extra_field]
+
+            return process
+
         @self.router.post(
             "/services",
             response_class=Response,
