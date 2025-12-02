@@ -134,3 +134,65 @@ def test_udp_get_missing_or_wrong_user_returns_404(
 
     resp_wrong_user = client.get("/process_graphs/udp2")
     assert resp_wrong_user.status_code == 404
+
+
+def test_udp_delete_success(app_with_auth, store_path, store_type):
+    """Delete endpoint removes UDP for authenticated user."""
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    udp_store = client.app.endpoints.udp_store
+
+    process_graph = {
+        "node1": {
+            "process_id": "constant",
+            "arguments": {"x": 3},
+            "result": True,
+        }
+    }
+
+    udp_store.upsert_udp(
+        user_id="test_user",
+        udp_id="udp-delete",
+        process_graph=process_graph,
+    )
+
+    resp = client.delete("/process_graphs/udp-delete")
+    assert resp.status_code == 204
+    assert udp_store.get_udp(user_id="test_user", udp_id="udp-delete") is None
+
+    # Subsequent GET should 404
+    resp_missing = client.get("/process_graphs/udp-delete")
+    assert resp_missing.status_code == 404
+
+
+def test_udp_delete_missing_or_wrong_user_returns_404(
+    app_with_auth, store_path, store_type
+):
+    """Delete returns 404 for missing UDP or wrong user."""
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    udp_store = client.app.endpoints.udp_store
+
+    process_graph = {
+        "node1": {
+            "process_id": "constant",
+            "arguments": {"x": 4},
+            "result": True,
+        }
+    }
+
+    udp_store.upsert_udp(
+        user_id="other_user",
+        udp_id="udp-delete-foreign",
+        process_graph=process_graph,
+    )
+
+    resp_missing = client.delete("/process_graphs/does-not-exist")
+    assert resp_missing.status_code == 404
+
+    resp_wrong_user = client.delete("/process_graphs/udp-delete-foreign")
+    assert resp_wrong_user.status_code == 404

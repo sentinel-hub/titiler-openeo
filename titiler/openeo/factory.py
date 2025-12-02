@@ -701,6 +701,28 @@ class EndpointsFactory(BaseFactory):
 
             return process
 
+        @self.router.delete(
+            "/process_graphs/{process_graph_id}",
+            response_class=Response,
+            status_code=204,
+            summary="Delete a user-defined process",
+            operation_id="delete-custom-process",
+            tags=["Data Processing"],
+        )
+        def delete_udp(
+            process_graph_id: str,
+            user=Depends(self.auth.validate),
+        ):
+            """Delete a UDP for the authenticated user."""
+            try:
+                self.udp_store.delete_udp(user_id=user.user_id, udp_id=process_graph_id)
+            except ValueError as err:
+                raise HTTPException(
+                    404, f"Could not find UDP: {process_graph_id}"
+                ) from err
+
+            return Response(status_code=204)
+
         @self.router.post(
             "/services",
             response_class=Response,
