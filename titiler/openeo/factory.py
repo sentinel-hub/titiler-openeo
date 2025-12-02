@@ -739,6 +739,64 @@ class EndpointsFactory(BaseFactory):
             """Validate a process graph without executing it."""
             errors: List[Dict[str, Any]] = []
 
+            raw_pg = body.model_dump().get("process_graph") or {}
+
+            # Basic per-node validation against registry specs (structure and required params)
+            for node_id, node in raw_pg.items():
+                node_dict = (
+                    node
+                    if isinstance(node, dict)
+                    else node.model_dump()
+                    if hasattr(node, "model_dump")
+                    else None
+                )
+                if not isinstance(node_dict, dict):
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' must be an object",
+                        }
+                    )
+                    continue
+
+                process_id = node_dict.get("process_id")
+                if not process_id:
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' missing process_id",
+                        }
+                    )
+                    continue
+
+                if process_id not in self.process_registry[None]:
+                    errors.append(
+                        {
+                            "code": "ProcessUnsupported",
+                            "message": f"Process '{process_id}' not found in registry",
+                        }
+                    )
+                    continue
+
+                spec = self.process_registry[process_id].spec
+                required_params = [
+                    p["name"]
+                    for p in spec.get("parameters", [])
+                    if not p.get("optional", False)
+                ]
+                args = node_dict.get("arguments", {}) or {}
+                for param_name in required_params:
+                    if param_name not in args or args.get(param_name) is None:
+                        errors.append(
+                            {
+                                "code": "ProcessParameterMissing",
+                                "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
+                            }
+                        )
+
+            if errors:
+                return {"errors": errors}
+
             try:
                 parsed_graph = OpenEOProcessGraph(pg_data=body.model_dump())
             except Exception as err:  # noqa: BLE001
@@ -760,6 +818,16 @@ class EndpointsFactory(BaseFactory):
                             "message": f"Process '{process_id}' not found in registry",
                         }
                     )
+                    continue
+
+                if not process_id:
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": "Process node missing process_id",
+                        }
+                    )
+                    continue
 
             # Validate argument schema against registry
             try:
@@ -768,13 +836,119 @@ class EndpointsFactory(BaseFactory):
                 msg = str(err)
                 # Unresolvable parameters should not yield validation errors
                 lower_msg = msg.lower()
-                if not (
-                    "parameter" in lower_msg
-                    and ("missing" in lower_msg or "not found" in lower_msg)
-                ):
+                if "from_parameter" in lower_msg or "from parameter" in lower_msg:
+                    # ignore unresolved user-supplied parameters
+                    pass
+                else:
                     errors.append({"code": "ProcessGraphInvalid", "message": msg})
 
             return {"errors": errors}
+
+        @self.router.put(
+            "/process_graphs/{process_graph_id}",
+            response_class=JSONResponse,
+            summary="Store a user-defined process",
+            response_model=openapi.ProcessGraphWithMetadata,
+            response_model_exclude_none=True,
+            operation_id="store-custom-process",
+            tags=["Data Processing"],
+        )
+        def upsert_udp(
+            process_graph_id: str,
+            body: openapi.ProcessGraphWithMetadata,
+            user=Depends(self.auth.validate),
+        ):
+            """Create or replace a UDP for the authenticated user."""
+            data = body.model_dump(exclude_none=True)
+            # Enforce path ID over body ID to satisfy spec
+            data["id"] = process_graph_id
+
+            # Basic validation: ensure process graph exists
+            if "process_graph" not in data or not data["process_graph"]:
+                raise HTTPException(
+                    400,
+                    "process_graph is required and must not be empty",
+                )
+
+            # Validate processes exist in registry and required params are present
+            for node_id, node in data["process_graph"].items():
+                node_dict = (
+                    node
+                    if isinstance(node, dict)
+                    else node.model_dump()
+                    if hasattr(node, "model_dump")
+                    else None
+                )
+                if not isinstance(node_dict, dict):
+                    raise InvalidProcessGraph(
+                        f"Process node '{node_id}' must be an object"
+                    )
+
+                process_id = node_dict.get("process_id")
+                if not process_id:
+                    raise InvalidProcessGraph("Process node missing process_id")
+
+                if process_id not in self.process_registry[None]:
+                    raise InvalidProcessGraph(
+                        f"Process '{process_id}' not found in registry"
+                    )
+
+                spec = self.process_registry[process_id].spec
+                required_params = [
+                    p["name"]
+                    for p in spec.get("parameters", [])
+                    if not p.get("optional", False)
+                ]
+                args = node_dict.get("arguments", {}) or {}
+                for param_name in required_params:
+                    if param_name not in args or args.get(param_name) is None:
+                        raise InvalidProcessGraph(
+                            f"Required parameter '{param_name}' missing for process '{process_id}'"
+                        )
+
+            # Validate argument schema (will raise InvalidProcessGraph on failure)
+            try:
+                parsed_graph = OpenEOProcessGraph(pg_data=data)
+                parsed_graph.to_callable(process_registry=self.process_registry)
+            except Exception as err:  # noqa: BLE001
+                raise InvalidProcessGraph(f"Invalid process graph: {str(err)}") from err
+
+            self.udp_store.upsert_udp(
+                user_id=user.user_id,
+                udp_id=process_graph_id,
+                process_graph=data["process_graph"],
+                parameters=data.get("parameters"),
+                summary=data.get("summary"),
+                description=data.get("description"),
+                returns=data.get("returns"),
+                categories=data.get("categories"),
+                deprecated=data.get("deprecated", False),
+                experimental=data.get("experimental", False),
+                exceptions=data.get("exceptions"),
+                examples=data.get("examples"),
+                links=data.get("links"),
+            )
+
+            stored = self.udp_store.get_udp(
+                user_id=user.user_id, udp_id=process_graph_id
+            )
+            if not stored:
+                raise HTTPException(404, f"Could not find UDP: {process_graph_id}")
+
+            return {
+                "id": stored["id"],
+                "summary": stored.get("summary"),
+                "description": stored.get("description"),
+                "parameters": stored.get("parameters"),
+                "returns": stored.get("returns"),
+                "categories": stored.get("categories", []),
+                "deprecated": stored.get("deprecated", False),
+                "experimental": stored.get("experimental", False),
+                "process_graph": stored["process_graph"],
+                "exceptions": stored.get("exceptions"),
+                "examples": stored.get("examples"),
+                "links": stored.get("links"),
+            }
 
         @self.router.post(
             "/services",
