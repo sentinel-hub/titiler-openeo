@@ -38,12 +38,12 @@ services:
       - TITILER_OPENEO_STAC_API_URL=https://stac.eoapi.dev
       - TITILER_OPENEO_STORE_URL=/tmp/services/eoapi.json
       # Keycloak Config
-      # - TITILER_OPENEO_AUTH_METHOD=oidc
-      # - TITILER_OPENEO_AUTH_OIDC_CLIENT_ID=titiler-openeo
-      # - TITILER_OPENEO_AUTH_OIDC_WK_URL=http://keycloak:8080/realms/master/.well-known/openid-configuration
-      # - TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/
-      # - TITILER_OPENEO_AUTH_OIDC_SCOPES=openid profile email
-      # - TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM=preferred_username
+      - TITILER_OPENEO_AUTH_METHOD=oidc
+      - TITILER_OPENEO_AUTH_OIDC_CLIENT_ID=titiler-openeo
+      - TITILER_OPENEO_AUTH_OIDC_WK_URL=http://keycloak:8080/realms/master/.well-known/openid-configuration
+      - TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/
+      - TITILER_OPENEO_AUTH_OIDC_SCOPES=openid profile email
+      - TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM=preferred_username
     env_file:
       - path: .env
         required: false
