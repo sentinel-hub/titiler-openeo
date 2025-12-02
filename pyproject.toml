@@ -90,6 +90,17 @@ parallel = true
 [tool.coverage.report]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
+[tool.pytest.ini_options]
+markers = [
+    "vcr: mark tests that rely on vcr cassettes",
+]
+filterwarnings = [
+    # Silence pydantic v1 deprecation noise coming from openeo_pg_parser_networkx
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20:openeo_pg_parser_networkx.*",
+    "ignore:The `parse_obj` method is deprecated:DeprecationWarning:openeo_pg_parser_networkx.*",
+    "ignore:.*allow_reuse.*:DeprecationWarning:openeo_pg_parser_networkx.*",
+]
+
 [tool.isort]
 profile = "black"
 known_first_party = ["titiler"]
