@@ -251,3 +251,108 @@ def test_validation_ignores_unresolvable_parameters(app_no_auth):
     resp = client.post("/validation", json=body)
     assert resp.status_code == 200
     assert resp.json()["errors"] == []
+
+
+def test_udp_put_creates_or_replaces(app_with_auth, store_path, store_type):
+    """PUT should create or replace a UDP with ID from path."""
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    udp_store = client.app.endpoints.udp_store
+
+    body = {
+        "id": "ignored-body-id",
+        "summary": "First",
+        "description": "Desc",
+        "parameters": [{"name": "p"}],
+        "returns": {"description": "ret"},
+        "categories": ["cat"],
+        "deprecated": False,
+        "experimental": True,
+        "process_graph": {
+            "node1": {
+                "process_id": "constant",
+                "arguments": {"x": 1},
+                "result": True,
+            }
+        },
+    }
+
+    resp_create = client.put("/process_graphs/new-udp", json=body)
+    assert resp_create.status_code == 200
+    created = udp_store.get_udp(user_id="test_user", udp_id="new-udp")
+    assert created is not None
+    assert created["process_graph"]["node1"]["arguments"]["x"] == 1
+
+    # Replace with new graph and metadata
+    body["process_graph"]["node1"]["arguments"]["x"] = 2
+    body["summary"] = "Replaced"
+    resp_replace = client.put("/process_graphs/new-udp", json=body)
+    assert resp_replace.status_code == 200
+    replaced = udp_store.get_udp(user_id="test_user", udp_id="new-udp")
+    assert replaced["summary"] == "Replaced"
+    assert replaced["process_graph"]["node1"]["arguments"]["x"] == 2
+    # Ensure path ID used, not body ID
+    assert resp_replace.json()["id"] == "new-udp"
+
+
+def test_udp_put_rejects_unknown_process(app_with_auth, store_path, store_type):
+    """PUT returns 422 for invalid process graph (unknown process)."""
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    body = {
+        "id": "udp-bad",
+        "process_graph": {
+            "node1": {
+                "process_id": "does_not_exist",
+                "arguments": {},
+                "result": True,
+            }
+        },
+    }
+
+    resp = client.put("/process_graphs/udp-bad", json=body)
+    assert resp.status_code == 422
+
+
+def test_udp_put_rejects_missing_required_param(app_with_auth, store_path, store_type):
+    """PUT returns 422 when required parameter is missing."""
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    body = {
+        "id": "udp-missing",
+        "process_graph": {
+            "node1": {
+                "process_id": "constant",
+                "arguments": {},
+                "result": True,
+            }
+        },
+    }
+
+    resp = client.put("/process_graphs/udp-missing", json=body)
+    assert resp.status_code == 422
+
+
+def test_validation_flags_missing_required_param(app_no_auth):
+    """Validation should return an error when required parameter is missing."""
+    client = app_no_auth
+    body = {
+        "id": "udp-missing",
+        "process_graph": {
+            "node1": {
+                "process_id": "constant",
+                "arguments": {},
+                "result": True,
+            }
+        },
+    }
+    resp = client.post("/validation", json=body)
+    assert resp.status_code == 200
+    errs = resp.json()["errors"]
+    assert any("ProcessParameterMissing" in e["code"] for e in errs)
