@@ -724,6 +724,59 @@ class EndpointsFactory(BaseFactory):
             return Response(status_code=204)
 
         @self.router.post(
+            "/validation",
+            response_class=JSONResponse,
+            summary="Validate a user-defined process (graph)",
+            response_model=Dict[str, List[Dict[str, Any]]],
+            response_model_exclude_none=True,
+            operation_id="validate-custom-process",
+            tags=["Data Processing"],
+        )
+        def validate_process_graph(
+            body: openapi.ProcessGraphWithMetadata,
+            user=Depends(self.auth.validate_optional),
+        ):
+            """Validate a process graph without executing it."""
+            errors: List[Dict[str, Any]] = []
+
+            try:
+                parsed_graph = OpenEOProcessGraph(pg_data=body.model_dump())
+            except Exception as err:  # noqa: BLE001
+                errors.append(
+                    {
+                        "code": "ProcessGraphInvalid",
+                        "message": str(err),
+                    }
+                )
+                return {"errors": errors}
+
+            # Validate supported processes
+            for _, node in parsed_graph.nodes:
+                process_id = node.get("process_id")
+                if process_id and process_id not in self.process_registry[None]:
+                    errors.append(
+                        {
+                            "code": "ProcessUnsupported",
+                            "message": f"Process '{process_id}' not found in registry",
+                        }
+                    )
+
+            # Validate argument schema against registry
+            try:
+                parsed_graph.to_callable(process_registry=self.process_registry)
+            except Exception as err:  # noqa: BLE001
+                msg = str(err)
+                # Unresolvable parameters should not yield validation errors
+                lower_msg = msg.lower()
+                if not (
+                    "parameter" in lower_msg
+                    and ("missing" in lower_msg or "not found" in lower_msg)
+                ):
+                    errors.append({"code": "ProcessGraphInvalid", "message": msg})
+
+            return {"errors": errors}
+
+        @self.router.post(
             "/services",
             response_class=Response,
             summary="Publish a new service",

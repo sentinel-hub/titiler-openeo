@@ -196,3 +196,58 @@ def test_udp_delete_missing_or_wrong_user_returns_404(
 
     resp_wrong_user = client.delete("/process_graphs/udp-delete-foreign")
     assert resp_wrong_user.status_code == 404
+
+
+def test_validation_success(app_no_auth):
+    """Validation returns empty errors for valid graph."""
+    client = app_no_auth
+    body = {
+        "id": "valid-pg",
+        "process_graph": {
+            "node1": {
+                "process_id": "constant",
+                "arguments": {"x": 1},
+                "result": True,
+            }
+        },
+    }
+    resp = client.post("/validation", json=body)
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []
+
+
+def test_validation_unknown_process(app_no_auth):
+    """Validation returns error for unsupported process but still 200."""
+    client = app_no_auth
+    body = {
+        "id": "invalid-pg",
+        "process_graph": {
+            "node1": {
+                "process_id": "nonexistent_proc",
+                "arguments": {},
+                "result": True,
+            }
+        },
+    }
+    resp = client.post("/validation", json=body)
+    assert resp.status_code == 200
+    errors = resp.json()["errors"]
+    assert errors and errors[0]["code"] == "ProcessUnsupported"
+
+
+def test_validation_ignores_unresolvable_parameters(app_no_auth):
+    """Validation ignores missing user parameters and still returns 200 with no errors."""
+    client = app_no_auth
+    body = {
+        "id": "param-pg",
+        "process_graph": {
+            "node1": {
+                "process_id": "add",
+                "arguments": {"x": {"from_parameter": "x"}, "y": 1},
+                "result": True,
+            }
+        },
+    }
+    resp = client.post("/validation", json=body)
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []
