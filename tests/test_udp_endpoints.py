@@ -52,6 +52,45 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
     assert "udp-other" not in ids
 
 
+def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, store_type):
+    """List should not crash when created_at mixes datetime and string."""
+    from titiler.openeo.services.local import LocalUdpStore
+
+    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
+        pytest.skip("In-memory sqlite store not shared across instances")
+
+    client = app_with_auth
+    udp_store = client.app.endpoints.udp_store
+
+    if not isinstance(udp_store, LocalUdpStore):
+        pytest.skip("Mixed created_at only applicable to local store")
+
+    # Seed with datetime
+    udp_store.upsert_udp(
+        user_id="test_user",
+        udp_id="udpdt",
+        process_graph={
+            "node": {"process_id": "constant", "arguments": {"x": 1}, "result": True}
+        },
+    )
+
+    # Inject a string created_at to simulate JSON-loaded store
+    udp_store.store["udpstr"] = {
+        "user_id": "test_user",
+        "process_graph": {
+            "node": {"process_id": "constant", "arguments": {"x": 2}, "result": True}
+        },
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+    }
+
+    resp = client.get("/process_graphs")
+    assert resp.status_code == 200
+    body = resp.json()
+    ids = {p["id"] for p in body["processes"]}
+    assert "udpdt" in ids and "udpstr" in ids
+
+
 def test_udp_get_returns_full_metadata(app_with_auth, store_path, store_type):
     """Detail endpoint returns full UDP including optional fields."""
     if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
