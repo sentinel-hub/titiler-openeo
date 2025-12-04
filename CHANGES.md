@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] (2025-12-04)
+
 ## Fixed
 
 * replace custom `BoundingBox` with `BoundingBox` from openEO pg_schema to fix type validation errors
