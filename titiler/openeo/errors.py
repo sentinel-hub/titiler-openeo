@@ -142,7 +142,7 @@ class ProcessParameterMissing(OpenEOException):
         super().__init__(
             message=f"Required process parameter '{parameter}' is missing",
             code="ProcessParameterMissing",
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
 

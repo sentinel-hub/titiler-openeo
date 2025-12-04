@@ -5,7 +5,7 @@ from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models.openapi import SpatialExtent
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend
@@ -87,7 +87,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     with pytest.raises(OutputLimitExceeded):
         loader.load_collection(
             id="test",
-            spatial_extent=SpatialExtent(
+            spatial_extent=BoundingBox(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
             bands=["B01"],
@@ -98,7 +98,7 @@ def test_load_collection_pixel_threshold(monkeypatch):
     # Test with acceptable dimensions
     result = loader.load_collection(
         id="test",
-        spatial_extent=SpatialExtent(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
         width=1000,
         height=1000,
     )
@@ -159,7 +159,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     with pytest.raises(OutputLimitExceeded):
         loader.load_collection_and_reduce(
             id="test",
-            spatial_extent=SpatialExtent(
+            spatial_extent=BoundingBox(
                 west=0, south=0, east=1, north=1, crs="EPSG:4326"
             ),
             width=15000,
@@ -169,7 +169,7 @@ def test_load_collection_and_reduce_pixel_threshold(monkeypatch):
     # Test with acceptable dimensions
     result = loader.load_collection_and_reduce(
         id="test",
-        spatial_extent=SpatialExtent(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
         width=1000,
         height=1000,
     )
@@ -243,7 +243,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
 
     # Test with a 1 degree by 1 degree bbox and 0.001 degrees/pixel resolution
     # Should result in approximately 1000x1000 pixels
-    spatial_extent = SpatialExtent(west=0, south=0, east=1, north=1, crs="EPSG:4326")
+    spatial_extent = BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326")
 
     # Call without explicit width/height to trigger resolution-based calculation
     loader.load_collection(

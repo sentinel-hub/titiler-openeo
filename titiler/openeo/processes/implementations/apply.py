@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional
 import morecantile
 import numpy
 
-from ...models.openapi import SpatialExtent
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
@@ -328,7 +328,7 @@ def _apply_spectral_dimension_stack(
 def xyz_to_bbox(
     data: Dict[str, Any],
     context: Optional[Dict] = None,
-) -> SpatialExtent:
+) -> BoundingBox:
     """Apply process on ArrayLike."""
 
     # find x, y and z attributes
@@ -342,7 +342,7 @@ def xyz_to_bbox(
     tilematrixset = "WebMercatorQuad"
     tms = morecantile.tms.get(tilematrixset)
     tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=tile.x, y=tile.y, z=tile.z)))
-    bbox = SpatialExtent(
+    bbox = BoundingBox(
         west=tile_bounds[0],
         south=tile_bounds[1],
         east=tile_bounds[2],
