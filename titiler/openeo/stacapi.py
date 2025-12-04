@@ -7,7 +7,7 @@ import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
-from openeo_pg_parser_networkx.pg_schema import TemporalInterval
+from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
@@ -29,7 +29,6 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .models.openapi import SpatialExtent
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
@@ -225,7 +224,7 @@ class LoadCollection:
     def _get_items(
         self,
         id: str,
-        spatial_extent: Optional[SpatialExtent] = None,
+        spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         properties: Optional[dict] = None,
         fields: Optional[List[str]] = None,
@@ -491,7 +490,7 @@ class LoadCollection:
     def load_collection(
         self,
         id: str,
-        spatial_extent: Optional[SpatialExtent] = None,
+        spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -573,7 +572,7 @@ class LoadCollection:
     def load_collection_and_reduce(
         self,
         id: str,
-        spatial_extent: Optional[SpatialExtent] = None,
+        spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -673,7 +672,7 @@ class LoadStac:
     def _handle_collection_or_catalog(
         self,
         stac_obj: Union[pystac.Collection, pystac.Catalog],
-        spatial_extent: Optional[SpatialExtent] = None,
+        spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -781,7 +780,7 @@ class LoadStac:
     def _process_spatial_extent(
         self,
         items: List[Dict],
-        spatial_extent: SpatialExtent,
+        spatial_extent: BoundingBox,
         bands: Optional[list[str]] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
@@ -834,7 +833,7 @@ class LoadStac:
     def load_stac(
         self,
         url: str,
-        spatial_extent: Optional[SpatialExtent] = None,
+        spatial_extent: Optional[BoundingBox] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,

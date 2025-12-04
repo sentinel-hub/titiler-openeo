@@ -10,6 +10,7 @@ import pystac
 import rasterio
 from affine import Affine
 from morecantile import TileMatrixSet
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
@@ -32,7 +33,6 @@ from shapely.geometry import box
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
-from .models.openapi import SpatialExtent
 
 
 class Dims(TypedDict):
@@ -490,7 +490,7 @@ def _check_pixel_limit(
 
 def _get_target_crs_bbox(
     items: List[pystac.Item],
-    spatial_extent: Optional[SpatialExtent],
+    spatial_extent: Optional[BoundingBox],
 ) -> Tuple[rasterio.crs.CRS, List[float]]:
     """Get target CRS and bbox from items and spatial extent."""
     target_crs = (
@@ -589,7 +589,7 @@ def _get_cube_resolutions(
 
 def _estimate_output_dimensions(
     items: List[pystac.Item],
-    spatial_extent: Optional[SpatialExtent],
+    spatial_extent: Optional[BoundingBox],
     bands: Optional[list[str]],
     width: Optional[int] = None,
     height: Optional[int] = None,

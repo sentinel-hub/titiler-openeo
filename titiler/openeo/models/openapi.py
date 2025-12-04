@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from geojson_pydantic import Polygon
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pydantic import AnyUrl, BaseModel, Field, RootModel
 
 OPENEO_VERSION = "1.2.0"
@@ -1680,24 +1680,6 @@ JsonSchema.model_rebuild()
 ProcessArgumentValue.model_rebuild()
 ProcessGraphWithMetadata.model_rebuild()
 
-
-class SpatialExtent(BaseModel, arbitrary_types_allowed=True):
-    west: float
-    east: float
-    north: float
-    south: float
-    base: Optional[float] = None
-    height: Optional[float] = None
-    crs: Optional[Union[str, int]] = None
-
-    @property
-    def polygon(self) -> Polygon:
-        """"""
-        return Polygon(
-            [
-                (self.west, self.south),
-                (self.west, self.north),
-                (self.east, self.north),
-                (self.east, self.south),
-            ]
-        )
+# Use BoundingBox from openEO pg_schema instead of custom BoundingBox
+# This is exported for backward compatibility
+SpatialExtent = BoundingBox
