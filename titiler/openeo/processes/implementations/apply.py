@@ -4,8 +4,8 @@ from typing import Any, Callable, Dict, Optional
 
 import morecantile
 import numpy
-
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+
 from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]

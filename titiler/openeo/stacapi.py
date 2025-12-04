@@ -7,7 +7,7 @@ import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
-from openeo_pg_parser_networkx.pg_schema import TemporalInterval, BoundingBox
+from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
@@ -29,7 +29,6 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
 from .processes.implementations.utils import _props_to_datename, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader

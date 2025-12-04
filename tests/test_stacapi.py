@@ -1,11 +1,11 @@
 """Test titiler.openeo.stacapi."""
 
 import pytest
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, stacApiBackend

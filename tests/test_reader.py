@@ -4,10 +4,10 @@ import datetime
 
 import pytest
 import rasterio
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
 
 from titiler.openeo.errors import OutputLimitExceeded
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from titiler.openeo.reader import (
     SimpleSTACReader,
     _calculate_dimensions,
@@ -338,9 +338,7 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
         )
 
     # Test with cropped extent
-    cropped_extent = BoundingBox(
-        west=4.9, south=4.9, east=5, north=5, crs="EPSG:4326"
-    )
+    cropped_extent = BoundingBox(west=4.9, south=4.9, east=5, north=5, crs="EPSG:4326")
     result_cropped = _estimate_output_dimensions(
         [sample_stac_item],
         cropped_extent,

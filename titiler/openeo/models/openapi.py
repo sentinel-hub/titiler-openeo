@@ -10,7 +10,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from geojson_pydantic import Polygon
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pydantic import AnyUrl, BaseModel, Field, RootModel
 

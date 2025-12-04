@@ -10,6 +10,7 @@ import pystac
 import rasterio
 from affine import Affine
 from morecantile import TileMatrixSet
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
@@ -32,7 +33,6 @@ from shapely.geometry import box
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
 
 class Dims(TypedDict):
