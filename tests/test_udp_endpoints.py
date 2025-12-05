@@ -1,7 +1,9 @@
 """Tests for UDP listing endpoint."""
 
 import pytest
+from starlette.testclient import TestClient
 
+from tests.conftest import MockAuth
 from titiler.openeo.services import get_udp_store
 
 
@@ -89,6 +91,48 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     body = resp.json()
     ids = {p["id"] for p in body["processes"]}
     assert "udpdt" in ids and "udpstr" in ids
+
+
+@pytest.fixture
+def app_with_auth_sqlalchemy(monkeypatch) -> TestClient:
+    """App configured with SQLAlchemy store to reproduce whitespace ID bug."""
+    store_url = "sqlite:///:memory:"
+    monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
+    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", store_url)
+
+    from titiler.openeo.main import create_app
+    from titiler.openeo.services import get_store
+
+    app = create_app()
+    store = get_store(store_url)
+    mock_auth = MockAuth(store=store)
+    app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
+    return TestClient(app)
+
+
+def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
+    """Creation accepts whitespace IDs but listing fails validation (current bug)."""
+    client = app_with_auth_sqlalchemy
+
+    udp_id = "Cyanobacteria Chlorophyll-a Detection with NDCI"
+    body = {
+        "id": "ignored",
+        "process_graph": {
+            "node1": {
+                "process_id": "constant",
+                "arguments": {"x": 1},
+                "result": True,
+            }
+        },
+    }
+
+    # Creation currently accepts whitespace in IDs
+    resp_create = client.put(f"/process_graphs/{udp_id}", json=body)
+    assert resp_create.status_code == 200
+
+    # Listing currently crashes (ResponseValidationError -> 500). Expected 200 when fixed.
+    resp_list = client.get("/process_graphs")
+    assert resp_list.status_code == 200
 
 
 def test_udp_get_returns_full_metadata(app_with_auth, store_path, store_type):
