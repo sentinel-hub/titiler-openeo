@@ -159,8 +159,13 @@ class LocalUdpStore(UdpStore):
             for udp_id, data in self.store.items()
             if data["user_id"] == user_id
         ]
-        # Sort by created_at descending to mirror other stores
-        udps.sort(key=lambda item: item["created_at"], reverse=True)
+        # Sort by created_at descending to mirror other stores; tolerate string timestamps
+        udps.sort(
+            key=lambda item: self._parse_dt(item.get("created_at")).replace(
+                tzinfo=None
+            ),
+            reverse=True,
+        )
         return udps[offset : offset + limit]
 
     def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
@@ -263,3 +268,18 @@ class LocalUdpStore(UdpStore):
         data = {"services": services, "udp_definitions": self.store}
         with open(self.path, "w") as f:
             json.dump(data, f, default=_json_default)
+
+    @staticmethod
+    def _parse_dt(value: Any) -> datetime:
+        """Parse created/updated timestamps that may be datetime or ISO strings."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                try:
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    return datetime.min
+        return datetime.min

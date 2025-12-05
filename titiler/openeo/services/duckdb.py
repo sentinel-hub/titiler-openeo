@@ -156,6 +156,8 @@ class DuckDBStore(ServicesStore):
 
             # Merge the existing service with updates
             service = result[1]
+            if isinstance(service, str):
+                service = json.loads(service)
             service.update(val)
 
             # Update service

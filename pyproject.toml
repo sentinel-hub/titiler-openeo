@@ -43,19 +43,22 @@ dev = [
     "brotlipy",
     "cryptography",
     "duckdb",
-    "griffe-inherited-docstrings>=1.1.1",
     "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-vcr",
+    "sqlalchemy>=2.0.0",
+    "pre-commit",
+    "bump-my-version",
     "ipython~=8.0.0",
+]
+docs = [
     "mkdocs-jupyter~=0.24.0",
     "mkdocs-material[imaging]>=9.6.14",
     "mkdocs>=1.6.1",
     "mkdocstrings[python]>=0.29.1",
-    "pre-commit",
-    "bump-my-version",
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "sqlalchemy>=2.0.0",
+    "griffe-inherited-docstrings>=1.1.1",
 ]
 
 [project.optional-dependencies]
@@ -71,17 +74,18 @@ Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
 Source = "https://github.com/sentinel-hub/titiler-openeo"
 Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 
-[build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
-
-[tool.pdm.version]
-source = "file"
+[tool.hatch.version]
 path = "titiler/openeo/__init__.py"
 
-[tool.pdm.build]
-includes = ["titiler/openeo"]
-excludes = ["tests/", "**/.mypy_cache", "**/.DS_Store"]
+[tool.hatch.build.targets.sdist]
+only-include = ["titiler"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["titiler"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.coverage.run]
 branch = true
@@ -89,6 +93,17 @@ parallel = true
 
 [tool.coverage.report]
 exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+
+[tool.pytest.ini_options]
+markers = [
+    "vcr: mark tests that rely on vcr cassettes",
+]
+filterwarnings = [
+    # Silence pydantic v1 deprecation noise coming from openeo_pg_parser_networkx
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20:openeo_pg_parser_networkx.*",
+    "ignore:The `parse_obj` method is deprecated:DeprecationWarning:openeo_pg_parser_networkx.*",
+    "ignore:.*allow_reuse.*:DeprecationWarning:openeo_pg_parser_networkx.*",
+]
 
 [tool.isort]
 profile = "black"
@@ -129,7 +144,7 @@ explicit_package_bases = true
 max-complexity = 14
 
 [tool.bumpversion]
-current_version = "0.5.0"
+current_version = "0.6.1"
 search = "{current_version}"
 replace = "{new_version}"
 regex = false

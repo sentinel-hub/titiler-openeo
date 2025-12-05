@@ -4,10 +4,10 @@ import datetime
 
 import pytest
 import rasterio
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
 
 from titiler.openeo.errors import OutputLimitExceeded
-from titiler.openeo.models.openapi import SpatialExtent
 from titiler.openeo.reader import (
     SimpleSTACReader,
     _calculate_dimensions,
@@ -295,7 +295,7 @@ def test_check_pixel_limit():
 def test_multiple_items_resolution(complex_stac_items):
     """Test resolution handling with multiple items."""
     # Create extent in web mercator
-    extent = SpatialExtent(
+    extent = BoundingBox(
         crs="EPSG:3857",
         west=0,
         south=0,
@@ -329,7 +329,7 @@ def test_multiple_items_resolution(complex_stac_items):
 def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
     """Test complete output dimension estimation."""
     # Test with full extent using UTM asset
-    full_extent = SpatialExtent(west=0, south=0, east=5, north=5, crs="EPSG:4326")
+    full_extent = BoundingBox(west=0, south=0, east=5, north=5, crs="EPSG:4326")
     with pytest.raises(OutputLimitExceeded) as exc_info:
         _estimate_output_dimensions(
             [sample_stac_item],
@@ -338,9 +338,7 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
         )
 
     # Test with cropped extent
-    cropped_extent = SpatialExtent(
-        west=4.9, south=4.9, east=5, north=5, crs="EPSG:4326"
-    )
+    cropped_extent = BoundingBox(west=4.9, south=4.9, east=5, north=5, crs="EPSG:4326")
     result_cropped = _estimate_output_dimensions(
         [sample_stac_item],
         cropped_extent,
@@ -393,7 +391,7 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
     assert "max allowed: 100,000,000 pixels" in error_msg
 
     # Test mixed resolution and CRS combination
-    mixed_extent = SpatialExtent(
+    mixed_extent = BoundingBox(
         crs="EPSG:4326",
         west=0,
         south=0,
