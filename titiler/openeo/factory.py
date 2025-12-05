@@ -20,6 +20,7 @@ from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
 from .errors import InvalidProcessGraph
 from .models import openapi
+from .models import udp as udp_models
 from .models.auth import User
 from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
@@ -622,7 +623,7 @@ class EndpointsFactory(BaseFactory):
             "/process_graphs",
             response_class=JSONResponse,
             summary="List user-defined processes",
-            response_model=openapi.Processes,
+            response_model=udp_models.UserProcesses,
             response_model_exclude_none=True,
             operation_id="list-udp",
             tags=["Data Processing"],
@@ -669,7 +670,7 @@ class EndpointsFactory(BaseFactory):
             "/process_graphs/{process_graph_id}",
             response_class=JSONResponse,
             summary="Full metadata for a user-defined process",
-            response_model=openapi.ProcessGraphWithMetadata,
+            response_model=udp_models.UserProcess,
             response_model_exclude_none=True,
             operation_id="describe-custom-process",
             tags=["Data Processing"],
@@ -733,7 +734,7 @@ class EndpointsFactory(BaseFactory):
             tags=["Data Processing"],
         )
         def validate_process_graph(
-            body: openapi.ProcessGraphWithMetadata,
+            body: udp_models.UserProcess,
             user=Depends(self.auth.validate_optional),
         ):
             """Validate a process graph without executing it."""
@@ -848,14 +849,14 @@ class EndpointsFactory(BaseFactory):
             "/process_graphs/{process_graph_id}",
             response_class=JSONResponse,
             summary="Store a user-defined process",
-            response_model=openapi.ProcessGraphWithMetadata,
+            response_model=udp_models.UserProcess,
             response_model_exclude_none=True,
             operation_id="store-custom-process",
             tags=["Data Processing"],
         )
         def upsert_udp(
             process_graph_id: str,
-            body: openapi.ProcessGraphWithMetadata,
+            body: udp_models.UserProcess,
             user=Depends(self.auth.validate),
         ):
             """Create or replace a UDP for the authenticated user."""

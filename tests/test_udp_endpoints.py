@@ -130,9 +130,12 @@ def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
     resp_create = client.put(f"/process_graphs/{udp_id}", json=body)
     assert resp_create.status_code == 200
 
-    # Listing currently crashes (ResponseValidationError -> 500). Expected 200 when fixed.
+    # Listing should succeed even with whitespace IDs
     resp_list = client.get("/process_graphs")
     assert resp_list.status_code == 200
+    body = resp_list.json()
+    ids = {p["id"] for p in body["processes"]}
+    assert udp_id in ids
 
 
 def test_udp_get_returns_full_metadata(app_with_auth, store_path, store_type):

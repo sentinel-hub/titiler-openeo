@@ -3819,8 +3819,10 @@ source = { editable = "." }
 dependencies = [
     { name = "jsonpath-ng" },
     { name = "openeo-pg-parser-networkx" },
+    { name = "psycopg2-binary" },
     { name = "pydantic-settings" },
     { name = "pystac-client" },
+    { name = "sqlalchemy" },
     { name = "starlette-cramjam" },
     { name = "titiler-core" },
 ]
@@ -3855,6 +3857,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-vcr" },
     { name = "sqlalchemy" },
+    { name = "titiler-openeo", extra = ["postgres", "server"] },
 ]
 docs = [
     { name = "griffe-inherited-docstrings" },
@@ -3871,9 +3874,11 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'oidc'" },
     { name = "jsonpath-ng", specifier = "~=1.7.0" },
     { name = "openeo-pg-parser-networkx", specifier = "==2025.10.1" },
+    { name = "psycopg2-binary", specifier = ">=2.9.11" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'" },
     { name = "pydantic-settings", specifier = "~=2.0" },
     { name = "pystac-client" },
+    { name = "sqlalchemy", specifier = ">=2.0.44" },
     { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.0" },
     { name = "starlette-cramjam", specifier = ">=0.4,<0.6" },
     { name = "titiler-core", specifier = ">=0.24.0,<0.25" },
@@ -3895,6 +3900,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-vcr" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
+    { name = "titiler-openeo", extras = ["postgres", "server"], editable = "." },
 ]
 docs = [
     { name = "griffe-inherited-docstrings", specifier = ">=1.1.1" },
