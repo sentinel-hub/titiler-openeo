@@ -112,3 +112,48 @@ def test_lazy_raster_stack_backward_compatibility():
     image = lazy_stack["2021-01-01T00:00:00Z"]
     assert isinstance(image, ImageData)
     assert lazy_stack._executed is True
+
+
+def test_lazy_raster_stack_temporal_ordering():
+    """Test that LazyRasterStack returns data in temporal order."""
+    import datetime
+    
+    # Test data with timestamps in mixed order
+    assets = [
+        {
+            "id": "item_2",  # middle timestamp
+            "datetime": datetime.datetime(2023, 6, 15),
+        },
+        {
+            "id": "item_1",  # earliest timestamp  
+            "datetime": datetime.datetime(2023, 6, 10),
+        },
+        {
+            "id": "item_3",  # latest timestamp
+            "datetime": datetime.datetime(2023, 6, 20),
+        },
+    ]
+    
+    # Create tasks using the same pattern as other tests
+    tasks = [(mock_task, asset) for asset in assets]
+    
+    lazy_stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: asset["datetime"],
+    )
+    
+    # Keys should be in temporal order, not insertion order
+    keys = list(lazy_stack.keys())
+    assert keys == ["item_1", "item_2", "item_3"]
+    
+    # Timestamp mapping should work
+    assert lazy_stack._timestamp_map["item_1"] == datetime.datetime(2023, 6, 10)
+    assert lazy_stack._timestamp_map["item_2"] == datetime.datetime(2023, 6, 15)
+    assert lazy_stack._timestamp_map["item_3"] == datetime.datetime(2023, 6, 20)
+    
+    # Iteration methods should maintain temporal order
+    assert list(lazy_stack.keys()) == ["item_1", "item_2", "item_3"]
+    
+    # Test that values() and items() preserve temporal ordering
+    # (Note: we can't test actual values without executing the tasks due to HTTP requests)

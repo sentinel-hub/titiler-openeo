@@ -53,7 +53,7 @@ def apply_pixel_selection(
     bounds: Optional[BBox] = None
     band_names: Optional[List[str]] = None
 
-    for datetime, img in data.items():
+    for key, img in data.items():
         # On the first Image we set the properties
         if len(assets_used) == 0:
             crs = img.crs
@@ -91,7 +91,8 @@ def apply_pixel_selection(
         else:
             pixsel_method.feed(img.array)
 
-        assets_used.append(datetime)
+        # Store the key (which could be item ID) for tracking
+        assets_used.append(key)
 
         if pixsel_method.is_done and pixsel_method.data is not None:
             return {

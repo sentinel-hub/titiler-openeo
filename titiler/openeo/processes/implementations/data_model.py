@@ -105,6 +105,14 @@ class LazyRasterStack(Dict[str, ImageData]):
                 if timestamp not in self._timestamp_groups:
                     self._timestamp_groups[timestamp] = []
                 self._timestamp_groups[timestamp].append(key)
+        
+        # If we have timestamps, sort keys by temporal order
+        if self._timestamp_fn and self._timestamp_map:
+            # Create a list of (timestamp, key) pairs and sort by timestamp
+            timestamp_key_pairs = [(self._timestamp_map[key], key) for key in self._keys]
+            timestamp_key_pairs.sort(key=lambda x: x[0])  # Sort by timestamp
+            # Update _keys to be in temporal order
+            self._keys = [key for _, key in timestamp_key_pairs]
 
     def _execute_tasks(self) -> None:
         """Execute the tasks and populate the dictionary."""
@@ -181,13 +189,15 @@ class LazyRasterStack(Dict[str, ImageData]):
         """Return the values of the RasterStack, executing tasks if necessary."""
         if not self._executed:
             self._execute_tasks()
-        return super().values()
+        # Return values in temporal order
+        return [self[key] for key in self._keys]
 
     def items(self) -> Any:
         """Return the items of the RasterStack, executing tasks if necessary."""
         if not self._executed:
             self._execute_tasks()
-        return super().items()
+        # Return items in temporal order
+        return [(key, self[key]) for key in self._keys]
 
     def get(self, key: str, default: Optional[T] = None) -> Union[ImageData, T]:
         """Get an item from the RasterStack, executing tasks if necessary."""
