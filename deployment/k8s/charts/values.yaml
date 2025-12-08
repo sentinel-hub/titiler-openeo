@@ -98,6 +98,13 @@ env:
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
 
+# Environment variables from ConfigMaps and Secrets
+envFrom:
+  configMaps: []
+  # - name: my-configmap
+  secrets: []
+  # - name: my-secret
+
 resources:
   limits:
     cpu: 1
