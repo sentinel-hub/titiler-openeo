@@ -23,3 +23,17 @@ def _props_to_datename(props: Dict) -> str:
     start_date = props["start_datetime"]
     end_date = props["end_datetime"]
     return start_date if start_date else end_date
+
+
+def _props_to_timestamp(props: Dict) -> str:
+    """Extract timestamp from STAC item properties.
+    
+    This is the new preferred function name for temporal metadata extraction.
+    Provides the same functionality as _props_to_datename but with clearer naming.
+    """
+    if d := props["datetime"]:
+        return d
+
+    start_date = props["start_datetime"]
+    end_date = props["end_datetime"]
+    return start_date if start_date else end_date

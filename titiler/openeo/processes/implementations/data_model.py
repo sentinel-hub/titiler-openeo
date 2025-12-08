@@ -34,34 +34,67 @@ def to_raster_stack(data: Union[ImageData, RasterStack]) -> RasterStack:
 class LazyRasterStack(Dict[str, ImageData]):
     """A RasterStack that lazily loads data when accessed.
 
-    This class wraps the tasks created by rio_tiler.tasks.create_tasks and only executes
-    them when the data is actually accessed. This allows for more efficient processing
-    when the data is not needed immediately.
+    This implementation separates unique key generation from temporal metadata:
+    - Keys are guaranteed unique identifiers
+    - Temporal metadata enables grouping and filtering by datetime
     """
 
     def __init__(
         self,
         tasks: TaskType,
-        date_name_fn: Callable[[Dict[str, Any]], str],
+        key_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
+        timestamp_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
         allowed_exceptions: Optional[Tuple] = None,
+        # Deprecated parameters for backward compatibility
+        date_name_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
     ):
         """Initialize a LazyRasterStack.
 
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
-            date_name_fn: A function that extracts a date name from an asset
-            allowed_exceptions: Exceptions that are allowed to be raised during task execution
+            key_fn: Function that generates unique keys from assets
+            timestamp_fn: Optional function that extracts datetime from assets
+            allowed_exceptions: Exceptions allowed during task execution
+            date_name_fn: DEPRECATED. Use key_fn for unique keys and timestamp_fn for temporal metadata
         """
         super().__init__()
         self._tasks = tasks
-        self._date_name_fn = date_name_fn
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
         self._executed = False
-        self._keys = self._compute_keys()
+        
+        # Handle backward compatibility and parameter validation
+        if date_name_fn is not None:
+            # Legacy usage - convert to new API
+            if key_fn is None:
+                key_fn = date_name_fn
+            if timestamp_fn is None:
+                timestamp_fn = date_name_fn
+        elif key_fn is None:
+            raise TypeError("LazyRasterStack() missing required argument: 'key_fn' (or use deprecated 'date_name_fn')")
+        
+        self._key_fn = key_fn
+        self._timestamp_fn = timestamp_fn
+        
+        # Pre-compute keys and timestamp metadata
+        self._keys = []
+        self._timestamp_map = {}  # Maps keys to timestamps  
+        self._timestamp_groups = {}  # Maps timestamps to lists of keys
+        
+        self._compute_metadata()
 
-    def _compute_keys(self) -> List[str]:
-        """Compute the keys of the RasterStack without executing the tasks."""
-        return [self._date_name_fn(asset) for _, asset in self._tasks]
+    def _compute_metadata(self) -> None:
+        """Compute keys and build timestamp mapping without executing tasks."""
+        for _, asset in self._tasks:
+            key = self._key_fn(asset)
+            self._keys.append(key)
+            
+            if self._timestamp_fn:
+                timestamp = self._timestamp_fn(asset)
+                self._timestamp_map[key] = timestamp
+                
+                if timestamp not in self._timestamp_groups:
+                    self._timestamp_groups[timestamp] = []
+                self._timestamp_groups[timestamp].append(key)
 
     def _execute_tasks(self) -> None:
         """Execute the tasks and populate the dictionary."""
@@ -69,9 +102,48 @@ class LazyRasterStack(Dict[str, ImageData]):
             for data, asset in filter_tasks(
                 self._tasks, allowed_exceptions=self._allowed_exceptions
             ):
-                key = self._date_name_fn(asset)
+                key = self._key_fn(asset)
                 self[key] = data
             self._executed = True
+
+    def timestamps(self) -> List[str]:
+        """Return list of unique timestamps in the stack."""
+        return sorted(self._timestamp_groups.keys())
+    
+    def get_timestamp(self, key: str) -> Optional[str]:
+        """Get the timestamp associated with a key."""
+        return self._timestamp_map.get(key)
+    
+    def get_by_timestamp(self, timestamp: str) -> Dict[str, ImageData]:
+        """Get all items with the specified timestamp.
+        
+        Args:
+            timestamp: ISO format timestamp string
+            
+        Returns:
+            Dictionary mapping keys to ImageData for items with this timestamp
+        """
+        if timestamp not in self._timestamp_groups:
+            return {}
+        
+        if not self._executed:
+            self._execute_tasks()
+        
+        return {key: self[key] for key in self._timestamp_groups[timestamp] if key in self}
+    
+    def groupby_timestamp(self) -> Dict[str, Dict[str, ImageData]]:
+        """Group items by timestamp.
+        
+        Returns:
+            Dictionary mapping timestamps to dictionaries of {key: ImageData}
+        """
+        if not self._executed:
+            self._execute_tasks()
+        
+        result = {}
+        for timestamp in self._timestamp_groups:
+            result[timestamp] = self.get_by_timestamp(timestamp)
+        return result
 
     def __getitem__(self, key: str) -> ImageData:
         """Get an item from the RasterStack, executing tasks if necessary."""

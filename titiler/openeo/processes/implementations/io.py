@@ -63,7 +63,8 @@ def load_url(
     # Return a LazyRasterStack that will only execute the tasks when accessed
     return LazyRasterStack(
         tasks=tasks,
-        date_name_fn=lambda _: "data",  # Single timestamp since it's a single COG
+        key_fn=lambda _: "data",  # Single key since it's a single COG
+        timestamp_fn=lambda _: "data",  # Single timestamp since it's a single COG
         allowed_exceptions=(),
     )
 
