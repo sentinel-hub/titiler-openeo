@@ -4,6 +4,7 @@ import csv
 import io
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, Optional, Union
 
 import numpy
@@ -64,7 +65,7 @@ def load_url(
     return LazyRasterStack(
         tasks=tasks,
         key_fn=lambda _: "data",  # Single key since it's a single COG
-        timestamp_fn=lambda _: "data",  # Single timestamp since it's a single COG
+        timestamp_fn=lambda _: datetime.now(),  # Use current time as timestamp
         allowed_exceptions=(),
     )
 

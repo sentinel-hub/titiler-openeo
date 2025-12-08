@@ -1,6 +1,7 @@
 """TiTiler.openeo data models."""
 
 import warnings
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, cast
 
 from rio_tiler.errors import TileOutsideBounds
@@ -44,7 +45,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         self,
         tasks: TaskType,
         key_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
-        timestamp_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
+        timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
         allowed_exceptions: Optional[Tuple] = None,
         # Deprecated parameters for backward compatibility
         date_name_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
@@ -54,7 +55,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
             key_fn: Function that generates unique keys from assets
-            timestamp_fn: Optional function that extracts datetime from assets
+            timestamp_fn: Optional function that extracts datetime objects from assets
             allowed_exceptions: Exceptions allowed during task execution
             date_name_fn: DEPRECATED. Use key_fn for unique keys and timestamp_fn for temporal metadata.
                          This parameter will be removed in a future version.
@@ -86,8 +87,8 @@ class LazyRasterStack(Dict[str, ImageData]):
         
         # Pre-compute keys and timestamp metadata
         self._keys = []
-        self._timestamp_map = {}  # Maps keys to timestamps  
-        self._timestamp_groups = {}  # Maps timestamps to lists of keys
+        self._timestamp_map = {}  # Maps keys to datetime objects  
+        self._timestamp_groups = {}  # Maps datetime objects to lists of keys
         
         self._compute_metadata()
 
@@ -115,19 +116,19 @@ class LazyRasterStack(Dict[str, ImageData]):
                 self[key] = data
             self._executed = True
 
-    def timestamps(self) -> List[str]:
+    def timestamps(self) -> List[datetime]:
         """Return list of unique timestamps in the stack."""
         return sorted(self._timestamp_groups.keys())
     
-    def get_timestamp(self, key: str) -> Optional[str]:
+    def get_timestamp(self, key: str) -> Optional[datetime]:
         """Get the timestamp associated with a key."""
         return self._timestamp_map.get(key)
     
-    def get_by_timestamp(self, timestamp: str) -> Dict[str, ImageData]:
+    def get_by_timestamp(self, timestamp: datetime) -> Dict[str, ImageData]:
         """Get all items with the specified timestamp.
         
         Args:
-            timestamp: ISO format timestamp string
+            timestamp: datetime object
             
         Returns:
             Dictionary mapping keys to ImageData for items with this timestamp
@@ -140,11 +141,11 @@ class LazyRasterStack(Dict[str, ImageData]):
         
         return {key: self[key] for key in self._timestamp_groups[timestamp] if key in self}
     
-    def groupby_timestamp(self) -> Dict[str, Dict[str, ImageData]]:
+    def groupby_timestamp(self) -> Dict[datetime, Dict[str, ImageData]]:
         """Group items by timestamp.
         
         Returns:
-            Dictionary mapping timestamps to dictionaries of {key: ImageData}
+            Dictionary mapping datetime objects to dictionaries of {key: ImageData}
         """
         if not self._executed:
             self._execute_tasks()

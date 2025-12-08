@@ -30,7 +30,7 @@ from .errors import (
     UnsupportedSTACObject,
 )
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
-from .processes.implementations.utils import _props_to_datename, _props_to_timestamp, to_rasterio_crs
+from .processes.implementations.utils import _props_to_datename, _props_to_timestamp, _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
@@ -827,7 +827,7 @@ class LoadStac:
         return LazyRasterStack(
             tasks=tasks,
             key_fn=lambda asset: asset["id"],  # Use item ID as unique key
-            timestamp_fn=lambda asset: _props_to_timestamp(asset["properties"]),
+            timestamp_fn=lambda asset: _props_to_datetime(asset["properties"]),
             allowed_exceptions=(TileOutsideBounds,),
         )
 

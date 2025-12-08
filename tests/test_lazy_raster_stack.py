@@ -1,6 +1,7 @@
 """Test LazyRasterStack with apply_pixel_selection."""
 
 import numpy as np
+from datetime import datetime
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import LazyRasterStack
@@ -19,7 +20,7 @@ def mock_task():
 
 def test_lazy_raster_stack():
     # Create a mock asset
-    mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01"}}
+    mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
 
     # Create a list of tasks
     tasks = [(mock_task, mock_asset)]
@@ -28,7 +29,7 @@ def test_lazy_raster_stack():
     lazy_stack = LazyRasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
-        timestamp_fn=lambda asset: asset["properties"]["datetime"],
+        timestamp_fn=lambda asset: datetime.fromisoformat(asset["properties"]["datetime"].replace('Z', '+00:00')),
     )
 
     assert len(lazy_stack) > 0
@@ -46,8 +47,8 @@ def test_lazy_raster_stack():
 def test_lazy_raster_stack_duplicate_timestamps():
     """Test that LazyRasterStack handles multiple items with the same timestamp correctly."""
     # Create mock assets with same datetime but different IDs
-    mock_asset_1 = {"id": "item-001", "properties": {"datetime": "2021-01-01"}}
-    mock_asset_2 = {"id": "item-002", "properties": {"datetime": "2021-01-01"}}
+    mock_asset_1 = {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
+    mock_asset_2 = {"id": "item-002", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
 
     # Create tasks
     tasks = [(mock_task, mock_asset_1), (mock_task, mock_asset_2)]
@@ -56,7 +57,7 @@ def test_lazy_raster_stack_duplicate_timestamps():
     lazy_stack = LazyRasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
-        timestamp_fn=lambda asset: asset["properties"]["datetime"],
+        timestamp_fn=lambda asset: datetime.fromisoformat(asset["properties"]["datetime"].replace('Z', '+00:00')),
     )
 
     assert len(lazy_stack) == 2  # Should have both items
@@ -64,26 +65,33 @@ def test_lazy_raster_stack_duplicate_timestamps():
     assert "item-002" in lazy_stack
 
     # Test timestamp grouping
-    assert lazy_stack.timestamps() == ["2021-01-01"]
-    assert lazy_stack.get_timestamp("item-001") == "2021-01-01"
-    assert lazy_stack.get_timestamp("item-002") == "2021-01-01"
+    timestamps = lazy_stack.timestamps()
+    assert len(timestamps) == 1
+    assert isinstance(timestamps[0], datetime)
+    assert timestamps[0].year == 2021
+    assert timestamps[0].month == 1
+    assert timestamps[0].day == 1
+    
+    assert isinstance(lazy_stack.get_timestamp("item-001"), datetime)
+    assert isinstance(lazy_stack.get_timestamp("item-002"), datetime)
 
-    # Test getting by timestamp
-    items_by_timestamp = lazy_stack.get_by_timestamp("2021-01-01")
+    # Test getting by timestamp - use the actual timestamp from the stack
+    test_dt = timestamps[0]
+    items_by_timestamp = lazy_stack.get_by_timestamp(test_dt)
     assert len(items_by_timestamp) == 2
     assert "item-001" in items_by_timestamp
     assert "item-002" in items_by_timestamp
 
     # Test groupby timestamp
     grouped = lazy_stack.groupby_timestamp()
-    assert "2021-01-01" in grouped
-    assert len(grouped["2021-01-01"]) == 2
+    assert test_dt in grouped
+    assert len(grouped[test_dt]) == 2
 
 
 def test_lazy_raster_stack_backward_compatibility():
     """Test backward compatibility with old date_name_fn parameter."""
     # Create a mock asset
-    mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01"}}
+    mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
 
     # Create a list of tasks
     tasks = [(mock_task, mock_asset)]
@@ -97,10 +105,10 @@ def test_lazy_raster_stack_backward_compatibility():
     assert len(lazy_stack) > 0
     assert lazy_stack._executed is False
 
-    # Should be accessible via the datetime key
-    assert "2021-01-01" in lazy_stack
+    # Should be accessible via the datetime string key (old behavior)
+    assert "2021-01-01T00:00:00Z" in lazy_stack
     
     # Accessing should work
-    image = lazy_stack["2021-01-01"]
+    image = lazy_stack["2021-01-01T00:00:00Z"]
     assert isinstance(image, ImageData)
     assert lazy_stack._executed is True
