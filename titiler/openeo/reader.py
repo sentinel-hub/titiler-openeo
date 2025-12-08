@@ -71,7 +71,8 @@ class SimpleSTACReader(MultiBaseReader):
         self.crs = WGS84_CRS  # Default to WGS84
 
         # Get projection information using STAC extension
-        if proj_ext := ProjectionExtension.ext(self.item):
+        if ProjectionExtension.has_extension(self.item):
+            proj_ext = ProjectionExtension.ext(self.item)
             if all(
                 [
                     proj_ext.transform,
