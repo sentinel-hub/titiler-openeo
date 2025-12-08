@@ -115,17 +115,20 @@ spec:
             - name: CURLOPT_NETRC_FILE
               value: /config/netrc
           {{- end }}
-          {{- if or .Values.envFrom.configMaps .Values.envFrom.secrets }}
-          envFrom:
-            {{- range .Values.envFrom.configMaps }}
-            - configMapRef:
-                name: {{ . }}
+            {{- range .Values.envVars.fromSecret }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
             {{- end }}
-            {{- range .Values.envFrom.secrets }}
-            - secretRef:
-                name: {{ . }}
+            {{- range .Values.envVars.fromConfigMap }}
+            - name: {{ .name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .configMapName }}
+                  key: {{ .configMapKey }}
             {{- end }}
-          {{- end }}
           ports:
             - name: http
               containerPort: 80
