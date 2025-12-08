@@ -73,30 +73,17 @@ class SimpleSTACReader(MultiBaseReader):
         # Get projection information using STAC extension
         if ProjectionExtension.has_extension(self.item):
             proj_ext = ProjectionExtension.ext(self.item)
-
-            # Set CRS if available
-            if proj_ext.epsg:
-                self.crs = rasterio.crs.CRS.from_epsg(proj_ext.epsg)
-            elif proj_ext.wkt2:
-                self.crs = rasterio.crs.CRS.from_wkt(proj_ext.wkt2)
-
-            # Set transform and shape if available
-            if proj_ext.transform and proj_ext.shape:
+            if all(
+                [
+                    proj_ext.transform,
+                    proj_ext.shape,
+                    proj_ext.crs_string,
+                ]
+            ):
                 self.height, self.width = proj_ext.shape
-                self.transform = Affine(
-                    proj_ext.transform[0],
-                    proj_ext.transform[1],
-                    proj_ext.transform[2],
-                    proj_ext.transform[3],
-                    proj_ext.transform[4],
-                    proj_ext.transform[5],
-                )
-                # Update bounds if we have both transform and shape
+                self.transform = Affine(*proj_ext.transform)
                 self.bounds = array_bounds(self.height, self.width, self.transform)
-            elif proj_ext.transform:
-                self.transform = proj_ext.transform
-            elif proj_ext.shape:
-                self.height, self.width = proj_ext.shape
+                self.crs = rasterio.crs.CRS.from_string(proj_ext.crs_string)
 
         self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
         self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
