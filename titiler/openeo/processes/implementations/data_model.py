@@ -2,7 +2,7 @@
 
 import warnings
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, cast, overload
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, overload
 
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
@@ -92,7 +92,9 @@ class LazyRasterStack(Dict[str, ImageData]):
         # Pre-compute keys and timestamp metadata
         self._keys: List[str] = []
         self._timestamp_map: Dict[str, datetime] = {}  # Maps keys to datetime objects
-        self._timestamp_groups: Dict[datetime, List[str]] = {}  # Maps datetime objects to lists of keys
+        self._timestamp_groups: Dict[
+            datetime, List[str]
+        ] = {}  # Maps datetime objects to lists of keys
 
         self._compute_metadata()
 
@@ -209,10 +211,10 @@ class LazyRasterStack(Dict[str, ImageData]):
 
     @overload
     def get(self, key: str) -> Optional[ImageData]: ...
-    
+
     @overload
     def get(self, key: str, default: T) -> Union[ImageData, T]: ...
-    
+
     def get(self, key: str, default: Optional[T] = None) -> Union[ImageData, T, None]:
         """Get an item from the RasterStack, executing tasks if necessary."""
         if key not in self:
