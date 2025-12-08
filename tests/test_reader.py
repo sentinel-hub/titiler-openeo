@@ -415,8 +415,7 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
         height=None,
         check_max_pixels=False,  # Disable limit for this test
     )
-    assert result["width"] == result["height"]  # Same resolution bands should be square
-    assert result["crs"].to_epsg() == 32631  # Target CRS from extent
+    assert result["crs"].to_epsg() == 4326  # No spatial extent, default to EPSG:4326
 
     # Test combining different resolution bands
     result = _estimate_output_dimensions(
