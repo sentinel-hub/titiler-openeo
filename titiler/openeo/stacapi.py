@@ -30,7 +30,7 @@ from .errors import (
     UnsupportedSTACObject,
 )
 from .processes.implementations.data_model import LazyRasterStack, RasterStack
-from .processes.implementations.utils import _props_to_datename, _props_to_timestamp, _props_to_datetime, to_rasterio_crs
+from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 
