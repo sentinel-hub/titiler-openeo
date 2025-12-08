@@ -98,12 +98,20 @@ env:
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
 
-# Environment variables from ConfigMaps and Secrets
-envFrom:
-  configMaps: []
-  # - name: my-configmap
-  secrets: []
-  # - name: my-secret
+# Additional environment variables from ConfigMaps and Secrets
+# Use this to map specific keys from secrets or configmaps to environment variables
+envVars:
+  fromSecret: []
+  # - name: REDIS_PASSWORD           # Environment variable name
+  #   secretName: redis-credentials   # Secret name
+  #   secretKey: password             # Key in the secret
+  # - name: REDIS_HOST
+  #   secretName: redis-credentials
+  #   secretKey: host
+  fromConfigMap: []
+  # - name: REDIS_PORT              # Environment variable name
+  #   configMapName: redis-config   # ConfigMap name
+  #   configMapKey: port            # Key in the configmap
 
 resources:
   limits:
