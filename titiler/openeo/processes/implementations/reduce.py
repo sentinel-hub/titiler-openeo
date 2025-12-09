@@ -213,7 +213,8 @@ def _reduce_spectral_dimension_single_image(
     Returns:
         An ImageData with the spectral dimension reduced
     """
-    reduced_img_data = reducer(data=data)
+    # Pass only the array data (spectral bands) to the reducer, not the entire ImageData
+    reduced_img_data = reducer(data=data.array)
     return ImageData(
         reduced_img_data,
         assets=data.assets,
@@ -248,41 +249,39 @@ def _reduce_spectral_dimension_stack(
             "Expected a non-empty RasterStack for spectral dimension reduction"
         )
 
-    # Apply the reducer to the entire stack
-    reduced_img_data = reducer(data=data)
-
-    # Validate the reducer output - must NOT be a RasterStack or dict
-    if isinstance(reduced_img_data, dict):
-        raise ValueError(
-            "The reducer must return an array-like object for spectral dimension reduction, "
-            "not a RasterStack (dict). The reducer should process the spectral bands "
-            "and return the resulting array directly."
-        )
-
-    # Check if it's array-like (more compliant than checking only numpy.ndarray)
-    try:
-        reduced_img_data = numpy.asarray(reduced_img_data)
-    except (TypeError, ValueError) as e:
-        reducer_type = type(reduced_img_data).__name__
-        raise ValueError(
-            f"The reducer must return an array-like object for spectral dimension reduction, "
-            f"but returned {reducer_type} which cannot be converted to an array. "
-            f"Expected array-like data with the same temporal dimension as input but reduced spectral bands."
-        ) from e
-
-    if reduced_img_data.shape[0] != len(data):
-        raise ValueError(
-            "The reduced data must have the same first dimension as the input stack"
-        )
-
     # Create a new stack with the reduced data
     result = {}
+
     # Iterate through keys instead of items() to avoid executing all tasks at once
-    for i, key in enumerate(data.keys()):
+    # Apply the reducer to each individual time slice
+    for key in data.keys():
         try:
             img = data[key]  # Access each image individually
+
+            # Apply the reducer to this individual image's spectral bands (array only)
+            reduced_img_data = reducer(data=img.array)
+
+            # Validate the reducer output - must NOT be a RasterStack or dict
+            if isinstance(reduced_img_data, dict):
+                raise ValueError(
+                    f"The reducer must return an array-like object for spectral dimension reduction "
+                    f"of image {key}, not a RasterStack (dict). The reducer should process the spectral bands "
+                    f"and return the resulting array directly."
+                )
+
+            # Check if it's array-like (more compliant than checking only numpy.ndarray)
+            try:
+                reduced_img_data = numpy.asarray(reduced_img_data)
+            except (TypeError, ValueError) as e:
+                reducer_type = type(reduced_img_data).__name__
+                raise ValueError(
+                    f"The reducer must return an array-like object for spectral dimension reduction "
+                    f"of image {key}, but returned {reducer_type} which cannot be converted to an array. "
+                    f"Expected array-like data with reduced spectral bands."
+                ) from e
+
             result[key] = ImageData(
-                reduced_img_data[i],
+                reduced_img_data,
                 assets=[key],
                 crs=img.crs,
                 bounds=img.bounds,

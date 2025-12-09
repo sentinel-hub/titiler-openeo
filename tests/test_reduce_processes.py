@@ -82,10 +82,13 @@ def test_reduce_spectral_dimension(sample_spectral_stack):
     # Mean reducer for spectral dimension
     def mean_reducer(data, **kwargs):
         """Calculate mean across spectral dimension."""
-        if isinstance(data, ImageData):
-            # Mean across bands (first dimension)
+        # After our changes, data is now the array directly, not ImageData
+        if hasattr(data, "array"):
+            # Old format - ImageData object
             return np.mean(data.array, axis=0)
-        return None
+        else:
+            # New format - array directly
+            return np.mean(data, axis=0)
 
     # Reduce spectral dimension
     result = reduce_dimension(
