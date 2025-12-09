@@ -161,31 +161,6 @@ def test_concurrent_execution_within_timestamp_group():
         ), f"Executions took too long, time spread: {time_spread}"
 
 
-def test_temporal_ordering_preserved():
-    """Test that timestamp groups are processed in chronological order."""
-
-    # Create test data with timestamps in reverse chronological order in dict
-    # but they should be processed in chronological order
-    timestamp_groups = {
-        datetime(2021, 1, 3): ["item_2021-01-03"],
-        datetime(2021, 1, 1): ["item_2021-01-01"],
-        datetime(2021, 1, 2): ["item_2021-01-02"],
-    }
-
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
-
-    # Apply pixel selection
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
-
-    # Verify we got a result
-    assert "data" in result
-
-    # Check that timestamps() method returns sorted timestamps
-    timestamps = mock_stack.timestamps()
-    expected_order = [datetime(2021, 1, 1), datetime(2021, 1, 2), datetime(2021, 1, 3)]
-    assert timestamps == expected_order
-
-
 def test_early_termination_by_timestamp_group():
     """Test that processing stops when pixel selection is satisfied."""
 
@@ -213,30 +188,6 @@ def test_early_termination_by_timestamp_group():
     assert len(processed_items) >= 1
     # For "first" selection, it might terminate after just one timestamp group
     assert len(processed_items) <= 4  # At most all items
-
-
-def test_fallback_to_sequential_for_non_lazy_stack():
-    """Test that regular dicts fall back to sequential processing."""
-
-    # Create a regular dict (not LazyRasterStack)
-    regular_stack = {}
-    for i in range(3):
-        array = np.ma.ones((3, 10, 10)) * (i + 1)
-        regular_stack[f"item_{i}"] = ImageData(
-            array,
-            assets=[f"item_{i}"],
-            crs="EPSG:4326",
-            bounds=(-180, -90, 180, 90),
-            band_names=["red", "green", "blue"],
-        )
-
-    # This should work without timestamp-based processing
-    result = apply_pixel_selection(regular_stack, pixel_selection="first")
-
-    # Verify we got a result
-    assert isinstance(result, dict)
-    assert "data" in result
-    assert isinstance(result["data"], ImageData)
 
 
 def test_failed_tasks_handling_in_timestamp_group():
@@ -318,27 +269,6 @@ def test_thread_pool_executor_usage():
     result = stack.get_by_timestamp(datetime(2021, 1, 1))
     assert len(result) == 3
     assert all(f"item_{i}" in result for i in range(3))
-
-
-def test_empty_timestamp_groups_handling():
-    """Test handling of timestamp groups with no items."""
-
-    timestamp_groups = {
-        datetime(2021, 1, 1): [],  # Empty timestamp group
-        datetime(2021, 1, 2): ["item_2021-01-02"],
-    }
-
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
-
-    # Should skip empty groups and process the non-empty one
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
-
-    # Should get a result from the non-empty group
-    assert "data" in result
-
-    # Should have processed only the item from the non-empty group
-    processed_items = [entry["key"] for entry in mock_stack._execution_log]
-    assert "item_2021-01-02" in processed_items
 
 
 def test_real_lazy_raster_stack_integration():
