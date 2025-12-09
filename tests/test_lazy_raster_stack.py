@@ -690,3 +690,78 @@ def test_lazy_raster_stack_edge_cases():
     assert len(lazy_stack_with_dupes._keys) == 3
     assert "duplicate-key" in lazy_stack_with_dupes._keys
     assert "unique-key" in lazy_stack_with_dupes._keys
+
+
+def test_get_first_item_with_failing_tasks():
+    """Test get_first_item finds the first successful task when early tasks fail."""
+    from rio_tiler.errors import TileOutsideBounds
+
+    from titiler.openeo.processes.implementations.data_model import get_first_item
+
+    def create_failing_task():
+        def task():
+            raise TileOutsideBounds("Task failed")
+
+        return task
+
+    def create_successful_task(value):
+        def task():
+            array = np.ma.MaskedArray(
+                data=np.full((1, 10, 10), value), mask=np.zeros((1, 10, 10), dtype=bool)
+            )
+            return ImageData(array)
+
+        return task
+
+    # Create tasks where first 2 fail and 3rd succeeds
+    assets = [
+        {"id": "fail1", "datetime": "2021-01-01T00:00:00Z"},
+        {"id": "fail2", "datetime": "2021-01-02T00:00:00Z"},
+        {"id": "success", "datetime": "2021-01-03T00:00:00Z"},
+    ]
+
+    tasks = [
+        (create_failing_task(), assets[0]),
+        (create_failing_task(), assets[1]),
+        (create_successful_task(42), assets[2]),
+    ]
+
+    lazy_stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: datetime.fromisoformat(
+            asset["datetime"].replace("Z", "+00:00")
+        ),
+        allowed_exceptions=(TileOutsideBounds,),
+    )
+
+    # get_first_item should find the first successful task (the 3rd one)
+    result = get_first_item(lazy_stack)
+    assert isinstance(result, ImageData)
+    assert result.array[0, 0, 0] == 42  # Value from the successful task
+
+
+def test_get_first_item_all_tasks_fail():
+    """Test get_first_item when all tasks fail."""
+    from rio_tiler.errors import TileOutsideBounds
+
+    from titiler.openeo.processes.implementations.data_model import get_first_item
+
+    def create_failing_task():
+        def task():
+            raise TileOutsideBounds("Task failed")
+
+        return task
+
+    assets = [{"id": "fail1"}, {"id": "fail2"}]
+    tasks = [(create_failing_task(), asset) for asset in assets]
+
+    lazy_stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        allowed_exceptions=(TileOutsideBounds,),
+    )
+
+    # get_first_item should raise KeyError when all tasks fail
+    with pytest.raises(KeyError, match="No successful tasks found"):
+        get_first_item(lazy_stack)

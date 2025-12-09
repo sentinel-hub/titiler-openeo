@@ -32,7 +32,7 @@ T = TypeVar("T")
 def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
     """Get the first item from a RasterStack efficiently.
 
-    For LazyRasterStack, this only executes the first task.
+    For LazyRasterStack, this finds the first successful task.
     For regular RasterStack, this gets the first value.
     For single ImageData, returns it directly.
 
@@ -40,14 +40,24 @@ def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
         data: Input data (ImageData or RasterStack)
 
     Returns:
-        ImageData: The first item
+        ImageData: The first successful item
+
+    Raises:
+        KeyError: If no successful tasks are found in the stack
     """
     if isinstance(data, ImageData):
         return data
     elif isinstance(data, LazyRasterStack):
-        # Only access the first key to avoid executing all tasks
-        first_key = next(iter(data.keys()))
-        return data[first_key]  # Execute only the first task
+        # Try each key in order until we find one that succeeds
+        for key in data.keys():
+            try:
+                return data[key]  # Execute this task
+            except KeyError:
+                # This task failed, try the next one
+                continue
+
+        # If we get here, all tasks failed
+        raise KeyError("No successful tasks found in LazyRasterStack")
     elif isinstance(data, dict):
         # Regular RasterStack
         return next(iter(data.values()))
@@ -58,7 +68,7 @@ def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
 def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
     """Get the last item from a RasterStack efficiently.
 
-    For LazyRasterStack, this only executes the last task.
+    For LazyRasterStack, this finds the last successful task.
     For regular RasterStack, this gets the last value.
     For single ImageData, returns it directly.
 
@@ -66,14 +76,24 @@ def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
         data: Input data (ImageData or RasterStack)
 
     Returns:
-        ImageData: The last item
+        ImageData: The last successful item
+
+    Raises:
+        KeyError: If no successful tasks are found in the stack
     """
     if isinstance(data, ImageData):
         return data
     elif isinstance(data, LazyRasterStack):
-        # Only access the last key to avoid executing all tasks
-        last_key = list(data.keys())[-1]
-        return data[last_key]  # Execute only the last task
+        # Try each key in reverse order until we find one that succeeds
+        for key in reversed(list(data.keys())):
+            try:
+                return data[key]  # Execute this task
+            except KeyError:
+                # This task failed, try the previous one
+                continue
+
+        # If we get here, all tasks failed
+        raise KeyError("No successful tasks found in LazyRasterStack")
     elif isinstance(data, dict):
         # Regular RasterStack - get last value
         return list(data.values())[-1]
@@ -168,15 +188,9 @@ class LazyRasterStack(Dict[str, ImageData]):
             # Update _keys to be in temporal order
             self._keys = [key for _, key in timestamp_key_pairs]
 
-            # Update key-to-task index mapping after reordering
-            self._key_to_task_index = {
-                key: next(
-                    i
-                    for i, (_, asset) in enumerate(self._tasks)
-                    if self._key_fn(asset) == key
-                )
-                for key in self._keys
-            }
+            # IMPORTANT: The _key_to_task_index mapping is still correct
+            # because it maps keys to their original task indices,
+            # regardless of the order in _keys
 
     def _execute_task_for_key(self, key: str) -> ImageData:
         """Execute a single task for the given key.
@@ -226,17 +240,22 @@ class LazyRasterStack(Dict[str, ImageData]):
         if not keys_to_execute:
             return
 
-        # Get the tasks for the selected keys
-        selected_tasks = [
-            self._tasks[self._key_to_task_index[key]] for key in keys_to_execute
+        # Get the tasks for the selected keys with their corresponding keys
+        key_task_pairs = [
+            (key, self._tasks[self._key_to_task_index[key]]) for key in keys_to_execute
         ]
 
         # Execute tasks with the same exception handling as the original
-        for data, asset in filter_tasks(
-            selected_tasks, allowed_exceptions=self._allowed_exceptions
-        ):
-            key = self._key_fn(asset)
-            self._data_cache[key] = data
+        for key, (task_func, _asset) in key_task_pairs:
+            try:
+                if isinstance(task_func, Future):
+                    data = task_func.result()
+                else:
+                    data = task_func()
+                self._data_cache[key] = data
+            except self._allowed_exceptions:
+                # Skip failed tasks, don't cache them
+                continue
 
     def _execute_all_tasks(self) -> None:
         """Execute all tasks and populate the cache (for backward compatibility)."""
