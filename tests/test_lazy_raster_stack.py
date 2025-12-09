@@ -99,24 +99,24 @@ def test_lazy_raster_stack_duplicate_timestamps():
     assert len(grouped[test_dt]) == 2
 
 
-def test_lazy_raster_stack_backward_compatibility():
-    """Test backward compatibility with old date_name_fn parameter."""
+def test_lazy_raster_stack_with_key_fn_only():
+    """Test LazyRasterStack with only key_fn (no timestamp_fn)."""
     # Create a mock asset
     mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
 
     # Create a list of tasks
     tasks = [(mock_task, mock_asset)]
 
-    # Create a LazyRasterStack using old API
+    # Create a LazyRasterStack using new API with only key_fn
     lazy_stack = LazyRasterStack(
         tasks=tasks,
-        date_name_fn=lambda asset: asset["properties"]["datetime"],
+        key_fn=lambda asset: asset["properties"]["datetime"],
     )
 
     assert len(lazy_stack) > 0
     assert lazy_stack._executed is False
 
-    # Should be accessible via the datetime string key (old behavior)
+    # Should be accessible via the datetime string key
     assert "2021-01-01T00:00:00Z" in lazy_stack
 
     # Accessing should work

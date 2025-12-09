@@ -1,6 +1,5 @@
 """TiTiler.openeo data models."""
 
-import warnings
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, overload
 
@@ -44,11 +43,9 @@ class LazyRasterStack(Dict[str, ImageData]):
     def __init__(
         self,
         tasks: TaskType,
-        key_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
+        key_fn: Callable[[Dict[str, Any]], str],
         timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
         allowed_exceptions: Optional[Tuple] = None,
-        # Deprecated parameters for backward compatibility
-        date_name_fn: Optional[Callable[[Dict[str, Any]], str]] = None,
     ):
         """Initialize a LazyRasterStack.
 
@@ -57,34 +54,11 @@ class LazyRasterStack(Dict[str, ImageData]):
             key_fn: Function that generates unique keys from assets
             timestamp_fn: Optional function that extracts datetime objects from assets
             allowed_exceptions: Exceptions allowed during task execution
-            date_name_fn: DEPRECATED. Use key_fn for unique keys and timestamp_fn for temporal metadata.
-                         This parameter will be removed in a future version.
         """
         super().__init__()
         self._tasks = tasks
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
         self._executed = False
-
-        # Handle backward compatibility and parameter validation
-        if date_name_fn is not None:
-            warnings.warn(
-                "The 'date_name_fn' parameter is deprecated. Use 'key_fn' for unique keys "
-                "and 'timestamp_fn' for temporal metadata instead. "
-                "This parameter will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            # Legacy usage - convert to new API
-            if key_fn is None:
-                key_fn = date_name_fn
-            if timestamp_fn is None:
-                # For backward compatibility, date_name_fn returns string, not datetime
-                # This will be used as key_fn, timestamp extraction is separate
-                timestamp_fn = None
-        elif key_fn is None:
-            raise TypeError(
-                "LazyRasterStack() missing required argument: 'key_fn' (or use deprecated 'date_name_fn')"
-            )
 
         self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
