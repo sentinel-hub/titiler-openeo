@@ -222,7 +222,7 @@ def test_first_last_temporal_behavior():
         )
         stack[date] = ImageData(data, band_names=["red", "green", "blue"])
 
-    # Test first() function - should return first temporal element 
+    # Test first() function - should return first temporal element
     first_result = first(stack)
 
     # NEW behavior: gets first temporal item, then first spectral band from that item
@@ -235,9 +235,9 @@ def test_first_last_temporal_behavior():
 
     # Test last() function - should return last temporal element
     last_result = last(stack)
-    
+
     # Should be the last band from the last temporal image
     assert isinstance(last_result, np.ndarray)
-    assert last_result.shape == (10, 10)  # Last band from last temporal item  
+    assert last_result.shape == (10, 10)  # Last band from last temporal item
     # Should have value 3.0 since last temporal item has value 3.0
     assert np.all(last_result == 3.0)
