@@ -46,24 +46,8 @@ def apply_pixel_selection(
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
     """
-    # Optimize for 'first' selection with LazyRasterStack
-    if pixel_selection == "first":
-        first_img = get_first_item(data)
-
-        return {
-            "data": ImageData(
-                first_img.array,
-                assets=first_img.assets,
-                crs=first_img.crs,
-                bounds=first_img.bounds,
-                band_names=first_img.band_names if first_img.band_names else [],
-                metadata={
-                    "pixel_selection_method": pixel_selection,
-                },
-            )
-        }
-
-    # Original implementation for other selection methods or regular RasterStack
+    # Use the original implementation for all selection methods
+    # The optimization should be in early termination, not in skipping processing
     pixsel_method = PixelSelectionMethod[pixel_selection].value()
 
     assets_used: List = []
@@ -71,7 +55,15 @@ def apply_pixel_selection(
     bounds: Optional[BBox] = None
     band_names: Optional[List[str]] = None
 
-    for key, img in data.items():
+    # Iterate through keys instead of items() to avoid executing all tasks at once
+    for key in data.keys():
+        # Access each image individually - this triggers lazy loading for this specific key
+        try:
+            img = data[key]
+        except KeyError:
+            # Skip failed tasks and continue with the next one
+            continue
+
         # On the first Image we set the properties
         if len(assets_used) == 0:
             crs = img.crs
@@ -112,6 +104,8 @@ def apply_pixel_selection(
         # Store the key (which could be item ID) for tracking
         assets_used.append(key)
 
+        # Early termination: if the pixel selection method is done, we can stop
+        # This is the real optimization - stopping when we have enough data
         if pixsel_method.is_done and pixsel_method.data is not None:
             return {
                 "data": ImageData(
@@ -152,43 +146,48 @@ def _reduce_temporal_dimension(
     Args:
         data: A RasterStack with temporal dimension
         reducer: A reducer function to apply on the temporal dimension
-        dimension: The name of the temporal dimension
-        context: Additional data to be passed to the reducer
 
     Returns:
-        A RasterStack with the temporal dimension reduced
+        A RasterStack with a single reduced temporal result
 
     Raises:
-        ValueError: If the data is not a valid RasterStack
+        ValueError: If the data is not a valid RasterStack or reducer doesn't return expected format
     """
     if not isinstance(data, dict) or not data:
         raise ValueError(
             "Expected a non-empty RasterStack for temporal dimension reduction"
         )
 
-    # Extract arrays from all images in the stack and create labeled arrays for the reducer
-    # labeled_arrays = [{"label": key, "data": img.array} for key, img in data.items()]
-
-    # Apply the reducer to the labeled arrays
+    # Apply the reducer to the stack
+    # Note: The reducer will determine how much data it actually needs
+    # Some reducers might be able to work with partial data
     reduced_array = reducer(data=data)
 
-    # Create a new stack with the reduced data
-    if not isinstance(reduced_array, numpy.ndarray):
+    # Validate the reducer output - must NOT be a RasterStack or dict
+    if isinstance(reduced_array, dict):
         raise ValueError(
-            "The reducer must return a numpy array for temporal dimension reduction"
-        )
-    if reduced_array.shape[0] != 1:
-        raise ValueError(
-            "The reduced data must have the same first dimension as the input stack"
+            "The reducer must return an array-like object for temporal dimension reduction, "
+            "not a RasterStack (dict). The reducer should collapse the temporal dimension "
+            "and return the resulting array directly."
         )
 
-    # Get first image efficiently for LazyRasterStack
+    # Check if it's array-like (more compliant than checking only numpy.ndarray)
+    try:
+        reduced_array = numpy.asarray(reduced_array)
+    except (TypeError, ValueError) as e:
+        reducer_type = type(reduced_array).__name__
+        raise ValueError(
+            f"The reducer must return an array-like object for temporal dimension reduction, "
+            f"but returned {reducer_type} which cannot be converted to an array. "
+            f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
+        ) from e
 
+    # Get first successful image efficiently for LazyRasterStack - only for metadata
     first_img = get_first_item(data)
 
     return {
         "reduced": ImageData(
-            reduced_array[0],
+            reduced_array,  # Use the reduced array directly since it's already collapsed
             assets=first_img.assets,
             crs=first_img.crs,
             bounds=first_img.bounds,
@@ -252,11 +251,24 @@ def _reduce_spectral_dimension_stack(
     # Apply the reducer to the entire stack
     reduced_img_data = reducer(data=data)
 
-    # Validate the reducer output
-    if not isinstance(reduced_img_data, numpy.ndarray):
+    # Validate the reducer output - must NOT be a RasterStack or dict
+    if isinstance(reduced_img_data, dict):
         raise ValueError(
-            "The reducer must return a numpy array for spectral dimension reduction"
+            "The reducer must return an array-like object for spectral dimension reduction, "
+            "not a RasterStack (dict). The reducer should process the spectral bands "
+            "and return the resulting array directly."
         )
+
+    # Check if it's array-like (more compliant than checking only numpy.ndarray)
+    try:
+        reduced_img_data = numpy.asarray(reduced_img_data)
+    except (TypeError, ValueError) as e:
+        reducer_type = type(reduced_img_data).__name__
+        raise ValueError(
+            f"The reducer must return an array-like object for spectral dimension reduction, "
+            f"but returned {reducer_type} which cannot be converted to an array. "
+            f"Expected array-like data with the same temporal dimension as input but reduced spectral bands."
+        ) from e
 
     if reduced_img_data.shape[0] != len(data):
         raise ValueError(
@@ -265,18 +277,24 @@ def _reduce_spectral_dimension_stack(
 
     # Create a new stack with the reduced data
     result = {}
-    for i, (key, img) in enumerate(data.items()):
-        result[key] = ImageData(
-            reduced_img_data[i],
-            assets=[key],
-            crs=img.crs,
-            bounds=img.bounds,
-            band_names=img.band_names if img.band_names is not None else [],
-            metadata={
-                "reduced_dimension": "spectral",
-                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-            },
-        )
+    # Iterate through keys instead of items() to avoid executing all tasks at once
+    for i, key in enumerate(data.keys()):
+        try:
+            img = data[key]  # Access each image individually
+            result[key] = ImageData(
+                reduced_img_data[i],
+                assets=[key],
+                crs=img.crs,
+                bounds=img.bounds,
+                band_names=img.band_names if img.band_names is not None else [],
+                metadata={
+                    "reduced_dimension": "spectral",
+                    "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+                },
+            )
+        except KeyError:
+            # Skip failed tasks
+            continue
 
     return result
 
