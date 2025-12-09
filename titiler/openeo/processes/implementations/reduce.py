@@ -1,7 +1,7 @@
 """titiler.openeo processed reduce."""
 
 import warnings
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy
 from rasterio.crs import CRS
@@ -37,92 +37,72 @@ class DimensionNotAvailable(Exception):
         )
 
 
-def apply_pixel_selection(
-    data: RasterStack,
-    pixel_selection: str = "first",
-) -> RasterStack:
-    """Apply PixelSelection method on a RasterStack.
+def _initialize_pixel_selection_method(
+    img: ImageData, pixsel_method, assets_used: List
+):
+    """Initialize pixel selection method with first image properties."""
+    if len(assets_used) == 0:
+        pixsel_method.cutline_mask = img.cutline_mask
+        pixsel_method.width = img.width
+        pixsel_method.height = img.height
+        pixsel_method.count = img.count
+        return img.crs, img.bounds, img.band_names
+    return None, None, None
 
-    Returns:
-        RasterStack: A single-image RasterStack containing the result of pixel selection
-    """
-    # Use the original implementation for all selection methods
-    # The optimization should be in early termination, not in skipping processing
-    pixsel_method = PixelSelectionMethod[pixel_selection].value()
 
-    assets_used: List = []
-    crs: Optional[CRS] = None
-    bounds: Optional[BBox] = None
-    band_names: Optional[List[str]] = None
+def _process_image_for_pixel_selection(
+    img: ImageData,
+    pixsel_method,
+    key: str,
+    assets_used: List,
+    crs: Optional[CRS],
+    bounds: Optional[BBox],
+    band_names: Optional[List[str]],
+) -> Tuple[Optional[CRS], Optional[BBox], Optional[List[str]]]:
+    """Process a single image for pixel selection."""
+    # Initialize on first image
+    init_crs, init_bounds, init_band_names = _initialize_pixel_selection_method(
+        img, pixsel_method, assets_used
+    )
+    if init_crs is not None:
+        crs, bounds, band_names = init_crs, init_bounds, init_band_names
 
-    # Iterate through keys instead of items() to avoid executing all tasks at once
-    for key in data.keys():
-        # Access each image individually - this triggers lazy loading for this specific key
-        try:
-            img = data[key]
-        except KeyError:
-            # Skip failed tasks and continue with the next one
-            continue
+    # Validate band count
+    assert (
+        img.count == pixsel_method.count
+    ), "Assets HAVE TO have the same number of bands"
 
-        # On the first Image we set the properties
-        if len(assets_used) == 0:
-            crs = img.crs
-            bounds = img.bounds
-            band_names = img.band_names
-            pixsel_method.cutline_mask = img.cutline_mask
-            pixsel_method.width = img.width
-            pixsel_method.height = img.height
-            pixsel_method.count = img.count
-
-        assert (
-            img.count == pixsel_method.count
-        ), "Assets HAVE TO have the same number of bands"
-
-        if any(
-            [
-                img.width != pixsel_method.width,
-                img.height != pixsel_method.height,
-            ]
-        ):
-            warnings.warn(
-                "Cannot concatenate images with different size. Will resize using fist asset width/heigh",
-                UserWarning,
-                stacklevel=2,
+    # Handle size differences
+    if any([img.width != pixsel_method.width, img.height != pixsel_method.height]):
+        warnings.warn(
+            "Cannot concatenate images with different size. Will resize using first asset width/height",
+            UserWarning,
+            stacklevel=2,
+        )
+        h = pixsel_method.height
+        w = pixsel_method.width
+        pixsel_method.feed(
+            numpy.ma.MaskedArray(
+                resize_array(img.array.data, h, w),
+                mask=resize_array(img.array.mask * 1, h, w).astype("bool"),
             )
-            h = pixsel_method.height
-            w = pixsel_method.width
-            pixsel_method.feed(
-                numpy.ma.MaskedArray(
-                    resize_array(img.array.data, h, w),
-                    mask=resize_array(img.array.mask * 1, h, w).astype("bool"),
-                )
-            )
+        )
+    else:
+        pixsel_method.feed(img.array)
 
-        else:
-            pixsel_method.feed(img.array)
+    assets_used.append(key)
+    return crs, bounds, band_names
 
-        # Store the key (which could be item ID) for tracking
-        assets_used.append(key)
 
-        # Early termination: if the pixel selection method is done, we can stop
-        # This is the real optimization - stopping when we have enough data
-        if pixsel_method.is_done and pixsel_method.data is not None:
-            return {
-                "data": ImageData(
-                    pixsel_method.data,
-                    assets=assets_used,
-                    crs=crs,
-                    bounds=bounds,
-                    band_names=band_names if band_names is not None else [],
-                    metadata={
-                        "pixel_selection_method": pixel_selection,
-                    },
-                )
-            }
-
-    if pixsel_method.data is None:
-        raise ValueError("Method returned an empty array")
-
+def _create_pixel_selection_result(
+    pixsel_method,
+    assets_used: List,
+    crs: Optional[CRS],
+    bounds: Optional[BBox],
+    band_names: Optional[List[str]],
+    pixel_selection: str,
+) -> Dict[str, ImageData]:
+    """Create the final pixel selection result."""
     return {
         "data": ImageData(
             pixsel_method.data,
@@ -130,11 +110,169 @@ def apply_pixel_selection(
             crs=crs,
             bounds=bounds,
             band_names=band_names if band_names is not None else [],
-            metadata={
-                "pixel_selection_method": pixel_selection,
-            },
+            metadata={"pixel_selection_method": pixel_selection},
         )
     }
+
+
+def _process_timestamp_group_parallel(
+    timestamp_items,
+    pixsel_method,
+    assets_used: List,
+    crs: Optional[CRS],
+    bounds: Optional[BBox],
+    band_names: Optional[List[str]],
+    pixel_selection: str,
+) -> Tuple[
+    bool,
+    Optional[Dict[str, ImageData]],
+    Optional[CRS],
+    Optional[BBox],
+    Optional[List[str]],
+]:
+    """Process a timestamp group with parallel loading."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from rio_tiler.constants import MAX_THREADS
+
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        # Submit all loading tasks for this timestamp
+        def load_item(key: str):
+            return timestamp_items[key]
+
+        future_to_key = {
+            executor.submit(load_item, key): key for key in timestamp_items.keys()
+        }
+
+        # Process results as they complete
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                img = future.result()
+                crs, bounds, band_names = _process_image_for_pixel_selection(
+                    img, pixsel_method, key, assets_used, crs, bounds, band_names
+                )
+
+                # Early termination check
+                if pixsel_method.is_done and pixsel_method.data is not None:
+                    result = _create_pixel_selection_result(
+                        pixsel_method,
+                        assets_used,
+                        crs,
+                        bounds,
+                        band_names,
+                        pixel_selection,
+                    )
+                    return True, result, crs, bounds, band_names
+
+            except Exception as e:
+                # Skip failed tasks and continue
+                warnings.warn(
+                    f"Failed to load image {key}: {e}", UserWarning, stacklevel=2
+                )
+                continue
+
+    return False, None, crs, bounds, band_names
+
+
+def _process_sequential(
+    data: RasterStack, pixsel_method, assets_used: List, pixel_selection: str
+) -> Dict[str, ImageData]:
+    """Process data sequentially for non-LazyRasterStack data."""
+    crs: Optional[CRS] = None
+    bounds: Optional[BBox] = None
+    band_names: Optional[List[str]] = None
+
+    for key in data.keys():
+        try:
+            img = data[key]
+        except KeyError:
+            continue
+
+        crs, bounds, band_names = _process_image_for_pixel_selection(
+            img, pixsel_method, key, assets_used, crs, bounds, band_names
+        )
+
+        if pixsel_method.is_done and pixsel_method.data is not None:
+            return _create_pixel_selection_result(
+                pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
+            )
+
+    if pixsel_method.data is None:
+        raise ValueError("Method returned an empty array")
+
+    return _create_pixel_selection_result(
+        pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
+    )
+
+
+def apply_pixel_selection(
+    data: RasterStack,
+    pixel_selection: str = "first",
+) -> RasterStack:
+    """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
+
+    This enhanced version processes images by timestamp groups with parallel loading
+    within each group for optimal performance with LazyRasterStack.
+
+    Returns:
+        RasterStack: A single-image RasterStack containing the result of pixel selection
+    """
+    pixsel_method = PixelSelectionMethod[pixel_selection].value()
+    assets_used: List = []
+    crs: Optional[CRS] = None
+    bounds: Optional[BBox] = None
+    band_names: Optional[List[str]] = None
+
+    # Check if data has timestamp-based grouping capability (LazyRasterStack)
+    if hasattr(data, "groupby_timestamp") and hasattr(data, "timestamps"):
+        timestamps = data.timestamps()
+
+        if not timestamps:
+            # Handle empty timestamps - maintain original error behavior
+            if pixsel_method.data is None:
+                raise ValueError("Method returned an empty array")
+            return {
+                "data": ImageData(numpy.array([]), assets=[], crs=None, bounds=None)
+            }
+
+        # Process timestamps in chronological order
+        for timestamp in sorted(timestamps):
+            timestamp_items = data.get_by_timestamp(timestamp)  # type: ignore[attr-defined]
+
+            if not timestamp_items:
+                continue
+
+            # Process timestamp group with parallel loading
+            terminated, result, crs, bounds, band_names = (
+                _process_timestamp_group_parallel(
+                    timestamp_items,
+                    pixsel_method,
+                    assets_used,
+                    crs,
+                    bounds,
+                    band_names,
+                    pixel_selection,
+                )
+            )
+
+            if terminated and result is not None:
+                return result
+
+            # Check for early termination after each timestamp group
+            if pixsel_method.is_done and pixsel_method.data is not None:
+                break
+
+    else:
+        # Fallback to sequential processing for non-LazyRasterStack data
+        return _process_sequential(data, pixsel_method, assets_used, pixel_selection)
+
+    if pixsel_method.data is None:
+        raise ValueError("Method returned an empty array")
+
+    return _create_pixel_selection_result(
+        pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
+    )
 
 
 def _reduce_temporal_dimension(
