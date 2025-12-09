@@ -1,6 +1,6 @@
 """TiTiler.openeo data models."""
 
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from typing import (
     Any,
@@ -15,7 +15,6 @@ from typing import (
     overload,
 )
 
-from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import TaskType, filter_tasks
@@ -131,7 +130,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         key_fn: Callable[[Dict[str, Any]], str],
         timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
         allowed_exceptions: Optional[Tuple] = None,
-        max_workers: int = MAX_THREADS,
+        max_workers: int = 5,
     ):
         """Initialize a LazyRasterStack.
 
@@ -146,7 +145,6 @@ class LazyRasterStack(Dict[str, ImageData]):
         self._tasks = tasks
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
         self._max_workers = max_workers
-
         self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
 
@@ -192,37 +190,20 @@ class LazyRasterStack(Dict[str, ImageData]):
             # because it maps keys to their original task indices,
             # regardless of the order in _keys
 
-    def _execute_task_for_key(self, key: str) -> ImageData:
-        """Execute a single task for the given key.
+    def _execute_task(self, key: str, task_func: Any) -> ImageData:
+        """Execute a single task and return the result.
 
         Args:
-            key: The key to execute the task for
+            key: The key for error reporting
+            task_func: The task function or Future to execute
 
         Returns:
             ImageData: The result of the task execution
-
-        Raises:
-            KeyError: If the key is not found in the stack
         """
-        if key not in self._key_to_task_index:
-            raise KeyError(f"Key '{key}' not found in LazyRasterStack")
-
-        if key in self._data_cache:
-            return self._data_cache[key]
-
-        task_index = self._key_to_task_index[key]
-        future_or_callable, asset = self._tasks[task_index]
-
-        try:
-            if isinstance(future_or_callable, Future):
-                data = future_or_callable.result()
-            else:
-                data = future_or_callable()
-            self._data_cache[key] = data
-            return data
-        except self._allowed_exceptions as err:
-            # If execution fails with allowed exception, don't cache
-            raise KeyError(f"Task execution failed for key '{key}'") from err
+        if isinstance(task_func, Future):
+            return task_func.result()
+        else:
+            return task_func()
 
     def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
         """Execute tasks for the selected keys only with concurrent execution.
@@ -247,25 +228,18 @@ class LazyRasterStack(Dict[str, ImageData]):
         ]
 
         # Execute tasks concurrently
-        with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             # Submit all tasks
-            def execute_task(key_task_pair):
-                key, (task_func, _asset) = key_task_pair
-                if isinstance(task_func, Future):
-                    return key, task_func.result()
-                else:
-                    return key, task_func()
-
-            future_to_key = {
-                executor.submit(execute_task, key_task_pair): key_task_pair[0]
-                for key_task_pair in key_task_pairs
+            key_to_future = {
+                key: executor.submit(self._execute_task, key, task_func)
+                for key, (task_func, _asset) in key_task_pairs
             }
 
             # Collect results as they complete
-            for future in as_completed(future_to_key):
+            for key, future in key_to_future.items():
                 try:
-                    result_key, data = future.result()
-                    self._data_cache[result_key] = data
+                    data = future.result()
+                    self._data_cache[key] = data
                 except self._allowed_exceptions:
                     # Skip failed tasks, don't cache them
                     continue
@@ -323,7 +297,19 @@ class LazyRasterStack(Dict[str, ImageData]):
         """Get an item from the RasterStack, executing the task if necessary."""
         if key in self._data_cache:
             return self._data_cache[key]
-        return self._execute_task_for_key(key)
+
+        if key not in self._key_to_task_index:
+            raise KeyError(f"Key '{key}' not found in LazyRasterStack")
+
+        task_index = self._key_to_task_index[key]
+        task_func, asset = self._tasks[task_index]
+
+        try:
+            data = self._execute_task(key, task_func)
+            self._data_cache[key] = data
+            return data
+        except self._allowed_exceptions as err:
+            raise KeyError(f"Task execution failed for key '{key}'") from err
 
     def __iter__(self) -> Any:
         """Iterate over the keys of the RasterStack."""
