@@ -7,7 +7,7 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from .core import process
-from .data_model import LazyRasterStack, RasterStack, get_first_item
+from .data_model import LazyRasterStack, RasterStack
 
 __all__ = [
     "array_element",
@@ -146,9 +146,7 @@ def add_dimension(
 
     # For non-empty data cube, we need to ensure the new dimension is compatible
     # with existing spatial dimensions
-    # Get first image efficiently for LazyRasterStack
-
-    first_image = get_first_item(data)
+    first_image = next(iter(data.values()))
     empty_array = numpy.ma.masked_array(
         numpy.zeros((1, first_image.height, first_image.width)),
         mask=True,  # All values are masked initially

@@ -320,14 +320,7 @@ def save_result(
     if isinstance(data, dict):
         # If there is only one item, save it as a single result
         if len(data) == 1:
-            # For single item, use efficient access
-
-            if isinstance(data, LazyRasterStack):
-                # Only access the first item to avoid executing all tasks
-                first_key = next(iter(data.keys()))
-                return _save_single_result(data[first_key], format, options)
-            else:
-                return _save_single_result(list(data.values())[0], format, options)
+            return _save_single_result(list(data.values())[0], format, options)
 
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
