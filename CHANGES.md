@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ## Fixed
 
 * keep CRS/Bounds for STAC Item is not all proj attributes are set in properties [#154](https://github.com/sentinel-hub/titiler-openeo/pull/154)
 
+=======
+>>>>>>> 892f35a (feat/udp-endpoints (#144))
 ## [0.6.1] (2025-12-04)
 
 ## Fixed
