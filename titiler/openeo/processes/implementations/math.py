@@ -4,6 +4,8 @@ import builtins
 
 import numpy
 
+from .data_model import get_first_item, get_last_item
+
 __all__ = [
     "absolute",
     "add",
@@ -248,7 +250,6 @@ def first(data):
     # Handle RasterStack
     if isinstance(data, dict):
         # For LazyRasterStack, only access the first key to avoid executing all tasks
-        from .data_model import get_first_item
 
         first_img = get_first_item(data)
         return first_img.array[0]
@@ -265,7 +266,6 @@ def last(data):
     # Handle RasterStack
     if isinstance(data, dict):
         # For LazyRasterStack, only access the last key to avoid executing all tasks
-        from .data_model import get_last_item
 
         last_img = get_last_item(data)
         return last_img.array[-1]

@@ -10,7 +10,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import RasterStack
+from .data_model import RasterStack, get_first_item
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -48,8 +48,6 @@ def apply_pixel_selection(
     """
     # Optimize for 'first' selection with LazyRasterStack
     if pixel_selection == "first":
-        from .data_model import get_first_item
-
         first_img = get_first_item(data)
 
         return {
@@ -185,7 +183,6 @@ def _reduce_temporal_dimension(
         )
 
     # Get first image efficiently for LazyRasterStack
-    from .data_model import get_first_item
 
     first_img = get_first_item(data)
 

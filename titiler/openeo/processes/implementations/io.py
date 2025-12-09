@@ -14,7 +14,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
-from .data_model import LazyRasterStack, RasterStack
+from .data_model import LazyRasterStack, RasterStack, get_first_item
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
@@ -321,7 +321,6 @@ def save_result(
         # If there is only one item, save it as a single result
         if len(data) == 1:
             # For single item, use efficient access
-            from .data_model import LazyRasterStack
 
             if isinstance(data, LazyRasterStack):
                 # Only access the first item to avoid executing all tasks

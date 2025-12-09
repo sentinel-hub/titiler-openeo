@@ -206,9 +206,9 @@ class LazyRasterStack(Dict[str, ImageData]):
                 data = future_or_callable()
             self._data_cache[key] = data
             return data
-        except self._allowed_exceptions:
+        except self._allowed_exceptions as err:
             # If execution fails with allowed exception, don't cache
-            raise KeyError(f"Task execution failed for key '{key}'") from KeyError
+            raise KeyError(f"Task execution failed for key '{key}'") from err
 
     def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
         """Execute tasks for the selected keys only.
