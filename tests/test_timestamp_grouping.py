@@ -286,7 +286,7 @@ def test_failed_tasks_handling_in_timestamp_group():
 @patch("concurrent.futures.ThreadPoolExecutor")
 @patch("concurrent.futures.as_completed")
 def test_thread_pool_executor_usage(mock_as_completed, mock_executor_class):
-    """Test that ThreadPoolExecutor is used for concurrent execution."""
+    """Test that ThreadPoolExecutor is used for concurrent execution in LazyRasterStack."""
 
     # Mock ThreadPoolExecutor
     mock_executor = MagicMock()
@@ -294,27 +294,40 @@ def test_thread_pool_executor_usage(mock_as_completed, mock_executor_class):
 
     # Mock future objects
     mock_future = MagicMock()
-    mock_future.result.return_value = ImageData(
-        np.ma.ones((3, 10, 10)),
-        assets=["test_item"],
-        crs="EPSG:4326",
-        bounds=(-180, -90, 180, 90),
-        band_names=["red", "green", "blue"],
+    mock_future.result.return_value = (
+        "test_key",
+        ImageData(
+            np.ma.ones((3, 10, 10)),
+            assets=["test_item"],
+            crs="EPSG:4326",
+            bounds=(-180, -90, 180, 90),
+            band_names=["red", "green", "blue"],
+        ),
     )
     mock_executor.submit.return_value = mock_future
 
     # Mock as_completed
     mock_as_completed.return_value = [mock_future]
 
-    # Create test data
-    timestamp_groups = {
-        datetime(2021, 1, 1): ["item_1", "item_2"],
-    }
+    # Create a real LazyRasterStack that will use _execute_selected_tasks
+    from titiler.openeo.processes.implementations.data_model import LazyRasterStack
 
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
+    def create_test_image():
+        return ImageData(
+            np.ma.ones((3, 10, 10)),
+            assets=["test_asset"],
+            crs="EPSG:4326",
+            bounds=(-180, -90, 180, 90),
+            band_names=["red", "green", "blue"],
+        )
 
-    # Apply pixel selection
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
+    tasks = [(create_test_image, {"timestamp": datetime(2021, 1, 1)})]
+    stack = LazyRasterStack(
+        tasks, key_fn=lambda x: "item_1", timestamp_fn=lambda x: x["timestamp"]
+    )
+
+    # Apply pixel selection - this will trigger _execute_selected_tasks
+    result = apply_pixel_selection(stack, pixel_selection="first")
 
     # Verify we got a result
     assert "data" in result

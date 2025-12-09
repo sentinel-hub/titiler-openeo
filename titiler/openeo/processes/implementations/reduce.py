@@ -115,8 +115,8 @@ def _create_pixel_selection_result(
     }
 
 
-def _process_timestamp_group_parallel(
-    timestamp_items,
+def _process_timestamp_group_simple(
+    timestamp_items,  # Can be Dict[str, ImageData] or dict-like object
     pixsel_method,
     assets_used: List,
     crs: Optional[CRS],
@@ -130,47 +130,48 @@ def _process_timestamp_group_parallel(
     Optional[BBox],
     Optional[List[str]],
 ]:
-    """Process a timestamp group with parallel loading."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    from rio_tiler.constants import MAX_THREADS
-
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        # Submit all loading tasks for this timestamp
-        def load_item(key: str):
-            return timestamp_items[key]
-
-        future_to_key = {
-            executor.submit(load_item, key): key for key in timestamp_items.keys()
-        }
-
-        # Process results as they complete
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            try:
-                img = future.result()
-                crs, bounds, band_names = _process_image_for_pixel_selection(
-                    img, pixsel_method, key, assets_used, crs, bounds, band_names
-                )
-
-                # Early termination check
-                if pixsel_method.is_done and pixsel_method.data is not None:
-                    result = _create_pixel_selection_result(
-                        pixsel_method,
-                        assets_used,
-                        crs,
-                        bounds,
-                        band_names,
-                        pixel_selection,
+    """Process a timestamp group using already-loaded ImageData."""
+    # Handle both dict interface and mock objects
+    if hasattr(timestamp_items, "items"):
+        # Real LazyRasterStack get_by_timestamp returns dict of ImageData
+        items = timestamp_items.items()
+    else:
+        # Mock objects or other dict-like structures
+        if hasattr(timestamp_items, "keys"):
+            # Build items list with error handling for individual keys
+            items = []
+            for key in timestamp_items.keys():
+                try:
+                    img = timestamp_items[key]
+                    items.append((key, img))
+                except Exception as e:
+                    # Skip failed keys and log warning
+                    warnings.warn(
+                        f"Failed to load image {key}: {e}", UserWarning, stacklevel=2
                     )
-                    return True, result, crs, bounds, band_names
+                    continue
+        else:
+            # Fallback: assume it's already a sequence of key-value pairs
+            items = timestamp_items
 
-            except Exception as e:
-                # Skip failed tasks and continue
-                warnings.warn(
-                    f"Failed to load image {key}: {e}", UserWarning, stacklevel=2
+    # Process each image in the timestamp group
+    for key, img in items:
+        try:
+            crs, bounds, band_names = _process_image_for_pixel_selection(
+                img, pixsel_method, key, assets_used, crs, bounds, band_names
+            )
+
+            # Early termination check
+            if pixsel_method.is_done and pixsel_method.data is not None:
+                result = _create_pixel_selection_result(
+                    pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
                 )
-                continue
+                return True, result, crs, bounds, band_names
+
+        except Exception as e:
+            # Skip failed tasks and continue
+            warnings.warn(f"Failed to load image {key}: {e}", UserWarning, stacklevel=2)
+            continue
 
     return False, None, crs, bounds, band_names
 
@@ -212,8 +213,8 @@ def apply_pixel_selection(
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
 
-    This enhanced version processes images by timestamp groups with parallel loading
-    within each group for optimal performance with LazyRasterStack.
+    This implementation leverages LazyRasterStack's built-in concurrent execution
+    capabilities through get_by_timestamp() which handles parallel loading internally.
 
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
@@ -243,9 +244,9 @@ def apply_pixel_selection(
             if not timestamp_items:
                 continue
 
-            # Process timestamp group with parallel loading
+            # Process timestamp group using already-loaded ImageData
             terminated, result, crs, bounds, band_names = (
-                _process_timestamp_group_parallel(
+                _process_timestamp_group_simple(
                     timestamp_items,
                     pixsel_method,
                     assets_used,

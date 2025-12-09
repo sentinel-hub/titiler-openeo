@@ -1,6 +1,6 @@
 """TiTiler.openeo data models."""
 
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import (
     Any,
@@ -225,11 +225,12 @@ class LazyRasterStack(Dict[str, ImageData]):
             raise KeyError(f"Task execution failed for key '{key}'") from err
 
     def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
-        """Execute tasks for the selected keys only.
+        """Execute tasks for the selected keys only with concurrent execution.
 
         Args:
             selected_keys: Set of keys to execute tasks for
         """
+
         # Filter out keys that are already cached
         keys_to_execute = [
             key
@@ -245,17 +246,29 @@ class LazyRasterStack(Dict[str, ImageData]):
             (key, self._tasks[self._key_to_task_index[key]]) for key in keys_to_execute
         ]
 
-        # Execute tasks with the same exception handling as the original
-        for key, (task_func, _asset) in key_task_pairs:
-            try:
+        # Execute tasks concurrently
+        with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+            # Submit all tasks
+            def execute_task(key_task_pair):
+                key, (task_func, _asset) = key_task_pair
                 if isinstance(task_func, Future):
-                    data = task_func.result()
+                    return key, task_func.result()
                 else:
-                    data = task_func()
-                self._data_cache[key] = data
-            except self._allowed_exceptions:
-                # Skip failed tasks, don't cache them
-                continue
+                    return key, task_func()
+
+            future_to_key = {
+                executor.submit(execute_task, key_task_pair): key_task_pair[0]
+                for key_task_pair in key_task_pairs
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_key):
+                try:
+                    result_key, data = future.result()
+                    self._data_cache[result_key] = data
+                except self._allowed_exceptions:
+                    # Skip failed tasks, don't cache them
+                    continue
 
     def _execute_all_tasks(self) -> None:
         """Execute all tasks and populate the cache (for backward compatibility)."""
