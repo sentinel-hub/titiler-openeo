@@ -14,7 +14,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
-from .data_model import LazyRasterStack, RasterStack, get_first_item
+from .data_model import LazyRasterStack, RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
