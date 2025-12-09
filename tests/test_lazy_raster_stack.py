@@ -765,3 +765,125 @@ def test_get_first_item_all_tasks_fail():
     # get_first_item should raise KeyError when all tasks fail
     with pytest.raises(KeyError, match="No successful tasks found"):
         get_first_item(lazy_stack)
+
+
+def test_temporal_sorting_preserves_task_mapping():
+    """Test that temporal sorting doesn't break key-to-task mapping."""
+
+    def create_task_with_value(value):
+        def task():
+            array = np.ma.MaskedArray(
+                data=np.full((1, 10, 10), value), mask=np.zeros((1, 10, 10), dtype=bool)
+            )
+            return ImageData(array)
+
+        return task
+
+    # Create tasks with REVERSE chronological order (newest first)
+    dates = ["2023-01-05", "2023-01-03", "2023-01-01", "2023-01-04", "2023-01-02"]
+    tasks = []
+
+    for i, date in enumerate(dates):
+        asset = {"id": f"item_{i}", "datetime": f"{date}T00:00:00Z"}
+        task = create_task_with_value(i * 10)  # Values: 0, 10, 20, 30, 40
+        tasks.append((task, asset))
+
+    lazy_stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: datetime.fromisoformat(
+            asset["datetime"].replace("Z", "+00:00")
+        ),
+    )
+
+    # Keys should be in temporal order (chronological)
+    expected_temporal_order = ["item_2", "item_4", "item_1", "item_3", "item_0"]
+    assert list(lazy_stack.keys()) == expected_temporal_order
+
+    # Key-to-task mapping should preserve original indices
+    assert lazy_stack._key_to_task_index["item_0"] == 0  # First task
+    assert lazy_stack._key_to_task_index["item_1"] == 1  # Second task
+    assert lazy_stack._key_to_task_index["item_2"] == 2  # Third task
+    assert lazy_stack._key_to_task_index["item_3"] == 3  # Fourth task
+    assert lazy_stack._key_to_task_index["item_4"] == 4  # Fifth task
+
+    # Each key should return the correct value from its original task
+    assert lazy_stack["item_0"].array[0, 0, 0] == 0  # Task 0 value
+    assert lazy_stack["item_1"].array[0, 0, 0] == 10  # Task 1 value
+    assert lazy_stack["item_2"].array[0, 0, 0] == 20  # Task 2 value
+    assert lazy_stack["item_3"].array[0, 0, 0] == 30  # Task 3 value
+    assert lazy_stack["item_4"].array[0, 0, 0] == 40  # Task 4 value
+
+
+def test_apply_pixel_selection_with_failing_tasks():
+    """Test apply_pixel_selection works when some tasks fail."""
+    from rio_tiler.errors import TileOutsideBounds
+
+    def create_failing_task():
+        def task():
+            raise TileOutsideBounds("Task failed")
+
+        return task
+
+    def create_successful_task(value):
+        def task():
+            array = np.ma.MaskedArray(
+                data=np.full((1, 10, 10), value), mask=np.zeros((1, 10, 10), dtype=bool)
+            )
+            return ImageData(array)
+
+        return task
+
+    # Create tasks where first 2 fail and 3rd succeeds
+    assets = [
+        {"id": "fail1", "datetime": "2021-01-01T00:00:00Z"},
+        {"id": "fail2", "datetime": "2021-01-02T00:00:00Z"},
+        {"id": "success", "datetime": "2021-01-03T00:00:00Z"},
+    ]
+
+    tasks = [
+        (create_failing_task(), assets[0]),
+        (create_failing_task(), assets[1]),
+        (create_successful_task(42), assets[2]),
+    ]
+
+    lazy_stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: datetime.fromisoformat(
+            asset["datetime"].replace("Z", "+00:00")
+        ),
+        allowed_exceptions=(TileOutsideBounds,),
+    )
+
+    # apply_pixel_selection should find the first successful task
+    result = apply_pixel_selection(lazy_stack, pixel_selection="first")
+
+    assert isinstance(result, dict)
+    assert "data" in result
+    assert isinstance(result["data"], ImageData)
+    assert result["data"].array[0, 0, 0] == 42  # Value from successful task
+
+
+def test_empty_lazy_raster_stack():
+    """Test LazyRasterStack with empty tasks list."""
+    from titiler.openeo.processes.implementations.data_model import get_first_item
+
+    # Create empty LazyRasterStack
+    lazy_stack = LazyRasterStack(
+        tasks=[],
+        key_fn=lambda asset: asset["id"],
+    )
+
+    assert len(lazy_stack) == 0
+    assert list(lazy_stack.keys()) == []
+    assert list(lazy_stack.values()) == []
+    assert list(lazy_stack.items()) == []
+
+    # get_first_item should raise error on empty stack
+    with pytest.raises(KeyError, match="No successful tasks found"):
+        get_first_item(lazy_stack)
+
+    # apply_pixel_selection should also fail gracefully
+    with pytest.raises(KeyError):
+        apply_pixel_selection(lazy_stack, pixel_selection="first")
