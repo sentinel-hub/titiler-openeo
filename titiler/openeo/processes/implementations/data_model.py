@@ -1,8 +1,21 @@
 """TiTiler.openeo data models."""
 
+from concurrent.futures import Future
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, overload
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    overload,
+)
 
+from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import TaskType, filter_tasks
@@ -14,6 +27,58 @@ from rio_tiler.tasks import TaskType, filter_tasks
 RasterStack = Dict[str, ImageData]
 
 T = TypeVar("T")
+
+
+def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
+    """Get the first item from a RasterStack efficiently.
+
+    For LazyRasterStack, this only executes the first task.
+    For regular RasterStack, this gets the first value.
+    For single ImageData, returns it directly.
+
+    Args:
+        data: Input data (ImageData or RasterStack)
+
+    Returns:
+        ImageData: The first item
+    """
+    if isinstance(data, ImageData):
+        return data
+    elif isinstance(data, LazyRasterStack):
+        # Only access the first key to avoid executing all tasks
+        first_key = next(iter(data.keys()))
+        return data[first_key]  # Execute only the first task
+    elif isinstance(data, dict):
+        # Regular RasterStack
+        return next(iter(data.values()))
+    else:
+        raise ValueError(f"Unsupported data type: {type(data)}")
+
+
+def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
+    """Get the last item from a RasterStack efficiently.
+
+    For LazyRasterStack, this only executes the last task.
+    For regular RasterStack, this gets the last value.
+    For single ImageData, returns it directly.
+
+    Args:
+        data: Input data (ImageData or RasterStack)
+
+    Returns:
+        ImageData: The last item
+    """
+    if isinstance(data, ImageData):
+        return data
+    elif isinstance(data, LazyRasterStack):
+        # Only access the last key to avoid executing all tasks
+        last_key = list(data.keys())[-1]
+        return data[last_key]  # Execute only the last task
+    elif isinstance(data, dict):
+        # Regular RasterStack - get last value
+        return list(data.values())[-1]
+    else:
+        raise ValueError(f"Unsupported data type: {type(data)}")
 
 
 def to_raster_stack(data: Union[ImageData, RasterStack]) -> RasterStack:
@@ -46,6 +111,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         key_fn: Callable[[Dict[str, Any]], str],
         timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
         allowed_exceptions: Optional[Tuple] = None,
+        max_workers: int = MAX_THREADS,
     ):
         """Initialize a LazyRasterStack.
 
@@ -54,17 +120,22 @@ class LazyRasterStack(Dict[str, ImageData]):
             key_fn: Function that generates unique keys from assets
             timestamp_fn: Optional function that extracts datetime objects from assets
             allowed_exceptions: Exceptions allowed during task execution
+            max_workers: Maximum number of threads for concurrent execution
         """
         super().__init__()
         self._tasks = tasks
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
-        self._executed = False
+        self._max_workers = max_workers
 
         self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
 
+        # Per-key execution cache instead of global execution flag
+        self._data_cache: Dict[str, ImageData] = {}
+
         # Pre-compute keys and timestamp metadata
         self._keys: List[str] = []
+        self._key_to_task_index: Dict[str, int] = {}  # Maps keys to task indices
         self._timestamp_map: Dict[str, datetime] = {}  # Maps keys to datetime objects
         self._timestamp_groups: Dict[
             datetime, List[str]
@@ -74,9 +145,10 @@ class LazyRasterStack(Dict[str, ImageData]):
 
     def _compute_metadata(self) -> None:
         """Compute keys and build timestamp mapping without executing tasks."""
-        for _, asset in self._tasks:
+        for i, (_, asset) in enumerate(self._tasks):
             key = self._key_fn(asset)
             self._keys.append(key)
+            self._key_to_task_index[key] = i
 
             if self._timestamp_fn:
                 timestamp = self._timestamp_fn(asset)
@@ -96,15 +168,83 @@ class LazyRasterStack(Dict[str, ImageData]):
             # Update _keys to be in temporal order
             self._keys = [key for _, key in timestamp_key_pairs]
 
-    def _execute_tasks(self) -> None:
-        """Execute the tasks and populate the dictionary."""
-        if not self._executed:
-            for data, asset in filter_tasks(
-                self._tasks, allowed_exceptions=self._allowed_exceptions
-            ):
-                key = self._key_fn(asset)
-                self[key] = data
-            self._executed = True
+            # Update key-to-task index mapping after reordering
+            self._key_to_task_index = {
+                key: next(
+                    i
+                    for i, (_, asset) in enumerate(self._tasks)
+                    if self._key_fn(asset) == key
+                )
+                for key in self._keys
+            }
+
+    def _execute_task_for_key(self, key: str) -> ImageData:
+        """Execute a single task for the given key.
+
+        Args:
+            key: The key to execute the task for
+
+        Returns:
+            ImageData: The result of the task execution
+
+        Raises:
+            KeyError: If the key is not found in the stack
+        """
+        if key not in self._key_to_task_index:
+            raise KeyError(f"Key '{key}' not found in LazyRasterStack")
+
+        if key in self._data_cache:
+            return self._data_cache[key]
+
+        task_index = self._key_to_task_index[key]
+        future_or_callable, asset = self._tasks[task_index]
+
+        try:
+            if isinstance(future_or_callable, Future):
+                data = future_or_callable.result()
+            else:
+                data = future_or_callable()
+            self._data_cache[key] = data
+            return data
+        except self._allowed_exceptions:
+            # If execution fails with allowed exception, don't cache
+            raise KeyError(f"Task execution failed for key '{key}'") from KeyError
+
+    def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
+        """Execute tasks for the selected keys only.
+
+        Args:
+            selected_keys: Set of keys to execute tasks for
+        """
+        # Filter out keys that are already cached
+        keys_to_execute = [
+            key
+            for key in selected_keys
+            if key in self._key_to_task_index and key not in self._data_cache
+        ]
+
+        if not keys_to_execute:
+            return
+
+        # Get the tasks for the selected keys
+        selected_tasks = [
+            self._tasks[self._key_to_task_index[key]] for key in keys_to_execute
+        ]
+
+        # Execute tasks with the same exception handling as the original
+        for data, asset in filter_tasks(
+            selected_tasks, allowed_exceptions=self._allowed_exceptions
+        ):
+            key = self._key_fn(asset)
+            self._data_cache[key] = data
+
+    def _execute_all_tasks(self) -> None:
+        """Execute all tasks and populate the cache (for backward compatibility)."""
+        for data, asset in filter_tasks(
+            self._tasks, allowed_exceptions=self._allowed_exceptions
+        ):
+            key = self._key_fn(asset)
+            self._data_cache[key] = data
 
     def timestamps(self) -> List[datetime]:
         """Return list of unique timestamps in the stack."""
@@ -126,11 +266,14 @@ class LazyRasterStack(Dict[str, ImageData]):
         if timestamp not in self._timestamp_groups:
             return {}
 
-        if not self._executed:
-            self._execute_tasks()
+        # Execute only tasks for this timestamp
+        timestamp_keys = set(self._timestamp_groups[timestamp])
+        self._execute_selected_tasks(timestamp_keys)
 
         return {
-            key: self[key] for key in self._timestamp_groups[timestamp] if key in self
+            key: self._data_cache[key]
+            for key in self._timestamp_groups[timestamp]
+            if key in self._data_cache
         }
 
     def groupby_timestamp(self) -> Dict[datetime, Dict[str, ImageData]]:
@@ -139,19 +282,16 @@ class LazyRasterStack(Dict[str, ImageData]):
         Returns:
             Dictionary mapping datetime objects to dictionaries of {key: ImageData}
         """
-        if not self._executed:
-            self._execute_tasks()
-
         result = {}
         for timestamp in self._timestamp_groups:
             result[timestamp] = self.get_by_timestamp(timestamp)
         return result
 
     def __getitem__(self, key: str) -> ImageData:
-        """Get an item from the RasterStack, executing tasks if necessary."""
-        if not self._executed:
-            self._execute_tasks()
-        return super().__getitem__(key)
+        """Get an item from the RasterStack, executing the task if necessary."""
+        if key in self._data_cache:
+            return self._data_cache[key]
+        return self._execute_task_for_key(key)
 
     def __iter__(self) -> Any:
         """Iterate over the keys of the RasterStack."""
@@ -171,17 +311,23 @@ class LazyRasterStack(Dict[str, ImageData]):
 
     def values(self) -> Any:
         """Return the values of the RasterStack, executing tasks if necessary."""
-        if not self._executed:
-            self._execute_tasks()
+        # Execute all tasks if not already cached
+        all_keys = set(self._keys)
+        self._execute_selected_tasks(all_keys)
         # Return values in temporal order
-        return [self[key] for key in self._keys]
+        return [self._data_cache[key] for key in self._keys if key in self._data_cache]
 
     def items(self) -> Any:
         """Return the items of the RasterStack, executing tasks if necessary."""
-        if not self._executed:
-            self._execute_tasks()
+        # Execute all tasks if not already cached
+        all_keys = set(self._keys)
+        self._execute_selected_tasks(all_keys)
         # Return items in temporal order
-        return [(key, self[key]) for key in self._keys]
+        return [
+            (key, self._data_cache[key])
+            for key in self._keys
+            if key in self._data_cache
+        ]
 
     @overload
     def get(self, key: str) -> Optional[ImageData]: ...
@@ -190,7 +336,10 @@ class LazyRasterStack(Dict[str, ImageData]):
     def get(self, key: str, default: T) -> Union[ImageData, T]: ...
 
     def get(self, key: str, default: Optional[T] = None) -> Union[ImageData, T, None]:
-        """Get an item from the RasterStack, executing tasks if necessary."""
+        """Get an item from the RasterStack, executing the task if necessary."""
         if key not in self:
             return default
-        return self[key]
+        try:
+            return self[key]  # Uses lazy execution via __getitem__
+        except KeyError:
+            return default

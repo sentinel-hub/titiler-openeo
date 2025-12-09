@@ -46,6 +46,26 @@ def apply_pixel_selection(
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
     """
+    # Optimize for 'first' selection with LazyRasterStack
+    if pixel_selection == "first":
+        from .data_model import get_first_item
+
+        first_img = get_first_item(data)
+
+        return {
+            "data": ImageData(
+                first_img.array,
+                assets=first_img.assets,
+                crs=first_img.crs,
+                bounds=first_img.bounds,
+                band_names=first_img.band_names if first_img.band_names else [],
+                metadata={
+                    "pixel_selection_method": pixel_selection,
+                },
+            )
+        }
+
+    # Original implementation for other selection methods or regular RasterStack
     pixsel_method = PixelSelectionMethod[pixel_selection].value()
 
     assets_used: List = []
@@ -164,7 +184,10 @@ def _reduce_temporal_dimension(
             "The reduced data must have the same first dimension as the input stack"
         )
 
-    first_img = next(iter(data.values()))
+    # Get first image efficiently for LazyRasterStack
+    from .data_model import get_first_item
+
+    first_img = get_first_item(data)
 
     return {
         "reduced": ImageData(

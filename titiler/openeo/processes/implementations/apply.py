@@ -149,8 +149,10 @@ def _apply_temporal_dimension(
             "The process must return a numpy array for temporal dimension processing"
         )
 
-    # Get properties from first image
-    first_img = next(iter(data.values()))
+    # Get properties from first image (optimized for LazyRasterStack)
+    from .data_model import get_first_item
+
+    first_img = get_first_item(data)
 
     # If target_dimension is None, preserve the temporal dimension with processed values
     # Create a new stack with the same keys but processed data

@@ -247,9 +247,11 @@ def first(data):
     """Return the first element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        first_elements = {k: v.array[0] for k, v in data.items()}
-        # return a multi-dimensional array
-        return numpy.stack(list(first_elements.values()), axis=0)
+        # For LazyRasterStack, only access the first key to avoid executing all tasks
+        from .data_model import get_first_item
+
+        first_img = get_first_item(data)
+        return first_img.array[0]
     elif isinstance(data, numpy.ndarray):
         return data[0]
     elif isinstance(data, numpy.ma.MaskedArray):
@@ -262,9 +264,11 @@ def last(data):
     """Return the last element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        last_elements = {k: v.array[-1] for k, v in data.items()}
-        # return a multi-dimensional array
-        return numpy.stack(list(last_elements.values()), axis=0)
+        # For LazyRasterStack, only access the last key to avoid executing all tasks
+        from .data_model import get_last_item
+
+        last_img = get_last_item(data)
+        return last_img.array[-1]
     elif isinstance(data, numpy.ndarray):
         return data[-1]
     elif isinstance(data, numpy.ma.MaskedArray):

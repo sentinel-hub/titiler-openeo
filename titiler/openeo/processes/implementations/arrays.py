@@ -49,6 +49,8 @@ def array_element(
         if label is not None:
             array_dict = {k: v.array for k, v in data.items() if k == label}
         # return a multi-dimensional array
+        # For LazyRasterStack, this will execute all tasks when stacking is needed
+        # This is expected behavior for array operations
         return numpy.stack(list(array_dict.values()), axis=0)
 
     # Handle regular arrays
@@ -144,7 +146,10 @@ def add_dimension(
 
     # For non-empty data cube, we need to ensure the new dimension is compatible
     # with existing spatial dimensions
-    first_image = next(iter(data.values()))
+    # Get first image efficiently for LazyRasterStack
+    from .data_model import get_first_item
+
+    first_image = get_first_item(data)
     empty_array = numpy.ma.masked_array(
         numpy.zeros((1, first_image.height, first_image.width)),
         mask=True,  # All values are masked initially
