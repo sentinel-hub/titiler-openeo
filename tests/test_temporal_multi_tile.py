@@ -7,7 +7,7 @@ import pytest
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import LazyRasterStack
-from titiler.openeo.processes.implementations.math import first
+from titiler.openeo.processes.implementations.math import first, last
 
 
 def mock_task():
@@ -208,10 +208,10 @@ def test_apply_pixel_selection_with_multi_tile_first():
     assert "2023-01-02" in keys[2] and "2023-01-02" in keys[3]
 
 
-def test_current_first_last_function_limitations():
-    """Test to demonstrate current limitations of first/last functions."""
+def test_first_last_temporal_behavior():
+    """Test that first/last functions now correctly handle temporal data."""
 
-    # Create a simple temporal stack to test current first/last functions
+    # Create a simple temporal stack to test first/last functions
     stack = {}
 
     # Create temporal data where each timestamp has one image
@@ -222,13 +222,22 @@ def test_current_first_last_function_limitations():
         )
         stack[date] = ImageData(data, band_names=["red", "green", "blue"])
 
-    # Test current first() function
+    # Test first() function - should return first temporal element 
     first_result = first(stack)
 
-    # Current implementation takes the first SPATIAL element (first row)
-    # from each image, not the first TEMPORAL element
+    # NEW behavior: gets first temporal item, then first spectral band from that item
+    # This is the correct temporal "first" behavior
     assert isinstance(first_result, np.ndarray)
-    assert first_result.shape[0] == len(stack)  # One result per image in stack
+    # Should be the first band from the first temporal image: (10, 10) spatial
+    assert first_result.shape == (10, 10)  # First band from first temporal item
+    # Should have value 1.0 since first temporal item has value 1.0
+    assert np.all(first_result == 1.0)
 
-    # This is NOT what we want for temporal "first" - it should return
-    # all tiles from the first timestamp, not the first spatial row from each image
+    # Test last() function - should return last temporal element
+    last_result = last(stack)
+    
+    # Should be the last band from the last temporal image
+    assert isinstance(last_result, np.ndarray)
+    assert last_result.shape == (10, 10)  # Last band from last temporal item  
+    # Should have value 3.0 since last temporal item has value 3.0
+    assert np.all(last_result == 3.0)
