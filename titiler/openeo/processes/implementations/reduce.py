@@ -1,6 +1,6 @@
 """titiler.openeo processed reduce."""
 
-import warnings
+import logging
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy
@@ -74,10 +74,8 @@ def _process_image_for_pixel_selection(
 
     # Handle size differences
     if any([img.width != pixsel_method.width, img.height != pixsel_method.height]):
-        warnings.warn(
-            "Cannot concatenate images with different size. Will resize using first asset width/height",
-            UserWarning,
-            stacklevel=2,
+        logging.warning(
+            "Cannot concatenate images with different size. Will resize using first asset width/height"
         )
         h = pixsel_method.height
         w = pixsel_method.width
@@ -155,7 +153,7 @@ def _process_timestamp_group_simple(
 
         except Exception as e:
             # Skip failed tasks and continue
-            warnings.warn(f"Failed to load image {key}: {e}", UserWarning, stacklevel=2)
+            logging.warning("Failed to load image %s: %s", key, str(e))
             continue
 
     return False, None, crs, bounds, band_names
@@ -419,11 +417,11 @@ def _reduce_spectral_dimension_stack(
         except KeyError as e:
             # Log task failures but continue processing other keys
             # This maintains backward compatibility with task-based execution
-            warnings.warn(
-                f"Failed to load data for key '{key}' during spectral dimension reduction: {e}. "
-                f"This may be due to task execution failure in lazy loading. Skipping this item.",
-                UserWarning,
-                stacklevel=2,
+            logging.warning(
+                "Failed to load data for key '%s' during spectral dimension reduction: %s. "
+                "This may be due to task execution failure in lazy loading. Skipping this item.",
+                key,
+                str(e),
             )
             continue
 

@@ -1,5 +1,6 @@
 """TiTiler.openeo data models."""
 
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
@@ -245,7 +246,14 @@ class LazyRasterStack(Dict[str, ImageData]):
                     data = future.result()
                     with self._cache_lock:
                         self._data_cache[key] = data
-                except self._allowed_exceptions:
+                except self._allowed_exceptions as e:
+                    # Log task failures for visibility in production scenarios
+                    logging.warning(
+                        "Task execution failed for key '%s' during concurrent execution: %s. "
+                        "This item will be skipped, which may result in incomplete data.",
+                        key,
+                        str(e),
+                    )
                     # Skip failed tasks, don't cache them
                     continue
 
