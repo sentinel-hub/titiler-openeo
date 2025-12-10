@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## Fixed
+## [0.7.0] (2025-12-10)
+
+### Fixed
 
 * keep CRS/Bounds for STAC Item is not all proj attributes are set in properties [#154](https://github.com/sentinel-hub/titiler-openeo/pull/154)
+* Fix LazyRasterStack uniqueness and add temporal ordering [#157](https://github.com/sentinel-hub/titiler-openeo/pull/157)
 
-## Added
+### Added
 
 * Full User Defined Process Graph support including graph validation [#158](https://github.com/sentinel-hub/titiler-openeo/pull/158)
+* Implement truly lazy execution for LazyRasterStack [#161](https://github.com/sentinel-hub/titiler-openeo/pull/161)
+* Add support for environment variables from Secrets and ConfigMaps [#160](https://github.com/sentinel-hub/titiler-openeo/pull/160)
 
 ## [0.6.1] (2025-12-04)
 
@@ -115,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release of openEO by TiTiler
 
-[unreleased]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.6.0...HEAD
+[unreleased]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.6.1...v0.7.0
 [0.6.0]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sentinel-hub/titiler-openeo/compare/v0.3.0...v0.4.0
