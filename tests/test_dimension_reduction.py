@@ -378,11 +378,12 @@ class TestErrorHandling:
         # Create a regular stack where accessing items raises errors
         class FailingStack(dict):
             def __getitem__(self, key):
-                raise RuntimeError(f"Task {key} failed")
+                raise KeyError(f"Task {key} failed")
 
         failing_stack = FailingStack({"item_1": None, "item_2": None})
 
         # The reducer should handle the failing tasks gracefully
-        # Since we can't access any data, it should raise during data access
-        with pytest.raises(RuntimeError, match="Task .* failed"):
+        # KeyError exceptions are caught by the reducer, but when all tasks fail,
+        # the reducer raises ValueError for no valid data
+        with pytest.raises(ValueError, match="No valid data found"):
             _reduce_temporal_dimension(failing_stack, mock_temporal_reducer)
