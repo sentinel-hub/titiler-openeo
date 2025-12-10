@@ -15,6 +15,7 @@ from typing import (
     overload,
 )
 
+from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import TaskType, filter_tasks
@@ -130,7 +131,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         key_fn: Callable[[Dict[str, Any]], str],
         timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
         allowed_exceptions: Optional[Tuple] = None,
-        max_workers: int = 5,
+        max_workers: int = MAX_THREADS,
     ):
         """Initialize a LazyRasterStack.
 
