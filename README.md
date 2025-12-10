@@ -50,7 +50,7 @@ uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8081
 Configuration settings can be provided via environment variables. The following settings are available:
 
 - TITILER_OPENEO_STAC_API_URL: URL of the STAC API with the collections to be used
-- TITILER_OPENEO_SERVICE_STORE_URL: URL of the openEO service store json file
+- TITILER_OPENEO_STORE_URL: URL of the openEO service/UDP store json file
 
 In this repository, 2 `.env` sample files are provided:
 
@@ -58,14 +58,14 @@ In this repository, 2 `.env` sample files are provided:
 
   ```bash
   TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
-  TITILER_OPENEO_SERVICE_STORE_URL="services/eoapi.json"
+  TITILER_OPENEO_STORE_URL="services/eoapi.json"
   ```
 
 - [`.env.cdse`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.cdse) that uses the [Copernicus Data Space Ecosystem (CDSE)](https://dataspace.copernicus.eu/)
 
   ```bash
   TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
-  TITILER_OPENEO_SERVICE_STORE_URL="services/copernicus.json"
+  TITILER_OPENEO_STORE_URL="services/copernicus.json"
   ```
 
   In order to access asset object store and to retrieve data efficiently, it requires to set additional **environment variables**:

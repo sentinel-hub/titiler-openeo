@@ -161,7 +161,7 @@ class BackendSettings(BaseSettings):
     """OpenEO Backend settings."""
 
     stac_api_url: Union[AnyHttpUrl, PostgresDsn]
-    service_store_url: Union[AnyHttpUrl, str]
+    store_url: Union[AnyHttpUrl, str]
     tile_store_url: Optional[str] = None  # URL for tile assignment store
     default_services_file: Optional[str] = (
         None  # Path to default services configuration file

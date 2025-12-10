@@ -6,7 +6,7 @@ from typing import Annotated, Any, Dict, List, Optional
 import morecantile
 import pyproj
 from attrs import define, field
-from fastapi import Depends, HTTPException, Path, Request
+from fastapi import Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
@@ -20,8 +20,9 @@ from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
 from .errors import InvalidProcessGraph
 from .models import openapi
+from .models import udp as udp_models
 from .models.auth import User
-from .services import ServicesStore, TileAssignmentStore
+from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
 
 STAC_VERSION = "1.0.0"
@@ -32,6 +33,7 @@ class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
 
     services_store: ServicesStore
+    udp_store: UdpStore
     tile_store: Optional[TileAssignmentStore] = None
     stac_client: stacApiBackend
     process_registry: ProcessRegistry
@@ -615,6 +617,338 @@ class EndpointsFactory(BaseFactory):
                     x="{x}",
                     y="{y}",
                 ),
+            }
+
+        @self.router.get(
+            "/process_graphs",
+            response_class=JSONResponse,
+            summary="List user-defined processes",
+            response_model=udp_models.UserProcesses,
+            response_model_exclude_none=True,
+            operation_id="list-udp",
+            tags=["Data Processing"],
+        )
+        def list_udps(
+            request: Request,
+            limit: int = Query(
+                100, ge=0, description="Maximum number of UDPs to return"
+            ),
+            offset: int = Query(0, ge=0, description="Offset for pagination"),
+            user=Depends(self.auth.validate),
+        ):
+            """List UDPs for the authenticated user."""
+            udps = self.udp_store.list_udps(
+                user_id=user.user_id, limit=limit, offset=offset
+            )
+
+            processes = []
+            for udp in udps:
+                processes.append(
+                    {
+                        "id": udp["id"],
+                        "summary": udp.get("summary"),
+                        "description": udp.get("description"),
+                        "parameters": udp.get("parameters"),
+                        "returns": udp.get("returns"),
+                        "categories": udp.get("categories", []),
+                        "deprecated": udp.get("deprecated", False),
+                        "experimental": udp.get("experimental", False),
+                        "process_graph": udp["process_graph"],
+                    }
+                )
+
+            links = [
+                {
+                    "href": self.url_for(request, "list_udps"),
+                    "rel": "self",
+                }
+            ]
+
+            return {"processes": processes, "links": links}
+
+        @self.router.get(
+            "/process_graphs/{process_graph_id}",
+            response_class=JSONResponse,
+            summary="Full metadata for a user-defined process",
+            response_model=udp_models.UserProcess,
+            response_model_exclude_none=True,
+            operation_id="describe-custom-process",
+            tags=["Data Processing"],
+        )
+        def get_udp(
+            process_graph_id: str,
+            user=Depends(self.auth.validate),
+        ):
+            """Return full UDP definition for the authenticated user."""
+            udp = self.udp_store.get_udp(user_id=user.user_id, udp_id=process_graph_id)
+            if not udp:
+                raise HTTPException(404, f"Could not find UDP: {process_graph_id}")
+
+            process = {
+                "id": udp["id"],
+                "summary": udp.get("summary"),
+                "description": udp.get("description"),
+                "parameters": udp.get("parameters"),
+                "returns": udp.get("returns"),
+                "categories": udp.get("categories", []),
+                "deprecated": udp.get("deprecated", False),
+                "experimental": udp.get("experimental", False),
+                "process_graph": udp["process_graph"],
+            }
+
+            for extra_field in ("exceptions", "examples", "links"):
+                if udp.get(extra_field) is not None:
+                    process[extra_field] = udp[extra_field]
+
+            return process
+
+        @self.router.delete(
+            "/process_graphs/{process_graph_id}",
+            response_class=Response,
+            status_code=204,
+            summary="Delete a user-defined process",
+            operation_id="delete-custom-process",
+            tags=["Data Processing"],
+        )
+        def delete_udp(
+            process_graph_id: str,
+            user=Depends(self.auth.validate),
+        ):
+            """Delete a UDP for the authenticated user."""
+            try:
+                self.udp_store.delete_udp(user_id=user.user_id, udp_id=process_graph_id)
+            except ValueError as err:
+                raise HTTPException(
+                    404, f"Could not find UDP: {process_graph_id}"
+                ) from err
+
+            return Response(status_code=204)
+
+        @self.router.post(
+            "/validation",
+            response_class=JSONResponse,
+            summary="Validate a user-defined process (graph)",
+            response_model=Dict[str, List[Dict[str, Any]]],
+            response_model_exclude_none=True,
+            operation_id="validate-custom-process",
+            tags=["Data Processing"],
+        )
+        def validate_process_graph(
+            body: udp_models.UserProcess,
+            user=Depends(self.auth.validate_optional),
+        ):
+            """Validate a process graph without executing it."""
+            errors: List[Dict[str, Any]] = []
+
+            raw_pg = body.model_dump().get("process_graph") or {}
+
+            # Basic per-node validation against registry specs (structure and required params)
+            for node_id, node in raw_pg.items():
+                node_dict = (
+                    node
+                    if isinstance(node, dict)
+                    else node.model_dump()
+                    if hasattr(node, "model_dump")
+                    else None
+                )
+                if not isinstance(node_dict, dict):
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' must be an object",
+                        }
+                    )
+                    continue
+
+                process_id = node_dict.get("process_id")
+                if not process_id:
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' missing process_id",
+                        }
+                    )
+                    continue
+
+                if process_id not in self.process_registry[None]:
+                    errors.append(
+                        {
+                            "code": "ProcessUnsupported",
+                            "message": f"Process '{process_id}' not found in registry",
+                        }
+                    )
+                    continue
+
+                spec = self.process_registry[process_id].spec
+                required_params = [
+                    p["name"]
+                    for p in spec.get("parameters", [])
+                    if not p.get("optional", False)
+                ]
+                args = node_dict.get("arguments", {}) or {}
+                for param_name in required_params:
+                    if param_name not in args or args.get(param_name) is None:
+                        errors.append(
+                            {
+                                "code": "ProcessParameterMissing",
+                                "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
+                            }
+                        )
+
+            if errors:
+                return {"errors": errors}
+
+            try:
+                parsed_graph = OpenEOProcessGraph(pg_data=body.model_dump())
+            except Exception as err:  # noqa: BLE001
+                errors.append(
+                    {
+                        "code": "ProcessGraphInvalid",
+                        "message": str(err),
+                    }
+                )
+                return {"errors": errors}
+
+            # Validate supported processes
+            for _, node in parsed_graph.nodes:
+                process_id = node.get("process_id")
+                if process_id and process_id not in self.process_registry[None]:
+                    errors.append(
+                        {
+                            "code": "ProcessUnsupported",
+                            "message": f"Process '{process_id}' not found in registry",
+                        }
+                    )
+                    continue
+
+                if not process_id:
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": "Process node missing process_id",
+                        }
+                    )
+                    continue
+
+            # Validate argument schema against registry
+            try:
+                parsed_graph.to_callable(process_registry=self.process_registry)
+            except Exception as err:  # noqa: BLE001
+                msg = str(err)
+                # Unresolvable parameters should not yield validation errors
+                lower_msg = msg.lower()
+                if "from_parameter" in lower_msg or "from parameter" in lower_msg:
+                    # ignore unresolved user-supplied parameters
+                    pass
+                else:
+                    errors.append({"code": "ProcessGraphInvalid", "message": msg})
+
+            return {"errors": errors}
+
+        @self.router.put(
+            "/process_graphs/{process_graph_id}",
+            response_class=JSONResponse,
+            summary="Store a user-defined process",
+            response_model=udp_models.UserProcess,
+            response_model_exclude_none=True,
+            operation_id="store-custom-process",
+            tags=["Data Processing"],
+        )
+        def upsert_udp(
+            process_graph_id: str,
+            body: udp_models.UserProcess,
+            user=Depends(self.auth.validate),
+        ):
+            """Create or replace a UDP for the authenticated user."""
+            data = body.model_dump(exclude_none=True)
+            # Enforce path ID over body ID to satisfy spec
+            data["id"] = process_graph_id
+
+            # Basic validation: ensure process graph exists
+            if "process_graph" not in data or not data["process_graph"]:
+                raise HTTPException(
+                    400,
+                    "process_graph is required and must not be empty",
+                )
+
+            # Validate processes exist in registry and required params are present
+            for node_id, node in data["process_graph"].items():
+                node_dict = (
+                    node
+                    if isinstance(node, dict)
+                    else node.model_dump()
+                    if hasattr(node, "model_dump")
+                    else None
+                )
+                if not isinstance(node_dict, dict):
+                    raise InvalidProcessGraph(
+                        f"Process node '{node_id}' must be an object"
+                    )
+
+                process_id = node_dict.get("process_id")
+                if not process_id:
+                    raise InvalidProcessGraph("Process node missing process_id")
+
+                if process_id not in self.process_registry[None]:
+                    raise InvalidProcessGraph(
+                        f"Process '{process_id}' not found in registry"
+                    )
+
+                spec = self.process_registry[process_id].spec
+                required_params = [
+                    p["name"]
+                    for p in spec.get("parameters", [])
+                    if not p.get("optional", False)
+                ]
+                args = node_dict.get("arguments", {}) or {}
+                for param_name in required_params:
+                    if param_name not in args or args.get(param_name) is None:
+                        raise InvalidProcessGraph(
+                            f"Required parameter '{param_name}' missing for process '{process_id}'"
+                        )
+
+            # Validate argument schema (will raise InvalidProcessGraph on failure)
+            try:
+                parsed_graph = OpenEOProcessGraph(pg_data=data)
+                parsed_graph.to_callable(process_registry=self.process_registry)
+            except Exception as err:  # noqa: BLE001
+                raise InvalidProcessGraph(f"Invalid process graph: {str(err)}") from err
+
+            self.udp_store.upsert_udp(
+                user_id=user.user_id,
+                udp_id=process_graph_id,
+                process_graph=data["process_graph"],
+                parameters=data.get("parameters"),
+                summary=data.get("summary"),
+                description=data.get("description"),
+                returns=data.get("returns"),
+                categories=data.get("categories"),
+                deprecated=data.get("deprecated", False),
+                experimental=data.get("experimental", False),
+                exceptions=data.get("exceptions"),
+                examples=data.get("examples"),
+                links=data.get("links"),
+            )
+
+            stored = self.udp_store.get_udp(
+                user_id=user.user_id, udp_id=process_graph_id
+            )
+            if not stored:
+                raise HTTPException(404, f"Could not find UDP: {process_graph_id}")
+
+            return {
+                "id": stored["id"],
+                "summary": stored.get("summary"),
+                "description": stored.get("description"),
+                "parameters": stored.get("parameters"),
+                "returns": stored.get("returns"),
+                "categories": stored.get("categories", []),
+                "deprecated": stored.get("deprecated", False),
+                "experimental": stored.get("experimental", False),
+                "process_graph": stored["process_graph"],
+                "exceptions": stored.get("exceptions"),
+                "examples": stored.get("examples"),
+                "links": stored.get("links"),
             }
 
         @self.router.post(
