@@ -7,11 +7,13 @@ The implementation is available in [`titiler/openeo/auth.py`](https://github.com
 ## OpenEO Authentication Model
 
 TiTiler-OpenEO follows the OpenEO authentication specification where tokens are provided in the format:
+
 ```
 Bearer oidc/oidc/{actual_token}
 ```
 
 The token structure consists of three parts:
+
 1. Authentication method (`oidc`)
 2. Provider identifier (`oidc`)
 3. The actual OIDC token
@@ -30,6 +32,7 @@ TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="your-redirect-url"
 ```
 
 Optional configuration:
+
 ```bash
 TITILER_OPENEO_AUTH_OIDC_SCOPES="openid email profile"  # Space-separated list (default)
 TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM="name"  # Claim to use for user name (default)
@@ -50,6 +53,7 @@ The OIDC implementation performs the following validations in the [`_verify_toke
 ## User Information
 
 Upon successful validation, a [`User`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/auth.py#L35) object is created with:
+
 - `user_id`: Subject claim from the token (`sub`)
 - `email`: Email claim if available
 - `name`: Value from the configured name claim (defaults to "name")

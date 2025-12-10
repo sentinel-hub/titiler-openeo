@@ -24,8 +24,8 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - Dynamic tiling services
 - FastAPI-based application
 - Middleware for CORS, compression, and caching
-- Optimized [RasterStack data model](https://sentinel-hub.github.io/titiler-openeo/raster-stack/) for consistent processing
-- [LazyRasterStack implementation](https://sentinel-hub.github.io/titiler-openeo/raster-stack/#lazyrasterstack) for improved performance
+- Enhanced [RasterStack data model](https://sentinel-hub.github.io/titiler-openeo/raster-stack/) with temporal dimension support
+- [LazyRasterStack implementation](https://sentinel-hub.github.io/titiler-openeo/raster-stack/#lazyrasterstack-with-temporal-intelligence) with concurrent execution and intelligent caching
 
 ## Installation
 

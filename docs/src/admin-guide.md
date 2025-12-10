@@ -9,6 +9,7 @@ This guide provides information for system administrators managing an openEO by 
 openEO by TiTiler is configured through environment variables. Key configuration areas include:
 
 #### API Settings ([`ApiSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L89))
+
 ```bash
 TITILER_OPENEO_API_NAME="openEO by TiTiler"
 TITILER_OPENEO_API_CORS_ORIGINS="*"
@@ -18,6 +19,7 @@ TITILER_OPENEO_API_DEBUG=false
 ```
 
 #### Backend Settings ([`BackendSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L127))
+
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://your-stac-api"
 TITILER_OPENEO_SERVICE_STORE_URL="path-to-services-config"
@@ -25,12 +27,14 @@ TITILER_OPENEO_TILE_STORE_URL="optional-tile-store-url"
 ```
 
 #### Processing Settings ([`ProcessingSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L182))
+
 ```bash
 TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
 ```
 
 #### Cache Settings ([`CacheSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L196))
+
 ```bash
 TITILER_OPENEO_CACHE_TTL=300
 TITILER_OPENEO_CACHE_MAXSIZE=512
@@ -45,6 +49,7 @@ openEO by TiTiler supports two authentication methods:
    - Configured through [`AuthSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L61)
    - Set `TITILER_OPENEO_AUTH_METHOD=basic`
    - Configure users in environment:
+
      ```bash
      TITILER_OPENEO_AUTH_USERS='{"user1": {"password": "pass1", "roles": ["user"]}}'
      ```
@@ -57,6 +62,7 @@ openEO by TiTiler supports two authentication methods:
 ### Cache Configuration
 
 The caching system can be tuned through the following settings:
+
 - `TITILER_OPENEO_CACHE_TTL`: Time-to-live for cached items (seconds)
 - `TITILER_OPENEO_CACHE_MAXSIZE`: Maximum number of items in cache
 - `TITILER_OPENEO_CACHE_DISABLE`: Disable caching entirely
@@ -64,6 +70,7 @@ The caching system can be tuned through the following settings:
 ### Processing Limits
 
 To prevent resource exhaustion:
+
 - `TITILER_OPENEO_PROCESSING_MAX_PIXELS`: Maximum allowed pixels for image processing
 - `TITILER_OPENEO_PROCESSING_MAX_ITEMS`: Maximum number of items (STAC items from a API search) in a request
 
@@ -80,6 +87,7 @@ The application provides several endpoints for monitoring:
 ### Logging
 
 Logging configuration is managed through `log_config.yaml`. The default configuration includes:
+
 - Console output
 - JSON formatting
 - Different log levels for different components
@@ -89,6 +97,7 @@ Logging configuration is managed through `log_config.yaml`. The default configur
 ### CORS Configuration
 
 Configure CORS settings through:
+
 ```bash
 TITILER_OPENEO_API_CORS_ORIGINS="domain1.com,domain2.com"
 TITILER_OPENEO_API_CORS_ALLOW_METHODS="GET,POST,PUT,PATCH,DELETE,OPTIONS"
@@ -97,6 +106,7 @@ TITILER_OPENEO_API_CORS_ALLOW_METHODS="GET,POST,PUT,PATCH,DELETE,OPTIONS"
 ### Cache Control
 
 Configure cache control headers:
+
 ```bash
 TITILER_OPENEO_API_CACHE_STATIC="public, max-age=3600"
 TITILER_OPENEO_API_CACHE_DYNAMIC="no-cache"
@@ -125,6 +135,7 @@ TITILER_OPENEO_API_CACHE_DEFAULT="no-store"
 ### Debug Mode
 
 Enable debug mode for detailed logging:
+
 ```bash
 TITILER_OPENEO_API_DEBUG=true
 ```
@@ -145,6 +156,7 @@ TITILER_OPENEO_API_DEBUG=true
 ### Updates
 
 When updating openEO by TiTiler:
+
 1. Review the changelog
 2. Backup configuration
 3. Test in a staging environment

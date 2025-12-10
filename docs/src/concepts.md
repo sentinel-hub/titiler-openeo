@@ -10,7 +10,7 @@ In openEO, a datacube is a fundamental concept and a key component of the platfo
 
 The backend intelligently handles resolution and dimensions using these key principles:
 
-1. **Default Resolution Control**: 
+1. **Default Resolution Control**:
    - The `load_collection` and `load_collection_and_reduce` processes default to a width of 1024 pixels
    - This intentionally avoids loading data at native resolution by default, which could cause memory issues
    - Users can explicitly request native resolution by providing their own width/height parameters
@@ -40,7 +40,11 @@ The backend uses three primary data structures for efficient processing:
    - Additional dimensions (like temporal or bands) can be added, but they must be compatible with the existing spatial dimensions
    - Spatial dimensions are inherent to the raster data and cannot be added separately
 
-3. **LazyRasterStack**: An optimized version of RasterStack that lazily loads data when accessed. This improves performance by only executing processing tasks when the data is actually needed.
+3. **LazyRasterStack**: An optimized version of RasterStack that lazily loads data when accessed. This improves performance by only executing processing tasks when the data is actually needed. The enhanced implementation includes:
+   - **Temporal Intelligence**: Automatic organization and grouping of data by timestamps
+   - **Concurrent Execution**: Parallel data loading using ThreadPoolExecutor for improved performance  
+   - **Timestamp-based Access**: Direct access to observations by time periods for efficient time-series analysis
+   - **Multi-dimensional Support**: Explicit handling of time and spectral dimensions
 
 ### Dimension Handling
 
@@ -49,13 +53,19 @@ The data cube implementation in openEO by TiTiler follows these principles for d
 1. **Spatial Dimensions**: Every raster in the stack has two spatial dimensions (height and width) that are inherent to the data. These dimensions cannot be added or removed through processes, as they are fundamental to the raster data structure.
 
 2. **Additional Dimensions**: Non-spatial dimensions can be added to the data cube:
-   - Temporal dimension: For time series data (e.g., "2021-01", "2021-02")
-   - Bands dimension: For spectral bands (e.g., "red", "green", "blue")
-   - Other dimensions: For any other type of categorization
+   - **Temporal dimension**: For time series data organized by timestamps (e.g., datetime objects for satellite observations)
+   - **Bands dimension**: For spectral bands within each temporal observation (e.g., "red", "green", "blue", "nir")
+   - **Other dimensions**: For any other type of categorization
 
-3. **Dimension Compatibility**: When adding dimensions to a non-empty data cube, the new dimension must be compatible with the existing spatial dimensions. This means any ImageData added to the stack must match the height and width of existing rasters.
+3. **Enhanced Temporal Support**: The RasterStack model now provides first-class support for the temporal dimension:
+   - **Time-first Organization**: RasterStack keys represent temporal observations, with each containing multi-band ImageData
+   - **Temporal Grouping**: Automatic grouping and sorting of observations by timestamp
+   - **Concurrent Processing**: Parallel loading of observations within the same time period
+   - **Dimension-aware Operations**: Processes can operate specifically on temporal or spectral dimensions
 
-4. **Empty Data Cubes**: An empty data cube (`{}`) can receive any non-spatial dimension. The first raster data added to the cube will establish the spatial dimensions that all subsequent data must match.
+4. **Dimension Compatibility**: When adding dimensions to a non-empty data cube, the new dimension must be compatible with the existing spatial dimensions. This means any ImageData added to the stack must match the height and width of existing rasters.
+
+5. **Empty Data Cubes**: An empty data cube (`{}`) can receive any non-spatial dimension. The first raster data added to the cube will establish the spatial dimensions that all subsequent data must match.
 
 ### Data Reduction
 
@@ -91,6 +101,7 @@ The backend automatically converts OpenEO process graphs to CQL2-JSON format for
 - Logical operators (`and`, `or`, `not`)
 
 Example conversion:
+
 ```json
 // OpenEO process graph
 {

@@ -62,6 +62,7 @@ For example:
 The behavior of the injected user parameter depends on how it's defined in the process's JSON schema:
 
 1. When the parameter schema defines `"type": "string"`:
+
 ```json
 {
   "parameters": {
@@ -72,7 +73,9 @@ The behavior of the injected user parameter depends on how it's defined in the p
   }
 }
 ```
+
 The process will receive just the user ID string, even when using from_parameter:
+
 ```json
 {
   "process_graph": {
@@ -89,6 +92,7 @@ The process will receive just the user ID string, even when using from_parameter
 ```
 
 2. When the parameter schema defines a User object type:
+
 ```json
 {
   "parameters": {
@@ -99,7 +103,9 @@ The process will receive just the user ID string, even when using from_parameter
   }
 }
 ```
+
 The process will receive the complete User object:
+
 ```json
 {
   "process_graph": {
