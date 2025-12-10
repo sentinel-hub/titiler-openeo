@@ -198,8 +198,9 @@ def apply_pixel_selection(
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
 
-    This implementation leverages LazyRasterStack's built-in concurrent execution
-    capabilities through get_by_timestamp() which handles parallel loading internally.
+    This function processes timestamp groups sequentially. For data sources that support
+    timestamp-based grouping (such as LazyRasterStack), any concurrent execution is handled
+    internally by the get_by_timestamp() method for each timestamp group.
 
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
