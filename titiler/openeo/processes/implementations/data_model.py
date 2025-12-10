@@ -1,5 +1,6 @@
 """TiTiler.openeo data models."""
 
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from typing import (
@@ -151,6 +152,7 @@ class LazyRasterStack(Dict[str, ImageData]):
 
         # Per-key execution cache instead of global execution flag
         self._data_cache: Dict[str, ImageData] = {}
+        self._cache_lock = threading.Lock()  # Thread-safe cache access
 
         # Pre-compute keys and timestamp metadata
         self._keys: List[str] = []
@@ -214,11 +216,12 @@ class LazyRasterStack(Dict[str, ImageData]):
         """
 
         # Filter out keys that are already cached
-        keys_to_execute = [
-            key
-            for key in selected_keys
-            if key in self._key_to_task_index and key not in self._data_cache
-        ]
+        with self._cache_lock:
+            keys_to_execute = [
+                key
+                for key in selected_keys
+                if key in self._key_to_task_index and key not in self._data_cache
+            ]
 
         if not keys_to_execute:
             return
@@ -240,7 +243,8 @@ class LazyRasterStack(Dict[str, ImageData]):
             for key, future in key_to_future.items():
                 try:
                     data = future.result()
-                    self._data_cache[key] = data
+                    with self._cache_lock:
+                        self._data_cache[key] = data
                 except self._allowed_exceptions:
                     # Skip failed tasks, don't cache them
                     continue
@@ -251,7 +255,8 @@ class LazyRasterStack(Dict[str, ImageData]):
             self._tasks, allowed_exceptions=self._allowed_exceptions
         ):
             key = self._key_fn(asset)
-            self._data_cache[key] = data
+            with self._cache_lock:
+                self._data_cache[key] = data
 
     def timestamps(self) -> List[datetime]:
         """Return list of unique timestamps in the stack."""
@@ -296,8 +301,9 @@ class LazyRasterStack(Dict[str, ImageData]):
 
     def __getitem__(self, key: str) -> ImageData:
         """Get an item from the RasterStack, executing the task if necessary."""
-        if key in self._data_cache:
-            return self._data_cache[key]
+        with self._cache_lock:
+            if key in self._data_cache:
+                return self._data_cache[key]
 
         if key not in self._key_to_task_index:
             raise KeyError(f"Key '{key}' not found in LazyRasterStack")
@@ -307,7 +313,8 @@ class LazyRasterStack(Dict[str, ImageData]):
 
         try:
             data = self._execute_task(key, task_func)
-            self._data_cache[key] = data
+            with self._cache_lock:
+                self._data_cache[key] = data
             return data
         except self._allowed_exceptions as err:
             raise KeyError(f"Task execution failed for key '{key}'") from err
@@ -334,7 +341,10 @@ class LazyRasterStack(Dict[str, ImageData]):
         all_keys = set(self._keys)
         self._execute_selected_tasks(all_keys)
         # Return values in temporal order
-        return [self._data_cache[key] for key in self._keys if key in self._data_cache]
+        with self._cache_lock:
+            return [
+                self._data_cache[key] for key in self._keys if key in self._data_cache
+            ]
 
     def items(self) -> Any:
         """Return the items of the RasterStack, executing tasks if necessary."""
@@ -342,11 +352,12 @@ class LazyRasterStack(Dict[str, ImageData]):
         all_keys = set(self._keys)
         self._execute_selected_tasks(all_keys)
         # Return items in temporal order
-        return [
-            (key, self._data_cache[key])
-            for key in self._keys
-            if key in self._data_cache
-        ]
+        with self._cache_lock:
+            return [
+                (key, self._data_cache[key])
+                for key in self._keys
+                if key in self._data_cache
+            ]
 
     @overload
     def get(self, key: str) -> Optional[ImageData]: ...

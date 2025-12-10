@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from threading import Lock
 
 import numpy as np
+from rio_tiler.constants import MAX_THREADS
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import LazyRasterStack
@@ -277,7 +278,7 @@ def test_thread_pool_executor_usage():
     # Verify the stack has the concurrent execution method
     assert hasattr(stack, "_execute_selected_tasks")
     assert hasattr(stack, "_max_workers")
-    assert stack._max_workers == 5  # Our default
+    assert stack._max_workers == MAX_THREADS  # Default MAX_THREADS value
 
     # Test that get_by_timestamp works (which internally uses _execute_selected_tasks)
     result = stack.get_by_timestamp(datetime(2021, 1, 1))
