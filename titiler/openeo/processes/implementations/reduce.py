@@ -131,28 +131,13 @@ def _process_timestamp_group_simple(
     Optional[List[str]],
 ]:
     """Process a timestamp group using already-loaded ImageData."""
-    # Handle both dict interface and mock objects
-    if hasattr(timestamp_items, "items"):
-        # Real LazyRasterStack get_by_timestamp returns dict of ImageData
+    # Require dict-like interface with .items() method for consistency
+    try:
         items = timestamp_items.items()
-    else:
-        # Mock objects or other dict-like structures
-        if hasattr(timestamp_items, "keys"):
-            # Build items list with error handling for individual keys
-            items = []
-            for key in timestamp_items.keys():
-                try:
-                    img = timestamp_items[key]
-                    items.append((key, img))
-                except Exception as e:
-                    # Skip failed keys and log warning
-                    warnings.warn(
-                        f"Failed to load image {key}: {e}", UserWarning, stacklevel=2
-                    )
-                    continue
-        else:
-            # Fallback: assume it's already a sequence of key-value pairs
-            items = timestamp_items
+    except AttributeError as e:
+        raise TypeError(
+            "timestamp_items must implement dict-like interface with .items() method"
+        ) from e
 
     # Process each image in the timestamp group
     for key, img in items:

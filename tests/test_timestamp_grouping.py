@@ -57,6 +57,11 @@ class MockTimestampGroup:
         """Return list of keys for this timestamp group."""
         return self.keys_list
 
+    def items(self):
+        """Return items as key-value pairs for dict-like interface."""
+        for key in self.keys_list:
+            yield key, self[key]
+
     def __getitem__(self, key):
         """Simulate image loading with execution tracking."""
         # Record the execution with timestamp
@@ -199,6 +204,15 @@ def test_failed_tasks_handling_in_timestamp_group():
 
         def keys(self):
             return self.keys_list
+
+        def items(self):
+            """Iterator over (key, value) pairs."""
+            for key in self.keys_list:
+                try:
+                    yield key, self[key]
+                except RuntimeError:
+                    # Skip failed items during iteration
+                    continue
 
         def __getitem__(self, key):
             if "bad" in key:
