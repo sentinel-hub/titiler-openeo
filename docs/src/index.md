@@ -31,6 +31,7 @@ The application implements the [openEO API (L1A and L1C)](https://openeo.org/doc
 ## Getting Started
 
 For installation and setup instructions, see:
+
 - [Local Setup](local-setup.md) for development environment
 - [Kubernetes Guide](kubernetes.md) for production deployment
 - [Administrator Guide](admin-guide.md) for configuration options

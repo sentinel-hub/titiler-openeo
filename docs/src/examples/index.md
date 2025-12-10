@@ -45,6 +45,7 @@ Explore how to:
 The examples demonstrate different approaches to managing resolution:
 
 1. **Default Resolution**:
+
 ```python
 loadcol = load_collection_and_reduce(
     "SENTINEL2_L2A",
@@ -56,6 +57,7 @@ loadcol = load_collection_and_reduce(
 ```
 
 2. **Custom Resolution**:
+
 ```python
 loadcol = load_collection_and_reduce(
     "SENTINEL2_L2A",

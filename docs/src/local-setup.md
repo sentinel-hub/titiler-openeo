@@ -19,30 +19,35 @@ python -m pip install -e .
 The application can be configured using different environment files:
 
 1. EOAPI Configuration (default)
+
 ```bash
 cp .env.eoapi .env
 export $(cat .env | xargs)
 ```
 
 This sets up:
+
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://stac.eoapi.dev"
 TITILER_OPENEO_STORE_URL="services/eoapi.json"
 ```
 
 2. CDSE Configuration
+
 ```bash
 cp .env.cdse .env
 export $(cat .env | xargs)
 ```
 
 This configures:
+
 ```bash
 TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
 TITILER_OPENEO_STORE_URL="services/copernicus.json"
 ```
 
 For CDSE, additional environment variables are required for efficient data access:
+
 ```bash
 AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu
 AWS_ACCESS_KEY_ID=<your_access_key>
@@ -60,6 +65,7 @@ VSI_CACHE=TRUE
 ## Running the Application
 
 Start the server:
+
 ```bash
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8080
 ```
@@ -71,6 +77,7 @@ The API will be available at `http://localhost:8080`
 To use the openEO Web Editor with your local instance:
 
 1. Start the openEO Web Editor:
+
 ```bash
 docker pull mundialis/openeo-web-editor:latest
 docker run -p 8081:80 mundialis/openeo-web-editor:latest

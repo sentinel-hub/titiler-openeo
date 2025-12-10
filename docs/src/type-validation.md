@@ -148,6 +148,7 @@ def test_array_create_rejects_raster_stack():
 To add type validation to a new process:
 
 1. **Add the @process decorator**:
+
    ```python
    from .core import process
    

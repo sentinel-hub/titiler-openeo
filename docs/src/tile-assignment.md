@@ -7,12 +7,14 @@ The tile assignment feature allows services to manage and track XYZ tile assignm
 The tile assignment feature requires two levels of configuration:
 
 1. Global Configuration:
+
    ```env
    # Enable tile assignment with SQLAlchemy store
    TITILER_OPENEO_TILE_STORE_URL=postgresql://user:pass@host/db
    ```
 
 2. Service Configuration:
+
    ```json
    {
      "type": "XYZ",
@@ -24,6 +26,7 @@ The tile assignment feature requires two levels of configuration:
    ```
 
 The feature will only be active when both:
+
 - A valid tile store URL is configured at the system level
 - The service has `tile_store: true` in its configuration (this will inject the store as "_openeo_tile_store" parameter)
 
@@ -49,7 +52,9 @@ To access the injected tile store in your process graph, use the `from_parameter
 ```
 
 ### Supported Store Types
+
 Currently supported tile store implementations:
+
 - PostgreSQL: `postgresql://user:pass@host/db`
 - SQLite: `sqlite:///path/to/db.sqlite`
 - SQLAlchemy URL: `sqlalchemy://...`
@@ -101,8 +106,8 @@ Because `user_id` is defined with `"type": "string"`, when using `from_parameter
 
 ## Access Control
 
-The tile assignment process ensures that each tile can only be managed by the user who claimed it. 
-Each operation (release/submit/force-release) requires a valid tile assignment - a user must have 
+The tile assignment process ensures that each tile can only be managed by the user who claimed it.
+Each operation (release/submit/force-release) requires a valid tile assignment - a user must have
 a claimed tile to perform any operation on it.
 
 ## Usage Example
@@ -159,10 +164,10 @@ Here's an example of using the tile assignment process in a service:
    - Additional data persists and is returned in subsequent queries
    - Only the tile owner can update their tile in controlled mode
    - Common use cases:
-     * Progress tracking (e.g., percent complete)
-     * Processing metadata (start time, end time)
-     * Quality metrics
-     * Custom workflow data
+     - Progress tracking (e.g., percent complete)
+     - Processing metadata (start time, end time)
+     - Quality metrics
+     - Custom workflow data
 
 ## Error Handling
 
@@ -175,6 +180,7 @@ The process handles several error conditions:
 ## Implementation Details
 
 The tile assignment system:
+
 - Maintains persistent tile assignments using SQLAlchemy
 - Ensures unique tile assignments (no two users can have the same tile)
 - Randomly distributes tiles to prevent predictable assignment patterns

@@ -1,7 +1,7 @@
 """titiler-openeo custom reader."""
 
+import logging
 import time
-import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlparse
 
@@ -16,12 +16,7 @@ from rasterio.errors import RasterioIOError
 from rasterio.transform import array_bounds
 from rasterio.warp import transform_bounds
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
-from rio_tiler.errors import (
-    AssetAsBandError,
-    ExpressionMixingWarning,
-    InvalidAssetName,
-    MissingAssets,
-)
+from rio_tiler.errors import AssetAsBandError, InvalidAssetName, MissingAssets
 from rio_tiler.io import Reader
 from rio_tiler.io.base import BaseReader, MultiBaseReader
 from rio_tiler.io.stac import STAC_ALTERNATE_KEY
@@ -163,10 +158,8 @@ class SimpleSTACReader(MultiBaseReader):
             ):
                 info["dataset_statistics"] = stats
             else:
-                warnings.warn(
-                    "Some statistics data in STAC are invalid, they will be ignored.",
-                    UserWarning,
-                    stacklevel=2,
+                logging.warning(
+                    "Some statistics data in STAC are invalid, they will be ignored."
                 )
 
         if vrt_options:
@@ -197,20 +190,16 @@ class SimpleSTACReader(MultiBaseReader):
         """
         assets = cast_to_sequence(assets)
         if assets and expression:
-            warnings.warn(
-                "Both expression and assets passed; expression will overwrite assets parameter.",
-                ExpressionMixingWarning,
-                stacklevel=2,
+            logging.warning(
+                "Both expression and assets passed; expression will overwrite assets parameter."
             )
 
         if expression:
             assets = self.parse_expression(expression, asset_as_band=asset_as_band)
 
         if not assets and self.default_assets:
-            warnings.warn(
-                f"No assets/expression passed, defaults to {self.default_assets}",
-                UserWarning,
-                stacklevel=2,
+            logging.warning(
+                "No assets/expression passed, defaults to %s", self.default_assets
             )
             assets = self.default_assets
 

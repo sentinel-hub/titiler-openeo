@@ -9,6 +9,7 @@ from openeo_pg_parser_networkx.pg_schema import ParameterReference
 from pydantic import TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
+from .data_model import LazyRasterStack
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +296,6 @@ def _value_to_openeo_name(value: Any) -> str:
     Returns:
         Human-readable type name
     """
-    from .data_model import LazyRasterStack
 
     if value is None:
         return "null"
@@ -335,7 +335,6 @@ def _validate_parameter_types(
     Raises:
         TypeError: If a parameter has an invalid type
     """
-    from .data_model import LazyRasterStack
 
     for param_name, param_value in resolved_kwargs.items():
         if param_name not in param_types:

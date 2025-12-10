@@ -4,6 +4,9 @@ import builtins
 
 import numpy
 
+from .data_model import get_first_item, get_last_item
+from .reduce import apply_pixel_selection
+
 __all__ = [
     "absolute",
     "add",
@@ -247,9 +250,34 @@ def first(data):
     """Return the first element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        first_elements = {k: v.array[0] for k, v in data.items()}
-        # return a multi-dimensional array
-        return numpy.stack(list(first_elements.values()), axis=0)
+        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
+            timestamps = data.timestamps()
+            if not timestamps:
+                raise ValueError("No timestamps available for first operation")
+
+            # Get the first timestamp and mosaic all images from that timestamp
+            first_timestamp = builtins.min(timestamps)
+            timestamp_group = data.get_by_timestamp(first_timestamp)
+
+            if not timestamp_group:
+                raise ValueError("No data available for first timestamp")
+
+            # If there's only one image in the group, return its first band
+            if len(timestamp_group) == 1:
+                img = next(iter(timestamp_group.values()))
+                return img.array[0]
+
+            # Multiple images - apply pixel selection to create mosaic, then get first band
+            mosaic_result = apply_pixel_selection(
+                timestamp_group, pixel_selection="first"
+            )
+            mosaic_img = next(iter(mosaic_result.values()))
+            return mosaic_img.array[0]
+        else:
+            # Regular RasterStack - use existing logic
+            first_img = get_first_item(data)
+            return first_img.array[0]
     elif isinstance(data, numpy.ndarray):
         return data[0]
     elif isinstance(data, numpy.ma.MaskedArray):
@@ -262,9 +290,34 @@ def last(data):
     """Return the last element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        last_elements = {k: v.array[-1] for k, v in data.items()}
-        # return a multi-dimensional array
-        return numpy.stack(list(last_elements.values()), axis=0)
+        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
+            timestamps = data.timestamps()
+            if not timestamps:
+                raise ValueError("No timestamps available for last operation")
+
+            # Get the last timestamp and mosaic all images from that timestamp
+            last_timestamp = builtins.max(timestamps)
+            timestamp_group = data.get_by_timestamp(last_timestamp)
+
+            if not timestamp_group:
+                raise ValueError("No data available for last timestamp")
+
+            # If there's only one image in the group, return its last band
+            if len(timestamp_group) == 1:
+                img = next(iter(timestamp_group.values()))
+                return img.array[-1]
+
+            # Multiple images - apply pixel selection to create mosaic, then get last band
+            mosaic_result = apply_pixel_selection(
+                timestamp_group, pixel_selection="first"
+            )
+            mosaic_img = next(iter(mosaic_result.values()))
+            return mosaic_img.array[-1]
+        else:
+            # Regular RasterStack - use existing logic
+            last_img = get_last_item(data)
+            return last_img.array[-1]
     elif isinstance(data, numpy.ndarray):
         return data[-1]
     elif isinstance(data, numpy.ma.MaskedArray):

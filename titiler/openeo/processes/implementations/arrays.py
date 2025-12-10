@@ -49,6 +49,8 @@ def array_element(
         if label is not None:
             array_dict = {k: v.array for k, v in data.items() if k == label}
         # return a multi-dimensional array
+        # For LazyRasterStack, this will execute all tasks when stacking is needed
+        # This is expected behavior for array operations
         return numpy.stack(list(array_dict.values()), axis=0)
 
     # Handle regular arrays

@@ -38,6 +38,7 @@ docker compose up
 ```
 
 This will start:
+
 - API service at http://localhost:8081
 - openEO Web Editor at http://localhost:8080
 - Keycloak at http://localhost:8082
@@ -65,6 +66,7 @@ The project includes a Keycloak instance for testing OpenID Connect authenticati
    - Click "Save"
 
 The environment includes several pre-configured settings:
+
 - GDAL optimization settings for performance
 - Debug mode enabled
 - STAC API endpoint set to https://stac.eoapi.dev

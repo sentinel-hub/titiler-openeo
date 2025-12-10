@@ -75,6 +75,7 @@ helm install titiler-openeo . -f values-cdse.yaml -n your-namespace
 The chart supports three database types:
 
 1. JSON (default no persistence)
+
 ```yaml
 database:
   type: "json"
@@ -85,6 +86,7 @@ database:
 ```
 
 2. DuckDB
+
 ```yaml
 database:
   type: "duckdb"
@@ -94,6 +96,7 @@ database:
 ```
 
 3. PostgreSQL (using subchart)
+
 ```yaml
 postgresql:
   enabled: true
@@ -140,6 +143,7 @@ stac:
 The chart supports two authentication methods:
 
 1. Basic Authentication (for testing)
+
 ```yaml
 auth:
   method: "basic"
@@ -151,6 +155,7 @@ auth:
 ```
 
 2. OpenID Connect (for production)
+
 ```yaml
 auth:
   method: "oidc"
@@ -190,7 +195,7 @@ autoscaling:
 
 ## Dependencies
 
-- PostgreSQL (optional): Version 16.6.6 from Bitnami charts repository
+* PostgreSQL (optional): Version 16.6.6 from Bitnami charts repository
 
 ## Contributing
 

@@ -219,6 +219,7 @@ def _handle_raster_geotiff(data: Dict[str, ImageData]) -> ImageData:
         ValueError: If ImageData objects have incompatible properties
     """
     # Get all ImageData objects from the RasterStack
+    # For LazyRasterStack, this will execute all tasks but only when needed for saving
     image_data_list = list(data.values())
 
     # Check if this is a RasterStack with ImageData objects

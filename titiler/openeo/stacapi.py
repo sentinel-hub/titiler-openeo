@@ -228,6 +228,8 @@ class LoadCollection:
         temporal_extent: Optional[TemporalInterval] = None,
         properties: Optional[dict] = None,
         fields: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        max_items: Optional[int] = None,
     ) -> List[Item]:
         fields = fields or [
             "assets",
@@ -243,6 +245,8 @@ class LoadCollection:
         query_params: Dict[str, Any] = {
             "collections": [id],
             "fields": fields,
+            "limit": limit,
+            "max_items": max_items,
         }
 
         if spatial_extent is not None:

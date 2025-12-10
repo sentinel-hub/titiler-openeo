@@ -32,6 +32,7 @@ AWS_DEFAULT_REGION=us-east-1 AWS_REGION=us-east-1 AWS_PROFILE=myprofile npm --pr
 Set environment variable or hard code in `infrastructure/aws/.env` file (e.g `STACK_STAGE=testing`).
 
 NOTE: At the time of writing this readme, 2 environment variables are mandatory in order to use the API:
+
 - TITILER_OPENEO_STAC_API_URL ("https://stac.eoapi.dev" or "https://stac.dataspace.copernicus.eu/v1")
 - TITILER_OPENEO_STORE_URL ("/var/task/services/eoapi.json" or "/var/task/services/copernicus.json")
 

@@ -27,3 +27,11 @@ repos:
         - pydantic~=2.0
         - types-cachetools
         - attrs
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.42.0
+    hooks:
+      - id: markdownlint
+        files: \.(md|mkd|markdown)$
+        args: ["--fix"]
+        exclude: ^(CHANGES\.md|RELEASE\.md)$
