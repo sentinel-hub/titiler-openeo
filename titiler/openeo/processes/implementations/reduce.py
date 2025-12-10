@@ -416,8 +416,15 @@ def _reduce_spectral_dimension_stack(
                     "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
                 },
             )
-        except KeyError:
-            # Skip failed tasks
+        except KeyError as e:
+            # Log task failures but continue processing other keys
+            # This maintains backward compatibility with task-based execution
+            warnings.warn(
+                f"Failed to load data for key '{key}' during spectral dimension reduction: {e}. "
+                f"This may be due to task execution failure in lazy loading. Skipping this item.",
+                UserWarning,
+                stacklevel=2,
+            )
             continue
 
     return result
