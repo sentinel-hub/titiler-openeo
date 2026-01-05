@@ -1424,8 +1424,13 @@ class EndpointsFactory(BaseFactory):
 
             # Parse query parameters for dynamic parameter substitution
             query_params = self._parse_query_parameters(request)
+            if configuration.get("tile_store", False) and self.tile_store:
+                query_params["_openeo_tile_store"] = self.tile_store
 
-            args = {
+            if configuration.get("inject_user", False) and user:
+                query_params["_openeo_user"] = user
+
+            parameters = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
                 "spatial_extent_east": tile_bounds[2],
@@ -1453,18 +1458,8 @@ class EndpointsFactory(BaseFactory):
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
-                parameters=args,  # Use built-in parameter substitution instead of manual
+                # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
-            # Prepare named parameters
-            named_params = {}
-
-            # Inject named parameters based on configuration
-            if configuration.get("tile_store", False) and self.tile_store:
-                named_params["_openeo_tile_store"] = self.tile_store
-
-            if configuration.get("inject_user", False) and user:
-                named_params["_openeo_user"] = user
-
-            img = pg_callable(named_parameters=named_params)
+            img = pg_callable(named_parameters=parameters)
             return Response(img.data, media_type=media_type)
