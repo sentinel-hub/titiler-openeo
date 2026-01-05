@@ -1,5 +1,6 @@
 """titiler.openeo endpoint Factory."""
 
+import json
 from copy import deepcopy
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -113,6 +114,53 @@ class EndpointsFactory(BaseFactory):
 
             elif isinstance(value, dict) or isinstance(value, list):
                 self.resolves_process_graph_parameters(value, parameters)
+
+    def _parse_query_parameters(self, request: Request) -> dict:
+        """Parse query parameters from request, handling JSON and simple types."""
+        query_params = {}
+        for param_name, param_value in request.query_params.items():
+            try:
+                # Try to parse as JSON for complex types (arrays, objects)
+                if param_value.startswith(("[", "{")):
+                    query_params[param_name] = json.loads(param_value)
+                else:
+                    # Handle simple types
+                    # Try to convert to number if possible
+                    try:
+                        if "." in param_value:
+                            query_params[param_name] = float(param_value)
+                        else:
+                            query_params[param_name] = int(param_value)
+                    except ValueError:
+                        # Keep as string if not a number
+                        query_params[param_name] = param_value
+            except json.JSONDecodeError as err:
+                raise HTTPException(
+                    400,
+                    detail=f"Invalid JSON in query parameter '{param_name}': {param_value}",
+                ) from err
+        return query_params
+
+    def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
+        """Validate that tile is within service extent if configured."""
+        if service_extent:
+            if not tms.crs._pyproj_crs.equals("EPSG:4326"):
+                trans = pyproj.Transformer.from_crs(
+                    tms.crs._pyproj_crs,
+                    pyproj.CRS.from_epsg(4326),
+                    always_xy=True,
+                )
+                tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
+
+            if not (
+                (tile_bounds[0] < service_extent[2])
+                and (tile_bounds[2] > service_extent[0])
+                and (tile_bounds[3] > service_extent[1])
+                and (tile_bounds[1] < service_extent[3])
+            ):
+                raise TileOutsideBounds(
+                    f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
+                )
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -1327,6 +1375,7 @@ class EndpointsFactory(BaseFactory):
             tags=["Secondary Services"],
         )
         def openeo_xyz_service(
+            request: Request,
             service_id: Annotated[
                 str,
                 Path(
@@ -1389,6 +1438,10 @@ class EndpointsFactory(BaseFactory):
             ), "Invalid `load` process, Missing spatial_extent"
 
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
+
+            # Parse query parameters for dynamic parameter substitution
+            query_params = self._parse_query_parameters(request)
+
             args = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
@@ -1398,26 +1451,12 @@ class EndpointsFactory(BaseFactory):
                 "tile_x": x,
                 "tile_y": y,
                 "tile_z": z,
+                **query_params,  # Merge query parameters, they override tile params if same name
             }
 
-            if service_extent := configuration.get("extent"):
-                if not tms.crs._pyproj_crs.equals("EPSG:4326"):
-                    trans = pyproj.Transformer.from_crs(
-                        tms.crs._pyproj_crs,
-                        pyproj.CRS.from_epsg(4326),
-                        always_xy=True,
-                    )
-                    tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
-
-                if not (
-                    (tile_bounds[0] < service_extent[2])
-                    and (tile_bounds[2] > service_extent[0])
-                    and (tile_bounds[3] > service_extent[1])
-                    and (tile_bounds[1] < service_extent[3])
-                ):
-                    raise TileOutsideBounds(
-                        f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
-                    )
+            # Validate tile bounds against service extent
+            service_extent = configuration.get("extent")
+            self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
 
             for node in load_nodes:
                 # Adapt spatial extent with tile bounds
