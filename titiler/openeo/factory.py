@@ -1431,6 +1431,13 @@ class EndpointsFactory(BaseFactory):
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                "bounding_box": {
+                    "west": tile_bounds[0],
+                    "south": tile_bounds[1],
+                    "east": tile_bounds[2],
+                    "north": tile_bounds[3],
+                    "crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                },
                 "tile_x": x,
                 "tile_y": y,
                 "tile_z": z,
