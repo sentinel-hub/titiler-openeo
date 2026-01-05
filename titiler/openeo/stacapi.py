@@ -272,9 +272,9 @@ class LoadCollection:
             start_date = None
             end_date = None
             if temporal_extent[0] is not None:
-                start_date = str(temporal_extent[0].to_numpy())
+                start_date = str(temporal_extent[0])
             if temporal_extent[1] is not None:
-                end_date = str(temporal_extent[1].to_numpy())
+                end_date = str(temporal_extent[1])
 
             if not end_date and not start_date:
                 raise TemporalExtentEmpty()

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -1436,18 +1437,26 @@ class EndpointsFactory(BaseFactory):
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                "bounding_box": {
-                    "west": tile_bounds[0],
-                    "south": tile_bounds[1],
-                    "east": tile_bounds[2],
-                    "north": tile_bounds[3],
-                    "crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                },
+                "bounding_box": BoundingBox(
+                    west=tile_bounds[0],
+                    east=tile_bounds[2],
+                    south=tile_bounds[1],
+                    north=tile_bounds[3],
+                    crs=tms.crs.to_epsg(),
+                ),
                 "tile_x": x,
                 "tile_y": y,
                 "tile_z": z,
                 **query_params,  # Merge query parameters, they override tile params if same name
             }
+
+            # now,with the default parameters from the service configuration, We will fill the default values
+            for param in process.get("parameters", []):
+                param_name = param.get("name")
+                if param_name and param_name not in parameters:
+                    default_value = param.get("default")
+                    if default_value is not None:
+                        parameters[param_name] = default_value
 
             # Validate tile bounds against service extent
             service_extent = configuration.get("extent")
@@ -1458,6 +1467,7 @@ class EndpointsFactory(BaseFactory):
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
+                parameters=process.get("parameters"),
                 # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
