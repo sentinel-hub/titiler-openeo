@@ -100,21 +100,6 @@ class EndpointsFactory(BaseFactory):
 
         return
 
-    def resolves_process_graph_parameters(self, pg, parameters):
-        """Replace `from_parameters` values in process-graph."""
-        iterator = enumerate(pg) if isinstance(pg, list) else pg.items()
-        for key, value in iterator:
-            if (
-                isinstance(value, dict)
-                and len(value) == 1
-                and "from_parameter" in value
-            ):
-                if value["from_parameter"] in parameters:
-                    pg[key] = parameters[value["from_parameter"]]
-
-            elif isinstance(value, dict) or isinstance(value, list):
-                self.resolves_process_graph_parameters(value, parameters)
-
     def _parse_query_parameters(self, request: Request) -> dict:
         """Parse query parameters from request, handling JSON and simple types."""
         query_params = {}
@@ -1415,8 +1400,6 @@ class EndpointsFactory(BaseFactory):
 
             # Get service configuration
             configuration = service.get("configuration") or {}
-            tile_size = configuration.get("tile_size", 256)
-            tile_buffer = configuration.get("buffer")
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
             tms = morecantile.tms.get(tilematrixset)
 
@@ -1458,21 +1441,12 @@ class EndpointsFactory(BaseFactory):
             service_extent = configuration.get("extent")
             self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
 
-            for node in load_nodes:
-                # Adapt spatial extent with tile bounds
-                self.resolves_process_graph_parameters(process["process_graph"], args)
-
-                # We also add Width/Height/TileBuffer to the load_collection process
-                node["arguments"]["width"] = int(tile_size)
-                node["arguments"]["height"] = int(tile_size)
-                if tile_buffer:
-                    node["arguments"]["tile_buffer"] = tile_buffer
-
             media_type = self._get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry
+                process_registry=self.process_registry,
+                parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
             # Prepare named parameters
