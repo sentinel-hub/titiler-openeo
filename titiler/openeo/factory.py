@@ -565,7 +565,9 @@ class EndpointsFactory(BaseFactory):
                             default_services_config = json.load(f)
 
                         # Create each service using the service configuration
-                        for _, service_data in default_services_config.items():
+                        for _, service_data in default_services_config[
+                            "services"
+                        ].items():
                             # Extract just the service configuration, ignoring id and user_id
                             service_config = service_data.get("service", {})
                             if "id" in service_config:

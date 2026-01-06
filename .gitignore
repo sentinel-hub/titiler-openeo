@@ -172,3 +172,4 @@ openapi.json
 file::memory:
 
 .venv311/
+._temp_store.json
