@@ -23,21 +23,7 @@
                             ],
                             "id": "sentinel-2-global-mosaics",
                             "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
+                                "from_parameter": "bounding_box"
                             },
                             "temporal_extent": [
                                 "2024-06-01T00:00:00Z",
@@ -128,21 +114,7 @@
                             "properties": {},
                             "id": "sentinel-2-global-mosaics",
                             "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
+                                "from_parameter": "bounding_box"
                             },
                             "temporal_extent": [
                                 "2022-04-21T00:00:00Z",
@@ -258,21 +230,7 @@
                             "properties": {},
                             "id": "sentinel-2-global-mosaics",
                             "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
+                                "from_parameter": "bounding_box"
                             },
                             "temporal_extent": [
                                 "2022-04-21T00:00:00Z",
