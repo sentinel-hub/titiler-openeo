@@ -39,6 +39,7 @@ nav:
     - Concepts: "concepts.md"
     - RasterStack Data Model: "raster-stack.md"
     - Special Features:
+      - Parameter Management: "parameter-management.md"
       - Service Authorization: "authorization.md"
       - Tile Assignment: "tile-assignment.md"
   - Administrator Guide:
@@ -49,6 +50,7 @@ nav:
     - Kubernetes Guide: "kubernetes.md"
   - Examples:
     - Overview: "examples/index.md"
+    - Parameter Management: "examples/parameter-management.md"
     - Notebooks:
       - Manhattan Satellite Imagery: "notebooks/manhattan.ipynb"
       - NDVI Time Series Analysis: "notebooks/ndvi_time_series.ipynb"

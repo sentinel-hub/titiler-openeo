@@ -1,5 +1,6 @@
 """titiler.openeo endpoint Factory."""
 
+import json
 from copy import deepcopy
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -75,44 +77,60 @@ class EndpointsFactory(BaseFactory):
         ]
 
     def overwrite_spatial_extent_without_parameters(self, load_node):
-        """Overwrite services Spatial Extent.
-
-        Adapted from https://github.com/Open-EO/openeo-sentinelhub-python-driver/blob/f046ca4e89105bfc4e7474eeffb864d147a05efd/rest/processing/utils.py#L307-L324
-        """
+        """Overwrite services Spatial Extent."""
         if load_node["arguments"]["spatial_extent"] is None:
             load_node["arguments"]["spatial_extent"] = {}
-        else:
-            for spatia_arg in ["east", "west", "south", "north", "crs"]:
-                spatia_arg_value = load_node["arguments"]["spatial_extent"].get(
-                    spatia_arg
-                )
-                if spatia_arg_value and (
-                    isinstance(spatia_arg_value, dict)
-                    and "from_parameter" in spatia_arg_value
-                ):
-                    return
 
-        for spatia_arg in ["east", "west", "south", "north", "crs"]:
-            load_node["arguments"]["spatial_extent"][spatia_arg] = {
-                "from_parameter": f"spatial_extent_{spatia_arg}"
-            }
+        load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
 
-    def resolves_process_graph_parameters(self, pg, parameters):
-        """Replace `from_parameters` values in process-graph."""
-        iterator = enumerate(pg) if isinstance(pg, list) else pg.items()
-        for key, value in iterator:
-            if (
-                isinstance(value, dict)
-                and len(value) == 1
-                and "from_parameter" in value
-            ):
-                if value["from_parameter"] in parameters:
-                    pg[key] = parameters[value["from_parameter"]]
+    def _parse_query_parameters(self, request: Request) -> dict:
+        """Parse query parameters from request, handling JSON and simple types."""
+        query_params = {}
+        for param_name, param_value in request.query_params.items():
+            try:
+                # Try to parse as JSON for complex types (arrays, objects)
+                if param_value.startswith(("[", "{")):
+                    query_params[param_name] = json.loads(param_value)
+                else:
+                    # Handle simple types
+                    # Try to convert to number if possible
+                    try:
+                        if "." in param_value:
+                            query_params[param_name] = float(param_value)
+                        else:
+                            query_params[param_name] = int(param_value)
+                    except ValueError:
+                        # Keep as string if not a number
+                        query_params[param_name] = param_value
+            except json.JSONDecodeError as err:
+                raise HTTPException(
+                    400,
+                    detail=f"Invalid JSON in query parameter '{param_name}': {param_value}",
+                ) from err
+        return query_params
 
-            elif isinstance(value, dict) or isinstance(value, list):
-                self.resolves_process_graph_parameters(value, parameters)
+    def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
+        """Validate that tile is within service extent if configured."""
+        if service_extent:
+            if not tms.crs._pyproj_crs.equals("EPSG:4326"):
+                trans = pyproj.Transformer.from_crs(
+                    tms.crs._pyproj_crs,
+                    pyproj.CRS.from_epsg(4326),
+                    always_xy=True,
+                )
+                tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
+
+            if not (
+                (tile_bounds[0] < service_extent[2])
+                and (tile_bounds[2] > service_extent[0])
+                and (tile_bounds[3] > service_extent[1])
+                and (tile_bounds[1] < service_extent[3])
+            ):
+                raise TileOutsideBounds(
+                    f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
+                )
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -531,7 +549,9 @@ class EndpointsFactory(BaseFactory):
                             default_services_config = json.load(f)
 
                         # Create each service using the service configuration
-                        for _, service_data in default_services_config.items():
+                        for _, service_data in default_services_config[
+                            "services"
+                        ].items():
                             # Extract just the service configuration, ignoring id and user_id
                             service_config = service_data.get("service", {})
                             if "id" in service_config:
@@ -1194,11 +1214,6 @@ class EndpointsFactory(BaseFactory):
                             ],
                             "default": "WebMercatorQuad",
                         },
-                        "buffer": {
-                            "description": "Buffer on each side of the given tile. It must be a multiple of `0.5`. Output **tilesize** will be expanded to `tilesize + 2 * buffer` (e.g 0.5 = 257x257, 1.0 = 258x258).",
-                            "type": "number",
-                            "minimum": 0,
-                        },
                         "scope": {
                             "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
                             "type": "string",
@@ -1210,11 +1225,6 @@ class EndpointsFactory(BaseFactory):
                             "type": "array",
                             "items": {"type": "string", "description": "User ID"},
                             "required": False,
-                        },
-                        "inject_user": {
-                            "description": "Whether to inject the authenticated user as a named parameter 'user' into the process graph.",
-                            "type": "boolean",
-                            "default": False,
                         },
                     },
                     "process_parameters": [
@@ -1290,11 +1300,25 @@ class EndpointsFactory(BaseFactory):
             """
             process = body.process.model_dump()
 
+            # Parse query parameters for dynamic parameter substitution
+            query_params = self._parse_query_parameters(request)
+            query_params["_openeo_user"] = user
+
+            # Set default parameter values from process definition
+            parameters = query_params.copy()
+            for param in process.get("parameters") or []:
+                param_name = param.get("name")
+                if param_name and param_name not in parameters:
+                    default_value = param.get("default")
+                    if default_value is not None:
+                        parameters[param_name] = default_value
+
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
+                parameters=process.get("parameters"),
             )
-            result = pg_callable(named_parameters={"user": user})
+            result = pg_callable(named_parameters=parameters)
 
             media_type = result.media_type if hasattr(result, "media_type") else None
             if not media_type and isinstance(result, str):
@@ -1327,6 +1351,7 @@ class EndpointsFactory(BaseFactory):
             tags=["Secondary Services"],
         )
         def openeo_xyz_service(
+            request: Request,
             service_id: Annotated[
                 str,
                 Path(
@@ -1366,9 +1391,8 @@ class EndpointsFactory(BaseFactory):
 
             # Get service configuration
             configuration = service.get("configuration") or {}
-            tile_size = configuration.get("tile_size", 256)
-            tile_buffer = configuration.get("buffer")
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
+            tilesize = configuration.get("tile_size", 256)
             tms = morecantile.tms.get(tilematrixset)
 
             minzoom = configuration.get("minzoom") or tms.minzoom
@@ -1387,64 +1411,59 @@ class EndpointsFactory(BaseFactory):
             assert all(
                 node["arguments"].get("spatial_extent") for node in load_nodes
             ), "Invalid `load` process, Missing spatial_extent"
+            # Force size to tile size
+            for node in load_nodes:
+                node["arguments"]["width"] = tilesize
+                node["arguments"]["height"] = tilesize
 
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
-            args = {
+
+            # Parse query parameters for dynamic parameter substitution
+            query_params = self._parse_query_parameters(request)
+            if self.tile_store:
+                query_params["_openeo_tile_store"] = self.tile_store
+
+            query_params["_openeo_user"] = user
+
+            parameters = {
                 "spatial_extent_west": tile_bounds[0],
                 "spatial_extent_south": tile_bounds[1],
                 "spatial_extent_east": tile_bounds[2],
                 "spatial_extent_north": tile_bounds[3],
                 "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+                "bounding_box": BoundingBox(
+                    west=tile_bounds[0],
+                    east=tile_bounds[2],
+                    south=tile_bounds[1],
+                    north=tile_bounds[3],
+                    crs=tms.crs.to_epsg(),
+                ),
                 "tile_x": x,
                 "tile_y": y,
                 "tile_z": z,
+                **query_params,  # Merge query parameters, they override tile params if same name
             }
 
-            if service_extent := configuration.get("extent"):
-                if not tms.crs._pyproj_crs.equals("EPSG:4326"):
-                    trans = pyproj.Transformer.from_crs(
-                        tms.crs._pyproj_crs,
-                        pyproj.CRS.from_epsg(4326),
-                        always_xy=True,
-                    )
-                    tile_bounds = trans.transform_bounds(*tile_bounds, densify_pts=21)
+            # now,with the default parameters from the service configuration, We will fill the default values
+            for param in process.get("parameters") or []:
+                param_name = param.get("name")
+                if param_name and param_name not in parameters:
+                    default_value = param.get("default")
+                    if default_value is not None:
+                        parameters[param_name] = default_value
 
-                if not (
-                    (tile_bounds[0] < service_extent[2])
-                    and (tile_bounds[2] > service_extent[0])
-                    and (tile_bounds[3] > service_extent[1])
-                    and (tile_bounds[1] < service_extent[3])
-                ):
-                    raise TileOutsideBounds(
-                        f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
-                    )
-
-            for node in load_nodes:
-                # Adapt spatial extent with tile bounds
-                self.resolves_process_graph_parameters(process["process_graph"], args)
-
-                # We also add Width/Height/TileBuffer to the load_collection process
-                node["arguments"]["width"] = int(tile_size)
-                node["arguments"]["height"] = int(tile_size)
-                if tile_buffer:
-                    node["arguments"]["tile_buffer"] = tile_buffer
+            # Validate tile bounds against service extent
+            service_extent = configuration.get("extent")
+            self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
 
             media_type = self._get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry
+                process_registry=self.process_registry,
+                parameters=process.get("parameters"),
+                # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
-            # Prepare named parameters
-            named_params = {}
-
-            # Inject named parameters based on configuration
-            if configuration.get("tile_store", False) and self.tile_store:
-                named_params["_openeo_tile_store"] = self.tile_store
-
-            if configuration.get("inject_user", False) and user:
-                named_params["_openeo_user"] = user
-
-            img = pg_callable(named_parameters=named_params)
+            img = pg_callable(named_parameters=parameters)
             return Response(img.data, media_type=media_type)

@@ -44,7 +44,7 @@ def test_user_parameter_in_process(app_with_auth):
         "process_graph": {
             "test1": {
                 "process_id": "test_user_process",
-                "arguments": {"user": {"from_parameter": "user"}},
+                "arguments": {"user": {"from_parameter": "_openeo_user"}},
                 "result": True,
             }
         }

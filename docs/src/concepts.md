@@ -135,3 +135,14 @@ The backend is optimized for on-the-fly processing and serving of raster data. K
   - Default width of 1024 pixels in load functions
   - Pixel count limits for larger requests
   - Early resolution optimization
+
+## Parameter Management
+
+The backend supports comprehensive parameter management for dynamic process graph execution. Parameters can be:
+
+- Defined with default values in process graph definitions
+- Overridden via query parameters in API requests where supported (e.g., `/result` endpoint or secondary tile services)
+- Automatically injected by the system (user context, spatial boundaries for tiles)
+- Validated against schema definitions
+
+For detailed information about parameter handling, query parameter syntax, default value resolution, and breaking changes, see the [Parameter Management](parameter-management.md) documentation.

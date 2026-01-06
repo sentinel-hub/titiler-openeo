@@ -29,7 +29,6 @@ Authorization is configured through the service configuration object when creati
 |-----------|------|-------------|
 | `scope` | string | Access scope: `private`, `restricted`, or `public` |
 | `authorized_users` | array | Optional list of user IDs allowed to access a restricted service |
-| `inject_user` | boolean | Whether to inject the authenticated user as a named parameter '_openeo_user' into the process graph (default: false). |
 
 ## Implementation
 
@@ -54,7 +53,6 @@ For example:
   "configuration": {
     "scope": "restricted",
     "authorized_users": ["user1", "user2"],
-    "inject_user": true  // Enable user injection into process graph
   }
 }
 ```
@@ -142,6 +140,10 @@ auth_manager.authorize(service, user)  # Raises HTTPException if access denied
    - 401 Unauthorized - For missing authentication
    - 403 Forbidden - For insufficient permissions
 5. If access is granted, the request proceeds to service execution
+
+## User Injection
+
+If the service call is authenticated, the authenticated user will be injected into the process graph as a named parameter `_openeo_user`. Thus any process graph parameter can reference the authenticated user by using `from_parameter: "_openeo_user"`.
 
 ## Best Practices
 
