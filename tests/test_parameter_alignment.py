@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+import pyproj
 from openeo_pg_parser_networkx.process_registry import Process
 
 from titiler.openeo.models.openapi import ResultRequest
@@ -311,3 +312,109 @@ def test_complex_parameter_types(app_with_auth):
     assert result_data["object_param"] == {
         "custom": "data"
     }  # Should parse JSON from query
+
+
+def test_bounding_box_parameter(app_with_auth):
+    """Test that bounding_box parameter works as modern replacement for spatial_extent_*."""
+    from openeo_pg_parser_networkx.pg_schema import BoundingBox
+
+    @process
+    def test_process_with_bbox(bbox: BoundingBox) -> SaveResultData:
+        """Test process that accepts bounding_box parameter."""
+        result = {
+            "west": bbox.west,
+            "east": bbox.east,
+            "south": bbox.south,
+            "north": bbox.north,
+            "crs": bbox.crs,
+        }
+        return SaveResultData(
+            data=json.dumps(result).encode(), media_type="application/json"
+        )
+
+    # Add test process to registry
+    app_with_auth.app.endpoints.process_registry[None]["test_process_with_bbox"] = (
+        Process(
+            implementation=test_process_with_bbox,
+            spec={
+                "id": "test_process_with_bbox",
+                "description": "Test process with bounding box parameter",
+                "parameters": [
+                    {
+                        "name": "bbox",
+                        "description": "Bounding box parameter",
+                        "schema": {"type": "object"},
+                        "default": {
+                            "west": 10.0,
+                            "east": 20.0,
+                            "south": 40.0,
+                            "north": 50.0,
+                            "crs": 4326,
+                        },
+                    }
+                ],
+                "returns": {"schema": {"type": "object"}},
+            },
+        )
+    )
+
+    # Test process graph that uses bounding_box parameter
+    process_graph_bbox = {
+        "process_graph": {
+            "test1": {
+                "process_id": "test_process_with_bbox",
+                "arguments": {"bbox": {"from_parameter": "bounding_box"}},
+                "result": True,
+            }
+        },
+        "parameters": [
+            {
+                "name": "bounding_box",
+                "description": "Spatial bounding box",
+                "schema": {"type": "object"},
+                "default": {
+                    "west": 10.0,
+                    "east": 20.0,
+                    "south": 40.0,
+                    "north": 50.0,
+                    "crs": 4326,
+                },
+            }
+        ],
+    }
+
+    # Test with query parameter override
+    bbox_query = json.dumps(
+        {"west": 5.0, "east": 15.0, "south": 35.0, "north": 45.0, "crs": 4326}
+    )
+
+    result_response = app_with_auth.post(
+        f"/result?bounding_box={bbox_query}",
+        json=ResultRequest(process=process_graph_bbox).model_dump(exclude_none=True),
+    )
+
+    assert result_response.status_code == 200
+    result_data = json.loads(result_response.content)
+
+    # Should use query parameter values, not defaults
+    assert result_data["west"] == 5.0
+    assert result_data["east"] == 15.0
+    assert result_data["south"] == 35.0
+    assert result_data["north"] == 45.0
+    assert result_data["crs"] == pyproj.CRS.from_epsg(4326).to_wkt()
+
+    # Test with default values (no query parameter)
+    result_response_default = app_with_auth.post(
+        "/result",
+        json=ResultRequest(process=process_graph_bbox).model_dump(exclude_none=True),
+    )
+
+    assert result_response_default.status_code == 200
+    result_data_default = json.loads(result_response_default.content)
+
+    # Should use default values
+    assert result_data_default["west"] == 10.0
+    assert result_data_default["east"] == 20.0
+    assert result_data_default["south"] == 40.0
+    assert result_data_default["north"] == 50.0
+    assert result_data_default["crs"] == pyproj.CRS.from_epsg(4326).to_wkt()

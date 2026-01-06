@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* **BREAKING**: Comprehensive parameter management system for both `/result` and XYZ tile service endpoints [#165](https://github.com/sentinel-hub/titiler-openeo/pull/165)
+  - Dynamic query parameter support with JSON parsing and type conversion
+  - Default parameter values from process graph definitions  
+  - Automatic injection of system parameters (`_openeo_user`, spatial context)
+  - Parameter precedence hierarchy: query params → system params → defaults
+  - Unified parameter handling across synchronous and tile service endpoints
+
+### Changed
+
+* **BREAKING**: User parameter injection now uses reserved `_openeo_user` parameter name instead of `user` [#165](https://github.com/sentinel-hub/titiler-openeo/pull/165)  
+  - Update process graphs that reference user information to use `{"from_parameter": "_openeo_user"}`
+  - The `user` parameter name is no longer automatically mapped to the authenticated user
+* **BREAKING**: Enhanced parameter validation and processing may affect existing process graphs [#165](https://github.com/sentinel-hub/titiler-openeo/pull/165)
+  - Default parameter values are now consistently applied when parameters are missing
+  - Query parameters undergo strict JSON parsing and type validation
+  - Parameter substitution now uses OpenEO standard built-in mechanisms
+
 ## [0.7.0] (2025-12-10)
 
 ### Fixed

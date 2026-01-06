@@ -59,6 +59,9 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocstrings[python]>=0.29.1",
     "griffe-inherited-docstrings>=1.1.1",
+    "jupyter-contrib-nbextensions>=0.7.0",
+    "notebook>=6.5.4,<7.0.0",
+    "nbconvert>=7.2.9",
 ]
 
 [project.optional-dependencies]

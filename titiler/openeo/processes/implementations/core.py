@@ -5,7 +5,7 @@ import logging
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
-from openeo_pg_parser_networkx.pg_schema import ParameterReference
+from openeo_pg_parser_networkx.pg_schema import BoundingBox, ParameterReference
 from pydantic import TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
@@ -78,12 +78,12 @@ def _is_string_type(param_type: Any) -> bool:
     )
 
 
-def _resolve_user_parameter(
+def _resolve_special_parameter(
     param_name: str,
     param_value: Any,
     param_type: Any,
 ) -> Any:
-    """Handle _openeo_user parameter based on type annotation.
+    """Handle special parameters based on type annotation.
 
     Args:
         param_name: Name of the parameter
@@ -95,6 +95,15 @@ def _resolve_user_parameter(
     """
     if param_name == "_openeo_user" and _is_string_type(param_type):
         return param_value.user_id
+    if param_type == BoundingBox:
+        if isinstance(param_value, dict):
+            return BoundingBox(
+                west=param_value.get("west"),
+                east=param_value.get("east"),
+                south=param_value.get("south"),
+                north=param_value.get("north"),
+                crs=param_value.get("crs", None),
+            )
     return param_value
 
 
@@ -125,7 +134,7 @@ def _resolve_kwargs(
                 value = named_parameters[arg.from_parameter]
                 # Handle type-based parameter resolution
                 if k in param_types:
-                    value = _resolve_user_parameter(
+                    value = _resolve_special_parameter(
                         arg.from_parameter, value, param_types[k]
                     )
                 resolved_kwargs[k] = value
