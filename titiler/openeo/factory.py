@@ -1245,11 +1245,6 @@ class EndpointsFactory(BaseFactory):
                             "items": {"type": "string", "description": "User ID"},
                             "required": False,
                         },
-                        "inject_user": {
-                            "description": "Whether to inject the authenticated user as a named parameter 'user' into the process graph.",
-                            "type": "boolean",
-                            "default": False,
-                        },
                     },
                     "process_parameters": [
                         {
@@ -1324,11 +1319,25 @@ class EndpointsFactory(BaseFactory):
             """
             process = body.process.model_dump()
 
+            # Parse query parameters for dynamic parameter substitution
+            query_params = self._parse_query_parameters(request)
+            query_params["_openeo_user"] = user
+
+            # Set default parameter values from process definition
+            parameters = query_params.copy()
+            for param in process.get("parameters") or []:
+                param_name = param.get("name")
+                if param_name and param_name not in parameters:
+                    default_value = param.get("default")
+                    if default_value is not None:
+                        parameters[param_name] = default_value
+
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
+                parameters=process.get("parameters"),
             )
-            result = pg_callable(named_parameters={"user": user})
+            result = pg_callable(named_parameters=parameters)
 
             media_type = result.media_type if hasattr(result, "media_type") else None
             if not media_type and isinstance(result, str):
@@ -1425,11 +1434,10 @@ class EndpointsFactory(BaseFactory):
 
             # Parse query parameters for dynamic parameter substitution
             query_params = self._parse_query_parameters(request)
-            if configuration.get("tile_store", False) and self.tile_store:
+            if self.tile_store:
                 query_params["_openeo_tile_store"] = self.tile_store
 
-            if configuration.get("inject_user", False) and user:
-                query_params["_openeo_user"] = user
+            query_params["_openeo_user"] = user
 
             parameters = {
                 "spatial_extent_west": tile_bounds[0],
@@ -1451,7 +1459,7 @@ class EndpointsFactory(BaseFactory):
             }
 
             # now,with the default parameters from the service configuration, We will fill the default values
-            for param in process.get("parameters", []):
+            for param in process.get("parameters") or []:
                 param_name = param.get("name")
                 if param_name and param_name not in parameters:
                     default_value = param.get("default")
