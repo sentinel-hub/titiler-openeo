@@ -1230,11 +1230,6 @@ class EndpointsFactory(BaseFactory):
                             ],
                             "default": "WebMercatorQuad",
                         },
-                        "buffer": {
-                            "description": "Buffer on each side of the given tile. It must be a multiple of `0.5`. Output **tilesize** will be expanded to `tilesize + 2 * buffer` (e.g 0.5 = 257x257, 1.0 = 258x258).",
-                            "type": "number",
-                            "minimum": 0,
-                        },
                         "scope": {
                             "description": "Service access scope. private: only owner can access; restricted: any authenticated user can access; public: no authentication required",
                             "type": "string",
@@ -1413,6 +1408,7 @@ class EndpointsFactory(BaseFactory):
             # Get service configuration
             configuration = service.get("configuration") or {}
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
+            tilesize = configuration.get("tile_size", 256)
             tms = morecantile.tms.get(tilematrixset)
 
             minzoom = configuration.get("minzoom") or tms.minzoom
@@ -1431,6 +1427,10 @@ class EndpointsFactory(BaseFactory):
             assert all(
                 node["arguments"].get("spatial_extent") for node in load_nodes
             ), "Invalid `load` process, Missing spatial_extent"
+            # Force size to tile size
+            for node in load_nodes:
+                node["arguments"]["width"] = tilesize
+                node["arguments"]["height"] = tilesize
 
             tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
 
