@@ -77,27 +77,11 @@ class EndpointsFactory(BaseFactory):
         ]
 
     def overwrite_spatial_extent_without_parameters(self, load_node):
-        """Overwrite services Spatial Extent.
-
-        Adapted from https://github.com/Open-EO/openeo-sentinelhub-python-driver/blob/f046ca4e89105bfc4e7474eeffb864d147a05efd/rest/processing/utils.py#L307-L324
-        """
+        """Overwrite services Spatial Extent."""
         if load_node["arguments"]["spatial_extent"] is None:
             load_node["arguments"]["spatial_extent"] = {}
-        else:
-            for spatia_arg in ["east", "west", "south", "north", "crs"]:
-                spatia_arg_value = load_node["arguments"]["spatial_extent"].get(
-                    spatia_arg
-                )
-                if spatia_arg_value and (
-                    isinstance(spatia_arg_value, dict)
-                    and "from_parameter" in spatia_arg_value
-                ):
-                    return
 
-        for spatia_arg in ["east", "west", "south", "north", "crs"]:
-            load_node["arguments"]["spatial_extent"][spatia_arg] = {
-                "from_parameter": f"spatial_extent_{spatia_arg}"
-            }
+        load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
 
