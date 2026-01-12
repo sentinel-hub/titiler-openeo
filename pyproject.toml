@@ -82,6 +82,9 @@ Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 where = ["."]  
 include = ["titiler*"]
 
+[tool.setuptools.package-data]
+"titiler.openeo.processes" = ["data/*.json"]
+
 [tool.setuptools_scm]
 write_to = "titiler/openeo/_version.py"
 fallback_version = "0.0.0+unknown"
