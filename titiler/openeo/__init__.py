@@ -1,8 +1,8 @@
 """titiler.openeo"""
 
-try:
+try:  # pragma: no cover
     from ._version import version as __version__
-except ImportError:
+except ImportError:  # pragma: no cover
     # fallback for development installs
     from importlib.metadata import version
 
