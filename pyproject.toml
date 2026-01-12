@@ -60,7 +60,7 @@ dev = [
     "pytest-vcr",
     "sqlalchemy>=2.0.0",
     "pre-commit",
-    "bump-my-version",
+    "setuptools_scm",
     "ipython~=8.0.0",
 ]
 server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
@@ -78,18 +78,20 @@ Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
 Source = "https://github.com/sentinel-hub/titiler-openeo"
 Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 
-[tool.hatch.version]
-path = "titiler/openeo/__init__.py"
+[tool.setuptools.packages.find]
+where = ["."]  
+include = ["titiler*"]
 
-[tool.hatch.build.targets.sdist]
-only-include = ["titiler"]
+[tool.setuptools.package-data]
+"titiler.openeo.processes" = ["data/*.json"]
 
-[tool.hatch.build.targets.wheel]
-only-include = ["titiler"]
+[tool.setuptools_scm]
+write_to = "titiler/openeo/_version.py"
+fallback_version = "0.0.0+unknown"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
 
 [tool.coverage.run]
 branch = true
@@ -145,16 +147,4 @@ explicit_package_bases = true
 [tool.ruff.lint.mccabe]
 max-complexity = 14
 
-[tool.bumpversion]
-current_version = "0.6.1"
-search = "{current_version}"
-replace = "{new_version}"
-regex = false
-tag = true
-commit = true
-tag_name = "{new_version}"
 
-[[tool.bumpversion.files]]
-filename = "titiler/openeo/__init__.py"
-search = '__version__ = "{current_version}"'
-replace = '__version__ = "{new_version}"'

@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 ARG PYTHON_VERSION=3.11
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
 
 # Build stage
 FROM python:${PYTHON_VERSION}-slim AS builder
+
+# Set version for setuptools_scm
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
 
 # Set build labels
 LABEL stage=builder

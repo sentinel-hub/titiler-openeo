@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] (2026-01-12)
+
 ### Added
 
 * **BREAKING**: Comprehensive parameter management system for both `/result` and XYZ tile service endpoints [#165](https://github.com/sentinel-hub/titiler-openeo/pull/165)
