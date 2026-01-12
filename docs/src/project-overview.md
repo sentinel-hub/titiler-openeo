@@ -19,6 +19,8 @@ The main features include:
 - JPEG / PNG / Geotiff / JSON / CSV output format support
 - XYZ secondary service support
 - Automatic OpenAPI documentation
+- Parameter management with dynamic query parameters, defaults, and validation
+- Unified parameter handling across synchronous processing and XYZ tile services
 
 ## API Support
 

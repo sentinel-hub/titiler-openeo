@@ -1,366 +1,282 @@
 {
-    "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5": {
-        "user_id": "12d6b89f-0f26-4fe7-a461-67418919b794",
-        "service": {
-            "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
-            "type": "XYZ",
-            "configuration": {
-                "tile_size": 256,
-                "minzoom": 8,
-                "maxzoom": 15
+  "services": {
+    "bc06846c-fcfb-47d4-8af0-c2fcef3dfadc": {
+      "user_id": "9d062e90-5cbc-4024-a130-778a0241105e",
+      "service": {
+        "process": {
+          "parameters": [
+            { "name": "bounding_box", "description": "", "schema": {} },
+            {
+              "name": "time",
+              "description": "Temporal extent for the search of the load collection",
+              "schema": {},
+              "optional": true,
+              "default": ["2024-06-01T00:00:00Z", "2024-07-30T00:00:00Z"]
+            }
+          ],
+          "process_graph": {
+            "1": {
+              "process_id": "load_collection_and_reduce",
+              "result": false,
+              "arguments": {
+                "bands": ["B04", "B03", "B02"],
+                "id": "sentinel-2-global-mosaics",
+                "spatial_extent": { "from_parameter": "bounding_box" },
+                "temporal_extent": { "from_parameter": "time" }
+              }
             },
-            "title": "sentinel-2 global mosaics 3 bands RGB",
-            "enabled": true,
-            "process": {
-                "parameters": [],
-                "process_graph": {
+            "2": {
+              "process_id": "save_result",
+              "result": true,
+              "arguments": {
+                "data": { "from_node": "color" },
+                "format": "PNG",
+                "options": { "datatype": "byte" }
+              }
+            },
+            "3": {
+              "process_id": "apply",
+              "result": false,
+              "arguments": {
+                "data": { "from_node": "1" },
+                "process": {
+                  "process_graph": {
                     "1": {
-                        "arguments": {
-                            "bands": [
-                                "B04",
-                                "B03",
-                                "B02"
-                            ],
-                            "id": "sentinel-2-global-mosaics",
-                            "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
-                            },
-                            "temporal_extent": [
-                                "2024-06-01T00:00:00Z",
-                                "2024-07-30T23:59:59Z"
-                            ]
-                        },
-                        "process_id": "load_collection_and_reduce"
+                      "arguments": {
+                        "inputMax": 10000,
+                        "inputMin": 0,
+                        "outputMax": 255,
+                        "x": { "from_parameter": "x" }
+                      },
+                      "process_id": "linear_scale_range"
                     },
                     "2": {
-                        "arguments": {
-                            "data": {
-                                "from_node": "color"
-                            },
-                            "format": "PNG",
-                            "options": {
-                                "datatype": "byte"
-                            }
-                        },
-                        "process_id": "save_result",
-                        "result": true
-                    },
-                    "color": {
-                        "arguments": {
-                            "data": {
-                                "from_node": "3"
-                            },
-                            "formula": "Gamma RGB 1.5 Sigmoidal RGB 10 0.3 Saturation 1"
-                        },
-                        "process_id": "color_formula"
-                    },
-                    "3": {
-                        "arguments": {
-                            "data": {
-                                "from_node": "1"
-                            },
-                            "process": {
-                                "process_graph": {
-                                    "1": {
-                                        "arguments": {
-                                            "inputMax": 10000,
-                                            "inputMin": 0,
-                                            "outputMax": 255,
-                                            "x": {
-                                                "from_parameter": "x"
-                                            }
-                                        },
-                                        "process_id": "linear_scale_range"
-                                    },
-                                    "2": {
-                                        "process_id": "trunc",
-                                        "arguments": {
-                                            "x": {
-                                                "from_node": "1"
-                                            }
-                                        },
-                                        "result": true
-                                    }
-                                }
-                            }
-                        },
-                        "process_id": "apply"
+                      "process_id": "trunc",
+                      "arguments": { "x": { "from_node": "1" } },
+                      "result": true
                     }
+                  }
                 }
-            }
-        }
-    },
-    "d55ae9e5-83d7-41c2-ae56-e6c72d3b7ea5": {
-        "user_id": "test",
-        "service": {
-            "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7ea5",
-            "type": "XYZ",
-            "configuration": {
-                "tile_size": 256,
-                "minzoom": 8,
-                "maxzoom": 15
+              }
             },
-            "title": "sentinel-2 global mosaics NDVI",
-            "enabled": true,
-            "process": {
-                "process_graph": {
-                    "load_collection": {
-                        "process_id": "load_collection_and_reduce",
-                        "arguments": {
-                            "bands": [
-                                "B04",
-                                "B08"
-                            ],
-                            "properties": {},
-                            "id": "sentinel-2-global-mosaics",
-                            "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
-                            },
-                            "temporal_extent": [
-                                "2022-04-21T00:00:00Z",
-                                "2022-05-01T00:00:00Z"
-                            ]
-                        },
-                        "description": "Loading the data; The order of the specified bands is important for the following reduce operation."
-                    },
-                    "reduce_bands": {
-                        "process_id": "reduce_dimension",
-                        "arguments": {
-                            "data": {
-                                "from_node": "load_collection"
-                            },
-                            "reducer": {
-                                "process_graph": {
-                                    "red": {
-                                        "process_id": "array_element",
-                                        "arguments": {
-                                            "data": {
-                                                "from_parameter": "data"
-                                            },
-                                            "index": 0
-                                        }
-                                    },
-                                    "nir": {
-                                        "process_id": "array_element",
-                                        "arguments": {
-                                            "data": {
-                                                "from_parameter": "data"
-                                            },
-                                            "index": 1
-                                        }
-                                    },
-                                    "ndvi": {
-                                        "process_id": "normalized_difference",
-                                        "arguments": {
-                                            "x": {
-                                                "from_node": "nir"
-                                            },
-                                            "y": {
-                                                "from_node": "red"
-                                            }
-                                        },
-                                        "result": true
-                                    }
-                                }
-                            },
-                            "dimension": "bands"
-                        },
-                        "description": "Compute the NDVI: (NIR - RED) / (NIR + RED)"
-                    },
-                    "rescale": {
-                        "process_id": "apply",
-                        "arguments": {
-                            "data": {
-                                "from_node": "reduce_bands"
-                            },
-                            "process": {
-                                "process_graph": {
-                                    "linear1": {
-                                        "process_id": "linear_scale_range",
-                                        "arguments": {
-                                            "x": {
-                                                "from_parameter": "x"
-                                            },
-                                            "inputMin": -1,
-                                            "inputMax": 1,
-                                            "outputMin": 0,
-                                            "outputMax": 255
-                                        },
-                                        "result": true
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "save": {
-                        "process_id": "save_result",
-                        "arguments": {
-                            "data": {
-                                "from_node": "rescale"
-                            },
-                            "format": "PNG"
-                        },
-                        "result": true
-                    }
-                }
+            "color": {
+              "process_id": "color_formula",
+              "result": false,
+              "arguments": {
+                "data": { "from_node": "3" },
+                "formula": "Gamma RGB 1.5 Sigmoidal RGB 6 0.3 Saturation 1"
+              }
             }
-        }
+          }
+        },
+        "type": "XYZ",
+        "title": "sentinel-2 global mosaics 3 bands RGB",
+        "description": null,
+        "enabled": true,
+        "configuration": { "tile_size": 256, "minzoom": 8, "maxzoom": 15 },
+        "user_id": "9d062e90-5cbc-4024-a130-778a0241105e"
+      }
     },
-    "d55ae9e5-83d8-41c2-ae56-e6c72d3b7ea5": {
-        "user_id": "test",
-        "service": {
-            "id": "d55ae9e5-83d8-41c2-ae56-e6c72d3b7ea5",
-            "type": "XYZ",
-            "configuration": {
-                "tile_size": 256,
-                "minzoom": 8,
-                "maxzoom": 15
+    "5cce795f-d4fe-4b6d-b181-d7b27fe8b5dd": {
+      "user_id": "9d062e90-5cbc-4024-a130-778a0241105e",
+      "service": {
+        "process": {
+          "id": null,
+          "summary": null,
+          "description": null,
+          "categories": null,
+          "parameters": null,
+          "returns": null,
+          "deprecated": null,
+          "experimental": null,
+          "exceptions": null,
+          "examples": null,
+          "links": null,
+          "process_graph": {
+            "load_collection": {
+              "process_id": "load_collection_and_reduce",
+              "namespace": null,
+              "result": false,
+              "description": "Loading the data; The order of the specified bands is important for the following reduce operation.",
+              "arguments": {
+                "bands": ["B04", "B08"],
+                "properties": {},
+                "id": "sentinel-2-global-mosaics",
+                "spatial_extent": { "from_parameter": "bounding_box" },
+                "temporal_extent": [
+                  "2022-04-21T00:00:00Z",
+                  "2022-05-01T00:00:00Z"
+                ]
+              }
             },
-            "title": "sentinel-2 global mosaics NDVI 2",
-            "enabled": true,
-            "process": {
-                "process_graph": {
-                    "load1": {
-                        "process_id": "load_collection_and_reduce",
-                        "arguments": {
-                            "bands": [
-                                "B04",
-                                "B08"
-                            ],
-                            "properties": {},
-                            "id": "sentinel-2-global-mosaics",
-                            "spatial_extent": {
-                                "east": {
-                                    "from_parameter": "spatial_extent_east"
-                                },
-                                "north": {
-                                    "from_parameter": "spatial_extent_north"
-                                },
-                                "south": {
-                                    "from_parameter": "spatial_extent_south"
-                                },
-                                "west": {
-                                    "from_parameter": "spatial_extent_west"
-                                },
-                                "crs": {
-                                    "from_parameter": "spatial_extent_crs"
-                                }
-                            },
-                            "temporal_extent": [
-                                "2022-04-21T00:00:00Z",
-                                "2022-05-01T00:00:00Z"
-                            ]
-                        }
+            "reduce_bands": {
+              "process_id": "reduce_dimension",
+              "namespace": null,
+              "result": false,
+              "description": "Compute the NDVI: (NIR - RED) / (NIR + RED)",
+              "arguments": {
+                "data": { "from_node": "load_collection" },
+                "reducer": {
+                  "process_graph": {
+                    "red": {
+                      "process_id": "array_element",
+                      "arguments": {
+                        "data": { "from_parameter": "data" },
+                        "index": 0
+                      }
+                    },
+                    "nir": {
+                      "process_id": "array_element",
+                      "arguments": {
+                        "data": { "from_parameter": "data" },
+                        "index": 1
+                      }
                     },
                     "ndvi": {
-                        "process_id": "ndvi",
-                        "arguments": {
-                            "data": {
-                                "from_node": "load1"
-                            },
-                            "nir": 1,
-                            "red": 0
-                        }
-                    },
-                    "colormap": {
-                        "process_id": "colormap",
-                        "arguments": {
-                            "data": {
-                                "from_node": "ndvi"
-                            },
-                            "colormap": [
-                                [
-                                    [
-                                        -2,
-                                        -1
-                                    ],
-                                    [
-                                        0,
-                                        255,
-                                        0,
-                                        255
-                                    ]
-                                ],
-                                [
-                                    [
-                                        -1,
-                                        0
-                                    ],
-                                    [
-                                        0,
-                                        255,
-                                        0,
-                                        255
-                                    ]
-                                ],
-                                [
-                                    [
-                                        0,
-                                        0.5
-                                    ],
-                                    [
-                                        255,
-                                        0,
-                                        0,
-                                        255
-                                    ]
-                                ],
-                                [
-                                    [
-                                        0.5,
-                                        1.1
-                                    ],
-                                    [
-                                        255,
-                                        255,
-                                        0,
-                                        255
-                                    ]
-                                ]
-                            ]
-                        }
-                    },
-                    "save5": {
-                        "process_id": "save_result",
-                        "arguments": {
-                            "data": {
-                                "from_node": "colormap"
-                            },
-                            "format": "PNG"
-                        },
-                        "result": true
+                      "process_id": "normalized_difference",
+                      "arguments": {
+                        "x": { "from_node": "nir" },
+                        "y": { "from_node": "red" }
+                      },
+                      "result": true
                     }
+                  }
                 },
-                "parameters": []
+                "dimension": "bands"
+              }
+            },
+            "rescale": {
+              "process_id": "apply",
+              "namespace": null,
+              "result": false,
+              "description": null,
+              "arguments": {
+                "data": { "from_node": "reduce_bands" },
+                "process": {
+                  "process_graph": {
+                    "linear1": {
+                      "process_id": "linear_scale_range",
+                      "arguments": {
+                        "x": { "from_parameter": "x" },
+                        "inputMin": -1,
+                        "inputMax": 1,
+                        "outputMin": 0,
+                        "outputMax": 255
+                      },
+                      "result": true
+                    }
+                  }
+                }
+              }
+            },
+            "save": {
+              "process_id": "save_result",
+              "namespace": null,
+              "result": true,
+              "description": null,
+              "arguments": {
+                "data": { "from_node": "rescale" },
+                "format": "PNG"
+              }
             }
-        }
+          }
+        },
+        "type": "XYZ",
+        "title": "sentinel-2 global mosaics NDVI",
+        "description": null,
+        "enabled": true,
+        "configuration": { "tile_size": 256, "minzoom": 8, "maxzoom": 15 }
+      }
+    },
+    "155f8a1c-0de8-4bca-a428-c04c23177ef6": {
+      "user_id": "9d062e90-5cbc-4024-a130-778a0241105e",
+      "service": {
+        "process": {
+          "id": null,
+          "summary": null,
+          "description": null,
+          "categories": null,
+          "parameters": [],
+          "returns": null,
+          "deprecated": null,
+          "experimental": null,
+          "exceptions": null,
+          "examples": null,
+          "links": null,
+          "process_graph": {
+            "load1": {
+              "process_id": "load_collection_and_reduce",
+              "namespace": null,
+              "result": false,
+              "description": null,
+              "arguments": {
+                "bands": ["B04", "B08"],
+                "properties": {},
+                "id": "sentinel-2-global-mosaics",
+                "spatial_extent": { "from_parameter": "bounding_box" },
+                "temporal_extent": [
+                  "2022-04-21T00:00:00Z",
+                  "2022-05-01T00:00:00Z"
+                ]
+              }
+            },
+            "ndvi": {
+              "process_id": "ndvi",
+              "namespace": null,
+              "result": false,
+              "description": null,
+              "arguments": {
+                "data": { "from_node": "load1" },
+                "nir": 1,
+                "red": 0
+              }
+            },
+            "colormap": {
+              "process_id": "colormap",
+              "namespace": null,
+              "result": false,
+              "description": null,
+              "arguments": {
+                "data": { "from_node": "ndvi" },
+                "colormap": [
+                  [
+                    [-2, -1],
+                    [0, 255, 0, 255]
+                  ],
+                  [
+                    [-1, 0],
+                    [0, 255, 0, 255]
+                  ],
+                  [
+                    [0, 0.5],
+                    [255, 0, 0, 255]
+                  ],
+                  [
+                    [0.5, 1.1],
+                    [255, 255, 0, 255]
+                  ]
+                ]
+              }
+            },
+            "save5": {
+              "process_id": "save_result",
+              "namespace": null,
+              "result": true,
+              "description": null,
+              "arguments": {
+                "data": { "from_node": "colormap" },
+                "format": "PNG"
+              }
+            }
+          }
+        },
+        "type": "XYZ",
+        "title": "sentinel-2 global mosaics NDVI 2",
+        "description": null,
+        "enabled": true,
+        "configuration": { "tile_size": 256, "minzoom": 8, "maxzoom": 15 }
+      }
     }
+  },
+  "udp_definitions": {}
 }

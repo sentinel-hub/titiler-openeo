@@ -216,6 +216,16 @@
                 "minimum": 1
             },
             "optional": true
+        },
+        {
+            "name": "tile_buffer",
+            "description": "The tile buffer size in pixels. This defines the overlap between tiles when processing data in chunks. A higher buffer size can help to reduce edge effects when applying certain processes (e.g., convolution filters) but increases memory consumption. Defaults to 0.",
+            "schema": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "default": 0,
+            "optional": true
         }
     ],
     "returns": {

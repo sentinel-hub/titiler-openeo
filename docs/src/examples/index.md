@@ -78,10 +78,16 @@ To run the notebooks locally:
 python -m pip install -e ".[dev]"
 ```
 
-1. Start Jupyter:
+2. Start Jupyter:
 
 ```bash
 jupyter notebook docs/notebooks
 ```
 
-1. Open the desired notebook and follow the instructions
+3. Open the desired notebook and follow the instructions
+
+
+## Parameter Management
+
+For examples of using the comprehensive parameter management system (query parameters, defaults, validation), see the [Parameter Management](../parameter-management.md#examples) documentation.
+

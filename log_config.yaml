@@ -27,6 +27,21 @@ loggers:
     handlers:
       - access
     propagate: no
+  rasterio:
+    level: WARN
+    handlers:
+      - default
+    propagate: yes
+  botocore:
+    level: WARN
+    handlers:
+      - default
+    propagate: yes
+  rio-tiler:
+    level: INFO
+    handlers:
+      - default
+    propagate: yes
 root:
   level: DEBUG
   handlers:

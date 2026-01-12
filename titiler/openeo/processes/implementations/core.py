@@ -5,7 +5,11 @@ import logging
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
-from openeo_pg_parser_networkx.pg_schema import ParameterReference
+from openeo_pg_parser_networkx.pg_schema import (
+    BoundingBox,
+    ParameterReference,
+    TemporalInterval,
+)
 from pydantic import TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
@@ -60,6 +64,30 @@ def _resolve_positional_args(
     return tuple(resolved_args)
 
 
+def _is_optional_type(param_type: Any) -> Tuple[bool, Any]:
+    """Check if a parameter type is Optional and return the underlying type.
+
+    Args:
+        param_type: Type annotation to check
+
+    Returns:
+        Tuple of (is_optional: bool, underlying_type: Any)
+        If optional, underlying_type is the non-None type
+    """
+    origin = get_origin(param_type)
+    if origin is Union:
+        args = get_args(param_type)
+        if type(None) in args:
+            # Filter out NoneType to get the actual type
+            non_none_types = [arg for arg in args if arg is not type(None)]
+            if len(non_none_types) == 1:
+                return True, non_none_types[0]
+            elif len(non_none_types) > 1:
+                # Multiple non-None types, reconstruct Union without None
+                return True, Union[tuple(non_none_types)]
+    return False, param_type
+
+
 def _is_string_type(param_type: Any) -> bool:
     """Check if a parameter type is string or Optional[str].
 
@@ -69,21 +97,17 @@ def _is_string_type(param_type: Any) -> bool:
     Returns:
         True if the type is string or Optional[str]
     """
-    # TODO: refactor with isinstance
-    return param_type == str or (  # noqa: E721
-        hasattr(param_type, "__origin__")
-        and param_type.__origin__ is Union
-        and str in param_type.__args__
-        and type(None) in param_type.__args__
-    )
+    # Use the new helper function
+    is_optional, underlying_type = _is_optional_type(param_type)
+    return underlying_type is str
 
 
-def _resolve_user_parameter(
+def _resolve_special_parameter(
     param_name: str,
     param_value: Any,
     param_type: Any,
 ) -> Any:
-    """Handle _openeo_user parameter based on type annotation.
+    """Handle special parameters based on type annotation.
 
     Args:
         param_name: Name of the parameter
@@ -95,6 +119,28 @@ def _resolve_user_parameter(
     """
     if param_name == "_openeo_user" and _is_string_type(param_type):
         return param_value.user_id
+
+    # Check for BoundingBox (including Optional[BoundingBox])
+    is_optional, underlying_type = _is_optional_type(param_type)
+    effective_type = underlying_type if is_optional else param_type
+
+    if effective_type == BoundingBox:
+        if isinstance(param_value, dict):
+            return BoundingBox(
+                west=param_value.get("west"),
+                east=param_value.get("east"),
+                south=param_value.get("south"),
+                north=param_value.get("north"),
+                crs=param_value.get("crs", None),
+            )
+    if effective_type == TemporalInterval:
+        if isinstance(param_value, dict):
+            return TemporalInterval(
+                [param_value.get("start", None), param_value.get("end", None)]
+            )
+        elif isinstance(param_value, list) and len(param_value) == 2:
+            return TemporalInterval(param_value)
+
     return param_value
 
 
@@ -125,10 +171,15 @@ def _resolve_kwargs(
                 value = named_parameters[arg.from_parameter]
                 # Handle type-based parameter resolution
                 if k in param_types:
-                    value = _resolve_user_parameter(
-                        arg.from_parameter, value, param_types[k]
-                    )
-                resolved_kwargs[k] = value
+                    try:
+                        value = _resolve_special_parameter(
+                            arg.from_parameter, value, param_types[k]
+                        )
+                        resolved_kwargs[k] = value
+                    except Exception as e:
+                        raise ProcessParameterMissing(
+                            f"Error resolving parameter {arg.from_parameter} for process {func_name}: {e}"
+                        ) from e
             else:
                 raise ProcessParameterMissing(
                     f"Error: Process Parameter {arg.from_parameter} was missing for process {func_name}"
@@ -348,12 +399,10 @@ def _validate_parameter_types(
 
         # Handle None values for Optional types
         if param_value is None:
-            origin = get_origin(param_type)
-            if origin is Union:
-                args = get_args(param_type)
-                if type(None) in args:
-                    # None is allowed for Optional types
-                    continue
+            is_optional, underlying_type = _is_optional_type(param_type)
+            if is_optional:
+                # None is allowed for Optional types
+                continue
             # If we get here, None is not allowed
             raise TypeError(
                 f"Parameter '{param_name}' in process '{func_name}' cannot be None"
