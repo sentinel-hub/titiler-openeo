@@ -58,17 +58,17 @@ This project uses `setuptools_scm` for automatic version determination based on 
 
 ## Building Docker Images
 
-Docker images will automatically use the correct version from git metadata thanks to setuptools_scm:
+Docker images automatically get the correct version through setuptools_scm:
 
 ```bash
-# Build from a tagged commit - uses the tag version
-docker build -t titiler-openeo:0.7.1 .
+# In CI/automated builds - version is passed via SETUPTOOLS_SCM_PRETEND_VERSION
+docker build --build-arg SETUPTOOLS_SCM_PRETEND_VERSION=0.7.1 -t titiler-openeo:0.7.1 .
 
-# Build from development - uses dev version with commit hash
+# Local builds from git repo - uses git metadata automatically
 docker build -t titiler-openeo:dev .
 ```
 
-The version is automatically detected from git history, so no manual version passing is needed.
+GitHub Actions automatically sets the correct version based on tags and branches.
 
 ## Version Number Guidelines
 

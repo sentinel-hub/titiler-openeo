@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 ARG PYTHON_VERSION=3.11
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
 
 # Build stage
 FROM python:${PYTHON_VERSION}-slim AS builder
+
+# Set version for setuptools_scm
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_TITILER_OPENEO=${SETUPTOOLS_SCM_PRETEND_VERSION}
 
 # Set build labels
 LABEL stage=builder
@@ -31,8 +35,6 @@ ENV UV_LINK_MODE=copy \
 
 # Install application
 WORKDIR /tmp/app
-# Copy git metadata for setuptools_scm version detection
-COPY .git/ .git/
 COPY titiler/ titiler/
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --extra server --extra oidc --extra postgres && \
