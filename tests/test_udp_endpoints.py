@@ -1,10 +1,27 @@
 """Tests for UDP listing endpoint."""
 
 import pytest
+from fastapi import Header
 from starlette.testclient import TestClient
 
-from tests.conftest import MockAuth
+from titiler.openeo.auth import Auth, User
 from titiler.openeo.services import get_udp_store
+
+
+class MockAuth(Auth):
+    """Mock authentication class for testing."""
+
+    def __init__(self, store):
+        """Initialize auth with store."""
+        self.store = store
+
+    def login(self, authorization: str = Header(default=None)):
+        """Mock login method."""
+        return {"access_token": "mock_token"}
+
+    def validate(self, authorization: str = Header(default=None)) -> User:
+        """Mock validate method."""
+        return User(user_id="test_user")
 
 
 def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store_type):
