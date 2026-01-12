@@ -61,6 +61,8 @@ jobs:
     steps:
       - name: checkout code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Fetch full git history for setuptools_scm
 
       - name: Docker meta
         id: meta

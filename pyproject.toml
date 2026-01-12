@@ -84,6 +84,7 @@ include = ["titiler*"]
 
 [tool.setuptools_scm]
 write_to = "titiler/openeo/_version.py"
+fallback_version = "0.0.0+unknown"
 
 [build-system]
 requires = ["setuptools>=64", "setuptools_scm>=8"]

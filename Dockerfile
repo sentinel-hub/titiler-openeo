@@ -31,6 +31,8 @@ ENV UV_LINK_MODE=copy \
 
 # Install application
 WORKDIR /tmp/app
+# Copy git metadata for setuptools_scm version detection
+COPY .git/ .git/
 COPY titiler/ titiler/
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --extra server --extra oidc --extra postgres && \
