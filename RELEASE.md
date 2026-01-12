@@ -1,15 +1,88 @@
 # Release Process
 
-This document outlines the steps to create a new release of titiler-openeo.
+This document outlines the steps to create a new release of titiler-openeo using SCM-based automatic versioning.
 
-## Steps
+## SCM-Based Versioning
 
-1. Create a new branch for the release:
+This project uses `setuptools_scm` for automatic version determination based on git tags. The version is automatically calculated from:
+- Git tags (for released versions)
+- Distance from the latest tag (for development versions)
+- Current commit hash (for dirty builds)
+
+## Release Steps
+
+1. **Ensure your working directory is clean**:
    ```bash
-   git checkout -b release/vX.Y.Z
+   git status
    ```
 
-2. Update version numbers in the following files:
+2. **Update CHANGES.md**:
+   - Change the "(Unreleased)" text to the current date
+   - Ensure all changes are properly documented under the new version
+   - Keep the format consistent with previous entries
+
+3. **Create and push a release tag**:
+   ```bash
+   # For a patch release (0.7.0 -> 0.7.1)
+   git tag v0.7.1
+   
+   # For a minor release (0.7.0 -> 0.8.0)
+   git tag v0.8.0
+   
+   # For a major release (0.7.0 -> 1.0.0)
+   git tag v1.0.0
+   
+   # Push the tag
+   git push origin v0.7.1  # replace with your tag
+   ```
+
+4. **Verify the version**:
+   ```bash
+   python -c "import titiler.openeo; print(titiler.openeo.__version__)"
+   ```
+
+5. **Update deployment files** (if needed):
+   ```
+   deployment/k8s/charts/Chart.yaml:
+   - Update appVersion to new version
+   - Increment chart version by 0.0.1
+   ```
+
+6. **Create a GitHub release**:
+   - Go to https://github.com/sentinel-hub/titiler-openeo/releases
+   - Click "Draft a new release"
+   - Choose the tag you just created
+   - Title the release with the tag name (e.g., "v0.7.1")
+   - Copy the changelog entries for this version into the description
+   - Publish the release
+
+## Version Number Guidelines
+
+Follow [Semantic Versioning (SemVer)](https://semver.org/):
+- **MAJOR** version (e.g., v1.0.0): Breaking changes
+- **MINOR** version (e.g., v0.8.0): New features, backward compatible
+- **PATCH** version (e.g., v0.7.1): Bug fixes, backward compatible
+
+## Development Versions
+
+During development, setuptools_scm will automatically generate version numbers like:
+- `0.7.1.dev5+g1234567` (5 commits after v0.7.0 tag, on commit 1234567)
+- `0.7.1.dev5+g1234567.dirty` (same as above but with uncommitted changes)
+
+## Checking Current Version
+
+You can check the current version in several ways:
+
+```bash
+# From Python
+python -c "import titiler.openeo; print(titiler.openeo.__version__)"
+
+# From setuptools_scm directly
+python -m setuptools_scm
+
+# From pip (if installed)
+pip show titiler-openeo
+```
    ```
    deployment/k8s/charts/Chart.yaml:
    - Update appVersion to new version (e.g., 0.2.1)
