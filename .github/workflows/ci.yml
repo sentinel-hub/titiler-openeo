@@ -55,8 +55,11 @@ jobs:
   publish-docker:
     needs: [tests]
     runs-on: ubuntu-latest
-    # main, tags or pull_request
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+    # only publish on main or tags (not on PRs, including Dependabot)
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: checkout code
