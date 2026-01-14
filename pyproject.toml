@@ -60,7 +60,6 @@ dev = [
     "pytest-vcr",
     "sqlalchemy>=2.0.0",
     "pre-commit",
-    "setuptools_scm",
     "ipython~=8.0.0",
 ]
 server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
@@ -78,20 +77,21 @@ Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
 Source = "https://github.com/sentinel-hub/titiler-openeo"
 Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 
-[tool.setuptools.packages.find]
-where = ["."]  
-include = ["titiler*"]
+[tool.hatch.version]
+path = "titiler/openeo/__init__.py"
 
-[tool.setuptools.package-data]
-"titiler.openeo.processes" = ["data/*.json"]
+[tool.hatch.build.targets.sdist]
+only-include = ["titiler"]
 
-[tool.setuptools_scm]
-write_to = "titiler/openeo/_version.py"
-fallback_version = "0.0.0+unknown"
+[tool.hatch.build.targets.wheel]
+only-include = ["titiler"]
+
+[tool.hatch.build.targets.wheel.sources]
+"titiler" = "titiler"
 
 [build-system]
-requires = ["setuptools>=64", "setuptools_scm>=8"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
 
 [tool.coverage.run]
 branch = true
@@ -146,5 +146,4 @@ explicit_package_bases = true
 
 [tool.ruff.lint.mccabe]
 max-complexity = 14
-
 

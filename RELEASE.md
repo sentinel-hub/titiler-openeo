@@ -1,150 +1,150 @@
 # Release Process
 
-This document outlines the steps to create a new release of titiler-openeo using SCM-based automatic versioning.
+This project uses [Release Please](https://github.com/googleapis/release-please) to automate releases based on [Conventional Commits](https://www.conventionalcommits.org/).
 
-## SCM-Based Versioning
+## Automated Release Process
 
-This project uses `setuptools_scm` for automatic version determination based on git tags. The version is automatically calculated from:
-- Git tags (for released versions)
-- Distance from the latest tag (for development versions)
-- Current commit hash (for dirty builds)
+### 1. Create Pull Requests with Conventional Titles
 
-## Release Steps
-
-1. **Ensure your working directory is clean**:
-   ```bash
-   git status
-   ```
-
-2. **Update CHANGES.md**:
-   - Change the "(Unreleased)" text to the current date
-   - Ensure all changes are properly documented under the new version
-   - Keep the format consistent with previous entries
-
-3. **Create and push a release tag**:
-   ```bash
-   # For a patch release (0.7.0 -> 0.7.1)
-   git tag v0.7.1
-   
-   # For a minor release (0.7.0 -> 0.8.0)
-   git tag v0.8.0
-   
-   # For a major release (0.7.0 -> 1.0.0)
-   git tag v1.0.0
-   
-   # Push the tag
-   git push origin v0.7.1  # replace with your tag
-   ```
-
-4. **Verify the version**:
-   ```bash
-   python -c "import titiler.openeo; print(titiler.openeo.__version__)"
-   ```
-
-5. **Update deployment files** (if needed):
-   ```
-   deployment/k8s/charts/Chart.yaml:
-   - Update appVersion to new version
-   - Increment chart version by 0.0.1
-   ```
-
-6. **Create a GitHub release**:
-   - Go to https://github.com/sentinel-hub/titiler-openeo/releases
-   - Click "Draft a new release"
-   - Choose the tag you just created
-   - Title the release with the tag name (e.g., "v0.7.1")
-   - Copy the changelog entries for this version into the description
-   - Publish the release
-
-## Building Docker Images
-
-Docker images automatically get the correct version through setuptools_scm:
+**PR titles are automatically validated** and must follow conventional commit format:
 
 ```bash
-# In CI/automated builds - version is passed via SETUPTOOLS_SCM_PRETEND_VERSION
-docker build --build-arg SETUPTOOLS_SCM_PRETEND_VERSION=0.7.1 -t titiler-openeo:0.7.1 .
-
-# Local builds from git repo - uses git metadata automatically
-docker build -t titiler-openeo:dev .
+# Valid PR titles:
+feat: add new process for NDVI calculation
+fix: resolve memory leak in tile processing
+feat!: change API endpoint structure (breaking change)
+docs: update installation guide
+perf: optimize raster processing pipeline
+chore(deps): update dependencies
+fix(auth): resolve OIDC timeout issues
 ```
 
-GitHub Actions automatically sets the correct version based on tags and branches.
+**The validation workflow will block merging** if the PR title doesn't follow the format.
 
-## Version Number Guidelines
+### 2. Individual Commits (Optional)
 
-Follow [Semantic Versioning (SemVer)](https://semver.org/):
-- **MAJOR** version (e.g., v1.0.0): Breaking changes
-- **MINOR** version (e.g., v0.8.0): New features, backward compatible
-- **PATCH** version (e.g., v0.7.1): Bug fixes, backward compatible
+Within PRs, you can use any commit style. Only the **PR title matters** for changelog generation since we use squash-merge.
 
-## Development Versions
-
-During development, setuptools_scm will automatically generate version numbers like:
-- `0.7.1.dev5+g1234567` (5 commits after v0.7.0 tag, on commit 1234567)
-- `0.7.1.dev5+g1234567.dirty` (same as above but with uncommitted changes)
-
-## Checking Current Version
-
-You can check the current version in several ways:
+However, if you prefer conventional commits throughout:
 
 ```bash
-# From Python
-python -c "import titiler.openeo; print(titiler.openeo.__version__)"
-
-# From setuptools_scm directly
-python -m setuptools_scm
-
-# From pip (if installed)
-pip show titiler-openeo
+git commit -m "feat: add new process for NDVI calculation"
+git commit -m "fix: resolve memory leak in tile processing"
+git commit -m "docs: update installation guide"
 ```
-   ```
-   deployment/k8s/charts/Chart.yaml:
-   - Update appVersion to new version (e.g., 0.2.1)
-   - Increment version by 0.0.1 (e.g., 0.9.0 -> 0.9.1)
 
-   pyproject.toml:
-   - Update current_version under [tool.bumpversion]
+### 3. Release Please Automation
 
-   titiler/openeo/__init__.py:
-   - Update __version__
-   ```
+When PRs are merged to `main`:
 
-3. Update CHANGES.md:
-   - Change the "(Unreleased)" text to the current date
-   - Ensure all changes are properly documented under the new version
-   - Keep the format consistent with previous entries
+1. **Release Please** analyzes PR titles (which become commit messages via squash-merge)
+2. Creates/updates a **Release PR** with:
+   - Updated [CHANGELOG.md](CHANGELOG.md) based on PR titles
+   - Bumped version in [titiler/openeo/__init__.py](titiler/openeo/__init__.py)
+   - Updated [deployment/k8s/charts/Chart.yaml](deployment/k8s/charts/Chart.yaml)
 
-4. Create a Pull Request:
-   - Push your branch to GitHub
-   - Create a PR titled "Release vX.Y.Z"
-   - Include a summary of the changes in the PR description
-   - Wait for approval and merge
+3. When the Release PR is **merged**:
+   - Creates a GitHub release with changelog
+   - Publishes to PyPI automatically  
+   - Builds and pushes Docker images to GHCR
 
-5. After the PR is merged, create a git tag and push:
-   ```bash
-   git checkout main
-   git pull
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
+### 4. Manual Release Steps (Optional)
 
-6. Create a GitHub release:
-   - Go to https://github.com/sentinel-hub/titiler-openeo/releases
-   - Click "Draft a new release"
-   - Choose the tag you just created
-   - Title the release "vX.Y.Z"
-   - Copy the changelog entries for this version into the description
-   - Publish the release
+If you need to manually trigger a release or update chart versions:
+
+```bash
+# Update Chart.yaml if needed
+# deployment/k8s/charts/Chart.yaml:
+# - Increment chart version by 0.0.1
+# - appVersion will be updated automatically by release-please
+```
+
+## PR Title Format (Enforced)
+
+**All PR titles are automatically validated** and must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**✅ Examples:**
+```
+feat: add comprehensive parameter management system
+fix(auth): resolve OIDC timeout issues  
+docs: update installation guide
+perf(processes): optimize raster processing pipeline
+feat!: change API endpoint structure (breaking change)
+chore(deps): update dependencies to latest versions
+```
+
+**❌ Invalid (will block merge):**
+```
+Add new feature           # Missing type
+Fix bug                   # Missing descriptive message  
+FIX: resolve issue        # Type should be lowercase
+feat: Add new feature     # Description should not start with capital
+Update docs               # Missing type
+```
+
+### PR Title Types
+
+- **feat**: New feature (triggers minor version bump)
+- **fix**: Bug fix (triggers patch version bump)  
+- **feat!** or **fix!**: Breaking change (triggers major version bump)
+- **docs**: Documentation changes
+- **style**: Code style changes (formatting, etc.)
+- **refactor**: Code refactoring without functional changes
+- **perf**: Performance improvements
+- **test**: Test changes
+- **chore**: Build process or auxiliary tool changes
+- **ci**: CI configuration changes
+- **revert**: Revert previous changes
+
+### Optional Scopes
+
+- **api**: API-related changes
+- **auth**: Authentication/authorization  
+- **processes**: OpenEO process implementations
+- **store**: Data store implementations
+- **docker**: Docker-related changes
+- **helm**: Kubernetes/Helm changes
+- **docs**: Documentation
+- **deps**: Dependency updates
+- **ci**: CI/CD pipeline
+
+## Repository Settings
+
+The repository is configured with:
+
+- ✅ **Squash-merge only** (PR title becomes commit message)
+- ✅ **PR title validation** (blocks merge if invalid)
+- ✅ **Automatic changelog generation** from PR titles
+- ✅ **Branch protection** requiring PR title validation
 
 ## Version Numbering
 
-We follow semantic versioning (MAJOR.MINOR.PATCH):
-- MAJOR version for incompatible API changes
-- MINOR version for new functionality in a backward compatible manner
-- PATCH version for backward compatible bug fixes
+We follow [Semantic Versioning (SemVer)](https://semver.org/):
+
+- **MAJOR**: Breaking changes (`feat!`, `fix!` commits)
+- **MINOR**: New features (`feat` commits)  
+- **PATCH**: Bug fixes (`fix` commits)
 
 ## Helm Chart Versioning
 
-The Helm chart version (in Chart.yaml) follows its own versioning scheme:
-- Increment the chart version by 0.0.1 for each release
-- Update appVersion to match the new titiler-openeo version
+The Helm chart version is managed separately and should be incremented manually when needed:
+
+- Chart version increments by 0.0.1 for each release
+- `appVersion` is updated automatically by release-please to match the package version
+
+## Emergency Releases
+
+For urgent fixes outside the normal process:
+
+1. Create a hotfix branch from main
+2. Make the fix with proper conventional commit message
+3. Create PR to main
+4. The release-please process will handle the rest automatically
