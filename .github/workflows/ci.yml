@@ -61,8 +61,6 @@ jobs:
     steps:
       - name: checkout code
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0  # Fetch full git history for setuptools_scm
 
       - name: Docker meta
         id: meta
@@ -94,8 +92,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.meta.outputs.version }}
 
   publish:
     needs: [tests]
