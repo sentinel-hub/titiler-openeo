@@ -75,7 +75,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }}
+            type=raw,value=${{ needs.release-please.outputs.tag_name }}
+            type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}}
             type=raw,value=latest
 
       - name: Build and push
