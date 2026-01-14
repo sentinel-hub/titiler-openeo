@@ -28,7 +28,10 @@ spec:
             - |
               if [ -f "/config/init_store.json" ]; then
                 echo "Initializing JSON store from init_store.json..."
-                mkdir -p "$(dirname {{ .Values.database.json.path }})" && cp /config/init_store.json {{ .Values.database.json.path }}
+                mkdir -p "$(dirname {{ .Values.database.json.path }})"
+                cp /config/init_store.json {{ .Values.database.json.path }}
+                chown 65532:65532 {{ .Values.database.json.path }}
+                chmod 664 {{ .Values.database.json.path }}
                 echo "JSON store initialization complete."
               else
                 echo "No init_store.json found in configmap, skipping initialization."
