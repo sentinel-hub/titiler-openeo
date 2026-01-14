@@ -3,6 +3,7 @@
     ".": {
       "release-type": "python",
       "package-name": "titiler-openeo",
+      "changelog-type": "github",
       "changelog-sections": [
         { "type": "feat", "section": "Features", "hidden": false },
         { "type": "fix", "section": "Bug Fixes", "hidden": false },
@@ -26,7 +27,8 @@
           "type": "yaml",
           "path": "deployment/k8s/charts/Chart.yaml",
           "jsonpath": "$.appVersion"
-        }
+        },
+        "titiler/openeo/__init__.py"
       ]
     }
   }
