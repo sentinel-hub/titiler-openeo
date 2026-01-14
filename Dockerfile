@@ -61,7 +61,7 @@ RUN apt-get update && \
 COPY --from=builder /opt/venv /opt/venv
 
 # Create non-root user
-RUN useradd -m -s /bin/bash titiler && \
+RUN useradd -u 65532 -m -s /bin/bash titiler && \
     mkdir -p /data /config
 COPY log_config.yaml /config/log_config.yaml
 RUN chown -R titiler:titiler /data /config
