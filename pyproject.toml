@@ -85,6 +85,9 @@ only-include = ["titiler"]
 
 [tool.hatch.build.targets.wheel]
 only-include = ["titiler"]
+artifacts = [
+  "titiler/openeo/processes/data/*.json"
+]
 
 [build-system]
 requires = ["hatchling"]

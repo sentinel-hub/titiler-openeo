@@ -6,7 +6,6 @@
 
 <!-- Please describe how you tested your changes -->
 
-- [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] I have run the existing test suite and all tests pass
 - [ ] I have tested this change manually
 
