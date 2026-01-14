@@ -86,10 +86,11 @@ only-include = ["titiler"]
 [tool.hatch.build.targets.wheel]
 only-include = ["titiler"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"titiler/openeo/processes/data/*.json" = "titiler/openeo/processes/data/"
+[tool.hatch.build.targets.wheel.sources]
+"titiler" = "titiler"
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [tool.coverage.run]
