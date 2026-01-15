@@ -19,4 +19,5 @@ def test_version():
 
     # Also test that __version__ is available in the module
     from titiler.openeo import __version__
+
     assert __version__ == "0.8.0"
