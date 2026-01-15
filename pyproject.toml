@@ -78,10 +78,7 @@ Source = "https://github.com/sentinel-hub/titiler-openeo"
 Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
 
 [tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.hooks.vcs]
-version-file = "titiler/openeo/_version.py"
+path = "titiler/openeo/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 only-include = ["titiler"]
@@ -93,7 +90,7 @@ only-include = ["titiler"]
 "titiler" = "titiler"
 
 [build-system]
-requires = ["hatchling>=1.25.0", "hatch-vcs"]
+requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [tool.coverage.run]
