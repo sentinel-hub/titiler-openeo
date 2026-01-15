@@ -1,3 +1,5 @@
 """titiler.openeo"""
 
-__version__ = "0.8.0"
+from importlib.metadata import version
+
+__version__ = version("titiler-openeo")
