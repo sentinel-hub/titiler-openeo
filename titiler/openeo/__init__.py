@@ -1,5 +1,9 @@
 """titiler.openeo"""
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = version("titiler-openeo")
+try:
+    __version__ = version("titiler-openeo")
+except PackageNotFoundError:
+    # Package is not installed
+    __version__ = "unknown"
