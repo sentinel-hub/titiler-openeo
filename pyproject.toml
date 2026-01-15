@@ -1,5 +1,6 @@
 [project]
 name = "titiler-openeo"
+version = "0.8.0"
 description = "TiTiler backend for openEO."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,7 +29,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: GIS",
 ]
-dynamic = ["version"]
 dependencies = [
     "titiler.core>=0.24.0,<0.25",
     "starlette-cramjam>=0.4,<0.6",
@@ -76,9 +76,6 @@ Documentation = "https://sentinel-hub.github.io/titiler-openeo/"
 Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
 Source = "https://github.com/sentinel-hub/titiler-openeo"
 Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
-
-[tool.hatch.version]
-path = "titiler/openeo/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 only-include = ["titiler"]
