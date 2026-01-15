@@ -173,6 +173,3 @@ file::memory:
 
 .venv311/
 ._temp_store.json
-
-# Auto-generated version file
-titiler/openeo/_version.py
