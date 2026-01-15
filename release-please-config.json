@@ -29,6 +29,11 @@
           "path": "deployment/k8s/charts/Chart.yaml",
           "jsonpath": "$.appVersion"
         },
+        {
+          "type": "yaml",
+          "path": "deployment/k8s/charts/Chart.yaml",
+          "jsonpath": "$.version"
+        },
         "titiler/openeo/__init__.py"
       ]
     }
