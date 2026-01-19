@@ -1,0 +1,147 @@
+{
+    "id": "d55ae9e5-83d7-41c2-ae56-e6c72d3b7da5",
+    "summary": "sentinel-2 global mosaics 3 bands RGB",
+    "description": "This service provides a global mosaic of Sentinel-2 data with 3 bands (RGB).",
+    "categories": [
+        "raster"
+    ],
+    "links": [
+    ],
+    "returns": {
+        "description": "A PNG image with 3 bands (RGB).",
+        "schema": {
+            "type": "object",
+            "subtype": "datacube"
+        }
+    },
+    "parameters": [
+        {
+            "description": "The east boundary of the spatial extent.",
+            "name": "spatial_extent_east",
+            "schema": {
+                "type": "number"
+            },
+            "default": -73.90
+        },
+        {
+            "description": "The north boundary of the spatial extent.",
+            "name": "spatial_extent_north",
+            "schema": {
+                "type": "number"
+            },
+            "default": 40.93
+        },
+        {
+            "description": "The south boundary of the spatial extent.",
+            "name": "spatial_extent_south",
+            "schema": {
+                "type": "number"
+            },
+            "default": 40.92
+        },
+        {
+            "description": "The west boundary of the spatial extent.",
+            "name": "spatial_extent_west",
+            "schema": {
+                "type": "number"
+            },
+            "default": -73.91
+        },
+        {
+            "description": "The CRS of the spatial extent.",
+            "name": "spatial_extent_crs",
+            "schema": {
+                "type": "string"
+            },
+            "default": "EPSG:4326"
+        }
+    ],
+    "process_graph": {
+        "1": {
+            "arguments": {
+                "bands": [
+                    "B04",
+                    "B03",
+                    "B02"
+                ],
+                "id": "sentinel-2-global-mosaics",
+                "spatial_extent": {
+                    "east": {
+                        "from_parameter": "spatial_extent_east"
+                    },
+                    "north": {
+                        "from_parameter": "spatial_extent_north"
+                    },
+                    "south": {
+                        "from_parameter": "spatial_extent_south"
+                    },
+                    "west": {
+                        "from_parameter": "spatial_extent_west"
+                    },
+                    "crs": {
+                        "from_parameter": "spatial_extent_crs"
+                    }
+                },
+                "temporal_extent": [
+                    "2024-06-01T00:00:00Z",
+                    "2024-07-30T23:59:59Z"
+                ]
+            },
+            "process_id": "load_collection_and_reduce"
+        },
+        "2": {
+            "arguments": {
+                "data": {
+                    "from_node": "color"
+                },
+                "format": "PNG",
+                "options": {
+                    "datatype": "byte"
+                }
+            },
+            "process_id": "save_result",
+            "result": true
+        },
+        "color": {
+            "arguments": {
+                "data": {
+                    "from_node": "3"
+                },
+                "formula": "Gamma RGB 1.5 Sigmoidal RGB 10 0.3 Saturation 1"
+            },
+            "process_id": "color_formula"
+        },
+        "3": {
+            "arguments": {
+                "data": {
+                    "from_node": "1"
+                },
+                "process": {
+                    "process_graph": {
+                        "1": {
+                            "arguments": {
+                                "inputMax": 10000,
+                                "inputMin": 0,
+                                "outputMax": 255,
+                                "x": {
+                                    "from_parameter": "x"
+                                }
+                            },
+                            "process_id": "linear_scale_range"
+                        },
+                        "2": {
+                            "process_id": "trunc",
+                            "arguments": {
+                                "x": {
+                                    "from_node": "1"
+                                }
+                            },
+                            "result": true
+                        }
+                    }
+                }
+            },
+            "process_id": "apply"
+        }
+    }
+}

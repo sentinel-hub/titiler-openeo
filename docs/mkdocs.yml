@@ -1,18 +1,18 @@
-site_name: TiTiler-OpenEO
+site_name: openEO by TiTiler
 site_description: TiTiler backend for openEO
 
 docs_dir: 'src'
 site_dir: 'build'
 
-repo_name: "developmentseed/titiler-openeo"
-repo_url: "https://github.com/developmentseed/titiler-openeo"
+repo_name: "sentinel-hub/titiler-openeo"
+repo_url: "https://github.com/sentinel-hub/titiler-openeo"
 edit_uri: "blob/main/docs/src/"
-site_url: "https://developmentseed.org/titiler-openeo/"
+site_url: "https://sentinel-hub.github.io/titiler-openeo/"
 
 extra:
   analytics:
     provider: plausible
-    domain: developmentseed.org/titiler-openeo
+    domain: sentinel-hub.github.io/titiler-openeo
 
     feedback:
       title: Was this page helpful?
@@ -28,14 +28,34 @@ extra:
           note: Thanks for your feedback!
   social:
     - icon: "fontawesome/brands/github"
-      link: "https://github.com/developmentseed"
-    - icon: "fontawesome/brands/medium"
-      link: "https://medium.com/devseed"
+      link: "https://github.com/sentinel-hub"
 
 nav:
-  - TiTiler-OpenEO: "index.md"
-  - Development - Contributing: "contributing.md"
-  - Release Notes: "release-notes.md"
+  - openEO by TiTiler: "index.md"
+  - Project:
+    - Overview: "project-overview.md"
+    - Release Notes: "release-notes.md"
+  - Architecture:
+    - Concepts: "concepts.md"
+    - RasterStack Data Model: "raster-stack.md"
+    - Special Features:
+      - Parameter Management: "parameter-management.md"
+      - Service Authorization: "authorization.md"
+      - Tile Assignment: "tile-assignment.md"
+  - Administrator Guide:
+    - Overview: "admin-guide.md"
+    - OpenID Connect: "openid-connect.md"
+  - Deployment:
+    - Local Setup: "local-setup.md"
+    - Kubernetes Guide: "kubernetes.md"
+  - Examples:
+    - Overview: "examples/index.md"
+    - Parameter Management: "examples/parameter-management.md"
+    - Notebooks:
+      - Manhattan Satellite Imagery: "notebooks/manhattan.ipynb"
+      - NDVI Time Series Analysis: "notebooks/ndvi_time_series.ipynb"
+  - Development:
+    - Contributing: "contributing.md"
 
 plugins:
   - search
@@ -43,6 +63,7 @@ plugins:
   - mkdocs-jupyter:
       include_source: true
       ignore: ["**/.ipynb_checkpoints/*.ipynb"]
+      execute: false
   - mkdocstrings:
       enable_inventory: true
       handlers:
@@ -72,47 +93,90 @@ plugins:
 
 theme:
   name: material
-  palette:
-    primary: indigo
-    scheme: default
   custom_dir: 'src/overrides'
   favicon: img/favicon.png
+  
+  # Enhanced theme configuration
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
 
+  # Enhanced navigation and features
   features:
-    - content.code.annotate
-    - content.code.copy
+    # Navigation
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
     - navigation.indexes
     - navigation.instant
     - navigation.tracking
-    - search.suggest
+    - navigation.top
+    - toc.integrate
+    
+    # Content
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    
+    # Search
+    - search.highlight
     - search.share
+    - search.suggest
+    
+    # Header
+    - header.autohide
 
-# https://github.com/kylebarron/cogeo-mosaic/blob/mkdocs/mkdocs.yml#L50-L75
 markdown_extensions:
+  # Python Markdown extensions
   - admonition
   - attr_list
-  - codehilite:
-      guess_lang: false
   - def_list
   - footnotes
-  - pymdownx.arithmatex
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # PyMdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.betterem
-  - pymdownx.caret:
-      insert: false
+  - pymdownx.caret
   - pymdownx.details
   - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_index: !!python/name:material.extensions.emoji.twemoji 
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
-  - pymdownx.escapeall:
-      hardbreak: true
-      nbsp: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
   - pymdownx.magiclink:
       hide_protocol: true
       repo_url_shortener: true
+  - pymdownx.mark
   - pymdownx.smartsymbols
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: div
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
   - pymdownx.tilde
-  - toc:
-      permalink: true

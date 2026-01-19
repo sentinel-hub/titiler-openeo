@@ -1,87 +1,109 @@
 [project]
 name = "titiler-openeo"
+version = "0.8.0"
 description = "TiTiler backend for openEO."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
-    {name = "Vincent Sarago", email = "vincent@developmentseed.com"},
+    { name = "Vincent Sarago", email = "vincent@developmentseed.com" },
+    { name = "Emmanuel Mathot", email = "emmanuel@developmentseed.com" },
 ]
-license = {text = "MIT"}
+license = { text = "MIT" }
 keywords = [
-    "OPENEO"
+    "openEO",
+    "TiTiler",
+    "COG",
+    "STAC",
+    "Mosaic",
+    "FastAPI",
+    "Rasterio",
+    "rio-tiler",
 ]
 classifiers = [
     "Intended Audience :: Information Technology",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: GIS",
 ]
-dynamic = ["version"]
 dependencies = [
-    "titiler.core==0.19.2",
-    "titiler.mosaic==0.19.2",
-    "starlette-cramjam>=0.4,<0.5",
-    "openeo-pg-parser-networkx",
+    "titiler.core>=0.24.0,<0.25",
+    "starlette-cramjam>=0.4,<0.6",
+    "openeo-pg-parser-networkx==2025.10.1",
     "pystac-client",
     "pydantic-settings~=2.0",
+    "jsonpath-ng~=1.7.0",
 ]
 
-[project.optional-dependencies]
-test = [
-    "pytest",
-    "pytest-cov",
-    "pytest-asyncio",
-    "httpx",
-    "brotlipy",
+[dependency-groups]
+docs = [
+    "mkdocs-jupyter~=0.24.0",
+    "mkdocs-material[imaging]>=9.6.14",
+    "mkdocs>=1.6.1",
+    "mkdocstrings[python]>=0.29.1",
+    "griffe-inherited-docstrings>=1.1.1",
+    "jupyter-contrib-nbextensions>=0.7.0",
+    "notebook>=6.5.4,<7.0.0",
+    "nbconvert>=7.2.9",
 ]
 dev = [
+    "brotlipy",
+    "cryptography",
+    "duckdb",
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-vcr",
+    "sqlalchemy>=2.0.0",
     "pre-commit",
-    "bump-my-version",
+    "ipython~=8.0.0",
 ]
-docs = [
-    "mkdocs>=1.4.3",
-    "mkdocs-jupyter>=0.24.5",
-    "mkdocs-material[imaging]>=9.5",
-    "griffe-inherited-docstrings>=1.0.0",
-    "mkdocstrings[python]>=0.25.1",
-]
-server = [
-    "uvicorn[standard]>=0.12.0,<0.19.0",
-]
+server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
+
+[project.optional-dependencies]
+server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
+duckdb = ["duckdb"]
+postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary"]
+oidc = ["cryptography", "httpx"]
 
 [project.urls]
-Homepage = "https://developmentseed.org/titiler-openeo/"
-Documentation = "https://developmentseed.org/titiler-openeo/"
-Issues = "https://github.com/developmentseed/titileropeneo/issues"
-Source = "https://github.com/developmentseed/titileropeneo"
-Changelog = "https://developmentseed.org/titileropeneo/release-notes/"
+Homepage = "https://sentinel-hub.github.io/titiler-openeo/"
+Documentation = "https://sentinel-hub.github.io/titiler-openeo/"
+Issues = "https://github.com/sentinel-hub/titiler-openeo/issues"
+Source = "https://github.com/sentinel-hub/titiler-openeo"
+Changelog = "https://sentinel-hub.github.io/titiler-openeo/release-notes/"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["titiler"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["titiler"]
+
+[tool.hatch.build.targets.wheel.sources]
+"titiler" = "titiler"
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
-
-[tool.pdm.version]
-source = "file"
-path = "titiler/openeo/__init__.py"
-
-[tool.pdm.build]
-includes = ["titiler/openeo"]
-excludes = ["tests/", "**/.mypy_cache", "**/.DS_Store"]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
 
 [tool.coverage.run]
 branch = true
 parallel = true
 
 [tool.coverage.report]
-exclude_lines = [
-  "no cov",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
+exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
+
+[tool.pytest.ini_options]
+markers = ["vcr: mark tests that rely on vcr cassettes"]
+filterwarnings = [
+    # Silence pydantic v1 deprecation noise coming from openeo_pg_parser_networkx
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20:openeo_pg_parser_networkx.*",
+    "ignore:The `parse_obj` method is deprecated:DeprecationWarning:openeo_pg_parser_networkx.*",
+    "ignore:.*allow_reuse.*:DeprecationWarning:openeo_pg_parser_networkx.*",
 ]
 
 [tool.isort]
@@ -108,9 +130,9 @@ select = [
 ignore = [
     "D103",
     "D101",
-    "E501",  # line too long, handled by black
-    "B008",  # do not perform function calls in argument defaults
-    "B905",  # ignore zip() without an explicit strict= parameter, only support with python >3.10
+    "E501", # line too long, handled by black
+    "B008", # do not perform function calls in argument defaults
+    "B905", # ignore zip() without an explicit strict= parameter, only support with python >3.10
 ]
 
 [tool.mypy]
@@ -122,16 +144,3 @@ explicit_package_bases = true
 [tool.ruff.lint.mccabe]
 max-complexity = 14
 
-[tool.bumpversion]
-current_version = "0.1.0"
-search = "{current_version}"
-replace = "{new_version}"
-regex = false
-tag = true
-commit = true
-tag_name = "{new_version}"
-
-[[tool.bumpversion.files]]
-filename = "titiler/openeo/__init__.py"
-search = '__version__ = "{current_version}"'
-replace = '__version__ = "{new_version}"'

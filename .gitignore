@@ -167,3 +167,9 @@ cdk.out/
 node_modules
 cdk.context.json
 *.nc
+.claud*
+openapi.json
+file::memory:
+
+.venv311/
+._temp_store.json

@@ -197,6 +197,35 @@
             ],
             "default": null,
             "optional": true
+        },
+        {
+            "name": "width",
+            "description": "The width of the output image in pixels. If only width is provided, height will be calculated to maintain the aspect ratio. Defaults to 1024 to prevent loading in native resolution.",
+            "schema": {
+                "type": "number",
+                "minimum": 1
+            },
+            "default": 1024,
+            "optional": true
+        },
+        {
+            "name": "height",
+            "description": "The height of the output image in pixels. If only height is provided, width will be calculated to maintain the aspect ratio.",
+            "schema": {
+                "type": "number",
+                "minimum": 1
+            },
+            "optional": true
+        },
+        {
+            "name": "tile_buffer",
+            "description": "The tile buffer size in pixels. This defines the overlap between tiles when processing data in chunks. A higher buffer size can help to reduce edge effects when applying certain processes (e.g., convolution filters) but increases memory consumption. Defaults to 0.",
+            "schema": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "default": 0,
+            "optional": true
         }
     ],
     "returns": {

@@ -1,7 +1,7 @@
 {
     "id": "apply_pixel_selection",
-    "summary": "Convert DataCube to ImageData.",
-    "description": "Apply `Pixel Selection` method on a DataCube to create an ImageData object",
+    "summary": "Apply pixel selection on a datacube.",
+    "description": "Apply `Pixel Selection` method on a datacube to create a new datacube",
     "categories": [
         "cubes",
         "aggregate",
@@ -37,10 +37,10 @@
         }
     ],
     "returns": {
-        "description": "An ImageData object for further processing.",
+        "description": "A datacube for further processing.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {},

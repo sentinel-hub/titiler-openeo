@@ -1,7 +1,7 @@
 {
     "id": "colormap",
-    "summary": "Apply a color formula to an image.",
-    "description": "Return Image data with a colormap applied.",
+    "summary": "Apply a color formula to a datacube.",
+    "description": "Return a datacube with a colormap applied.",
     "categories": [
         "images",
         "color"
@@ -9,10 +9,10 @@
     "parameters": [
         {
             "name": "data",
-            "description": "An image.",
+            "description": "A datacube.",
             "schema": {
                 "type": "object",
-                "subtype": "imagedata"
+                "subtype": "datacube"
             }
         },
         {
@@ -70,10 +70,10 @@
         }
     ],
     "returns": {
-        "description": "The image with the colormap applied.",
+        "description": "The datacube with the colormap applied.",
         "schema": {
             "type": "object",
-            "subtype": "imagedata"
+            "subtype": "datacube"
         }
     },
     "exceptions": {},

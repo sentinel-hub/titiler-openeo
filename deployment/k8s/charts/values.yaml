@@ -1,0 +1,205 @@
+# Default values for titiler-openeo.
+
+image:
+  repository: ghcr.io/sentinel-hub/titiler-openeo
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  command: "uvicorn"
+  args:
+    - "titiler.openeo.main:app"
+    - "--host"
+    - "0.0.0.0"
+    - "--port"
+    - "80"
+    - "--forwarded-allow-ips"   # to make sure it works behind a reverse proxy
+    - "*"   # Allow all
+    - "--log-config"
+    - "/config/log_config.yaml"
+
+nameOverride: ""
+fullnameOverride: ""
+
+terminationGracePeriodSeconds: 30
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: titiler.local
+      paths: ["/"]
+  tls: []
+  #  - secretName: titiler-tls
+  #    hosts:
+  #      - titiler.local
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+replicaCount: 1
+
+extraHostPathMounts:
+  []
+  # - name: map-sources
+  #   mountPath: /map-sources/
+  #   hostPath: /home/ubuntu/map-sources
+  #   readOnly: false
+  #   mountPropagation: HostToContainer # OPTIONAL
+
+imagePullSecrets: []
+
+# Authentication configuration
+auth:
+  # Authentication method: "basic" or "oidc"
+  method: "basic"
+
+  # Basic auth configuration (for testing)
+  basic:
+    enabled: true
+    users:
+      - username: "test"
+        password: "password"
+
+  # OIDC configuration (for production)
+  oidc:
+    enabled: false
+    clientId: ""
+    wellKnownUrl: ""
+    redirectUrl: ""
+    scopes: "openid email profile"
+    nameClaim: "name"
+    title: "OIDC"
+    description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+
+# STAC configuration
+stac:
+  apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
+
+env:
+  CPL_TMPDIR: /tmp
+  GDAL_CACHEMAX: 200   # 200 mb
+  VSI_CACHE: "TRUE"   # Enable VSI cache
+  VSI_CACHE_SIZE: 5000000   # 5 MB (per file-handle)
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"   # Disable directory listing
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"   # Merge consecutive ranges
+  GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
+  GDAL_HTTP_VERSION: 2   # Use HTTP/2
+  PYTHONWARNINGS: "ignore"
+
+# Additional environment variables from ConfigMaps and Secrets
+# Use this to map specific keys from secrets or configmaps to environment variables
+envVars:
+  fromSecret: []
+  # - name: REDIS_PASSWORD           # Environment variable name
+  #   secretName: redis-credentials   # Secret name
+  #   secretKey: password             # Key in the secret
+  # - name: REDIS_HOST
+  #   secretName: redis-credentials
+  #   secretKey: host
+  fromConfigMap: []
+  # - name: REDIS_PORT              # Environment variable name
+  #   configMapName: redis-config   # ConfigMap name
+  #   configMapKey: port            # Key in the configmap
+
+resources:
+  limits:
+    cpu: 1
+    memory: 2Gi
+  requests:
+    cpu: 1
+    memory: 2Gi
+
+serviceAccountName: ""
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# logging configuration
+logging:
+  configFile: "files/log_config.yaml"
+
+enableTileStore: false
+# PostgreSQL subchart configuration
+postgresql:
+  enabled: false
+  auth:
+    database: openeo
+    username: openeo
+    password: "8472387r4_$78-b9"
+  primary:
+    persistence:
+      size: 8Gi
+
+# Database configuration
+database:
+  # Type of database to use: "json", "duckdb", "postgresql"
+  type: "json"
+  # Default services configuration file path
+  defaultServices: ""  # Path to default services configuration file (like files/copernicus.json)
+
+  # File-based storage configuration (for JSON and DuckDB)
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+    existingClaim: ""
+
+  # JSON file configuration
+  json:
+    # Will be used if type is "json"
+    enabled: true
+    path: "/mnt/data/store.json"
+    seed: "files/eoapi.json"   # Initial data to populate the JSON store
+
+  # DuckDB configuration
+  duckdb:
+    # Will be used if type is "duckdb"
+    enabled: false
+    path: "/mnt/data/store.db"
+
+  # PostgreSQL connection configuration (when not using subchart)
+  external:
+    enabled: false
+    host: ""
+    port: 5432
+    user: openeo
+    database: openeo
+    password: ""
+    existingSecret: ""   # Name of existing secret containing password
+    existingSecretKey: "password"   # Key in the existing secret
+
+securityContext:
+  {}
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # readOnlyRootFilesystem: true
+  # allowPrivilegeEscalation: false
+  # runAsNonRoot: true
+  # runAsUser: 1001
+
+podSecurityContext:
+  sysctls:
+    - name: net.ipv4.ip_unprivileged_port_start
+      value: "0"
+  # fsGroup: 1001
+  # runAsNonRoot: true
+  # runAsUser: 1001
