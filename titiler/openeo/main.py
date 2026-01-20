@@ -100,21 +100,15 @@ def create_app():
 
     # Register backend specific load_collection methods
     loaders = LoadCollection(stac_client)  # type: ignore
-
-    # Import the process decorator
-    from .processes.implementations.core import process
-
-    # Apply the @process decorator directly to the methods to enable parameter resolution
-    process_load_collection = process(loaders.load_collection)
-    process_load_collection_and_reduce = process(loaders.load_collection_and_reduce)
-
-    process_registry["load_collection"] = Process(
+    process_registry["load_collection"] = process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
-        implementation=process_load_collection,
+        implementation=loaders.load_collection,
     )
-    process_registry["load_collection_and_reduce"] = Process(
+    process_registry["load_collection_and_reduce"] = process_registry[
+        "load_collection_and_reduce"
+    ] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection_and_reduce"],
-        implementation=process_load_collection_and_reduce,
+        implementation=loaders.load_collection_and_reduce,
     )
     loaders = LoadStac()  # type: ignore
     process_registry["load_stac"] = Process(
