@@ -425,19 +425,25 @@ class LoadCollection:
             return value or ""
 
         if process_id == "starts_with":
-            pattern = resolve_pattern_value(args.get("y")) + "%"
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = resolve_pattern_value(pattern_arg) + "%"
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "ends_with":
-            pattern = "%" + resolve_pattern_value(args.get("y"))
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = "%" + resolve_pattern_value(pattern_arg)
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "contains":
-            pattern = "%" + resolve_pattern_value(args.get("y")) + "%"
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = "%" + resolve_pattern_value(pattern_arg) + "%"
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
@@ -448,7 +454,7 @@ class LoadCollection:
         """Handle null check operators."""
         if process_id == "is_null":
             return {
-                "op": "isNull",
+                "op": "is null",
                 "args": [{"property": f"{prop_name}"}],
             }
         return None
