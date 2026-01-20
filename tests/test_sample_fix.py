@@ -11,7 +11,7 @@ def test_original_sample_scenario():
     from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
     # Read the original sample.json
-    with open("sample.json", "r") as f:
+    with open("tests/sample.json", "r") as f:
         sample_data = json.load(f)
 
     # Extract the properties from the sample that were causing issues

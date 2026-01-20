@@ -10,7 +10,7 @@ def test_full_cql2_conversion():
     from titiler.openeo.stacapi import LoadCollection, stacApiBackend
 
     # Read the sample process graph
-    with open("sample.json", "r") as f:
+    with open("tests/sample.json", "r") as f:
         sample_data = json.load(f)
 
     # Extract the load_collection operation
