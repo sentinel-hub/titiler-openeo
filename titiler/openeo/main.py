@@ -100,15 +100,68 @@ def create_app():
 
     # Register backend specific load_collection methods
     loaders = LoadCollection(stac_client)  # type: ignore
-    process_registry["load_collection"] = process_registry["load_collection"] = Process(
+
+    # Import the process decorator
+    from .processes.implementations.core import process
+
+    # Create wrapper functions that handle parameter resolution
+    @process
+    def load_collection_wrapper(
+        id: str,
+        spatial_extent=None,
+        temporal_extent=None,
+        bands=None,
+        properties=None,
+        width: int = 1024,
+        height=None,
+        tile_buffer=None,
+        named_parameters=None,
+    ):
+        return loaders.load_collection(
+            id=id,
+            spatial_extent=spatial_extent,
+            temporal_extent=temporal_extent,
+            bands=bands,
+            properties=properties,
+            width=width,
+            height=height,
+            tile_buffer=tile_buffer,
+            named_parameters=named_parameters,
+        )
+
+    @process
+    def load_collection_and_reduce_wrapper(
+        id: str,
+        spatial_extent=None,
+        temporal_extent=None,
+        bands=None,
+        properties=None,
+        pixel_selection: str = "first",
+        width: int = 1024,
+        height=None,
+        tile_buffer=None,
+        named_parameters=None,
+    ):
+        return loaders.load_collection_and_reduce(
+            id=id,
+            spatial_extent=spatial_extent,
+            temporal_extent=temporal_extent,
+            bands=bands,
+            properties=properties,
+            pixel_selection=pixel_selection,
+            width=width,
+            height=height,
+            tile_buffer=tile_buffer,
+            named_parameters=named_parameters,
+        )
+
+    process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
-        implementation=loaders.load_collection,
+        implementation=load_collection_wrapper,
     )
-    process_registry["load_collection_and_reduce"] = process_registry[
-        "load_collection_and_reduce"
-    ] = Process(
+    process_registry["load_collection_and_reduce"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection_and_reduce"],
-        implementation=loaders.load_collection_and_reduce,
+        implementation=load_collection_and_reduce_wrapper,
     )
     loaders = LoadStac()  # type: ignore
     process_registry["load_stac"] = Process(
