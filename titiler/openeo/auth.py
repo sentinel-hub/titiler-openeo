@@ -178,9 +178,11 @@ class OIDCAuth(Auth):
             )
 
             # Verify claims
+            aud = payload.get("aud", [])
+            aud_list = aud.split() if isinstance(aud, str) else aud
             if not (
                 payload.get("azp") == self._oidc_config.client_id
-                or self._oidc_config.client_id in payload.get("aud").split(" ")
+                or self._oidc_config.client_id in aud_list
             ):
                 raise ValueError("Invalid audience")
 
