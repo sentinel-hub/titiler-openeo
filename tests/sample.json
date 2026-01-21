@@ -1,0 +1,202 @@
+{
+  "parameters": [
+    {
+      "name": "time",
+      "description": "Time range for the data",
+      "schema": {},
+      "default": [
+        "2026-01-10",
+        "2026-01-20"
+      ],
+      "optional": true
+    },
+    {
+      "name": "bounding_box",
+      "description": "Bounding box for the area of interest",
+      "schema": {},
+      "default": {
+        "west": -5,
+        "south": 40,
+        "east": 5,
+        "north": 50
+      },
+      "optional": true
+    },
+    {
+      "name": "bands",
+      "description": "Bands to load",
+      "schema": {},
+      "default": [
+        "B04",
+        "B03",
+        "B02"
+      ],
+      "optional": true
+    },
+    {
+      "name": "cloud_cover",
+      "description": "Maximum cloud cover percentage",
+      "schema": {},
+      "default": 20,
+      "optional": true
+    }
+  ],
+  "process_graph": {
+    "loadcollection1": {
+      "process_id": "load_collection",
+      "result": false,
+      "arguments": {
+        "bands": {
+          "from_parameter": "bands"
+        },
+        "id": "sentinel-2-l2a",
+        "properties": {
+          "eo:cloud_cover": {
+            "process_graph": {
+              "lte1": {
+                "process_id": "lte",
+                "arguments": {
+                  "x": {
+                    "from_parameter": "value"
+                  },
+                  "y": {
+                    "from_parameter": "cloud_cover"
+                  }
+                },
+                "result": true
+              }
+            }
+          }
+        },
+        "spatial_extent": {
+          "from_parameter": "bounding_box"
+        },
+        "temporal_extent": {
+          "from_parameter": "time"
+        }
+      }
+    },
+    "applypixelselection1": {
+      "process_id": "apply_pixel_selection",
+      "result": false,
+      "arguments": {
+        "data": {
+          "from_node": "loadcollection1"
+        },
+        "pixel_selection": "first"
+      }
+    },
+    "applydimension1": {
+      "process_id": "apply_dimension",
+      "result": false,
+      "arguments": {
+        "data": {
+          "from_node": "applypixelselection1"
+        },
+        "dimension": "bands",
+        "process": {
+          "process_graph": {
+            "arrayelement1": {
+              "process_id": "array_element",
+              "arguments": {
+                "data": {
+                  "from_parameter": "data"
+                },
+                "index": 0
+              }
+            },
+            "arrayelement2": {
+              "process_id": "array_element",
+              "arguments": {
+                "data": {
+                  "from_parameter": "data"
+                },
+                "index": 1
+              }
+            },
+            "arrayelement3": {
+              "process_id": "array_element",
+              "arguments": {
+                "data": {
+                  "from_parameter": "data"
+                },
+                "index": 2
+              }
+            },
+            "arraycreate1": {
+              "process_id": "array_create",
+              "arguments": {
+                "data": [
+                  {
+                    "from_node": "arrayelement1"
+                  },
+                  {
+                    "from_node": "arrayelement2"
+                  },
+                  {
+                    "from_node": "arrayelement3"
+                  }
+                ]
+              },
+              "result": true
+            }
+          }
+        }
+      }
+    },
+    "apply1": {
+      "process_id": "apply",
+      "result": false,
+      "arguments": {
+        "data": {
+          "from_node": "applydimension1"
+        },
+        "process": {
+          "process_graph": {
+            "linearscalerange1": {
+              "process_id": "linear_scale_range",
+              "arguments": {
+                "inputMax": 1,
+                "inputMin": 0,
+                "outputMax": 255,
+                "x": {
+                  "from_parameter": "x"
+                }
+              }
+            },
+            "trunc1": {
+              "process_id": "trunc",
+              "arguments": {
+                "x": {
+                  "from_node": "linearscalerange1"
+                }
+              },
+              "result": true
+            }
+          }
+        }
+      }
+    },
+    "colorformula1": {
+      "process_id": "color_formula",
+      "result": false,
+      "arguments": {
+        "data": {
+          "from_node": "apply1"
+        },
+        "formula": "Gamma RGB 1.5 Sigmoidal RGB 6 0.3 Saturation 1"
+      }
+    },
+    "saveresult1": {
+      "process_id": "save_result",
+      "result": true,
+      "arguments": {
+        "data": {
+          "from_node": "colorformula1"
+        },
+        "format": "PNG",
+        "options": {}
+      }
+    }
+  }
+}
