@@ -7,7 +7,11 @@ import pystac
 from attrs import define, field
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
-from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
+from openeo_pg_parser_networkx.pg_schema import (
+    BoundingBox,
+    ParameterReference,
+    TemporalInterval,
+)
 from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
@@ -221,6 +225,52 @@ class LoadCollection:
 
     stac_api: stacApiBackend = field()
 
+    def _resolve_parameter_reference(
+        self,
+        value: Any,
+        named_parameters: Optional[dict] = None,
+    ) -> tuple[bool, Optional[Any]]:
+        """Resolve a parameter reference to its actual value.
+
+        Handles both ParameterReference objects (from parser) and dict with
+        'from_parameter' key (for backwards compatibility with direct calls).
+
+        Args:
+            value: The value to check and potentially resolve
+            named_parameters: Dictionary of parameter values
+
+        Returns:
+            Tuple of (is_reference, resolved_value):
+            - (True, resolved_value) if it was a reference and was resolved
+            - (True, original_dict) if it was a dict reference that couldn't be resolved
+            - (True, None) if it was a ParameterReference that couldn't be resolved
+            - (False, None) if it wasn't a reference
+        """
+        param_name = None
+        is_param_ref_object = False
+
+        # Check if it's a ParameterReference object (from parser)
+        if isinstance(value, ParameterReference):
+            param_name = value.from_parameter
+            is_param_ref_object = True
+        # Check if it's a dict with 'from_parameter' key (backwards compatibility)
+        elif isinstance(value, dict) and value.get("from_parameter"):
+            param_name = value["from_parameter"]
+
+        if param_name:
+            if named_parameters and param_name in named_parameters:
+                return (True, named_parameters[param_name])
+            else:
+                # Parameter reference found but not in named_parameters
+                if is_param_ref_object:
+                    # For ParameterReference objects, return None to skip the filter
+                    return (True, None)
+                else:
+                    # For dict format, keep the original dict for backwards compatibility
+                    return (True, value)
+
+        return (False, None)
+
     def _get_items(
         self,
         id: str,
@@ -318,17 +368,14 @@ class LoadCollection:
         if process_id in operators:
             # Resolve parameter reference in the 'y' argument if present
             y_value = args.get("y")
-            if (
-                isinstance(y_value, dict)
-                and y_value.get("from_parameter")
-                and named_parameters
-            ):
-                param_name = y_value["from_parameter"]
-                if param_name in named_parameters:
-                    y_value = named_parameters[param_name]
-                else:
+            is_ref, resolved_value = self._resolve_parameter_reference(
+                y_value, named_parameters
+            )
+            if is_ref:
+                if resolved_value is None:
                     # Parameter not found, skip this filter
                     return None
+                y_value = resolved_value
 
             return {
                 "op": operators[process_id],
@@ -340,27 +387,21 @@ class LoadCollection:
             min_value = args.get("min")
             max_value = args.get("max")
 
-            if (
-                isinstance(min_value, dict)
-                and min_value.get("from_parameter")
-                and named_parameters
-            ):
-                param_name = min_value["from_parameter"]
-                if param_name in named_parameters:
-                    min_value = named_parameters[param_name]
-                else:
+            is_ref, resolved_value = self._resolve_parameter_reference(
+                min_value, named_parameters
+            )
+            if is_ref:
+                if resolved_value is None:
                     return None
+                min_value = resolved_value
 
-            if (
-                isinstance(max_value, dict)
-                and max_value.get("from_parameter")
-                and named_parameters
-            ):
-                param_name = max_value["from_parameter"]
-                if param_name in named_parameters:
-                    max_value = named_parameters[param_name]
-                else:
+            is_ref, resolved_value = self._resolve_parameter_reference(
+                max_value, named_parameters
+            )
+            if is_ref:
+                if resolved_value is None:
                     return None
+                max_value = resolved_value
 
             return {
                 "op": "between",
@@ -384,16 +425,13 @@ class LoadCollection:
         if process_id in ["in", "array_contains"]:
             # Resolve parameter reference in the 'values' argument if present
             values = args.get("values", [])
-            if (
-                isinstance(values, dict)
-                and values.get("from_parameter")
-                and named_parameters
-            ):
-                param_name = values["from_parameter"]
-                if param_name in named_parameters:
-                    values = named_parameters[param_name]
-                else:
+            is_ref, resolved_value = self._resolve_parameter_reference(
+                values, named_parameters
+            )
+            if is_ref:
+                if resolved_value is None:
                     return None
+                values = resolved_value
 
             return {
                 "op": "in",
@@ -415,13 +453,11 @@ class LoadCollection:
 
         def resolve_pattern_value(value):
             """Resolve parameter reference for pattern value."""
-            if (
-                isinstance(value, dict)
-                and value.get("from_parameter")
-                and named_parameters
-            ):
-                param_name = value["from_parameter"]
-                return named_parameters.get(param_name, "")
+            is_ref, resolved_value = self._resolve_parameter_reference(
+                value, named_parameters
+            )
+            if is_ref:
+                return resolved_value if resolved_value is not None else ""
             return value or ""
 
         if process_id == "starts_with":
@@ -503,20 +539,25 @@ class LoadCollection:
         # Try to extract target value from arguments
         target_value = None
         for _, arg_value in args.items():
-            if (
-                isinstance(arg_value, dict)
-                and arg_value.get("from_parameter") == "value"
-            ):
-                continue
-            elif (
-                isinstance(arg_value, dict)
-                and arg_value.get("from_parameter")
-                and named_parameters
-            ):
-                # Resolve parameter reference
-                param_name = arg_value["from_parameter"]
-                if param_name in named_parameters:
-                    target_value = named_parameters[param_name]
+            # Check if it's a reference to the special "value" parameter
+            is_ref, _ = self._resolve_parameter_reference(arg_value, {})
+            if is_ref:
+                # Check if it's the special "value" parameter
+                param_name = None
+                if isinstance(arg_value, ParameterReference):
+                    param_name = arg_value.from_parameter
+                elif isinstance(arg_value, dict):
+                    param_name = arg_value.get("from_parameter")
+
+                if param_name == "value":
+                    continue
+
+                # Try to resolve the parameter
+                is_ref, resolved_value = self._resolve_parameter_reference(
+                    arg_value, named_parameters
+                )
+                if is_ref and resolved_value is not None:
+                    target_value = resolved_value
                     break
             else:
                 target_value = arg_value
