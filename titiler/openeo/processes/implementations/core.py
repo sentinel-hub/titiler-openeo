@@ -533,6 +533,10 @@ def process(f):
         # Handle special parameters
         _handle_special_args(resolved_kwargs, sig)
 
+        # Pass named_parameters if function expects it
+        if "named_parameters" in sig.parameters:
+            resolved_kwargs["named_parameters"] = named_parameters
+
         # Validate parameter types
         _validate_parameter_types(resolved_kwargs, param_types, f.__name__)
 

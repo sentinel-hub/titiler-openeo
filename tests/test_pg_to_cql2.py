@@ -1,4 +1,9 @@
-"""Test conversion from OpenEO process graphs to CQL2-JSON format."""
+"""Test conversion from OpenEO process graphs to CQL2-JSON format.
+
+These tests focus on the CQL2 conversion mechanics - mapping OpenEO process IDs
+to CQL2 operators. For parameter resolution tests with ParameterReference objects
+from the parser, see test_parameter_resolution.py.
+"""
 
 import pytest
 
@@ -20,7 +25,7 @@ def test_simple_eq_conversion(load_collection):
                 "cc": {
                     "process_id": "eq",
                     "arguments": {
-                        "x": {"from_parameter": "value"},
+                        "x": {"property": "eo:cloud_cover"},
                         "y": 10,
                     },
                     "result": True,
@@ -43,7 +48,7 @@ def test_between_conversion(load_collection):
                 "cc": {
                     "process_id": "between",
                     "arguments": {
-                        "x": {"from_parameter": "value"},
+                        "x": {"property": "eo:cloud_cover"},
                         "min": 0,
                         "max": 50,
                     },
@@ -69,7 +74,7 @@ def test_multiple_conditions(load_collection):
             "process_graph": {
                 "cc": {
                     "process_id": "lt",
-                    "arguments": {"x": {"from_parameter": "value"}, "y": 20},
+                    "arguments": {"x": {"property": "eo:cloud_cover"}, "y": 20},
                     "result": True,
                 }
             }
@@ -79,7 +84,7 @@ def test_multiple_conditions(load_collection):
                 "pf": {
                     "process_id": "eq",
                     "arguments": {
-                        "x": {"from_parameter": "value"},
+                        "x": {"property": "platform"},
                         "y": "Sentinel-2B",
                         "case_sensitive": False,
                     },
@@ -108,7 +113,7 @@ def test_pattern_matching(load_collection):
             "process_graph": {
                 "title": {
                     "process_id": "starts_with",
-                    "arguments": {"x": {"from_parameter": "value"}, "y": "Sentinel"},
+                    "arguments": {"data": {"property": "title"}, "pattern": "Sentinel"},
                     "result": True,
                 }
             }
@@ -129,7 +134,7 @@ def test_array_operator(load_collection):
                 "bands": {
                     "process_id": "in",
                     "arguments": {
-                        "x": {"from_parameter": "value"},
+                        "x": {"property": "band_names"},
                         "values": ["B02", "B03", "B04"],
                     },
                     "result": True,
@@ -165,3 +170,68 @@ def test_empty_properties(load_collection):
     properties = {}
     result = load_collection._convert_process_graph_to_cql2(properties)
     assert result == {}
+
+
+def test_ends_with_operator(load_collection):
+    """Test ends_with pattern operator."""
+    properties = {
+        "instrument": {
+            "process_graph": {
+                "ends": {
+                    "process_id": "ends_with",
+                    "arguments": {
+                        "data": {"property": "instrument"},
+                        "pattern": "MSI",
+                    },
+                    "result": True,
+                }
+            }
+        }
+    }
+
+    expected = {"op": "like", "args": [{"property": "instrument"}, "%MSI"]}
+    result = load_collection._convert_process_graph_to_cql2(properties)
+    assert result == expected
+
+
+def test_contains_operator(load_collection):
+    """Test contains pattern operator."""
+    properties = {
+        "title": {
+            "process_graph": {
+                "contains": {
+                    "process_id": "contains",
+                    "arguments": {
+                        "data": {"property": "title"},
+                        "pattern": "L2A",
+                    },
+                    "result": True,
+                }
+            }
+        }
+    }
+
+    expected = {"op": "like", "args": [{"property": "title"}, "%L2A%"]}
+    result = load_collection._convert_process_graph_to_cql2(properties)
+    assert result == expected
+
+
+def test_is_null_operator(load_collection):
+    """Test is_null operator."""
+    properties = {
+        "optional_field": {
+            "process_graph": {
+                "null_check": {
+                    "process_id": "is_null",
+                    "arguments": {
+                        "x": {"property": "optional_field"},
+                    },
+                    "result": True,
+                }
+            }
+        }
+    }
+
+    expected = {"op": "is null", "args": [{"property": "optional_field"}]}
+    result = load_collection._convert_process_graph_to_cql2(properties)
+    assert result == expected
