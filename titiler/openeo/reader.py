@@ -636,7 +636,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     Read a STAC item and return an ImageData object.
 
     Args:
-        item: STAC item dictionary or pystac.Item object
+        item: STAC item dictionary (converted to pystac.Item by SimpleSTACReader)
         bbox: Bounding box to read
         **kwargs: Additional keyword arguments to pass to the reader
 
@@ -653,7 +653,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 img = src_dst.part(bbox, **kwargs)
 
                 # Create cutline_mask from item geometry if available
-                if geometry := item.get("geometry"):
+                if geometry := src_dst.item.geometry:
                     img = _apply_cutline_mask(img, geometry, kwargs.get("dst_crs"))
 
                 return img

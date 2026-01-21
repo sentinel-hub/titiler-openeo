@@ -41,37 +41,37 @@ class MockReader(SimpleSTACReader):
 def test_load_collection_pixel_threshold(monkeypatch):
     """Test pixel threshold in load_collection."""
 
-    # Mock STAC item
-    mock_item = Item.from_dict(
-        {
-            "type": "Feature",
-            "id": "test-item",
-            "stac_version": "1.0.0",
-            "stac_extensions": [
-                "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
-            ],
-            "bbox": [0, 0, 1, 1],
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-            },
-            "properties": {
-                "datetime": "2021-01-01T00:00:00Z",
-                "proj:crs": "EPSG:4326",
-                "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
-            },
-            "assets": {
-                "B01": {
-                    "href": "https://example.com/B01.tif",
-                    "type": "image/tiff; application=geotiff",
-                }
-            },
-        }
-    )
+    # Mock STAC item as dict (as returned by STAC API)
+    mock_item_dict = {
+        "type": "Feature",
+        "id": "test-item",
+        "stac_version": "1.0.0",
+        "stac_extensions": [
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
+        "bbox": [0, 0, 1, 1],
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        "properties": {
+            "datetime": "2021-01-01T00:00:00Z",
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+        },
+        "assets": {
+            "B01": {
+                "href": "https://example.com/B01.tif",
+                "type": "image/tiff; application=geotiff",
+            }
+        },
+        "links": [],
+    }
 
-    # Mock _get_items to return our test item
+    # Mock _get_items to return our test item as dict
     def mock_get_items(*args, **kwargs):
-        return [mock_item]
+        # Return pystac.Item for internal processing but reader gets dict
+        return [Item.from_dict(mock_item_dict)]
 
     monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
     monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
