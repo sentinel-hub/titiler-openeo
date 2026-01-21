@@ -13,8 +13,9 @@ from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
+from rasterio.features import rasterize
 from rasterio.transform import array_bounds
-from rasterio.warp import transform_bounds
+from rasterio.warp import transform_bounds, transform_geom
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import AssetAsBandError, InvalidAssetName, MissingAssets
 from rio_tiler.io import Reader
@@ -652,14 +653,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 img = src_dst.part(bbox, **kwargs)
 
                 # Create cutline_mask from item geometry if available
-                # Handle both pystac.Item objects and dictionaries
-                geometry = None
-                if hasattr(item, "geometry"):
-                    geometry = item.geometry
-                elif isinstance(item, dict):
-                    geometry = item.get("geometry")
-
-                if geometry is not None:
+                if geometry := item.get("geometry"):
                     img = _apply_cutline_mask(img, geometry, kwargs.get("dst_crs"))
 
                 return img
@@ -696,9 +690,6 @@ def _apply_cutline_mask(
     Returns:
         ImageData object with cutline_mask set
     """
-    from rasterio.features import rasterize
-    from rasterio.warp import transform_geom
-
     # Transform geometry from WGS84 to the destination CRS if needed
     if dst_crs is not None and dst_crs != WGS84_CRS:
         geometry = transform_geom(WGS84_CRS, dst_crs, geometry)

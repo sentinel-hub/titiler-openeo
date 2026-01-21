@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-from pystac import Item
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 
@@ -503,45 +502,6 @@ class TestReaderGeometryIntegration:
         assert np.sum(~result.cutline_mask[:, :50]) > np.sum(
             ~result.cutline_mask[:, 50:]
         )
-
-    @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_detects_geometry_from_pystac_item(self, mock_reader_class):
-        """Test that _reader extracts geometry from pystac.Item objects."""
-        # Setup mock
-        mock_reader_instance = MagicMock()
-        mock_reader_class.return_value.__enter__ = MagicMock(
-            return_value=mock_reader_instance
-        )
-        mock_reader_class.return_value.__exit__ = MagicMock(return_value=False)
-        mock_reader_instance.part.return_value = self._create_mock_image_data()
-
-        # Create a pystac.Item with geometry
-        item = Item.from_dict(
-            {
-                "type": "Feature",
-                "stac_version": "1.0.0",
-                "id": "test-pystac-item",
-                "bbox": [0, 0, 10, 10],
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
-                },
-                "properties": {"datetime": "2025-01-01T00:00:00Z"},
-                "assets": {},
-                "links": [],
-            }
-        )
-
-        bbox = (0, 0, 10, 10)
-
-        # Call _reader
-        result = _reader(item, bbox, dst_crs=CRS.from_epsg(4326))
-
-        # Verify cutline_mask was applied (geometry covers full bbox)
-        assert result.cutline_mask is not None
-        assert result.cutline_mask.shape == (100, 100)
-        # All pixels should be inside the geometry
-        assert np.all(~result.cutline_mask)
 
     @patch("titiler.openeo.reader.SimpleSTACReader")
     def test_reader_no_cutline_when_no_geometry(self, mock_reader_class):
