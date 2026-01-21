@@ -10,7 +10,7 @@ from openeo_pg_parser_networkx.pg_schema import (
     ParameterReference,
     TemporalInterval,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
 from .data_model import LazyRasterStack
@@ -125,6 +125,9 @@ def _resolve_special_parameter(
     effective_type = underlying_type if is_optional else param_type
 
     if effective_type == BoundingBox:
+        # If already a BoundingBox, return as-is
+        if isinstance(param_value, BoundingBox):
+            return param_value
         if isinstance(param_value, dict):
             return BoundingBox(
                 west=param_value.get("west"),
@@ -134,6 +137,9 @@ def _resolve_special_parameter(
                 crs=param_value.get("crs", None),
             )
     if effective_type == TemporalInterval:
+        # If already a TemporalInterval, return as-is
+        if isinstance(param_value, TemporalInterval):
+            return param_value
         if isinstance(param_value, dict):
             return TemporalInterval(
                 [param_value.get("start", None), param_value.get("end", None)]
@@ -353,6 +359,12 @@ def _value_to_openeo_name(value: Any) -> str:
 
     value_type = type(value)
 
+    # Handle OpenEO schema types first (before dict check)
+    if isinstance(value, BoundingBox):
+        return "bounding-box"
+    if isinstance(value, TemporalInterval):
+        return "temporal-interval"
+
     if isinstance(value, dict):
         return "datacube"
     if isinstance(value, LazyRasterStack):
@@ -439,6 +451,15 @@ def _validate_parameter_types(
                     f"Parameter '{param_name}' in process '{func_name}': "
                     f"expected '{expected_type_name}' but got '{actual_type_name}'"
                 )
+
+        # Skip validation for already-resolved Pydantic BaseModel instances
+        # These are already validated when constructed (e.g., BoundingBox, TemporalInterval)
+        if isinstance(param_value, BaseModel):
+            # Check if the type matches the expected type
+            is_opt, underlying = _is_optional_type(param_type)
+            expected_type = underlying if is_opt else param_type
+            if isinstance(param_value, expected_type):
+                continue
 
         # Use Pydantic TypeAdapter for general validation
         try:
