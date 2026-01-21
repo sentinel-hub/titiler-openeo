@@ -230,6 +230,7 @@ class LoadCollection:
         fields: Optional[List[str]] = None,
         limit: Optional[int] = None,
         max_items: Optional[int] = None,
+        named_parameters: Optional[dict] = None,
     ) -> List[Item]:
         fields = fields or [
             "assets",
@@ -289,14 +290,20 @@ class LoadCollection:
 
         if properties is not None:
             # Convert OpenEO process graphs to STAC CQL2-JSON format
-            filter_expr = self._convert_process_graph_to_cql2(properties)
+            filter_expr = self._convert_process_graph_to_cql2(
+                properties, named_parameters
+            )
             query_params["filter"] = filter_expr
             query_params["filter_lang"] = "cql2-json"
 
         return self.stac_api.get_items(**query_params)
 
     def _handle_comparison_operator(
-        self, process_id: str, prop_name: str, args: dict
+        self,
+        process_id: str,
+        prop_name: str,
+        args: dict,
+        named_parameters: Optional[dict] = None,
     ) -> Optional[Dict]:
         """Handle comparison operators like eq, lt, gt, etc."""
         operators = {
@@ -309,55 +316,134 @@ class LoadCollection:
         }
 
         if process_id in operators:
+            # Resolve parameter reference in the 'y' argument if present
+            y_value = args.get("y")
+            if (
+                isinstance(y_value, dict)
+                and y_value.get("from_parameter")
+                and named_parameters
+            ):
+                param_name = y_value["from_parameter"]
+                if param_name in named_parameters:
+                    y_value = named_parameters[param_name]
+                else:
+                    # Parameter not found, skip this filter
+                    return None
+
             return {
                 "op": operators[process_id],
-                "args": [{"property": f"{prop_name}"}, args.get("y")],
+                "args": [{"property": f"{prop_name}"}, y_value],
             }
 
         if process_id == "between":
+            # Resolve parameter references in min/max arguments if present
+            min_value = args.get("min")
+            max_value = args.get("max")
+
+            if (
+                isinstance(min_value, dict)
+                and min_value.get("from_parameter")
+                and named_parameters
+            ):
+                param_name = min_value["from_parameter"]
+                if param_name in named_parameters:
+                    min_value = named_parameters[param_name]
+                else:
+                    return None
+
+            if (
+                isinstance(max_value, dict)
+                and max_value.get("from_parameter")
+                and named_parameters
+            ):
+                param_name = max_value["from_parameter"]
+                if param_name in named_parameters:
+                    max_value = named_parameters[param_name]
+                else:
+                    return None
+
             return {
                 "op": "between",
                 "args": [
                     {"property": f"{prop_name}"},
-                    args.get("min"),
-                    args.get("max"),
+                    min_value,
+                    max_value,
                 ],
             }
 
         return None
 
     def _handle_array_operator(
-        self, process_id: str, prop_name: str, args: dict
+        self,
+        process_id: str,
+        prop_name: str,
+        args: dict,
+        named_parameters: Optional[dict] = None,
     ) -> Optional[Dict]:
         """Handle array operators like in, array_contains."""
         if process_id in ["in", "array_contains"]:
+            # Resolve parameter reference in the 'values' argument if present
+            values = args.get("values", [])
+            if (
+                isinstance(values, dict)
+                and values.get("from_parameter")
+                and named_parameters
+            ):
+                param_name = values["from_parameter"]
+                if param_name in named_parameters:
+                    values = named_parameters[param_name]
+                else:
+                    return None
+
             return {
                 "op": "in",
                 "args": [
                     {"property": f"{prop_name}"},
-                    {"array": args.get("values", [])},
+                    {"array": values},
                 ],
             }
         return None
 
     def _handle_pattern_operator(
-        self, process_id: str, prop_name: str, args: dict
+        self,
+        process_id: str,
+        prop_name: str,
+        args: dict,
+        named_parameters: Optional[dict] = None,
     ) -> Optional[Dict]:
         """Handle pattern matching operators like starts_with, ends_with, contains."""
+
+        def resolve_pattern_value(value):
+            """Resolve parameter reference for pattern value."""
+            if (
+                isinstance(value, dict)
+                and value.get("from_parameter")
+                and named_parameters
+            ):
+                param_name = value["from_parameter"]
+                return named_parameters.get(param_name, "")
+            return value or ""
+
         if process_id == "starts_with":
-            pattern = args.get("y", "") + "%"
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = resolve_pattern_value(pattern_arg) + "%"
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "ends_with":
-            pattern = "%" + args.get("y", "")
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = "%" + resolve_pattern_value(pattern_arg)
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
             }
         elif process_id == "contains":
-            pattern = "%" + args.get("y", "") + "%"
+            # Support both 'y' (OpenEO standard) and 'pattern' argument names
+            pattern_arg = args.get("y") or args.get("pattern")
+            pattern = "%" + resolve_pattern_value(pattern_arg) + "%"
             return {
                 "op": "like",
                 "args": [{"property": f"{prop_name}"}, pattern],
@@ -368,13 +454,18 @@ class LoadCollection:
         """Handle null check operators."""
         if process_id == "is_null":
             return {
-                "op": "isNull",
+                "op": "is null",
                 "args": [{"property": f"{prop_name}"}],
             }
         return None
 
     def _handle_logical_operator(
-        self, process_id: str, prop_name: str, args: dict, node_id: str
+        self,
+        process_id: str,
+        prop_name: str,
+        args: dict,
+        node_id: str,
+        named_parameters: Optional[dict] = None,
     ) -> Optional[Dict]:
         """Handle logical operators like and, or, not."""
         if process_id not in ["and", "or", "not"]:
@@ -385,7 +476,9 @@ class LoadCollection:
             for sub_arg in args.get("expressions", []):
                 # Recursively process sub-conditions
                 sub_pg = {"process_graph": {f"sub_{node_id}": sub_arg}}
-                sub_condition = self._convert_process_graph_to_cql2({prop_name: sub_pg})
+                sub_condition = self._convert_process_graph_to_cql2(
+                    {prop_name: sub_pg}, named_parameters
+                )
                 if sub_condition:
                     sub_conditions.append(sub_condition)
 
@@ -395,13 +488,17 @@ class LoadCollection:
         elif process_id == "not":
             # Recursively process the negated condition
             sub_pg = {"process_graph": {f"sub_{node_id}": args.get("expression")}}
-            sub_condition = self._convert_process_graph_to_cql2({prop_name: sub_pg})
+            sub_condition = self._convert_process_graph_to_cql2(
+                {prop_name: sub_pg}, named_parameters
+            )
             if sub_condition:
                 return {"op": "not", "args": [sub_condition]}
 
         return None
 
-    def _handle_default_operator(self, prop_name: str, args: dict) -> Optional[Dict]:
+    def _handle_default_operator(
+        self, prop_name: str, args: dict, named_parameters: Optional[dict] = None
+    ) -> Optional[Dict]:
         """Handle default case for unmatched processes."""
         # Try to extract target value from arguments
         target_value = None
@@ -411,6 +508,16 @@ class LoadCollection:
                 and arg_value.get("from_parameter") == "value"
             ):
                 continue
+            elif (
+                isinstance(arg_value, dict)
+                and arg_value.get("from_parameter")
+                and named_parameters
+            ):
+                # Resolve parameter reference
+                param_name = arg_value["from_parameter"]
+                if param_name in named_parameters:
+                    target_value = named_parameters[param_name]
+                    break
             else:
                 target_value = arg_value
                 break
@@ -426,7 +533,9 @@ class LoadCollection:
         """Handle non-process graph case (direct value)."""
         return {"op": "=", "args": [{"property": f"{prop_name}"}, value]}
 
-    def _process_single_property(self, prop_name: str, process_graph) -> Optional[Dict]:
+    def _process_single_property(
+        self, prop_name: str, process_graph, named_parameters: Optional[dict] = None
+    ) -> Optional[Dict]:
         """Process a single property in the process graph."""
         # Handle non-process graph case (direct value)
         if not isinstance(process_graph, dict) or "process_graph" not in process_graph:
@@ -445,12 +554,18 @@ class LoadCollection:
 
         # Try each operator type handler
         handlers = [
-            self._handle_comparison_operator,
-            self._handle_array_operator,
-            self._handle_pattern_operator,
-            self._handle_null_check,
+            lambda p_id, p_name, a: self._handle_comparison_operator(
+                p_id, p_name, a, named_parameters
+            ),
+            lambda p_id, p_name, a: self._handle_array_operator(
+                p_id, p_name, a, named_parameters
+            ),
+            lambda p_id, p_name, a: self._handle_pattern_operator(
+                p_id, p_name, a, named_parameters
+            ),
+            lambda p_id, p_name, a: self._handle_null_check(p_id, p_name),
             lambda p_id, p_name, a: self._handle_logical_operator(
-                p_id, p_name, a, node_id
+                p_id, p_name, a, node_id, named_parameters
             ),
         ]
 
@@ -461,14 +576,17 @@ class LoadCollection:
                 return condition
 
         # Try default handler as fallback
-        return self._handle_default_operator(prop_name, args)
+        return self._handle_default_operator(prop_name, args, named_parameters)
 
-    def _convert_process_graph_to_cql2(self, properties: dict) -> dict:
+    def _convert_process_graph_to_cql2(
+        self, properties: dict, named_parameters: Optional[dict] = None
+    ) -> dict:
         """
         Convert OpenEO process graph properties to STAC CQL2-JSON format.
 
         Args:
             properties: Dictionary of property name to OpenEO process graph
+            named_parameters: Dictionary of parameter values for resolving parameter references
 
         Returns:
             Dictionary in CQL2-JSON format following the STAC API Filter Extension spec
@@ -479,13 +597,17 @@ class LoadCollection:
         # For single property we return the condition directly
         if len(properties) == 1:
             prop_name = next(iter(properties.keys()))
-            condition = self._process_single_property(prop_name, properties[prop_name])
+            condition = self._process_single_property(
+                prop_name, properties[prop_name], named_parameters
+            )
             return condition if condition else {}
 
         # For multiple properties, combine with AND
         cql2_filter: Dict[str, Any] = {"op": "and", "args": []}
         for prop_name, process_graph in properties.items():
-            condition = self._process_single_property(prop_name, process_graph)
+            condition = self._process_single_property(
+                prop_name, process_graph, named_parameters
+            )
             if condition:
                 cql2_filter["args"].append(condition)
 
@@ -502,6 +624,7 @@ class LoadCollection:
         width: Optional[int] = 1024,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
+        named_parameters: Optional[dict] = None,
     ) -> RasterStack:
         """Load Collection."""
         items = self._get_items(
@@ -509,6 +632,7 @@ class LoadCollection:
             spatial_extent=spatial_extent,
             temporal_extent=temporal_extent,
             properties=properties,
+            named_parameters=named_parameters,
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
@@ -585,6 +709,7 @@ class LoadCollection:
         width: Optional[int] = 1024,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
+        named_parameters: Optional[dict] = None,
     ) -> RasterStack:
         """Load Collection and return image."""
         items = self._get_items(
@@ -592,6 +717,7 @@ class LoadCollection:
             spatial_extent=spatial_extent,
             temporal_extent=temporal_extent,
             properties=properties,
+            named_parameters=named_parameters,
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
