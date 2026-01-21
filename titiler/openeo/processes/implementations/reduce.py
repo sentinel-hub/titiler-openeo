@@ -14,6 +14,46 @@ from .data_model import RasterStack, get_first_item
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
+# Mapping of reducer function names to their corresponding PixelSelectionMethod names
+# This enables _reduce_temporal_dimension to use the efficient streaming approach
+#
+# NOTE: 'first' and 'last' from math.py are NOT included here because they have
+# different semantics:
+# - math.py first/last = first/last item in temporal order (chronologically)
+# - PixelSelectionMethod first = first available (non-masked) pixel value
+#
+# Use 'firstpixel' reducer for pixel-wise first valid value behavior.
+# Note: rio_tiler doesn't have a 'last' PixelSelectionMethod, so 'lastpixel'
+# uses a fallback array-based implementation (not in this mapping).
+PIXEL_SELECTION_REDUCERS = {
+    "firstpixel": "first",  # first available pixel (fills masked values)
+    "mean": "mean",
+    "median": "median",
+    "sd": "stdev",  # openEO uses 'sd' for standard deviation
+    "stdev": "stdev",
+    "count": "count",
+    "highestpixel": "highest",
+    "lowestpixel": "lowest",
+    "lastbandlow": "lastbandlow",
+    "lastbandhight": "lastbandhight",
+}
+
+
+def _get_pixel_selection_method_name(reducer: Callable) -> Optional[str]:
+    """Get the PixelSelectionMethod name for a reducer function if applicable.
+
+    Args:
+        reducer: A reducer function
+
+    Returns:
+        The PixelSelectionMethod name if the reducer corresponds to one, None otherwise
+    """
+    reducer_name = getattr(reducer, "__name__", None)
+    if reducer_name and reducer_name in PIXEL_SELECTION_REDUCERS:
+        return PIXEL_SELECTION_REDUCERS[reducer_name]
+    return None
+
+
 pixel_methods = Literal[
     "first",
     "highest",
@@ -266,6 +306,11 @@ def _reduce_temporal_dimension(
 ) -> RasterStack:
     """Reduce the temporal dimension of a RasterStack.
 
+    This function uses the efficient streaming approach via PixelSelectionMethod
+    for supported reducers (first, mean, median, stdev, count, highest, lowest,
+    lastbandlow, lastbandhight). For custom reducers, it falls back to loading
+    all data and applying the reducer.
+
     Args:
         data: A RasterStack with temporal dimension
         reducer: A reducer function to apply on the temporal dimension
@@ -281,7 +326,33 @@ def _reduce_temporal_dimension(
             "Expected a non-empty RasterStack for temporal dimension reduction"
         )
 
-    # Apply the reducer to the stack
+    # Check if the reducer corresponds to a PixelSelectionMethod
+    # This enables the efficient streaming approach for supported reducers
+    pixel_selection_method = _get_pixel_selection_method_name(reducer)
+
+    if pixel_selection_method is not None:
+        # Use the efficient streaming approach via apply_pixel_selection
+        # This processes data incrementally without loading everything into memory
+        result = apply_pixel_selection(data, pixel_selection=pixel_selection_method)
+
+        # Convert the result to match reduce_dimension's expected output format
+        # apply_pixel_selection returns {"data": ImageData}, we return {"reduced": ImageData}
+        result_img = result["data"]
+        return {
+            "reduced": ImageData(
+                result_img.array,
+                assets=result_img.assets,
+                crs=result_img.crs,
+                bounds=result_img.bounds,
+                band_names=result_img.band_names,
+                metadata={
+                    "reduced_dimension": "temporal",
+                    "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+                },
+            )
+        }
+
+    # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
     # Some reducers might be able to work with partial data
     reduced_array = reducer(data=data)

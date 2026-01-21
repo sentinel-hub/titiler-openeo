@@ -286,6 +286,7 @@ class LoadCollection:
             "assets",
             "id",
             "bbox",
+            "geometry",
             "collection",
             "properties",
             "type",

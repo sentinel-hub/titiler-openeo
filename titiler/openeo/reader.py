@@ -13,8 +13,9 @@ from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
+from rasterio.features import rasterize
 from rasterio.transform import array_bounds
-from rasterio.warp import transform_bounds
+from rasterio.warp import transform_bounds, transform_geom
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import AssetAsBandError, InvalidAssetName, MissingAssets
 from rio_tiler.io import Reader
@@ -635,12 +636,12 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     Read a STAC item and return an ImageData object.
 
     Args:
-        item: STAC item dictionary
+        item: STAC item dictionary (converted to pystac.Item by SimpleSTACReader)
         bbox: Bounding box to read
         **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
-        ImageData object
+        ImageData object with cutline_mask set from item geometry if available
     """
     max_retries = 10
     retry_delay = 1.0  # seconds
@@ -649,7 +650,13 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     while True:
         try:
             with SimpleSTACReader(item) as src_dst:
-                return src_dst.part(bbox, **kwargs)
+                img = src_dst.part(bbox, **kwargs)
+
+                # Create cutline_mask from item geometry if available
+                if geometry := src_dst.item.geometry:
+                    img = _apply_cutline_mask(img, geometry, kwargs.get("dst_crs"))
+
+                return img
         except RasterioIOError as e:
             retries += 1
             if retries >= max_retries:
@@ -662,3 +669,41 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
             time.sleep(retry_delay)
             # Increase delay for next retry (exponential backoff)
             retry_delay *= 2
+
+
+def _apply_cutline_mask(
+    img: ImageData,
+    geometry: Dict[str, Any],
+    dst_crs: Optional[rasterio.crs.CRS] = None,
+) -> ImageData:
+    """
+    Apply a cutline mask to an ImageData object based on item geometry.
+
+    This creates a mask from the STAC item's footprint geometry, which can be used
+    to optimize mosaicking by indicating which pixels are outside the valid data area.
+
+    Args:
+        img: ImageData object to apply the mask to
+        geometry: GeoJSON geometry dict (typically in EPSG:4326)
+        dst_crs: Target CRS for the geometry transformation
+
+    Returns:
+        ImageData object with cutline_mask set
+    """
+    # Transform geometry from WGS84 to the destination CRS if needed
+    if dst_crs is not None and dst_crs != WGS84_CRS:
+        geometry = transform_geom(WGS84_CRS, dst_crs, geometry)
+
+    # Create cutline mask using rasterize
+    # The mask is True where data is valid (inside the geometry)
+    cutline_mask = rasterize(
+        [geometry],
+        out_shape=(img.height, img.width),
+        transform=img.transform,
+        default_value=0,
+        fill=1,
+        dtype="uint8",
+    ).astype("bool")
+
+    img.cutline_mask = cutline_mask
+    return img
