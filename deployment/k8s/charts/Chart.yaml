@@ -1,16 +1,16 @@
 apiVersion: v2
-appVersion: 0.8.0
+appVersion: 0.9.0
 description: OpenEO by TiTiler
 name: titiler-openeo
-version: 0.13.4
-icon: https://raw.githubusercontent.com/developmentseed/titiler/main/docs/logos/TiTiler_logo_small.png
+version: 0.9.0
+icon: >-
+  https://raw.githubusercontent.com/developmentseed/titiler/main/docs/logos/TiTiler_logo_small.png
 maintainers:
   - name: DevelopmentSeed
     url: https://github.com/developmentseed
-
 dependencies:
   - name: postgresql
     alias: postgresql
-    version: "16.6.6"
-    repository: "https://charts.bitnami.com/bitnami"
+    version: 16.6.6
+    repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
