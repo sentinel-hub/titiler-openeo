@@ -387,7 +387,7 @@ def last(data):
         else:
             # Regular RasterStack - use existing logic
             last_img = get_last_item(data)
-            return last_img.array[-1]
+            return last_img.array
     elif isinstance(data, numpy.ndarray):
         return data[-1]
     elif isinstance(data, numpy.ma.MaskedArray):

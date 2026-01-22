@@ -225,19 +225,18 @@ def test_first_last_temporal_behavior():
     # Test first() function - should return first temporal element
     first_result = first(stack)
 
-    # NEW behavior: gets first temporal item, then first spectral band from that item
-    # This is the correct temporal "first" behavior
+    # Should return the entire first temporal image (all bands)
     assert isinstance(first_result, np.ndarray)
-    # Should be the first band from the first temporal image: (10, 10) spatial
-    assert first_result.shape == (10, 10)  # First band from first temporal item
+    # Should be all bands from the first temporal item: (3, 10, 10)
+    assert first_result.shape == (3, 10, 10)
     # Should have value 1.0 since first temporal item has value 1.0
     assert np.all(first_result == 1.0)
 
     # Test last() function - should return last temporal element
     last_result = last(stack)
 
-    # Should be the last band from the last temporal image
+    # Should return the entire last temporal image (all bands)
     assert isinstance(last_result, np.ndarray)
-    assert last_result.shape == (10, 10)  # Last band from last temporal item
+    assert last_result.shape == (3, 10, 10)
     # Should have value 3.0 since last temporal item has value 3.0
     assert np.all(last_result == 3.0)
