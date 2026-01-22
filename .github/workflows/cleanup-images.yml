@@ -1,0 +1,162 @@
+name: Cleanup Container Images
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_run:
+    workflows: ["Release Please"]
+    types: [completed]
+
+  # Variables for manual triggering
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (no actual deletions)'
+        type: boolean
+        default: true
+      pr_retention_days:
+        description: 'PR image retention (days)'
+        type: number
+        default: 30
+      sha_retention_days:
+        description: 'SHA/dev image retention (days)'
+        type: number
+        default: 7
+      untagged_retention_days:
+        description: 'Untagged image retention (days)'
+        type: number
+        default: 7
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Cleanup old images
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+            const prRetention = ${{ github.event.inputs.pr_retention_days || 30 }};
+            const shaRetention = ${{ github.event.inputs.sha_retention_days || 7 }};
+            const untaggedRetention = ${{ github.event.inputs.untagged_retention_days || 7 }};
+
+            const cutoffPR = Date.now() - prRetention * 86400000;
+            const cutoffSHA = Date.now() - shaRetention * 86400000;
+            const cutoffUntagged = Date.now() - untaggedRetention * 86400000;
+
+            const patterns = {
+              release: /^(v\d+\.\d+\.\d+.*|latest|\d{8}-\d{6})$/,
+              pr: /^pr-\d+$/,
+              sha: /^sha-[a-f0-9]+$/,
+              dev: /^(dev|main)$/
+            };
+
+            console.log('='.repeat(60));
+            console.log(`Container Image Cleanup - ${owner}/${repo}`);
+            console.log(`PR: ${prRetention}d | SHA: ${shaRetention}d | Untagged: ${untaggedRetention}d | Dry run: ${dryRun}`);
+            console.log('='.repeat(60));
+
+            const stats = { kept: 0, deleted: 0, errors: 0 };
+            let page = 1;
+
+            while (true) {
+              console.log(`\n📄 Page ${page}...`);
+              const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                package_type: 'container',
+                package_name: repo,
+                org: owner,
+                page,
+                per_page: 100,
+                state: 'active'
+              }).catch(err => {
+                console.log(`⚠️ API Error (page ${page}): ${err.message}`);
+                return { data: [] };
+              });
+
+              if (!versions.length) {
+                console.log(`✓ No more versions (page ${page})`);
+                break;
+              }
+              console.log(`  Found ${versions.length} versions`);
+
+              for (const v of versions) {
+                const tags = v.metadata?.container?.tags || [];
+                const created = new Date(v.created_at).getTime();
+                const age = Math.floor((Date.now() - created) / 86400000);
+
+                let shouldDelete = false;
+                let reason;
+
+                if (tags.length === 0) {
+                  shouldDelete = created < cutoffUntagged;
+                  reason = shouldDelete ? `untagged >${untaggedRetention}d (${age}d)` : `untagged <${untaggedRetention}d (${age}d)`;
+                } else {
+                  const isRelease = tags.some(t => patterns.release.test(t));
+                  const isPR = tags.some(t => patterns.pr.test(t));
+                  const isSHA = tags.some(t => patterns.sha.test(t) || patterns.dev.test(t));
+
+                  if (isRelease) {
+                    reason = `release (${age}d)`;
+                  } else if (isPR) {
+                    shouldDelete = created < cutoffPR;
+                    reason = shouldDelete ? `PR >${prRetention}d (${age}d)` : `PR <${prRetention}d (${age}d)`;
+                  } else if (isSHA) {
+                    shouldDelete = created < cutoffSHA;
+                    reason = shouldDelete ? `SHA >${shaRetention}d (${age}d)` : `SHA <${shaRetention}d (${age}d)`;
+                  } else {
+                    shouldDelete = created < cutoffUntagged;
+                    reason = shouldDelete ? `unknown >${untaggedRetention}d (${age}d)` : `unknown <${untaggedRetention}d (${age}d)`;
+                  }
+                }
+
+                const tagStr = tags.length ? tags.join(', ') : 'untagged';
+                console.log(`${shouldDelete ? '✗ DELETE' : '✓ KEEP'} ${tagStr} - ${reason}`);
+
+                if (shouldDelete) {
+                  if (!dryRun) {
+                    try {
+                      await github.rest.packages.deletePackageVersionForOrg({
+                        package_type: 'container',
+                        package_name: repo,
+                        org: owner,
+                        package_version_id: v.id
+                      });
+                      stats.deleted++;
+                    } catch (err) {
+                      console.log(`  ❌ ${err.message}`);
+                      stats.errors++;
+                    }
+                  } else {
+                    stats.deleted++;
+                  }
+                } else {
+                  stats.kept++;
+                }
+              }
+
+              page++;
+            }
+
+            console.log('\n' + '='.repeat(60));
+            console.log(`Processed ${page - 1} pages total`);
+            console.log(`Kept: ${stats.kept} | Deleted: ${stats.deleted} | Errors: ${stats.errors}`);
+            console.log('='.repeat(60));
+
+            await core.summary
+              .addHeading('Container Image Cleanup 🧹')
+              .addTable([
+                [{data: 'Metric', header: true}, {data: 'Count', header: true}],
+                ['Kept', stats.kept.toString()],
+                ['Deleted', stats.deleted.toString()],
+                ['Errors', stats.errors.toString()]
+              ])
+              .addRaw(`\n**Mode:** ${dryRun ? '🔍 Dry Run' : '🗑️ Live'} | **Retention:** PR=${prRetention}d, SHA=${shaRetention}d, Untagged=${untaggedRetention}d`)
+              .write();
+
+            if (stats.errors > 0) core.setFailed(`${stats.errors} errors`);
