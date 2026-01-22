@@ -1,4 +1,41 @@
-"""titiler.openeo processed reduce."""
+"""titiler.openeo processed reduce.
+
+CRITICAL DEVELOPER WARNING - REDUCER INVOCATION PATTERNS
+=========================================================
+
+When implementing dimension reduction functions in this module, it is CRITICAL to understand
+that reducer functions may maintain internal state, caching, or other stateful behavior.
+This means you MUST call each reducer function EXACTLY ONCE per reduction operation.
+
+KEY REQUIREMENTS:
+-----------------
+1. **NEVER iterate and call the reducer multiple times** on individual items
+   ❌ BAD: for item in data: result = reducer(data=item)
+   ✅ GOOD: stacked = stack_all_data(data); result = reducer(data=stacked)
+
+2. **Stack/combine all data FIRST, then call reducer ONCE**
+   - For spectral reduction across time: Stack to (time, bands, h, w), transpose to
+     (bands, time, h, w), call reducer ONCE
+   - For temporal reduction: Stack to (time, bands, h, w), call reducer ONCE
+
+3. **Understand the reduction axis**
+   - Spectral reduction: Reduce across BANDS (axis depends on how data is stacked)
+   - Temporal reduction: Reduce across TIME dimension
+   - Always ensure the reducer operates on the correct axis
+
+4. **Why this matters:**
+   - Some reducers maintain caches of computed values
+   - Calling a reducer multiple times can return incorrect/stale results
+   - This bug has occurred MULTIPLE TIMES and caused production issues
+
+5. **Testing requirements:**
+   - Always test with a stateful/caching reducer
+   - Verify reducer is called exactly once (use mock.call_count)
+   - Test with multiple time slices and multiple bands
+
+If you're modifying _reduce_spectral_dimension_stack or _reduce_temporal_dimension,
+READ THIS ENTIRE WARNING CAREFULLY before making changes.
+"""
 
 import logging
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
@@ -428,9 +465,15 @@ def _reduce_spectral_dimension_stack(
 ) -> RasterStack:
     """Reduce the spectral dimension of a RasterStack.
 
+    CRITICAL: This function calls the reducer EXACTLY ONCE to handle reducers with
+    internal state/caching. All images are stacked first, then the reducer is invoked
+    once on the combined data. DO NOT MODIFY to call reducer per-image.
+
     Args:
         data: A RasterStack with spectral dimension
-        reducer: A reducer function to apply on the spectral dimension
+        reducer: A reducer function to apply on the spectral dimension.
+                 The reducer will be called ONCE with shape (bands, time, height, width)
+                 and must reduce along axis 0 (bands).
 
     Returns:
         A RasterStack with the spectral dimension reduced for each image
@@ -443,51 +486,26 @@ def _reduce_spectral_dimension_stack(
             "Expected a non-empty RasterStack for spectral dimension reduction"
         )
 
-    # Create a new stack with the reduced data
-    result = {}
+    # Load all images first and collect metadata
+    images = []
+    keys = []
+    metadata_list = []
 
-    # Iterate through keys instead of items() to avoid executing all tasks at once
-    # Apply the reducer to each individual time slice
     for key in data.keys():
         try:
             img = data[key]  # Access each image individually
-
-            # Apply the reducer to this individual image's spectral bands (array only)
-            reduced_img_data = reducer(data=img.array)
-
-            # Validate the reducer output - must NOT be a RasterStack or dict
-            if isinstance(reduced_img_data, dict):
-                raise ValueError(
-                    f"The reducer must return an array-like object for spectral dimension reduction "
-                    f"of image {key}, not a RasterStack (dict). The reducer should process the spectral bands "
-                    f"and return the resulting array directly."
-                )
-
-            # Check if it's array-like (more compliant than checking only numpy.ndarray)
-            try:
-                reduced_img_data = numpy.asarray(reduced_img_data)
-            except (TypeError, ValueError) as e:
-                reducer_type = type(reduced_img_data).__name__
-                raise ValueError(
-                    f"The reducer must return an array-like object for spectral dimension reduction "
-                    f"of image {key}, but returned {reducer_type} which cannot be converted to an array. "
-                    f"Expected array-like data with reduced spectral bands."
-                ) from e
-
-            result[key] = ImageData(
-                reduced_img_data,
-                assets=[key],
-                crs=img.crs,
-                bounds=img.bounds,
-                band_names=img.band_names if img.band_names is not None else [],
-                metadata={
-                    "reduced_dimension": "spectral",
-                    "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-                },
+            images.append(img.array)
+            keys.append(key)
+            metadata_list.append(
+                {
+                    "crs": img.crs,
+                    "bounds": img.bounds,
+                    "band_names": img.band_names if img.band_names is not None else [],
+                    "assets": [key],
+                }
             )
         except KeyError as e:
             # Log task failures but continue processing other keys
-            # This maintains backward compatibility with task-based execution
             logging.warning(
                 "Failed to load data for key '%s' during spectral dimension reduction: %s. "
                 "This may be due to task execution failure in lazy loading. Skipping this item.",
@@ -495,6 +513,105 @@ def _reduce_spectral_dimension_stack(
                 str(e),
             )
             continue
+
+    if not images:
+        raise ValueError("No valid images loaded for spectral dimension reduction")
+
+    # CRITICAL: Stack all images FIRST, then call reducer ONCE
+    # This is required for reducers with internal caching/state
+    # Stack all images along a new temporal dimension (axis 0)
+    # Shape will be (time, bands, height, width)
+    stacked_data = numpy.stack(images, axis=0)
+
+    # To reduce the spectral dimension while maintaining time separation,
+    # we move the bands axis to the front: (bands, time, height, width)
+    # This allows the reducer to operate on the bands dimension (axis 0)
+    transposed_data = numpy.moveaxis(stacked_data, 1, 0)
+
+    # CRITICAL: Call the reducer EXACTLY ONCE with ALL the data
+    # The reducer will reduce along axis 0 (bands dimension)
+    # Input shape: (bands, time, height, width)
+    # Expected output shape: (time, height, width) for full reduction
+    #                    or: (reduced_bands, time, height, width) for partial reduction
+    reduced_data = reducer(data=transposed_data)
+
+    # Validate the reducer output - must NOT be a RasterStack or dict
+    if isinstance(reduced_data, dict):
+        raise ValueError(
+            "The reducer must return an array-like object for spectral dimension reduction, "
+            "not a RasterStack (dict). The reducer should process the spectral bands "
+            "and return the resulting array directly."
+        )
+
+    # Check if it's array-like
+    try:
+        reduced_data = numpy.asarray(reduced_data)
+    except (TypeError, ValueError) as e:
+        reducer_type = type(reduced_data).__name__
+        raise ValueError(
+            f"The reducer must return an array-like object for spectral dimension reduction, "
+            f"but returned {reducer_type} which cannot be converted to an array. "
+            f"Expected array-like data with reduced spectral bands."
+        ) from e
+
+    # Transform the result back to (time, ...) format for splitting into time slices
+    # The reducer output shape depends on whether it fully or partially reduced the spectral dimension
+    if reduced_data.ndim == 3:
+        # Output is (time, height, width) - fully reduced spectral dimension
+        final_data = reduced_data
+    elif reduced_data.ndim == 4:
+        # Output is (reduced_bands, time, height, width) - partial spectral reduction
+        # Move time axis back to position 0: (time, reduced_bands, height, width)
+        final_data = numpy.moveaxis(reduced_data, 1, 0)
+    elif reduced_data.ndim == 2:
+        # Output is (time, height) or (height, width) - need to determine which
+        # If first dimension matches number of images, it's (time, height)
+        if reduced_data.shape[0] == len(images):
+            # Add width dimension: (time, height, 1)
+            final_data = reduced_data[:, :, numpy.newaxis]
+        else:
+            # Assume it's (height, width), expand for time: (1, height, width)
+            final_data = reduced_data[numpy.newaxis, :, :]
+            # Repeat for all time slices
+            final_data = numpy.repeat(final_data, len(images), axis=0)
+    else:
+        # Unexpected dimensionality - try to infer
+        logging.warning(
+            f"Unexpected reducer output shape {reduced_data.shape} for spectral reduction. "
+            f"Expected 3D (time, height, width) or 4D (time, bands, height, width). "
+            f"Attempting to reshape..."
+        )
+        # If first dimension matches images, assume it's already correct
+        if reduced_data.shape[0] == len(images):
+            final_data = reduced_data
+        else:
+            # Try to move second dimension to first
+            final_data = (
+                numpy.moveaxis(reduced_data, 1, 0)
+                if reduced_data.ndim > 1
+                else reduced_data
+            )
+
+    # Split the result back into individual ImageData objects
+    result = {}
+    for idx, (key, meta) in enumerate(zip(keys, metadata_list)):
+        # Extract the data for this time slice
+        if final_data.ndim >= 1 and len(final_data) > idx:
+            time_slice_data = final_data[idx]
+        else:
+            time_slice_data = final_data
+
+        result[key] = ImageData(
+            time_slice_data,
+            assets=meta["assets"],
+            crs=meta["crs"],
+            bounds=meta["bounds"],
+            band_names=meta["band_names"],
+            metadata={
+                "reduced_dimension": "spectral",
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
 
     return result
 

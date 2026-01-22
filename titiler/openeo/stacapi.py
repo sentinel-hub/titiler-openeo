@@ -753,7 +753,20 @@ class LoadCollection:
         tile_buffer: Optional[float] = None,
         named_parameters: Optional[dict] = None,
     ) -> RasterStack:
-        """Load Collection and return image."""
+        """Load Collection and return image.
+
+        .. deprecated::
+            Use `load_collection` followed by `reduce_dimension(dimension='time')` instead.
+            This process is maintained for backward compatibility but will be removed in a future version.
+        """
+        import warnings
+
+        warnings.warn(
+            "load_collection_and_reduce is deprecated. Use load_collection followed by \"\n            \"reduce_dimension(dimension='time') instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         items = self._get_items(
             id,
             spatial_extent=spatial_extent,

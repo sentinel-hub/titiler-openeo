@@ -44,29 +44,34 @@ Explore how to:
 
 The examples demonstrate different approaches to managing resolution:
 
-1. **Default Resolution**:
+1. **Default Resolution** (Recommended):
 
 ```python
-loadcol = load_collection_and_reduce(
+loadcol = load_collection(
     "SENTINEL2_L2A",
     spatial_extent=bbox,
     temporal_extent=["2021-01-01", "2021-12-31"],
     bands=["B04", "B08"]
 )
+# Reduce temporal dimension
+reduced = reduce_dimension(loadcol, dimension="time", reducer="first")
 # Uses default width of 1024 pixels for memory efficiency
 ```
 
 2. **Custom Resolution**:
 
 ```python
-loadcol = load_collection_and_reduce(
+loadcol = load_collection(
     "SENTINEL2_L2A",
     spatial_extent=bbox,
     temporal_extent=["2021-01-01", "2021-12-31"],
     bands=["B04", "B08"],
     width=2048,  # Explicitly control resolution
 )
+reduced = reduce_dimension(loadcol, dimension="time", reducer="first")
 ```
+
+> **Note**: The `load_collection_and_reduce` process is deprecated. Use `load_collection` followed by `reduce_dimension` as shown above.
 
 ## Running the Notebooks
 

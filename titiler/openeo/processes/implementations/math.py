@@ -22,15 +22,21 @@ __all__ = [
     "constant",
     "cos",
     "cosh",
+    "count",
     "divide",
     "e",
     "exp",
     "first",
+    "firstpixel",
     "floor",
+    "highestpixel",
     "last",
+    "lastbandhight",
+    "lastbandlow",
     "linear_scale_range",
     "ln",
     "log",
+    "lowestpixel",
     "min",
     "max",
     "mean",
@@ -45,6 +51,7 @@ __all__ = [
     "sin",
     "sinh",
     "sqrt",
+    "stdev",
     "subtract",
     "tan",
     "tanh",
@@ -340,7 +347,7 @@ def first(data):
         else:
             # Regular RasterStack - use existing logic
             first_img = get_first_item(data)
-            return first_img.array[0]
+            return first_img.array
     elif isinstance(data, numpy.ndarray):
         return data[0]
     elif isinstance(data, numpy.ma.MaskedArray):

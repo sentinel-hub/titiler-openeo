@@ -1,0 +1,30 @@
+{
+    "id": "lowestpixel",
+    "summary": "Select lowest pixel values",
+    "description": "Selects the lowest pixel values across the temporal dimension. This uses the PixelSelectionMethod 'lowest' which feeds the mosaic array with the lowest pixel values. When used with RasterStack, it processes data incrementally using an efficient streaming approach.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    ],
+    "returns": {
+        "description": "Lowest pixel values.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}

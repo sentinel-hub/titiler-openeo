@@ -170,8 +170,19 @@ def _resolve_kwargs(
     Raises:
         ProcessParameterMissing: If a parameter reference cannot be resolved
     """
+    special_args = [
+        "axis",  # Dimension to operate on
+        "keepdims",  # Whether to preserve dimensions after reduction
+        "context",  # Additional process context
+        "dim_labels",  # Labels for dimensions
+        "data",  # Input data reference
+    ]
     resolved_kwargs = {}
     for k, arg in kwargs.items():
+        if k in special_args:
+            # Special args are handled separately
+            resolved_kwargs[k] = arg
+            continue
         if isinstance(arg, ParameterReference):
             if arg.from_parameter in named_parameters:
                 value = named_parameters[arg.from_parameter]

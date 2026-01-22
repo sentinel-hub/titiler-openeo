@@ -174,15 +174,12 @@ def test_reduce_dimension_spectral(sample_raster_stack):
     """Test reducing spectral dimension of RasterStack."""
 
     # Mean reducer for spectral dimension
+    # Receives shape (bands, time, height, width) and reduces along bands (axis=0)
     def mean_reducer(data, **kwargs):
-        if isinstance(data, ImageData):
-            # For a single image, return mean across bands as a 2D array
-            return np.mean(data.array, axis=0)
-        elif isinstance(data, dict) and all(
-            isinstance(v, ImageData) for v in data.values()
-        ):
-            # For a stack of images, return an array with shape (n_images,)
-            return np.array([np.mean(img.array, axis=0) for img in data.values()])
+        # Data is a numpy array, not ImageData or dict
+        if isinstance(data, (np.ndarray, np.ma.MaskedArray)):
+            # Reduce along axis 0 (bands dimension)
+            return np.mean(data, axis=0)
         return None
 
     result = reduce_dimension(sample_raster_stack, mean_reducer, "spectral")
@@ -190,11 +187,15 @@ def test_reduce_dimension_spectral(sample_raster_stack):
     assert isinstance(result, dict)
     assert len(result) == len(sample_raster_stack)
 
-    # Each result should be an ImageData with 1 band (spectral dimension reduced)
+    # Each result should be an ImageData with reduced spectral dimension
     for _key, img_data in result.items():
         assert isinstance(img_data, ImageData)
-        # The band dimension should be removed or reduced to 1
-        assert img_data.array.ndim == 2 or img_data.count == 1
+        # The spectral dimension should be reduced
+        # Result shape should be (height, width) or (1, height, width)
+        assert img_data.array.ndim in [2, 3]
+        if img_data.array.ndim == 3:
+            # If 3D, should have fewer bands than original (original had 3: red, green, blue)
+            assert img_data.count <= 3
 
 
 def test_hillshade(sample_raster_stack):

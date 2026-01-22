@@ -1,7 +1,8 @@
 {
     "id": "load_collection_and_reduce",
-    "summary": "Load a collection and return a datacube",
-    "description": "Loads a collection from the current back-end by its id and returns it as a datacube.",
+    "summary": "Load a collection and return a datacube (DEPRECATED)",
+    "description": "**DEPRECATED**: This process is deprecated. Use `load_collection` followed by `reduce_dimension` with dimension 'time' instead.\n\nLoads a collection from the current back-end by its id and returns it as a datacube.",
+    "deprecated": true,
     "categories": [
         "cubes",
         "import"

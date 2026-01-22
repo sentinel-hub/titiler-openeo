@@ -1,0 +1,30 @@
+{
+    "id": "firstpixel",
+    "summary": "Get first available (non-masked) pixel value",
+    "description": "Selects the first available (non-masked) pixel value across the temporal dimension. This uses the PixelSelectionMethod 'first' which feeds the mosaic array with the first valid pixel value encountered. This is useful for filling in masked/nodata areas with valid pixels from other timestamps.\n\nNote: This is different from the 'first' function which returns data from the first timestamp chronologically. 'firstpixel' returns the first valid pixel value, filling masked areas.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    ],
+    "returns": {
+        "description": "First available pixel values.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}
