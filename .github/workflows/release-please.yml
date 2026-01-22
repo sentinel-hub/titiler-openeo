@@ -55,7 +55,7 @@ jobs:
   publish-docker:
     needs: release-please
     runs-on: ubuntu-latest
-    if: ${{ contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
+    if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
     permissions:
       contents: read
       packages: write
@@ -95,7 +95,7 @@ jobs:
   publish-helm-chart:
     needs: release-please
     runs-on: ubuntu-latest
-    if: ${{ contains(fromJSON(needs.release-please.outputs.paths_released), 'deployment/k8s/charts') }}
+    if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), 'deployment/k8s/charts') }}
     permissions:
       contents: write
     
