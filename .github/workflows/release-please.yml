@@ -54,6 +54,9 @@ jobs:
     needs: release-please
     runs-on: ubuntu-latest
     if: ${{ needs.release-please.outputs.release_created }}
+    permissions:
+      contents: read
+      packages: write
     
     steps:
       - name: Checkout
