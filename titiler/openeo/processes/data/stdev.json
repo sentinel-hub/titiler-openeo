@@ -1,0 +1,51 @@
+{
+    "id": "stdev",
+    "summary": "Calculate standard deviation",
+    "description": "Calculates the standard deviation across the data. This is an alias for the 'sd' function that matches the PixelSelectionMethod naming. When used with RasterStack, it uses an efficient streaming approach.\n\nThe standard deviation is a measure that is used to quantify the amount of variation or dispersion of a set of data values.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        },
+        {
+            "name": "axis",
+            "description": "The axis along which to compute the standard deviation.",
+            "schema": {
+                "type": [
+                    "integer",
+                    "null"
+                ]
+            },
+            "optional": true,
+            "default": null
+        },
+        {
+            "name": "keepdims",
+            "description": "If true, retains reduced dimensions with length 1.",
+            "schema": {
+                "type": "boolean"
+            },
+            "optional": true,
+            "default": false
+        }
+    ],
+    "returns": {
+        "description": "The standard deviation.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}

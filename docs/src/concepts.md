@@ -11,7 +11,7 @@ In openEO, a datacube is a fundamental concept and a key component of the platfo
 The backend intelligently handles resolution and dimensions using these key principles:
 
 1. **Default Resolution Control**:
-   - The `load_collection` and `load_collection_and_reduce` processes default to a width of 1024 pixels
+   - The `load_collection` process defaults to a width of 1024 pixels
    - This intentionally avoids loading data at native resolution by default, which could cause memory issues
    - Users can explicitly request native resolution by providing their own width/height parameters
    - The default provides a good balance between quality and performance
@@ -69,12 +69,15 @@ The data cube implementation in openEO by TiTiler follows these principles for d
 
 ### Data Reduction
 
-The ImageData object is obtained by reducing as early as possible the data from the collections. While both `load_collection` and `load_collection_and_reduce` processes are available, it's recommended to use `load_collection_and_reduce` to immediately get an `imagedata` object at the desired resolution. This approach:
+The ImageData object is obtained by reducing as early as possible the data from the collections. The recommended approach is to use `load_collection` followed by `reduce_dimension` with dimension `'time'` (or `'temporal'`). This approach:
 
 1. Uses a default width of 1024 pixels to prevent memory issues
 2. Allows explicit control over resolution through width/height parameters
 3. Performs data reduction at the target resolution
 4. Maintains proper proportions throughout the process
+5. Provides more flexibility for custom reducers and dimension handling
+
+**Note**: The `load_collection_and_reduce` process is deprecated and maintained only for backward compatibility.
 
 ![alt text](img/rasterstack.png)
 

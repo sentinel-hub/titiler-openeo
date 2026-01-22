@@ -1,0 +1,30 @@
+{
+    "id": "lastbandhight",
+    "summary": "Select pixels using last band (highest value)",
+    "description": "Selects pixels using the last band as decision factor, choosing pixels where the last band has the highest value. This uses the PixelSelectionMethod 'lastbandhight' which feeds the mosaic array using the last band as the decision factor.\n\nNote: The spelling 'lastbandhight' matches rio_tiler's PixelSelectionMethod.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    ],
+    "returns": {
+        "description": "Pixel selection based on highest last band value.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}

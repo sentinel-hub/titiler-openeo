@@ -1,0 +1,30 @@
+{
+    "id": "lastbandlow",
+    "summary": "Select pixels using last band (lowest value)",
+    "description": "Selects pixels using the last band as decision factor, choosing pixels where the last band has the lowest value. This uses the PixelSelectionMethod 'lastbandlow' which feeds the mosaic array using the last band as the decision factor.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    ],
+    "returns": {
+        "description": "Pixel selection based on lowest last band value.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}

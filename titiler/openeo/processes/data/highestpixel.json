@@ -1,0 +1,30 @@
+{
+    "id": "highestpixel",
+    "summary": "Select highest pixel values",
+    "description": "Selects the highest pixel values across the temporal dimension. This uses the PixelSelectionMethod 'highest' which feeds the mosaic array with the highest pixel values. When used with RasterStack, it processes data incrementally using an efficient streaming approach.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        }
+    ],
+    "returns": {
+        "description": "Highest pixel values.",
+        "schema": {
+            "type": [
+                "number",
+                "array"
+            ]
+        }
+    }
+}

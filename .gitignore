@@ -173,3 +173,5 @@ file::memory:
 
 .venv311/
 ._temp_store.json
+docs/src/notebooks/evi.tif
+docs/src/notebooks/timeseries-basic.csv

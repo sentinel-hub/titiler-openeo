@@ -1,0 +1,39 @@
+{
+    "id": "count",
+    "summary": "Count valid (non-masked) pixels",
+    "description": "Counts the number of valid (non-masked) pixels across the temporal dimension. When used with RasterStack, it efficiently counts valid pixels using streaming approach.",
+    "categories": [
+        "math",
+        "reducer"
+    ],
+    "parameters": [
+        {
+            "name": "data",
+            "description": "An array or data cube with temporal dimension.",
+            "schema": {
+                "type": [
+                    "array",
+                    "object"
+                ]
+            }
+        },
+        {
+            "name": "condition",
+            "description": "Optional condition for counting.",
+            "schema": {
+                "type": [
+                    "boolean",
+                    "null"
+                ]
+            },
+            "optional": true,
+            "default": null
+        }
+    ],
+    "returns": {
+        "description": "Count of valid pixels.",
+        "schema": {
+            "type": "number"
+        }
+    }
+}
