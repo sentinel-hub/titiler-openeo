@@ -116,6 +116,5 @@ jobs:
         uses: helm/chart-releaser-action@v1.7.0
         with:
           charts_dir: deployment/k8s
-          config: cr.yaml
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
