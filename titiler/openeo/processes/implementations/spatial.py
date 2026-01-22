@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy
 from pyproj import CRS
 from rasterio.warp import Resampling as WarpResampling
-from shapely.geometry import shape
 
 from .data_model import ImageData, RasterStack
 
@@ -84,7 +83,7 @@ def _apply_reducer_to_image(
 
     Args:
         img: An ImageData object.
-        geom_obj: A shapely geometry object.
+        geom_obj: A GeoJSON geometry dict or object with __geo_interface__ property.
         reducer: A reducer function.
         target_dimension: Optional dimension name to store additional information.
 
@@ -92,7 +91,9 @@ def _apply_reducer_to_image(
         The result of applying the reducer.
     """
     # Get coverage array for the geometry
-    coverage = img.get_coverage_array(geom_obj.__geo_interface__)
+    # Handle both dict and objects with __geo_interface__
+    geom_dict = geom_obj if isinstance(geom_obj, dict) else geom_obj.__geo_interface__
+    coverage = img.get_coverage_array(geom_dict)
 
     for band_idx in range(img.count):
         # Get band data
@@ -135,7 +136,7 @@ def _apply_reducer_to_raster_stack(
 
     Args:
         data: A RasterStack object.
-        geom_obj: A shapely geometry object.
+        geom_obj: A GeoJSON geometry dict or object with __geo_interface__ property.
         reducer: A reducer function.
         target_dimension: Optional dimension name to store additional information.
 
@@ -232,13 +233,12 @@ def aggregate_spatial(
 
     # Process each geometry
     for idx, feature in enumerate(features):
-        # Extract and convert geometry
+        # Extract geometry (already a GeoJSON dict)
         geom = _extract_geometry(feature)
-        geom_obj = shape(geom) if isinstance(geom, Dict) else geom
 
         # Apply reducer to the RasterStack
         stack_results = _apply_reducer_to_raster_stack(
-            data, geom_obj, reducer, target_dimension
+            data, geom, reducer, target_dimension
         )
         if stack_results:
             results[str(idx)] = stack_results

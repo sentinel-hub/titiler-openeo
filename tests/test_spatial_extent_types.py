@@ -46,15 +46,6 @@ def test_boundingbox_with_optional_params():
     assert bbox.height == 100.0
 
 
-def test_boundingbox_polygon_property():
-    """Test that BoundingBox has the polygon property."""
-    bbox = BoundingBox(west=0.0, south=0.0, east=10.0, north=10.0)
-
-    polygon = bbox.polygon
-    assert polygon is not None
-    assert hasattr(polygon, "bounds")
-
-
 def test_boundingbox_type_validation():
     """Test that BoundingBox instances pass type validation."""
     from typing import Optional

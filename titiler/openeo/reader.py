@@ -25,7 +25,6 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, BBox, Indexes
 from rio_tiler.utils import cast_to_sequence
-from shapely.geometry import box
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
@@ -492,22 +491,17 @@ def _get_target_crs_bbox(
         with SimpleSTACReader(item) as src_dst:
             item_bbox = src_dst.bounds
             if item_bbox:
-                item_polygon = box(
-                    item_bbox[0], item_bbox[1], item_bbox[2], item_bbox[3]
-                )
                 if not spatial_extent:
                     if not target_bbox:
                         target_bbox = list(item_bbox)
                     else:
-                        current_polygon = box(
-                            target_bbox[0],
-                            target_bbox[1],
-                            target_bbox[2],
-                            target_bbox[3],
-                        )
-                        union = current_polygon.union(item_polygon)
-                        if not union.is_empty:
-                            target_bbox = list(union.bounds)
+                        # Compute union of two bounding boxes
+                        target_bbox = [
+                            min(target_bbox[0], item_bbox[0]),  # west
+                            min(target_bbox[1], item_bbox[1]),  # south
+                            max(target_bbox[2], item_bbox[2]),  # east
+                            max(target_bbox[3], item_bbox[3]),  # north
+                        ]
 
                     if target_crs == WGS84_CRS:  # Only update if still default
                         target_crs = src_dst.crs
