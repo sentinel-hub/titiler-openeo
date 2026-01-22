@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 (2026-01-22)
+
+## What's Changed
+* fix: permissions to push docker image. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/188
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.9.0...v0.9.1
+
 ## 0.9.0 (2026-01-21)
 
 ## What's Changed
