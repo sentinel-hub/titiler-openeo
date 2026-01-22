@@ -27,7 +27,7 @@ jobs:
   publish-pypi:
     needs: release-please
     runs-on: ubuntu-latest
-    if: ${{ contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
+    if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
     
     steps:
       - name: Checkout
