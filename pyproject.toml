@@ -1,6 +1,6 @@
 [project]
 name = "titiler-openeo"
-version = "0.9.1"
+version = "0.10.0"
 description = "TiTiler backend for openEO."
 readme = "README.md"
 requires-python = ">=3.10"
