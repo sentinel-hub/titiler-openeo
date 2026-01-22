@@ -1,9 +1,10 @@
 {
-  "include-component-in-tag": false,
+  "include-component-in-tag": true,
   "packages": {
     ".": {
       "release-type": "python",
       "package-name": "titiler-openeo",
+      "component": "titiler-openeo",
       "changelog-type": "github",
       "changelog-sections": [
         { "type": "feat", "section": "Features", "hidden": false },
@@ -18,9 +19,6 @@
         { "type": "build", "section": "Build System", "hidden": true },
         { "type": "ci", "section": "Continuous Integration", "hidden": true }
       ],
-      "group-pull-request-title-pattern": "chore: release${component} ${version}",
-      "pull-request-title-pattern": "chore: release${component} ${version}",
-      "separate-pull-requests": false,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
       "extra-files": [
@@ -30,16 +28,32 @@
           "jsonpath": "$.appVersion"
         },
         {
-          "type": "yaml",
-          "path": "deployment/k8s/charts/Chart.yaml",
-          "jsonpath": "$.version"
-        },
-        {
           "type": "generic",
           "path": "titiler/openeo/__init__.py",
           "glob": false
         }
       ]
+    },
+    "deployment/k8s/charts": {
+      "release-type": "helm",
+      "package-name": "titiler-openeo-chart",
+      "component": "helm-chart",
+      "changelog-type": "github",
+      "changelog-sections": [
+        { "type": "feat", "section": "Features", "hidden": false },
+        { "type": "fix", "section": "Bug Fixes", "hidden": false },
+        { "type": "perf", "section": "Performance Improvements", "hidden": false },
+        { "type": "revert", "section": "Reverts", "hidden": false },
+        { "type": "docs", "section": "Documentation", "hidden": false },
+        { "type": "style", "section": "Styles", "hidden": true },
+        { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
+        { "type": "refactor", "section": "Code Refactoring", "hidden": false },
+        { "type": "test", "section": "Tests", "hidden": true },
+        { "type": "build", "section": "Build System", "hidden": true },
+        { "type": "ci", "section": "Continuous Integration", "hidden": true }
+      ],
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false
     }
   }
 }
