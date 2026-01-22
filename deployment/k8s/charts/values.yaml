@@ -2,7 +2,7 @@
 
 image:
   repository: ghcr.io/sentinel-hub/titiler-openeo
-  tag: "latest"
+  tag:  # Uses appVersion from Chart.yaml by default
   pullPolicy: IfNotPresent
   command: "uvicorn"
   args:
