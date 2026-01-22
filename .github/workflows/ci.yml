@@ -99,7 +99,7 @@ jobs:
   publish:
     needs: [tests]
     runs-on: ubuntu-latest
-    if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/titiler-openeo-') || github.event_name == 'release'
     steps:
       - uses: actions/checkout@v6
       
@@ -117,8 +117,11 @@ jobs:
       - name: Set tag version
         id: tag
         run: |
-          echo "version=${GITHUB_REF#refs/*/}"
-          echo "version=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+          # Strip 'titiler-openeo-' prefix from tag to get version
+          TAG_NAME="${GITHUB_REF#refs/*/}"
+          VERSION="${TAG_NAME#titiler-openeo-}"
+          echo "version=${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Set module version
         id: module
@@ -126,7 +129,7 @@ jobs:
           echo version=$(python -c'import titiler.openeo; print(titiler.openeo.__version__)') >> $GITHUB_OUTPUT
 
       - name: Build and publish
-        if: ${{ steps.tag.outputs.version }} == ${{ steps.module.outputs.version}}
+        if: steps.tag.outputs.version == steps.module.outputs.version
         env:
           UV_PUBLISH_USERNAME: ${{ secrets.PYPI_USERNAME }}
           UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
