@@ -52,7 +52,7 @@ jobs:
 
       - name: Run helm unittest
         run: |
-          helm plugin install https://github.com/helm-unittest/helm-unittest
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.6.2
           helm unittest deployment/k8s/charts
 
       - name: Run chart-testing (list-changed)
