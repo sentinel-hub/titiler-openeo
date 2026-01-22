@@ -32,7 +32,7 @@ classifiers = [
 dependencies = [
     "titiler.core>=0.24.0,<0.25",
     "starlette-cramjam>=0.4,<0.6",
-    "openeo-pg-parser-networkx==2025.10.1",
+    "openeo-pg-parser-networkx==2026.1.2",
     "pystac-client",
     "pydantic-settings~=2.0",
     "jsonpath-ng~=1.7.0",
