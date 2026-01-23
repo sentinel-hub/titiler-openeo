@@ -926,7 +926,3 @@ class TestHandleUnionTypes:
         result = _handle_union_types((int, float))
         # The heuristic detects primitives as array-like
         assert result == "array"
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
