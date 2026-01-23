@@ -12,7 +12,7 @@ from attrs import define, field
 from fastapi import Header
 from fastapi.exceptions import HTTPException
 from fastapi.security.utils import get_authorization_scheme_param
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
@@ -287,7 +287,7 @@ class AuthToken(BaseModel):
     def check_token(cls, v):
         """Validate Token."""
         if v == "":
-            raise ValidationError("Empty token string.")
+            raise ValueError("Empty token string.")
         return v
 
     @classmethod

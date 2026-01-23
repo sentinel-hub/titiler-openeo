@@ -5,8 +5,9 @@ import json
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import ValidationError
 
-from titiler.openeo.auth import OIDCAuth, OIDCConfig
+from titiler.openeo.auth import AuthToken, OIDCAuth, OIDCConfig
 
 
 @pytest.fixture
@@ -91,3 +92,26 @@ def test_oidc_auth_audience_invalid(mock_get_key, mock_settings):
 
     with pytest.raises(Exception, match="Invalid audience"):
         auth._verify_token(token, mock_key)
+
+
+def test_auth_token_empty_string_validation():
+    """Test that empty token string raises proper validation error."""
+    with pytest.raises((ValidationError, ValueError)):
+        AuthToken(method="oidc", provider="realm", token="")
+
+
+def test_auth_token_valid():
+    """Test that valid token is accepted."""
+    token = AuthToken(method="oidc", provider="realm", token="valid_token_123")
+    assert token.token == "valid_token_123"
+    assert token.method == "oidc"
+    assert token.provider == "realm"
+
+
+def test_auth_token_from_token():
+    """Test parsing Bearer token format."""
+    bearer = "Bearer oidc/realm/my_access_token"
+    token = AuthToken.from_token(bearer)
+    assert token.method == "oidc"
+    assert token.provider == "realm"
+    assert token.token == "my_access_token"
