@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.2 (2026-01-23)
+
+## What's Changed
+* perf: enhance cache control settings for tile endpoints and update version by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/205
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.10.1...titiler-openeo-v0.10.2
+
 ## 0.10.1 (2026-01-23)
 
 ## What's Changed
