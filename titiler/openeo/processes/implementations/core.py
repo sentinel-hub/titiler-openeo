@@ -182,9 +182,11 @@ def _resolve_kwargs(
 
     All ParameterReference objects are resolved from named_parameters.
     Special parameter transformations (User->user_id, dict->BoundingBox) are applied.
+    Special OpenEO args (context, axis, etc.) are skipped if they reference
+    non-existent parameters, as they will be removed later if not in the function signature.
 
     Raises:
-        ProcessParameterMissing: If a parameter reference cannot be resolved
+        ProcessParameterMissing: If a required parameter reference cannot be resolved
     """
     resolved = {}
     for key, value in kwargs.items():
@@ -194,6 +196,10 @@ def _resolve_kwargs(
 
         ref_name = value.from_parameter
         if ref_name not in named_parameters:
+            # Skip special OpenEO args that reference non-existent parameters
+            # They will be removed later by _handle_special_args if not in signature
+            if key in _SPECIAL_OPENEO_ARGS:
+                continue
             raise ProcessParameterMissing(
                 f"Parameter '{ref_name}' missing for process '{func_name}'"
             )
