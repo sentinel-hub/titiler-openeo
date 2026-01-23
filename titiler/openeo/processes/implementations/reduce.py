@@ -114,59 +114,41 @@ class DimensionNotAvailable(Exception):
         )
 
 
-def _initialize_pixel_selection_method(
-    img: ImageData, pixsel_method, assets_used: List
-):
-    """Initialize pixel selection method with first image properties."""
-    if len(assets_used) == 0:
-        pixsel_method.cutline_mask = img.cutline_mask
-        pixsel_method.width = img.width
-        pixsel_method.height = img.height
-        pixsel_method.count = img.count
-        return img.crs, img.bounds, img.band_names
-    return None, None, None
+def _compute_aggregated_cutline_mask(
+    cutline_masks: List[Optional[numpy.ndarray]],
+) -> Optional[numpy.ndarray]:
+    """Compute combined cutline mask from a list of individual masks.
 
+    Combines masks using OR logic: a pixel is valid (False) if ANY image has it valid.
+    If any image has no cutline_mask (None), all its pixels are considered valid,
+    which means the aggregated result should indicate all pixels are valid.
 
-def _process_image_for_pixel_selection(
-    img: ImageData,
-    pixsel_method,
-    key: str,
-    assets_used: List,
-    crs: Optional[CRS],
-    bounds: Optional[BBox],
-    band_names: Optional[List[str]],
-) -> Tuple[Optional[CRS], Optional[BBox], Optional[List[str]]]:
-    """Process a single image for pixel selection."""
-    # Initialize on first image
-    init_crs, init_bounds, init_band_names = _initialize_pixel_selection_method(
-        img, pixsel_method, assets_used
-    )
-    if init_crs is not None:
-        crs, bounds, band_names = init_crs, init_bounds, init_band_names
+    Args:
+        cutline_masks: List of cutline_mask arrays (or None)
 
-    # Validate band count
-    assert (
-        img.count == pixsel_method.count
-    ), "Assets HAVE TO have the same number of bands"
+    Returns:
+        Combined cutline mask, or None if all pixels are valid
+    """
+    if not cutline_masks:
+        return None
 
-    # Handle size differences
-    if any([img.width != pixsel_method.width, img.height != pixsel_method.height]):
-        logging.warning(
-            "Cannot concatenate images with different size. Will resize using first asset width/height"
-        )
-        h = pixsel_method.height
-        w = pixsel_method.width
-        pixsel_method.feed(
-            numpy.ma.MaskedArray(
-                resize_array(img.array.data, h, w),
-                mask=resize_array(img.array.mask * 1, h, w).astype("bool"),
-            )
-        )
-    else:
-        pixsel_method.feed(img.array)
+    # If any image has no cutline_mask, all its pixels are valid
+    # With OR logic, this means all pixels in the aggregate are valid
+    if any(m is None for m in cutline_masks):
+        return None
 
-    assets_used.append(key)
-    return crs, bounds, band_names
+    # All masks are valid arrays at this point - filter to satisfy mypy
+    valid_masks: List[numpy.ndarray] = [m for m in cutline_masks if m is not None]
+
+    # Start with first mask
+    aggregated = valid_masks[0].copy()
+
+    # OR combination: pixel is valid (False) if ANY image has it valid
+    # Since True = outside footprint, minimum gives the union of valid areas
+    for mask in valid_masks[1:]:
+        aggregated = numpy.minimum(aggregated, mask)
+
+    return aggregated
 
 
 def _create_pixel_selection_result(
@@ -190,81 +172,55 @@ def _create_pixel_selection_result(
     }
 
 
-def _process_timestamp_group_simple(
-    timestamp_items,  # Can be Dict[str, ImageData] or dict-like object
-    pixsel_method,
-    assets_used: List,
-    crs: Optional[CRS],
-    bounds: Optional[BBox],
-    band_names: Optional[List[str]],
-    pixel_selection: str,
-) -> Tuple[
-    bool,
-    Optional[Dict[str, ImageData]],
-    Optional[CRS],
-    Optional[BBox],
-    Optional[List[str]],
-]:
-    """Process a timestamp group using already-loaded ImageData."""
-    # Require dict-like interface with .items() method for consistency
-    try:
-        items = timestamp_items.items()
-    except AttributeError as e:
-        raise TypeError(
-            "timestamp_items must implement dict-like interface with .items() method"
-        ) from e
+def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, ImageData]]:
+    """Collect all images from a RasterStack.
 
-    # Process each image in the timestamp group
-    for key, img in items:
-        try:
-            crs, bounds, band_names = _process_image_for_pixel_selection(
-                img, pixsel_method, key, assets_used, crs, bounds, band_names
-            )
+    Args:
+        data: A RasterStack (regular dict or LazyRasterStack)
 
-            # Early termination check
-            if pixsel_method.is_done and pixsel_method.data is not None:
-                result = _create_pixel_selection_result(
-                    pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
-                )
-                return True, result, crs, bounds, band_names
+    Returns:
+        List of (key, ImageData) tuples in temporal order
+    """
+    all_images: List[Tuple[str, ImageData]] = []
 
-        except Exception as e:
-            # Skip failed tasks and continue
-            logging.warning("Failed to load image %s: %s", key, str(e))
-            continue
+    # Check if data has timestamp-based grouping capability (LazyRasterStack)
+    if hasattr(data, "groupby_timestamp") and hasattr(data, "timestamps"):
+        timestamps = data.timestamps()
+        for timestamp in sorted(timestamps):
+            timestamp_items = data.get_by_timestamp(timestamp)  # type: ignore[attr-defined]
+            if timestamp_items:
+                all_images.extend(timestamp_items.items())
+    else:
+        # Regular RasterStack - collect all images
+        for key in data.keys():
+            try:
+                img = data[key]
+                all_images.append((key, img))
+            except KeyError:
+                continue
 
-    return False, None, crs, bounds, band_names
+    return all_images
 
 
-def _process_sequential(
-    data: RasterStack, pixsel_method, assets_used: List, pixel_selection: str
-) -> Dict[str, ImageData]:
-    """Process data sequentially for non-LazyRasterStack data."""
-    crs: Optional[CRS] = None
-    bounds: Optional[BBox] = None
-    band_names: Optional[List[str]] = None
-
-    for key in data.keys():
-        try:
-            img = data[key]
-        except KeyError:
-            continue
-
-        crs, bounds, band_names = _process_image_for_pixel_selection(
-            img, pixsel_method, key, assets_used, crs, bounds, band_names
+def _feed_image_to_pixsel(
+    img: ImageData,
+    pixsel_method: Any,
+) -> None:
+    """Feed an image to the pixel selection method, handling size differences."""
+    if any([img.width != pixsel_method.width, img.height != pixsel_method.height]):
+        logging.warning(
+            "Cannot concatenate images with different size. Will resize using first asset width/height"
         )
-
-        if pixsel_method.is_done and pixsel_method.data is not None:
-            return _create_pixel_selection_result(
-                pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
+        h = pixsel_method.height
+        w = pixsel_method.width
+        pixsel_method.feed(
+            numpy.ma.MaskedArray(
+                resize_array(img.array.data, h, w),
+                mask=resize_array(img.array.mask * 1, h, w).astype("bool"),
             )
-
-    if pixsel_method.data is None:
-        raise ValueError("Method returned an empty array")
-
-    return _create_pixel_selection_result(
-        pixsel_method, assets_used, crs, bounds, band_names, pixel_selection
-    )
+        )
+    else:
+        pixsel_method.feed(img.array)
 
 
 def apply_pixel_selection(
@@ -273,9 +229,9 @@ def apply_pixel_selection(
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
 
-    This function processes timestamp groups sequentially. For data sources that support
-    timestamp-based grouping (such as LazyRasterStack), any concurrent execution is handled
-    internally by the get_by_timestamp() method for each timestamp group.
+    This function first collects all images and computes the aggregated cutline mask,
+    then processes images for pixel selection. This ensures early termination works
+    correctly by knowing upfront which pixels will be covered by any image.
 
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
@@ -286,48 +242,41 @@ def apply_pixel_selection(
     bounds: Optional[BBox] = None
     band_names: Optional[List[str]] = None
 
-    # Check if data has timestamp-based grouping capability (LazyRasterStack)
-    if hasattr(data, "groupby_timestamp") and hasattr(data, "timestamps"):
-        timestamps = data.timestamps()
+    # Collect all images first
+    all_images = _collect_images_from_data(data)
 
-        if not timestamps:
-            # Handle empty timestamps - maintain original error behavior
-            if pixsel_method.data is None:
-                raise ValueError("Method returned an empty array")
-            return {
-                "data": ImageData(numpy.array([]), assets=[], crs=None, bounds=None)
-            }
+    if not all_images:
+        raise ValueError("Method returned an empty array")
 
-        # Process timestamps in chronological order
-        for timestamp in sorted(timestamps):
-            timestamp_items = data.get_by_timestamp(timestamp)  # type: ignore[attr-defined]
+    # Compute aggregated cutline mask from all images
+    cutline_masks = [img.cutline_mask for _, img in all_images]
+    aggregated_cutline = _compute_aggregated_cutline_mask(cutline_masks)
 
-            if not timestamp_items:
-                continue
+    # Process images for pixel selection
+    for key, img in all_images:
+        # Initialize pixsel_method on first image
+        if len(assets_used) == 0:
+            pixsel_method.width = img.width
+            pixsel_method.height = img.height
+            pixsel_method.count = img.count
+            crs = img.crs
+            bounds = img.bounds
+            band_names = img.band_names
+            # Set the aggregated cutline mask
+            if aggregated_cutline is not None:
+                pixsel_method.cutline_mask = aggregated_cutline
 
-            # Process timestamp group using already-loaded ImageData
-            terminated, result, crs, bounds, band_names = (
-                _process_timestamp_group_simple(
-                    timestamp_items,
-                    pixsel_method,
-                    assets_used,
-                    crs,
-                    bounds,
-                    band_names,
-                    pixel_selection,
-                )
-            )
+        # Validate band count
+        assert (
+            img.count == pixsel_method.count
+        ), "Assets HAVE TO have the same number of bands"
 
-            if terminated and result is not None:
-                return result
+        _feed_image_to_pixsel(img, pixsel_method)
+        assets_used.append(key)
 
-            # Check for early termination after each timestamp group
-            if pixsel_method.is_done and pixsel_method.data is not None:
-                break
-
-    else:
-        # Fallback to sequential processing for non-LazyRasterStack data
-        return _process_sequential(data, pixsel_method, assets_used, pixel_selection)
+        # Early termination check
+        if pixsel_method.is_done and pixsel_method.data is not None:
+            break
 
     if pixsel_method.data is None:
         raise ValueError("Method returned an empty array")

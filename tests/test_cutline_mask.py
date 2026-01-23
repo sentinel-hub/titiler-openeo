@@ -6,8 +6,224 @@ import numpy as np
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 
-from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
+from titiler.openeo.processes.implementations.reduce import (
+    _compute_aggregated_cutline_mask,
+    apply_pixel_selection,
+)
 from titiler.openeo.reader import _apply_cutline_mask, _reader
+
+
+class TestComputeAggregatedCutlineMask:
+    """Tests for the _compute_aggregated_cutline_mask function."""
+
+    def test_all_masks_none_returns_none(self):
+        """When all masks are None, return None (all pixels valid)."""
+        result = _compute_aggregated_cutline_mask([None, None, None])
+        assert result is None
+
+    def test_empty_list_returns_none(self):
+        """Empty list returns None."""
+        result = _compute_aggregated_cutline_mask([])
+        assert result is None
+
+    def test_any_mask_none_returns_none(self):
+        """If any mask is None (all valid), aggregate should be None (all valid)."""
+        mask1 = np.array([[True, True], [False, False]], dtype=bool)
+        mask2 = None  # All pixels valid
+        mask3 = np.array([[True, False], [True, False]], dtype=bool)
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2, mask3])
+        # With OR logic, if any image has all valid pixels, all pixels are valid
+        assert result is None
+
+    def test_single_mask_returns_copy(self):
+        """Single mask returns a copy of itself."""
+        mask = np.array([[True, False], [False, True]], dtype=bool)
+        result = _compute_aggregated_cutline_mask([mask])
+
+        assert result is not None
+        np.testing.assert_array_equal(result, mask)
+        # Ensure it's a copy, not the same object
+        assert result is not mask
+
+    def test_or_combination_two_masks(self):
+        """Two masks combine with OR logic (minimum for bool where True=outside)."""
+        # mask1: top-left valid (False), rest outside (True)
+        mask1 = np.array([[False, True], [True, True]], dtype=bool)
+        # mask2: bottom-right valid (False), rest outside (True)
+        mask2 = np.array([[True, True], [True, False]], dtype=bool)
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2])
+
+        # Expected: pixels valid if valid in ANY mask
+        # Top-left: valid in mask1 -> False
+        # Bottom-right: valid in mask2 -> False
+        # Others: outside in both -> True
+        expected = np.array([[False, True], [True, False]], dtype=bool)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_or_combination_three_masks(self):
+        """Three masks combine correctly with OR logic."""
+        # Each mask has one valid pixel in different positions
+        mask1 = np.array([[False, True, True], [True, True, True]], dtype=bool)
+        mask2 = np.array([[True, False, True], [True, True, True]], dtype=bool)
+        mask3 = np.array([[True, True, True], [True, True, False]], dtype=bool)
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2, mask3])
+
+        # Expected: valid where ANY mask is valid
+        expected = np.array([[False, False, True], [True, True, False]], dtype=bool)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_all_valid_in_all_masks(self):
+        """All masks have all valid pixels -> all valid."""
+        mask1 = np.zeros((3, 3), dtype=bool)  # All False = all valid
+        mask2 = np.zeros((3, 3), dtype=bool)
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2])
+
+        expected = np.zeros((3, 3), dtype=bool)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_all_outside_in_all_masks(self):
+        """All masks have all outside pixels -> all outside."""
+        mask1 = np.ones((3, 3), dtype=bool)  # All True = all outside
+        mask2 = np.ones((3, 3), dtype=bool)
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2])
+
+        expected = np.ones((3, 3), dtype=bool)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_complementary_masks_full_coverage(self):
+        """Two complementary masks (left/right halves) cover full area."""
+        # Left half valid
+        mask1 = np.array(
+            [[False, False, True, True], [False, False, True, True]], dtype=bool
+        )
+        # Right half valid
+        mask2 = np.array(
+            [[True, True, False, False], [True, True, False, False]], dtype=bool
+        )
+
+        result = _compute_aggregated_cutline_mask([mask1, mask2])
+
+        # Combined: all pixels valid
+        expected = np.zeros((2, 4), dtype=bool)
+        np.testing.assert_array_equal(result, expected)
+
+
+class TestApplyPixelSelectionWithAggregatedCutline:
+    """Tests for apply_pixel_selection using aggregated cutline mask."""
+
+    def _create_image_with_cutline(
+        self, values, cutline_mask, bounds=(0, 0, 10, 10), mask=None
+    ):
+        """Helper to create ImageData with cutline_mask."""
+        if mask is None:
+            mask = np.zeros_like(values, dtype=bool)
+        data = np.ma.array(values, mask=mask)
+        img = ImageData(data, bounds=bounds, crs=CRS.from_epsg(4326))
+        img.cutline_mask = cutline_mask
+        return img
+
+    def test_aggregated_cutline_set_before_feed(self):
+        """Verify aggregated cutline is set on pixsel_method before processing."""
+        # Two images with complementary cutlines
+        cutline1 = np.zeros((10, 10), dtype=bool)
+        cutline1[:, 5:] = True  # Right half outside
+
+        cutline2 = np.zeros((10, 10), dtype=bool)
+        cutline2[:, :5] = True  # Left half outside
+
+        img1 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 10, cutline1
+        )
+        img2 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 20, cutline2
+        )
+
+        stack = {"2021-01-01": img1, "2021-01-02": img2}
+
+        # Apply pixel selection - should work without error
+        result = apply_pixel_selection(data=stack, pixel_selection="first")
+
+        assert "data" in result
+        assert result["data"].array.shape == (1, 10, 10)
+
+    def test_no_cutline_masks_all_none(self):
+        """When all images have no cutline_mask, aggregated should be None."""
+        img1 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 10, None
+        )
+        img2 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 20, None
+        )
+
+        stack = {"2021-01-01": img1, "2021-01-02": img2}
+
+        result = apply_pixel_selection(data=stack, pixel_selection="first")
+
+        assert "data" in result
+        # All pixels should be from first image
+        np.testing.assert_array_equal(result["data"].array.data, 10)
+
+    def test_one_image_no_cutline_makes_all_valid(self):
+        """If one image has no cutline_mask, all pixels are considered valid."""
+        # First image has restrictive cutline (only left half valid)
+        cutline1 = np.zeros((10, 10), dtype=bool)
+        cutline1[:, 5:] = True  # Right half outside
+
+        img1 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 10, cutline1
+        )
+        # Second image has no cutline - all pixels valid
+        img2 = self._create_image_with_cutline(
+            np.ones((1, 10, 10), dtype=np.float32) * 20, None
+        )
+
+        stack = {"2021-01-01": img1, "2021-01-02": img2}
+
+        result = apply_pixel_selection(data=stack, pixel_selection="first")
+
+        assert "data" in result
+        # With aggregated cutline = None (all valid), first image fills everything
+        np.testing.assert_array_equal(result["data"].array.data, 10)
+
+    def test_early_termination_with_full_coverage_aggregated(self):
+        """Early termination works correctly with aggregated cutline."""
+        # Two images that together cover the full area
+        # But individually, neither covers everything
+
+        # Image 1: left half valid, value 100
+        cutline1 = np.zeros((10, 20), dtype=bool)
+        cutline1[:, 10:] = True  # Right half outside
+
+        # Image 2: right half valid, value 200
+        cutline2 = np.zeros((10, 20), dtype=bool)
+        cutline2[:, :10] = True  # Left half outside
+
+        # Image 1 has data everywhere but only left is in footprint
+        data1 = np.ones((1, 10, 20), dtype=np.float32) * 100
+        mask1 = np.zeros((1, 10, 20), dtype=bool)
+        img1 = self._create_image_with_cutline(
+            data1, cutline1, bounds=(0, 0, 20, 10), mask=mask1
+        )
+
+        # Image 2 has data everywhere but only right is in footprint
+        data2 = np.ones((1, 10, 20), dtype=np.float32) * 200
+        mask2 = np.zeros((1, 10, 20), dtype=bool)
+        img2 = self._create_image_with_cutline(
+            data2, cutline2, bounds=(0, 0, 20, 10), mask=mask2
+        )
+
+        stack = {"2021-01-01": img1, "2021-01-02": img2}
+
+        result = apply_pixel_selection(data=stack, pixel_selection="first")
+
+        assert "data" in result
+        img = result["data"]
+        assert img.array.shape == (1, 10, 20)
 
 
 class TestApplyCutlineMask:
