@@ -1,4 +1,20 @@
-"""Process decorator for OpenEO parameter resolution."""
+"""Process decorator for OpenEO parameter resolution.
+
+This module provides the @process decorator which is the core mechanism for resolving
+OpenEO process graph parameters. The decorator handles:
+1. ParameterReference resolution (converting references to actual values)
+2. Multiple parameter sources (args, kwargs, positional_parameters, named_parameters)
+3. Type-based special parameter handling (User -> user_id, dict -> BoundingBox, etc.)
+4. Type validation using Pydantic
+5. Idempotent operation (safe for recursive/nested process calls)
+
+Key Design Decisions:
+- Removed "special_args" list to ensure ALL ParameterReference objects get resolved
+- Made parameter handling idempotent to support recursive decorator calls
+- Simplified parameter flow: all parameters end up in resolved_kwargs
+- Support both OpenEO graph calls (with positional_parameters/named_parameters dicts)
+  and regular Python function calls (with positional args)
+"""
 
 import inspect
 import logging
@@ -25,12 +41,35 @@ def _handle_positional_parameters(
 ) -> None:
     """Map positional parameters to named parameters.
 
+    This function is IDEMPOTENT - critical for recursive decorator calls.
+    When the @process decorator calls a function that is also decorated with @process,
+    this function may be called multiple times with the same parameters. We must
+    preserve already-resolved values and not overwrite them with ParameterReference
+    objects from inner decorator calls.
+
     Args:
-        args: Tuple of positional arguments
-        positional_parameters: Maps parameter names to positions
-        named_parameters: Dictionary to store mapped parameters
+        args: Tuple of positional arguments from function call
+        positional_parameters: Maps parameter names to argument positions
+                             e.g., {"data": 0, "value": 1}
+        named_parameters: Dictionary to store mapped parameters (modified in place)
+
+    Example:
+        # OpenEO graph call:
+        array_element(positional_parameters={"data": 0, "index": 1},
+                     named_parameters={"data": <some_value>, "index": 1})
+        # This function maps args[0] -> named_parameters["data"] if not already resolved
     """
     for arg_name, i in positional_parameters.items():
+        # Check if named_parameters already has a resolved value
+        existing_value = named_parameters.get(arg_name)
+
+        # If existing value exists and is NOT a ParameterReference, keep it (it's already resolved)
+        if existing_value is not None and not isinstance(
+            existing_value, ParameterReference
+        ):
+            continue
+
+        # Otherwise, map the positional arg to named_parameters
         named_parameters[arg_name] = args[i]
 
 
@@ -158,31 +197,31 @@ def _resolve_kwargs(
 ) -> Dict[str, Any]:
     """Resolve keyword arguments from parameter references.
 
+    This function handles ParameterReference objects in kwargs, which are placeholders
+    that reference values in named_parameters. For example:
+    - kwargs["data"] = ParameterReference(from_parameter="data")
+    - named_parameters["data"] = <actual_array>
+    - Result: resolved_kwargs["data"] = <actual_array>
+
+    IMPORTANT: This function resolves ALL ParameterReference objects, including "data".
+    Previously, there was a "special_args" list that prevented resolution of certain
+    parameters, but this caused bugs where ParameterReference objects reached functions
+    unresolved. That list has been removed.
+
     Args:
-        kwargs: Dictionary of keyword arguments
-        named_parameters: Dictionary of parameter values
-        param_types: Dictionary of parameter type annotations
+        kwargs: Dictionary of keyword arguments (may contain ParameterReference)
+        named_parameters: Dictionary mapping parameter names to their actual values
+        param_types: Dictionary of parameter type annotations for special handling
         func_name: Name of the function for error messages
 
     Returns:
-        Dictionary of resolved keyword arguments
+        Dictionary of resolved keyword arguments (no ParameterReference objects)
 
     Raises:
         ProcessParameterMissing: If a parameter reference cannot be resolved
     """
-    special_args = [
-        "axis",  # Dimension to operate on
-        "keepdims",  # Whether to preserve dimensions after reduction
-        "context",  # Additional process context
-        "dim_labels",  # Labels for dimensions
-        "data",  # Input data reference
-    ]
     resolved_kwargs = {}
     for k, arg in kwargs.items():
-        if k in special_args:
-            # Special args are handled separately
-            resolved_kwargs[k] = arg
-            continue
         if isinstance(arg, ParameterReference):
             if arg.from_parameter in named_parameters:
                 value = named_parameters[arg.from_parameter]
@@ -192,11 +231,11 @@ def _resolve_kwargs(
                         value = _resolve_special_parameter(
                             arg.from_parameter, value, param_types[k]
                         )
-                        resolved_kwargs[k] = value
                     except Exception as e:
                         raise ProcessParameterMissing(
                             f"Error resolving parameter {arg.from_parameter} for process {func_name}: {e}"
                         ) from e
+                resolved_kwargs[k] = value
             else:
                 raise ProcessParameterMissing(
                     f"Error: Process Parameter {arg.from_parameter} was missing for process {func_name}"
@@ -401,13 +440,25 @@ def _validate_parameter_types(
 ) -> None:
     """Validate parameter types using Pydantic.
 
+    This function performs runtime type validation on resolved parameters using
+    Pydantic's TypeAdapter. It catches common type mismatches that would otherwise
+    cause cryptic errors deeper in the execution:
+
+    Common validations:
+    - Ensuring datacubes (dict/LazyRasterStack) aren't passed to array parameters
+    - Checking None values are only used with Optional types
+    - Validating subscripted generics (e.g., Optional[BoundingBox])
+
+    NOTE: Uses get_origin() to extract base classes before isinstance() checks
+    to avoid "TypeError: Subscripted generics cannot be used with class and instance checks"
+
     Args:
         resolved_kwargs: Dictionary of resolved keyword arguments
         param_types: Dictionary of parameter type annotations
         func_name: Name of the function for error messages
 
     Raises:
-        TypeError: If a parameter has an invalid type
+        TypeError: If a parameter has an invalid type, with human-readable error message
     """
 
     for param_name, param_value in resolved_kwargs.items():
@@ -469,8 +520,19 @@ def _validate_parameter_types(
             # Check if the type matches the expected type
             is_opt, underlying = _is_optional_type(param_type)
             expected_type = underlying if is_opt else param_type
-            if isinstance(param_value, expected_type):
-                continue
+
+            # Get the origin type for isinstance checks (handles subscripted generics)
+            origin_type = get_origin(expected_type)
+            check_type = origin_type if origin_type is not None else expected_type
+
+            # For subscripted generics, we need to check if it's a class before using isinstance
+            try:
+                if isinstance(check_type, type) and isinstance(param_value, check_type):
+                    continue
+            except TypeError:
+                # If isinstance fails (e.g., for complex types), skip the check
+                # and let Pydantic validation handle it below
+                pass
 
         # Use Pydantic TypeAdapter for general validation
         try:
@@ -496,20 +558,58 @@ def _validate_parameter_types(
 def process(f):
     """Handle parameter resolution in the OpenEO processing pipeline.
 
-    This decorator resolves parameter references to their actual values,
-    handles type-based parameter extraction (like user_id from User objects),
-    and manages special OpenEO parameters.
+    ARCHITECTURE OVERVIEW:
+    This decorator is the central mechanism for OpenEO parameter resolution. It handles
+    two distinct calling patterns:
+
+    1. OpenEO Process Graph Calls:
+       function(positional_parameters={"x": 0}, named_parameters={"x": value, ...})
+       - positional_parameters maps parameter names to arg positions
+       - named_parameters contains the actual parameter values
+       - May contain ParameterReference objects that need resolution
+
+    2. Regular Python Calls:
+       function(x, y, z) or function(x=1, y=2)
+       - Standard positional/keyword arguments
+       - Auto-mapped to named_parameters for consistency
+
+    PARAMETER RESOLUTION FLOW:
+    1. Auto-create positional_parameters mapping if args provided without mapping
+    2. Map positional args to named_parameters using _handle_positional_parameters
+    3. Resolve ParameterReference objects in kwargs using _resolve_kwargs
+    4. Extract and resolve any remaining ParameterReference in named_parameters
+    5. Apply special parameter transformations (User -> user_id, dict -> BoundingBox)
+    6. Remove parameters not in function signature
+    7. Validate parameter types
+    8. Call function with **resolved_kwargs only (no positional args)
+
+    IDEMPOTENCY:
+    The decorator is idempotent - if a @process decorated function calls another
+    @process decorated function, parameters that are already resolved won't be
+    overwritten. This is crucial for recursive/nested process calls.
+
+    DESIGN DECISION - Why remove "special_args"?
+    Previously, a "special_args" list prevented resolution of parameters like "data".
+    This caused bugs where ParameterReference(from_parameter="data") objects reached
+    functions unresolved, causing errors. All parameters must be resolved.
 
     Args:
-        f: Function to decorate
+        f: Function to decorate (typically an OpenEO process implementation)
 
     Returns:
-        Wrapped function that handles parameter resolution
+        Wrapped function that handles parameter resolution transparently
 
     Example:
         @process
-        def compute_ndvi(red: float, nir: float) -> float:
-            return (nir - red) / (nir + red)
+        def array_element(data: list, index: int) -> Any:
+            return data[index]
+
+        # Both calling patterns work:
+        array_element([1, 2, 3], 1)  # Regular Python call -> 2
+        array_element(
+            positional_parameters={"data": 0, "index": 1},
+            named_parameters={"data": [1, 2, 3], "index": 1}
+        )  # OpenEO graph call -> 2
     """
 
     @wraps(f)
@@ -520,44 +620,125 @@ def process(f):
         **kwargs,
     ):
         # Initialize parameter dictionaries
-        args_list = list(args)
+        # These may be None for regular Python calls, so provide defaults
         if positional_parameters is None:
             positional_parameters = {}
         if named_parameters is None:
             named_parameters = {}
 
-        # Handle parameter resolution
-        _handle_positional_parameters(args, positional_parameters, named_parameters)
-        resolved_args = _resolve_positional_args(
-            tuple(args_list), named_parameters, f.__name__
-        )
-
-        # Get parameter types from function signature
+        # Get parameter types from function signature for type validation
         sig = inspect.signature(f)
         param_types = {name: param.annotation for name, param in sig.parameters.items()}
 
-        # Resolve keyword arguments
+        # AUTO-MAPPING FOR REGULAR PYTHON CALLS:
+        # If args are provided but no positional_parameters mapping exists,
+        # this is a regular Python function call (not an OpenEO graph call).
+        # Create the positional_parameters mapping based on function signature.
+        # Example: array_element([1,2,3], 1) -> positional_parameters={"data": 0, "index": 1}
+        if args and not positional_parameters:
+            # Get parameter names, excluding the special decorator parameters
+            param_names = [
+                p
+                for p in sig.parameters.keys()
+                if p not in ("positional_parameters", "named_parameters")
+            ]
+            # Create mapping: parameter_name -> argument_index
+            for i, _ in enumerate(args):
+                if i < len(param_names):
+                    positional_parameters[param_names[i]] = i
+
+        # STEP 1: Map positional args to named_parameters
+        # Uses positional_parameters mapping to know which arg goes to which parameter
+        # Idempotent: won't overwrite already-resolved values
+        _handle_positional_parameters(args, positional_parameters, named_parameters)
+
+        # STEP 2: Resolve all kwargs (handles ParameterReference objects)
+        # Any ParameterReference in kwargs gets resolved from named_parameters
+        # This also applies special parameter transformations
         resolved_kwargs = _resolve_kwargs(
             kwargs, named_parameters, param_types, f.__name__
         )
 
-        # Handle special parameters
+        # STEP 3: Extract and resolve remaining parameters from named_parameters
+        # These are parameters that:
+        # - Match the function signature
+        # - Weren't already in kwargs
+        # - May still contain ParameterReference objects that need resolution
+        for param_name in sig.parameters:
+            # Skip if already in resolved_kwargs or special parameters
+            if param_name in resolved_kwargs or param_name in (
+                "positional_parameters",
+                "named_parameters",
+            ):
+                continue
+
+            if param_name in named_parameters:
+                value = named_parameters[param_name]
+
+                # If it's a ParameterReference, resolve it
+                if isinstance(value, ParameterReference):
+                    # Look up the referenced parameter
+                    ref_param = value.from_parameter
+                    if ref_param in named_parameters:
+                        resolved_value = named_parameters[ref_param]
+                        # CIRCULAR REFERENCE CHECK:
+                        # If the resolved value is also a ParameterReference, it means
+                        # we're in a self-reference situation (e.g., data -> data)
+                        # This indicates the parameter hasn't been properly resolved yet.
+                        # Skip it to avoid infinite loops.
+                        if isinstance(resolved_value, ParameterReference):
+                            logger.warning(
+                                f"Parameter {param_name} references {ref_param} which is also a ParameterReference. "
+                                f"This suggests unresolved parameters in the process graph."
+                            )
+                            continue
+
+                        # Apply special parameter resolution if needed
+                        if (
+                            param_name in param_types
+                            and param_types[param_name] != inspect.Parameter.empty
+                        ):
+                            try:
+                                resolved_value = _resolve_special_parameter(
+                                    ref_param, resolved_value, param_types[param_name]
+                                )
+                            except Exception as e:
+                                raise ProcessParameterMissing(
+                                    f"Error resolving parameter {ref_param} for process {f.__name__}: {e}"
+                                ) from e
+                        resolved_kwargs[param_name] = resolved_value
+                    else:
+                        raise ProcessParameterMissing(
+                            f"Error: Process Parameter {ref_param} was missing for process {f.__name__}"
+                        )
+                else:
+                    # Already resolved, add directly
+                    resolved_kwargs[param_name] = value
+
+        # STEP 4: Remove parameters not in function signature
+        # Some parameters (like "axis", "context") may be present in named_parameters
+        # but not expected by the function. Remove them to avoid TypeError.
         _handle_special_args(resolved_kwargs, sig)
 
-        # Pass named_parameters if function expects it
+        # STEP 5: Pass named_parameters if function explicitly expects it
+        # Some functions need access to the full named_parameters dict for context
         if "named_parameters" in sig.parameters:
             resolved_kwargs["named_parameters"] = named_parameters
 
-        # Validate parameter types
+        # STEP 6: Validate all parameter types using Pydantic
+        # Catches type mismatches before they cause cryptic errors
         _validate_parameter_types(resolved_kwargs, param_types, f.__name__)
 
-        # Debug logging
+        # Debug logging (truncate values to avoid huge logs)
         pretty_args = {k: repr(v)[:80] for k, v in resolved_kwargs.items()}
         if hasattr(f, "__name__"):
             logger.debug(
                 f"Running process {f.__name__} with resolved parameters: {pretty_args}"
             )
 
-        return f(*resolved_args, **resolved_kwargs)
+        # STEP 7: Call the wrapped function with resolved kwargs ONLY
+        # We don't use positional args here - everything is passed as keyword arguments.
+        # This ensures consistent parameter passing regardless of calling pattern.
+        return f(**resolved_kwargs)
 
     return wrapper
