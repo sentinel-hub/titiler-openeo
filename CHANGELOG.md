@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.1 (2026-01-23)
+
+## What's Changed
+* fix: pydantic validation error. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/200
+* fix: skip non-existent special OpenEO args in parameter resolution by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/203
+* fix: cutline aggregation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/204
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.10.0...titiler-openeo-v0.10.1
+
 ## 0.10.0 (2026-01-23)
 
 ## What's Changed
