@@ -67,7 +67,14 @@ class DynamicCacheControlMiddleware:
             await self.app(scope, receive, send)
             return
 
-        cache_header = self.get_cache_header(scope["path"])
+        # Get the path relative to the application root
+        # This handles deployments with a URL prefix (e.g., /openeo)
+        path = scope["path"]
+        root_path = scope.get("root_path", "")
+        if root_path and path.startswith(root_path):
+            path = path[len(root_path) :] or "/"
+
+        cache_header = self.get_cache_header(path)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
