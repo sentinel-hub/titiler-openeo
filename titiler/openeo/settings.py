@@ -136,6 +136,9 @@ class ApiSettings(BaseSettings):
     cors_allow_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     # Cache settings for different endpoint types
     cache_static: str = "public, max-age=3600"  # For static resources
+    cache_tiles: str = (
+        "public, max-age=3600"  # For XYZ tile endpoints (browser cacheable)
+    )
     cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
     cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""
