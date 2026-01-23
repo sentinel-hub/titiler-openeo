@@ -14,6 +14,7 @@ class DynamicCacheControlMiddleware:
         self,
         app: ASGIApp,
         static_paths: Sequence[str] = ("/static/",),
+        tile_paths: Sequence[str] = ("/services/xyz/",),
         dynamic_paths: Sequence[str] = (
             "/processes/",
             "/jobs/",
@@ -27,10 +28,12 @@ class DynamicCacheControlMiddleware:
         Args:
             app: The ASGI application
             static_paths: Paths that should use static caching policy
+            tile_paths: Paths for tile endpoints that can be cached by browsers
             dynamic_paths: Paths that should use dynamic caching policy
         """
         self.app = app
         self.static_paths = static_paths
+        self.tile_paths = tile_paths
         self.dynamic_paths = dynamic_paths
         self.settings = ApiSettings()
 
@@ -45,6 +48,9 @@ class DynamicCacheControlMiddleware:
         """
         if any(path.startswith(static) for static in self.static_paths):
             return self.settings.cache_static
+        # Check tile paths before general dynamic paths (more specific match first)
+        if any(path.startswith(tile) for tile in self.tile_paths):
+            return self.settings.cache_tiles
         if any(path.startswith(dynamic) for dynamic in self.dynamic_paths):
             return self.settings.cache_dynamic
         return self.settings.cache_default

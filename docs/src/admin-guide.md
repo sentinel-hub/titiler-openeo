@@ -109,9 +109,15 @@ Configure cache control headers:
 
 ```bash
 TITILER_OPENEO_API_CACHE_STATIC="public, max-age=3600"
+TITILER_OPENEO_API_CACHE_TILES="public, max-age=3600"
 TITILER_OPENEO_API_CACHE_DYNAMIC="no-cache"
 TITILER_OPENEO_API_CACHE_DEFAULT="no-store"
 ```
+
+- `CACHE_STATIC`: For static resources like CSS, JS files
+- `CACHE_TILES`: For XYZ tile endpoints (`/services/xyz/`), allowing browsers to cache tiles
+- `CACHE_DYNAMIC`: For dynamic API endpoints that need fresh data
+- `CACHE_DEFAULT`: Default policy for other endpoints
 
 ## Troubleshooting
 
