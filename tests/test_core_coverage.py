@@ -735,6 +735,31 @@ class TestProcessDecoratorEdgeCases:
         )
         assert result == 10
 
+    def test_special_args_as_parameter_reference_to_nonexistent(self):
+        """Test special OpenEO args skip resolution when referencing non-existent parameters.
+
+        Validates: When context/axis/etc are ParameterReference to non-existent
+        parameters, they are skipped (not resolved) rather than raising an error.
+
+        Why important: OpenEO parser often passes context=ParameterReference(from_parameter="context")
+        even when "context" doesn't exist in named_parameters. This is an optional
+        parameter that should be silently skipped, not cause an error.
+        """
+
+        @process
+        def simple_func(x: int) -> int:
+            return x * 2
+
+        # Pass context as ParameterReference to non-existent parameter
+        # This should NOT raise ProcessParameterMissing
+        result = simple_func(
+            x=5,
+            context=ParameterReference(from_parameter="context"),
+            positional_parameters={},
+            named_parameters={"x": 5},  # No "context" key
+        )
+        assert result == 10
+
     def test_optional_named_parameters_passthrough(self):
         """Test named_parameters preserved if function signature expects it.
 
