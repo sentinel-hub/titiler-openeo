@@ -3,7 +3,7 @@ name = "titiler-openeo"
 version = "0.9.1"
 description = "TiTiler backend for openEO."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Vincent Sarago", email = "vincent@developmentseed.com" },
     { name = "Emmanuel Mathot", email = "emmanuel@developmentseed.com" },
@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-    "titiler.core>=0.24.0,<0.25",
+    "titiler.core>=1.1.1",
     "starlette-cramjam>=0.4,<0.6",
     "openeo-pg-parser-networkx==2026.1.2",
     "pystac-client",

@@ -18,6 +18,7 @@ __all__ = [
 ]
 
 
+@process
 def array_element(
     data: Union[ArrayLike, RasterStack, LazyRasterStack],
     index: Optional[int] = None,
@@ -33,12 +34,21 @@ def array_element(
     Returns:
         The element at the specified index
     """
+    # Basic validation
     if index is not None and index < 0:
         raise IndexError(f"Index value must be >= 0, {index}")
-    if label is not None and label not in data.keys():
-        raise KeyError(f"Label {label} not found in data: {data.keys()}")
     if index is None and label is None:
         raise ValueError("Either index or label must be provided")
+
+    # Label is only supported for RasterStack/dict types
+    if label is not None and not isinstance(data, dict):
+        raise ValueError(
+            "Label parameter is only supported for RasterStack/dict data types"
+        )
+
+    # Validate label exists in dict (do this after type check)
+    if label is not None and isinstance(data, dict) and label not in data.keys():
+        raise KeyError(f"Label {label} not found in data: {data.keys()}")
 
     # Handle RasterStack
     if isinstance(data, dict):
@@ -53,11 +63,34 @@ def array_element(
         # This is expected behavior for array operations
         return numpy.stack(list(array_dict.values()), axis=0)
 
-    # Handle regular arrays
-    elif isinstance(data, ImageData):
-        return numpy.take(data.array, index, axis=0)
-    else:
-        return numpy.take(data, index, axis=0)
+    # Handle regular arrays (index must be provided at this point)
+    if index is None:
+        raise ValueError("Index must be provided for non-dict data types")
+
+    # Get the array to work with
+    array_data = data.array if isinstance(data, ImageData) else data
+
+    # Convert to numpy array to ensure we have a shape attribute
+    array_data = numpy.asarray(array_data)
+
+    # Handle 0-dimensional arrays (scalars)
+    # If index is 0, return the scalar value itself
+    # Otherwise raise an error since we can't index into a scalar
+    if array_data.ndim == 0:
+        if index == 0:
+            return array_data.item()  # Return the scalar value
+        else:
+            raise IndexError(
+                f"Cannot index scalar (0-dimensional array) with index {index}"
+            )
+
+    # Check bounds
+    if index >= array_data.shape[0]:
+        raise IndexError(
+            f"Index {index} is out of bounds for axis 0 with size {array_data.shape[0]}"
+        )
+
+    return numpy.take(array_data, index, axis=0)
 
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
@@ -80,7 +113,14 @@ def array_create(data: Optional[ArrayLike] = None, repeat: int = 1) -> ArrayLike
         # Return a default array for XYZ tiles
         return numpy.empty((1, 1, 1), dtype=numpy.uint8)
 
-    # Handle both numpy arrays and other array-like inputs
+    # If data is a list/tuple of arrays, stack them along axis 0
+    if isinstance(data, (list, tuple)):
+        # Convert each element to array and stack them
+        arrays = [numpy.asanyarray(item) for item in data]
+        # Stack along first axis - this creates (n_elements, *spatial_dims)
+        return numpy.stack(arrays, axis=0)
+
+    # Handle single array input
     arr = numpy.asanyarray(data)
 
     # # check that the array is no more than 2D
