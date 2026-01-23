@@ -13,7 +13,6 @@ The tests are organized into logical groups covering:
 Each test is documented to explain what it validates and why it's important.
 """
 
-import inspect
 from typing import List, Optional, Union
 
 import numpy as np
@@ -23,7 +22,6 @@ from openeo_pg_parser_networkx.pg_schema import (
     ParameterReference,
     TemporalInterval,
 )
-from pydantic import ValidationError
 
 from titiler.openeo.auth import User
 from titiler.openeo.errors import ProcessParameterMissing

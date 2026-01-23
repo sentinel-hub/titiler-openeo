@@ -27,7 +27,7 @@ def test_parameter_reference_in_kwargs():
     data_ref = ParameterReference(from_parameter="data")
 
     # Call with ParameterReference in kwargs
-    result = test_func(data=data_ref, index=2, named_parameters=named_params)
+    _ = test_func(data=data_ref, index=2, named_parameters=named_params)
 
     # Verify the function received the resolved value, not the ParameterReference
     assert len(call_log) == 1
@@ -52,7 +52,7 @@ def test_parameter_reference_in_positional_parameters():
 
     # Call with ParameterReference in positional args
     # positional_parameters maps parameter name to position in args
-    result = test_func(
+    _ = test_func(
         data_ref,  # args[0]
         positional_parameters={"data": 0},
         named_parameters=named_params,
@@ -79,7 +79,7 @@ def test_parameter_reference_only_in_named_parameters():
 
     # Call without passing data in kwargs or args
     # The decorator should extract it from named_parameters
-    result = test_func(index=2, named_parameters=named_params)
+    _ = test_func(index=2, named_parameters=named_params)
 
     # Verify the function received the value from named_parameters
     assert len(call_log) == 1
@@ -133,7 +133,7 @@ def test_parameter_reference_with_positional_and_named_conflict():
 
     # This simulates the issue: positional_parameters[0] = scalar,
     # but named_parameters["data"] = correct array
-    result = test_func(
+    _ = test_func(
         scalar_value,  # args[0] - wrong value
         positional_parameters={"data": 0},
         named_parameters=named_params,  # has correct value
