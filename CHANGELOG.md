@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 (2026-01-23)
+
+## What's Changed
+* fix: implement dynamic cache control middleware and add comprehensive tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/207
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.10.2...titiler-openeo-v0.11.0
+
 ## 0.10.2 (2026-01-23)
 
 ## What's Changed
