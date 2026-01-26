@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0 (2026-01-26)
+
+## What's Changed
+* fix: add version extraction from tags in CI workflow by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/209
+* refactor: spectral dimension reduction to unify handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/211
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.11.0...titiler-openeo-v0.12.0
+
 ## 0.11.0 (2026-01-23)
 
 ## What's Changed
