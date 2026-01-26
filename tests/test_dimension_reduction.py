@@ -6,7 +6,6 @@ from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.reduce import (
     DimensionNotAvailable,
-    _reduce_spectral_dimension_single_image,
     _reduce_spectral_dimension_stack,
     _reduce_temporal_dimension,
     reduce_dimension,
@@ -194,7 +193,10 @@ class TestSpectralDimensionReduction:
             band_names=["red", "green", "blue", "nir"],
         )
 
-        result = _reduce_spectral_dimension_single_image(img, mock_spectral_reducer)
+        # Wrap in single-item RasterStack as required by the unified function
+        stack = {"single_image": img}
+        result_stack = _reduce_spectral_dimension_stack(stack, mock_spectral_reducer)
+        result = result_stack["single_image"]
 
         assert isinstance(result, ImageData)
         # After reduction from (4, 10, 10) to (10, 10), result should be (10, 10)
@@ -210,6 +212,39 @@ class TestSpectralDimensionReduction:
         # Check metadata
         assert result.metadata["reduced_dimension"] == "spectral"
         assert result.metadata["reduction_method"] == "mock_spectral_reducer"
+
+    def test_spectral_reduction_single_image_band_names_cleared(self):
+        """Test that band_names are cleared when spectral reduction changes band count.
+
+        This prevents IndexError when trying to access bands by index after reduction.
+        If we have 4 input bands but 1 output band, keeping the original band_names
+        would cause mismatches.
+        """
+        # Create image with 4 bands and band names
+        array = np.ma.ones((4, 10, 10))
+        array[0] = 1  # red
+        array[1] = 2  # green
+        array[2] = 3  # blue
+        array[3] = 4  # nir
+
+        img = ImageData(
+            array,
+            assets=["test_asset"],
+            crs="EPSG:4326",
+            bounds=(-180, -90, 180, 90),
+            band_names=["red", "green", "blue", "nir"],
+        )
+
+        # Wrap in single-item RasterStack as required by the unified function
+        stack = {"single_image": img}
+        result_stack = _reduce_spectral_dimension_stack(stack, mock_spectral_reducer)
+        result = result_stack["single_image"]
+
+        # After reducing 4 bands to 1, band_names should be cleared to avoid mismatch
+        # The result should have empty band_names since we can't know which band it represents
+        assert (
+            result.band_names == []
+        ), f"Expected empty band_names, got {result.band_names}"
 
     def test_spectral_reduction_stack_success(self):
         """Test successful spectral reduction on stack."""

@@ -380,32 +380,73 @@ def _reduce_temporal_dimension(
     }
 
 
-def _reduce_spectral_dimension_single_image(
-    data: ImageData,
-    reducer: Callable,
-) -> ImageData:
-    """Reduce the spectral dimension of a single ImageData.
+def _reshape_reduced_spectral_data(
+    reduced_data: numpy.ndarray, num_images: int
+) -> numpy.ndarray:
+    """Transform reducer output back to (time, ...) format for splitting.
 
     Args:
-        data: An ImageData with spectral dimension
-        reducer: A reducer function to apply on the spectral dimension
+        reduced_data: Output from the spectral reducer
+        num_images: Number of time slices expected
 
     Returns:
-        An ImageData with the spectral dimension reduced
+        Array reshaped to (time, ...) format
     """
-    # Pass only the array data (spectral bands) to the reducer, not the entire ImageData
-    reduced_img_data = reducer(data=data.array)
-    return ImageData(
-        reduced_img_data,
-        assets=data.assets,
-        crs=data.crs,
-        bounds=data.bounds,
-        band_names=data.band_names if data.band_names is not None else [],
-        metadata={
-            "reduced_dimension": "spectral",
-            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-        },
-    )
+    if reduced_data.ndim == 3:
+        # Output is (time, height, width) - fully reduced spectral dimension
+        return reduced_data
+    elif reduced_data.ndim == 4:
+        # Output is (reduced_bands, time, height, width) - partial spectral reduction
+        # Move time axis back to position 0: (time, reduced_bands, height, width)
+        return numpy.moveaxis(reduced_data, 1, 0)
+    elif reduced_data.ndim == 2:
+        # Output is (time, height) or (height, width) - need to determine which
+        # If first dimension matches number of images, it's (time, height)
+        if reduced_data.shape[0] == num_images:
+            # Add width dimension: (time, height, 1)
+            return reduced_data[:, :, numpy.newaxis]
+        else:
+            # Assume it's (height, width), expand for time: (1, height, width)
+            expanded = reduced_data[numpy.newaxis, :, :]
+            # Repeat for all time slices
+            return numpy.repeat(expanded, num_images, axis=0)
+    else:
+        # Unexpected dimensionality - try to infer
+        logging.warning(
+            f"Unexpected reducer output shape {reduced_data.shape} for spectral reduction. "
+            f"Expected 3D (time, height, width) or 4D (time, bands, height, width). "
+            f"Attempting to reshape..."
+        )
+        # If first dimension matches images, assume it's already correct
+        if reduced_data.shape[0] == num_images:
+            return reduced_data
+        else:
+            # Try to move second dimension to first
+            return (
+                numpy.moveaxis(reduced_data, 1, 0)
+                if reduced_data.ndim > 1
+                else reduced_data
+            )
+
+
+def _determine_output_band_count(final_data: numpy.ndarray) -> int:
+    """Determine the number of output bands from the final reduced data.
+
+    Args:
+        final_data: The reshaped data in (time, ...) format
+
+    Returns:
+        Number of output bands (0 if cannot be determined)
+    """
+    if final_data.ndim >= 1 and len(final_data) > 0:
+        sample_slice = final_data[0] if final_data.ndim > 2 else final_data
+        if sample_slice.ndim == 2:
+            # (height, width) - single band output
+            return 1
+        elif sample_slice.ndim == 3:
+            # (bands, height, width) - multi-band output
+            return sample_slice.shape[0]
+    return 0
 
 
 def _reduce_spectral_dimension_stack(
@@ -504,42 +545,10 @@ def _reduce_spectral_dimension_stack(
         ) from e
 
     # Transform the result back to (time, ...) format for splitting into time slices
-    # The reducer output shape depends on whether it fully or partially reduced the spectral dimension
-    if reduced_data.ndim == 3:
-        # Output is (time, height, width) - fully reduced spectral dimension
-        final_data = reduced_data
-    elif reduced_data.ndim == 4:
-        # Output is (reduced_bands, time, height, width) - partial spectral reduction
-        # Move time axis back to position 0: (time, reduced_bands, height, width)
-        final_data = numpy.moveaxis(reduced_data, 1, 0)
-    elif reduced_data.ndim == 2:
-        # Output is (time, height) or (height, width) - need to determine which
-        # If first dimension matches number of images, it's (time, height)
-        if reduced_data.shape[0] == len(images):
-            # Add width dimension: (time, height, 1)
-            final_data = reduced_data[:, :, numpy.newaxis]
-        else:
-            # Assume it's (height, width), expand for time: (1, height, width)
-            final_data = reduced_data[numpy.newaxis, :, :]
-            # Repeat for all time slices
-            final_data = numpy.repeat(final_data, len(images), axis=0)
-    else:
-        # Unexpected dimensionality - try to infer
-        logging.warning(
-            f"Unexpected reducer output shape {reduced_data.shape} for spectral reduction. "
-            f"Expected 3D (time, height, width) or 4D (time, bands, height, width). "
-            f"Attempting to reshape..."
-        )
-        # If first dimension matches images, assume it's already correct
-        if reduced_data.shape[0] == len(images):
-            final_data = reduced_data
-        else:
-            # Try to move second dimension to first
-            final_data = (
-                numpy.moveaxis(reduced_data, 1, 0)
-                if reduced_data.ndim > 1
-                else reduced_data
-            )
+    final_data = _reshape_reduced_spectral_data(reduced_data, len(images))
+
+    # Determine output band count for band_names handling
+    num_output_bands = _determine_output_band_count(final_data)
 
     # Split the result back into individual ImageData objects
     result = {}
@@ -550,12 +559,22 @@ def _reduce_spectral_dimension_stack(
         else:
             time_slice_data = final_data
 
+        # Adjust band_names to match output band count
+        # If band count changed, clear band_names to avoid mismatches
+        output_band_names = []
+        if (
+            num_output_bands > 0
+            and meta["band_names"]
+            and len(meta["band_names"]) == num_output_bands
+        ):
+            output_band_names = meta["band_names"]
+
         result[key] = ImageData(
             time_slice_data,
             assets=meta["assets"],
             crs=meta["crs"],
             bounds=meta["bounds"],
-            band_names=meta["band_names"],
+            band_names=output_band_names,
             metadata={
                 "reduced_dimension": "spectral",
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
@@ -599,13 +618,8 @@ def reduce_dimension(
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
-        # Check if we have a single-image stack (common case from ImageData input)
-        if len(data) == 1:
-            # Get the single image and reduce its spectral dimension
-            key = next(iter(data))
-            return {key: _reduce_spectral_dimension_single_image(data[key], reducer)}
-        else:
-            return _reduce_spectral_dimension_stack(data, reducer)
+        # Use unified stack reduction for both single and multi-image cases
+        return _reduce_spectral_dimension_stack(data, reducer)
 
     # Unsupported dimension
     else:
