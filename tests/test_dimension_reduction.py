@@ -172,6 +172,32 @@ class TestTemporalDimensionReduction:
         with pytest.raises(ValueError, match="cannot be converted to an array"):
             _reduce_temporal_dimension(data, mock_invalid_reducer_returns_string)
 
+    def test_temporal_reduction_with_pixel_selection_mean(self):
+        """Test temporal reduction using a pixel selection method (mean)."""
+        from titiler.openeo.processes.implementations.math import mean
+
+        # Create test data with 3 time steps
+        data = {}
+        for i in range(3):
+            array = np.ma.ones((2, 10, 10)) * (i + 1)  # Values: 1, 2, 3
+            data[f"time_{i}"] = ImageData(
+                array,
+                assets=[f"asset_{i}"],
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+                band_names=["red", "green"],
+            )
+
+        # mean is a pixel selection reducer, so it should use the efficient path
+        result = _reduce_temporal_dimension(data, mean)
+
+        assert isinstance(result, dict)
+        assert "reduced" in result
+        reduced_img = result["reduced"]
+
+        # Mean of 1, 2, 3 should be 2.0
+        np.testing.assert_array_almost_equal(reduced_img.array.data, 2.0)
+
 
 class TestSpectralDimensionReduction:
     """Test spectral dimension reduction."""
@@ -361,6 +387,132 @@ class TestSpectralDimensionReduction:
 
         with pytest.raises(ValueError, match="cannot be converted to an array"):
             _reduce_spectral_dimension_stack(data, mock_invalid_reducer_returns_string)
+
+    def test_spectral_reduction_2d_output_matches_images(self):
+        """Test spectral reduction with 2D output where first dim matches num images."""
+        # Create test data with 2 time steps
+        data = {}
+        for i in range(2):
+            array = np.ma.ones((3, 5, 5))
+            data[f"time_{i}"] = ImageData(
+                array,
+                assets=[f"asset_{i}"],
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+            )
+
+        # Reducer that returns 2D output where first dim matches num images
+        def reducer_2d_time_height(data):
+            # Reduce to (time, height) by averaging across bands and width
+            return np.mean(data, axis=(0, 3))  # axis 0=bands, 3=width
+
+        result = _reduce_spectral_dimension_stack(data, reducer_2d_time_height)
+        assert len(result) == 2
+        # Should add width dimension
+        for img in result.values():
+            assert img.array.ndim in [2, 3]  # Could be (h, w) or (1, h, w)
+
+    def test_spectral_reduction_2d_output_spatial(self):
+        """Test spectral reduction with 2D output representing spatial dims."""
+        # Create test data with 1 time step
+        data = {
+            "time_0": ImageData(
+                np.ma.ones((3, 5, 5)),
+                assets=["asset_0"],
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+            )
+        }
+
+        # Reducer that returns 2D spatial output
+        def reducer_2d_spatial(data):
+            # Reduce to (height, width) by averaging across bands and time
+            return np.mean(data, axis=(0, 1))  # axis 0=bands, 1=time
+
+        result = _reduce_spectral_dimension_stack(data, reducer_2d_spatial)
+        assert len(result) == 1
+        # Should work correctly
+        img = result["time_0"]
+        assert img.array.ndim in [2, 3]
+
+    def test_spectral_reduction_4d_output(self):
+        """Test spectral reduction with 4D output (partial reduction)."""
+        # Create test data with 2 time steps, each with 3 bands
+        data = {}
+        for i in range(2):
+            array = np.ma.ones((3, 5, 5))
+            data[f"time_{i}"] = ImageData(
+                array,
+                assets=[f"asset_{i}"],
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+                band_names=["red", "green", "blue"],
+            )
+
+        # Reducer that does partial reduction (3 bands -> 2 bands)
+        def reducer_partial(data):
+            # Input: (bands=3, time=2, h, w)
+            # Output: (reduced_bands=2, time=2, h, w)
+            # Take first 2 bands only
+            return data[:2, :, :, :]
+
+        result = _reduce_spectral_dimension_stack(data, reducer_partial)
+        assert len(result) == 2
+        # Each result should have 2 bands
+        for img in result.values():
+            assert img.array.shape[0] == 2
+            # band_names should be cleared since count changed
+            assert img.band_names == []
+
+    def test_spectral_reduction_unexpected_dims(self):
+        """Test spectral reduction with unexpected dimensionality (5D)."""
+        # Create test data
+        data = {
+            "time_0": ImageData(
+                np.ma.ones((3, 5, 5)),
+                assets=["asset_0"],
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+            )
+        }
+
+        # Reducer that returns unexpected 5D output
+        def reducer_5d(data):
+            # Add extra dimensions
+            return data[..., np.newaxis, np.newaxis]
+
+        # Should still work but log a warning
+        result = _reduce_spectral_dimension_stack(data, reducer_5d)
+        assert len(result) == 1
+
+    def test_spectral_reduction_with_failing_tasks(self):
+        """Test spectral reduction when some tasks fail to load."""
+
+        # Create a stack where some items fail to load
+        class PartiallyFailingStack(dict):
+            def __getitem__(self, key):
+                if key == "fail_item":
+                    raise KeyError(f"Task {key} failed")
+                # For successful items, return ImageData
+                return ImageData(
+                    np.ma.ones((3, 5, 5)),
+                    assets=[key],
+                    crs="EPSG:4326",
+                    bounds=(-180, -90, 180, 90),
+                )
+
+        failing_stack = PartiallyFailingStack()
+        failing_stack["success_1"] = None  # Will be replaced by __getitem__
+        failing_stack["fail_item"] = None  # Will raise KeyError
+        failing_stack["success_2"] = None  # Will be replaced by __getitem__
+
+        # Should process successfully and skip the failing item
+        result = _reduce_spectral_dimension_stack(failing_stack, mock_spectral_reducer)
+        # Should have 2 successful results
+        assert len(result) == 2
+        assert "success_1" in result
+        assert "success_2" in result
+        assert "fail_item" not in result
 
 
 class TestReduceDimensionIntegration:
