@@ -1014,6 +1014,12 @@ class LoadStac:
             key_fn=lambda asset: asset["id"],  # Use item ID as unique key
             timestamp_fn=lambda asset: _props_to_datetime(asset["properties"]),
             allowed_exceptions=(TileOutsideBounds,),
+            # New parameters for truly lazy behavior
+            width=int(width) if width else None,
+            height=int(height) if height else None,
+            bounds=tuple(bbox),
+            dst_crs=crs,
+            band_names=bands,
         )
 
     def load_stac(

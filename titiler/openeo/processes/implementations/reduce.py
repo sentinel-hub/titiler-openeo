@@ -47,7 +47,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import RasterStack, get_first_item
+from .data_model import LazyImageRef, LazyRasterStack, RasterStack, get_first_item
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -172,34 +172,51 @@ def _create_pixel_selection_result(
     }
 
 
-def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, ImageData]]:
-    """Collect all images from a RasterStack.
+def _collect_images_from_data(
+    data: RasterStack,
+) -> List[Tuple[str, Union[LazyImageRef, ImageData]]]:
+    """Collect all images or image references from a RasterStack.
+
+    For LazyRasterStack with image refs, returns LazyImageRef instances without
+    executing tasks. This enables deferred execution and cutline mask computation
+    without loading actual pixel data.
+
+    For regular RasterStack or LazyRasterStack without image refs, returns
+    actual ImageData instances.
 
     Args:
         data: A RasterStack (regular dict or LazyRasterStack)
 
     Returns:
-        List of (key, ImageData) tuples in temporal order
+        List of (key, Union[LazyImageRef, ImageData]) tuples in temporal order
     """
-    all_images: List[Tuple[str, ImageData]] = []
+    all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
 
-    # Check if data has timestamp-based grouping capability (LazyRasterStack)
-    if hasattr(data, "groupby_timestamp") and hasattr(data, "timestamps"):
+    # Check if data is a LazyRasterStack with image refs (truly lazy path)
+    if isinstance(data, LazyRasterStack):
+        image_refs = data.get_image_refs()
+        if image_refs:
+            # Return LazyImageRef instances without executing tasks
+            return image_refs
+
+    # Fall back to timestamp-based grouping if available (duck typing)
+    if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
         timestamps = data.timestamps()
         for timestamp in sorted(timestamps):
-            timestamp_items = data.get_by_timestamp(timestamp)  # type: ignore[attr-defined]
+            timestamp_items = data.get_by_timestamp(timestamp)
             if timestamp_items:
-                all_images.extend(timestamp_items.items())
-    else:
-        # Regular RasterStack - collect all images
-        for key in data.keys():
-            try:
-                img = data[key]
-                all_images.append((key, img))
-            except KeyError:
-                continue
+                all_items.extend(timestamp_items.items())
+        return all_items
 
-    return all_images
+    # Regular RasterStack - collect all images
+    for key in data.keys():
+        try:
+            img = data[key]
+            all_items.append((key, img))
+        except KeyError:
+            continue
+
+    return all_items
 
 
 def _feed_image_to_pixsel(
@@ -229,9 +246,14 @@ def apply_pixel_selection(
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
 
-    This function first collects all images and computes the aggregated cutline mask,
-    then processes images for pixel selection. This ensures early termination works
-    correctly by knowing upfront which pixels will be covered by any image.
+    This function first collects all images/refs and computes the aggregated cutline mask
+    from LazyImageRef instances (without executing tasks), then processes images for
+    pixel selection. This ensures early termination works correctly by knowing upfront
+    which pixels will be covered by any image.
+
+    For LazyRasterStack with image refs, cutline masks are computed from geometry metadata
+    without loading pixel data. Tasks are only executed when actually feeding pixels to
+    the pixel selection method.
 
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
@@ -242,29 +264,51 @@ def apply_pixel_selection(
     bounds: Optional[BBox] = None
     band_names: Optional[List[str]] = None
 
-    # Collect all images first
-    all_images = _collect_images_from_data(data)
+    # Collect all images/refs first (without executing tasks for LazyImageRef)
+    all_items = _collect_images_from_data(data)
 
-    if not all_images:
+    if not all_items:
         raise ValueError("Method returned an empty array")
 
-    # Compute aggregated cutline mask from all images
-    cutline_masks = [img.cutline_mask for _, img in all_images]
+    # Compute aggregated cutline mask from all items
+    # For LazyImageRef, this computes from geometry without task execution
+    # For ImageData, this uses the existing cutline_mask attribute
+    cutline_masks = []
+    for _, item in all_items:
+        if isinstance(item, LazyImageRef):
+            cutline_masks.append(item.cutline_mask())
+        else:
+            cutline_masks.append(item.cutline_mask)
     aggregated_cutline = _compute_aggregated_cutline_mask(cutline_masks)
 
-    # Process images for pixel selection
-    for key, img in all_images:
-        # Initialize pixsel_method on first image
-        if len(assets_used) == 0:
-            pixsel_method.width = img.width
-            pixsel_method.height = img.height
-            pixsel_method.count = img.count
-            crs = img.crs
-            bounds = img.bounds
-            band_names = img.band_names
-            # Set the aggregated cutline mask
-            if aggregated_cutline is not None:
-                pixsel_method.cutline_mask = aggregated_cutline
+    # Initialize pixsel_method from first item's metadata
+    first_key, first_item = all_items[0]
+    if isinstance(first_item, LazyImageRef):
+        pixsel_method.width = first_item.width
+        pixsel_method.height = first_item.height
+        pixsel_method.count = first_item.count
+        crs = first_item.crs
+        bounds = first_item.bounds
+        band_names = first_item.band_names
+    else:
+        pixsel_method.width = first_item.width
+        pixsel_method.height = first_item.height
+        pixsel_method.count = first_item.count
+        crs = first_item.crs
+        bounds = first_item.bounds
+        band_names = first_item.band_names
+
+    # Set the aggregated cutline mask
+    if aggregated_cutline is not None:
+        pixsel_method.cutline_mask = aggregated_cutline
+
+    # Process items for pixel selection
+    for key, item in all_items:
+        # Realize the image if it's a LazyImageRef (execute the task now)
+        if isinstance(item, LazyImageRef):
+            img = item.realize()
+        else:
+            img = item
 
         # Validate band count
         assert (

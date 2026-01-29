@@ -48,9 +48,13 @@ def load_url(
         },
     }
 
-    # Get metadata from COG to set bbox
+    # Get metadata from COG to set bbox, dimensions, and CRS
     with COGReader(url) as cog:
         item["bbox"] = [float(x) for x in cog.bounds]
+        cog_width = cog.dataset.width
+        cog_height = cog.dataset.height
+        cog_crs = cog.dataset.crs
+        cog_bounds = tuple(float(x) for x in cog.bounds)
 
     # Create the tasks
     tasks = create_tasks(
@@ -67,6 +71,12 @@ def load_url(
         key_fn=lambda _: "data",  # Single key since it's a single COG
         timestamp_fn=lambda _: datetime.now(),  # Use current time as timestamp
         allowed_exceptions=(),
+        # New parameters for truly lazy behavior
+        width=cog_width,
+        height=cog_height,
+        bounds=cog_bounds,
+        dst_crs=cog_crs,
+        band_names=["data"],
     )
 
 
