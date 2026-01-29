@@ -58,6 +58,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "pytest-vcr",
+    "shapely>=2.0.0",
     "sqlalchemy>=2.0.0",
     "pre-commit",
     "ipython~=8.0.0",
