@@ -267,84 +267,75 @@ def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, ImageRef]]:
 
 Tests in `test_cutline_mask.py`, `test_pixel_selection_reducers.py`, `test_reduce_processes.py`, `test_dimension_reduction.py`, and `test_truly_lazy_raster_stack.py` updated to use `RasterStack.from_images()` instead of plain dicts.
 
-### Phase 6: Eliminate Union[LazyImageRef, ImageData] Pattern 🔄 IN PROGRESS
+### Phase 6: Unified ImageRef Class ✅ COMPLETED
 
-**Goal:** RasterStack should ALWAYS manage ImageRef instances. Hide laziness management - all functions should work with ImageRef protocol only, never raw ImageData.
+**Goal:** Single `ImageRef` class that manages both lazy and eager states internally - no multiple classes, no isinstance checks, NO BACKWARDS COMPATIBILITY ALIASES.
 
-#### Problem Statement
+#### Solution: Unified ImageRef with State Management
 
-Currently `_collect_images_from_data()` returns `List[Tuple[str, Union[LazyImageRef, ImageData]]]`:
+ONE `ImageRef` class (no `LazyImageRef`, no `EagerImageRef`):
 
-- When RasterStack has refs (lazy): returns LazyImageRef
-- When RasterStack was created via `from_images()`: returns raw ImageData
-
-This forces `isinstance` checks throughout the codebase:
-
-```python
-# Current - BAD
-for key, item in all_items:
-    if isinstance(item, LazyImageRef):
-        cutline_masks.append(item.cutline_mask())
-    else:
-        cutline_masks.append(item.cutline_mask)
-```
-
-#### Solution: EagerImageRef
-
-Create `EagerImageRef` that wraps already-loaded ImageData:
-
-- Implements same `ImageRef` protocol as `LazyImageRef`
-- `realize()` returns the cached ImageData immediately
-- `cutline_mask()` returns `image.cutline_mask`
-
-#### Step 6.1: Create EagerImageRef Dataclass
+- `realized` property tracks whether data has been loaded
+- `from_task()` factory creates lazy refs (task function, no cached image)
+- `from_image()` factory creates eager refs (pre-loaded image, no task)
+- `realize()` loads data on first call (lazy) or returns cached image (eager)
+- `cutline_mask()` computes from geometry (if available) or returns image's mask
 
 ```python
 @dataclass
-class EagerImageRef:
-    """ImageRef implementation for pre-loaded ImageData."""
-    _image: ImageData  # Already loaded
+class ImageRef:
+    """A unified image reference that manages lazy or eager data access."""
     _key: str
-
-    @property
-    def key(self) -> str:
-        return self._key
+    _width: int
+    _height: int
+    _bounds: BBox
+    _crs: Optional[CRS]
+    _band_names: List[str]
+    _count: int
+    _geometry: Optional[Dict[str, Any]] = None
+    _task_fn: Optional[Callable[[], ImageData]] = None  # For lazy
+    _image: Optional[ImageData] = None  # For eager/cached
     
     @property
-    def width(self) -> int:
-        return self._image.width
-    
-    # ... other properties delegate to _image
+    def realized(self) -> bool:
+        return self._image is not None
     
     def realize(self) -> ImageData:
-        return self._image  # No task execution needed
+        if self._image is None:
+            self._image = self._task_fn()
+        return self._image
     
-    def cutline_mask(self) -> Optional[numpy.ndarray]:
-        return self._image.cutline_mask
+    @classmethod
+    def from_task(cls, key, task_fn, ...) -> "ImageRef": ...
+    
+    @classmethod
+    def from_image(cls, key, image: ImageData) -> "ImageRef": ...
 ```
 
-#### Step 6.2: Update from_images() to Create EagerImageRef
+#### Step 6.1: Unified ImageRef Class ✅
 
-```python
-@classmethod
-def from_images(cls, images: Dict[str, ImageData], ...) -> "RasterStack":
-    # Create EagerImageRef for each image
-    for key, img in images.items():
-        stack._image_refs[key] = EagerImageRef(_image=img, _key=key)
-```
+- Single class with `_task_fn` (lazy) and `_image` (eager/cached) fields
+- `realized` property for state inspection
+- Factory methods `from_task()` and `from_image()` for construction
+- **NO** backwards compatibility aliases
 
-#### Step 6.3: Simplify _collect_images_from_data()
+#### Step 6.2: Simplified _collect_images_from_data() ✅
 
 ```python
 def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, ImageRef]]:
-    """Always returns ImageRef instances - never raw ImageData."""
-    return data.get_image_refs()  # Single path, always works
+    """Always returns ImageRef instances."""
+    image_refs = data.get_image_refs()
+    if image_refs:
+        return image_refs
+    # Fallback: create ImageRef from pre-loaded images
+    return [(key, ImageRef.from_image(key=key, image=data[key])) for key in data.keys()]
 ```
 
-#### Step 6.4: Remove isinstance Checks
+#### Step 6.3: Remove isinstance Checks ✅
+
+All consumers now use uniform interface:
 
 ```python
-# New - GOOD
 for key, ref in all_items:
     cutline_masks.append(ref.cutline_mask())  # Always works!
     img = ref.realize()  # Always works!

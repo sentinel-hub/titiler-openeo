@@ -34,7 +34,6 @@ from rio_tiler.types import BBox
 # The datacube can be a set of files, or arrays in memory distributed over a cluster.
 # These choices are left to the backend implementor, this guide only tries to highlight the possibilities.
 # NOTE: RasterStack is now a class, not a type alias. The class is defined below.
-# LazyRasterStack is a deprecated alias for backwards compatibility.
 
 T = TypeVar("T")
 
@@ -246,11 +245,6 @@ class ImageRef:
         )
 
 
-# Backwards compatibility aliases
-LazyImageRef = ImageRef
-EagerImageRef = ImageRef
-
-
 class RasterStack(Dict[str, ImageData]):
     """A raster stack with lazy loading and temporal awareness.
 
@@ -260,7 +254,7 @@ class RasterStack(Dict[str, ImageData]):
     This implementation separates unique key generation from temporal metadata:
     - Keys are guaranteed unique identifiers
     - Temporal metadata enables grouping and filtering by datetime
-    - LazyImageRef instances enable cutline mask computation without task execution
+    - ImageRef instances enable cutline mask computation without task execution
     """
 
     def __init__(
@@ -284,11 +278,11 @@ class RasterStack(Dict[str, ImageData]):
             timestamp_fn: Optional function that extracts datetime objects from assets
             allowed_exceptions: Exceptions allowed during task execution
             max_workers: Maximum number of threads for concurrent execution
-            width: Output width in pixels (for LazyImageRef)
-            height: Output height in pixels (for LazyImageRef)
-            bounds: Output bounds as (west, south, east, north) (for LazyImageRef)
-            dst_crs: Target CRS (for LazyImageRef)
-            band_names: List of band names (for LazyImageRef)
+            width: Output width in pixels (for ImageRef)
+            height: Output height in pixels (for ImageRef)
+            bounds: Output bounds as (west, south, east, north) (for ImageRef)
+            dst_crs: Target CRS (for ImageRef)
+            band_names: List of band names (for ImageRef)
         """
         super().__init__()
         self._tasks = tasks
@@ -297,7 +291,7 @@ class RasterStack(Dict[str, ImageData]):
         self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
 
-        # Output dimensions for LazyImageRef
+        # Output dimensions for ImageRef
         self._width = width
         self._height = height
         self._bounds = bounds
@@ -316,8 +310,8 @@ class RasterStack(Dict[str, ImageData]):
             datetime, List[str]
         ] = {}  # Maps datetime objects to lists of keys
 
-        # LazyImageRef instances for deferred cutline computation
-        self._image_refs: Dict[str, LazyImageRef] = {}
+        # ImageRef instances for deferred cutline computation
+        self._image_refs: Dict[str, ImageRef] = {}
 
         self._compute_metadata()
 
@@ -346,22 +340,22 @@ class RasterStack(Dict[str, ImageData]):
         """List of band names."""
         return self._band_names
 
-    def get_image_ref(self, key: str) -> Optional[LazyImageRef]:
-        """Get the LazyImageRef for a given key.
+    def get_image_ref(self, key: str) -> Optional[ImageRef]:
+        """Get the ImageRef for a given key.
 
         Args:
             key: The key to look up
 
         Returns:
-            LazyImageRef if available, None otherwise
+            ImageRef if available, None otherwise
         """
         return self._image_refs.get(key)
 
-    def get_image_refs(self) -> List[Tuple[str, LazyImageRef]]:
-        """Get all LazyImageRef instances in temporal order.
+    def get_image_refs(self) -> List[Tuple[str, ImageRef]]:
+        """Get all ImageRef instances in temporal order.
 
         Returns:
-            List of (key, LazyImageRef) tuples in temporal order
+            List of (key, ImageRef) tuples in temporal order
         """
         return [
             (key, self._image_refs[key])
@@ -699,8 +693,3 @@ class RasterStack(Dict[str, ImageData]):
             dst_crs=first_img.crs,
             band_names=first_img.band_names if first_img.band_names else [],
         )
-
-
-# Deprecated alias for backwards compatibility
-# TODO: Remove in a future version
-LazyRasterStack = RasterStack

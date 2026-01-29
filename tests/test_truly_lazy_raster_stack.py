@@ -1,7 +1,7 @@
-"""Tests for truly lazy LazyRasterStack behavior with LazyImageRef.
+"""Tests for RasterStack lazy behavior with ImageRef.
 
-These tests verify that when LazyRasterStack is created with dimension parameters
-(width, height, bounds, dst_crs, band_names), it creates LazyImageRef instances
+These tests verify that when RasterStack is created with dimension parameters
+(width, height, bounds, dst_crs, band_names), it creates ImageRef instances
 that enable cutline mask computation without executing tasks.
 """
 
@@ -14,8 +14,7 @@ from rio_tiler.models import ImageData
 from shapely.geometry import box, mapping
 
 from titiler.openeo.processes.implementations.data_model import (
-    LazyImageRef,
-    LazyRasterStack,
+    ImageRef,
     RasterStack,
     compute_cutline_mask,
 )
@@ -92,26 +91,25 @@ class TestComputeCutlineMask:
         assert mask.all()
 
 
-class TestLazyImageRef:
-    """Tests for LazyImageRef dataclass."""
+class TestImageRef:
+    """Tests for ImageRef dataclass."""
 
     def test_lazy_image_ref_properties(self):
-        """LazyImageRef stores all properties correctly."""
+        """ImageRef stores all properties correctly."""
         geometry = mapping(box(0, 0, 10, 10))
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
         task_fn = MagicMock(return_value=None)
 
-        ref = LazyImageRef(
-            _key="item1",
-            _geometry=geometry,
-            _width=256,
-            _height=256,
-            _bounds=bounds,
-            _crs=crs,
-            _band_names=["B04", "B08"],
-            _count=2,
-            _task_fn=task_fn,
+        ref = ImageRef.from_task(
+            key="item1",
+            task_fn=task_fn,
+            width=256,
+            height=256,
+            bounds=bounds,
+            crs=crs,
+            band_names=["B04", "B08"],
+            geometry=geometry,
         )
 
         assert ref.key == "item1"
@@ -130,16 +128,15 @@ class TestLazyImageRef:
         crs = CRS.from_epsg(4326)
         task_fn = MagicMock(return_value=None)
 
-        ref = LazyImageRef(
-            _key="item1",
-            _geometry=geometry,
-            _width=100,
-            _height=100,
-            _bounds=bounds,
-            _crs=crs,
-            _band_names=["B04"],
-            _count=1,
-            _task_fn=task_fn,
+        ref = ImageRef.from_task(
+            key="item1",
+            task_fn=task_fn,
+            width=100,
+            height=100,
+            bounds=bounds,
+            crs=crs,
+            band_names=["B04"],
+            geometry=geometry,
         )
 
         # Compute cutline mask - should NOT execute task
@@ -157,16 +154,15 @@ class TestLazyImageRef:
         crs = CRS.from_epsg(4326)
         task_fn = MagicMock(return_value=None)
 
-        ref = LazyImageRef(
-            _key="item1",
-            _geometry=geometry,
-            _width=100,
-            _height=100,
-            _bounds=bounds,
-            _crs=crs,
-            _band_names=["B04"],
-            _count=1,
-            _task_fn=task_fn,
+        ref = ImageRef.from_task(
+            key="item1",
+            task_fn=task_fn,
+            width=100,
+            height=100,
+            bounds=bounds,
+            crs=crs,
+            band_names=["B04"],
+            geometry=geometry,
         )
 
         mask1 = ref.cutline_mask()
@@ -188,16 +184,15 @@ class TestLazyImageRef:
         # Task function returns ImageData directly
         task_fn = MagicMock(return_value=mock_image)
 
-        ref = LazyImageRef(
-            _key="item1",
-            _geometry=geometry,
-            _width=100,
-            _height=100,
-            _bounds=bounds,
-            _crs=crs,
-            _band_names=["B04"],
-            _count=1,
-            _task_fn=task_fn,
+        ref = ImageRef.from_task(
+            key="item1",
+            task_fn=task_fn,
+            width=100,
+            height=100,
+            bounds=bounds,
+            crs=crs,
+            band_names=["B04"],
+            geometry=geometry,
         )
 
         # Realize - should execute task
@@ -207,8 +202,8 @@ class TestLazyImageRef:
         task_fn.assert_called_once()
 
 
-class TestLazyRasterStackWithDimensions:
-    """Tests for LazyRasterStack when created with dimension parameters."""
+class TestRasterStackWithDimensions:
+    """Tests for RasterStack when created with dimension parameters."""
 
     def _create_mock_task(self, item_id: str, geometry: dict, image_data: ImageData):
         """Create a mock task tuple."""
@@ -222,7 +217,7 @@ class TestLazyRasterStackWithDimensions:
         return (mock_future, mock_asset)
 
     def test_lazy_raster_stack_creates_image_refs_with_dimensions(self):
-        """When dimensions provided, LazyRasterStack creates LazyImageRef instances."""
+        """When dimensions provided, RasterStack creates ImageRef instances."""
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
         geometry = mapping(box(0, 0, 10, 10))
@@ -232,7 +227,7 @@ class TestLazyRasterStackWithDimensions:
 
         task = self._create_mock_task("item1", geometry, mock_image)
 
-        stack = LazyRasterStack(
+        stack = RasterStack(
             tasks=[task],
             key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
@@ -249,12 +244,12 @@ class TestLazyRasterStackWithDimensions:
 
         key, ref = image_refs[0]
         assert key == "item1"
-        assert isinstance(ref, LazyImageRef)
+        assert isinstance(ref, ImageRef)
         assert ref.width == 256
         assert ref.height == 256
 
     def test_lazy_raster_stack_no_image_refs_without_dimensions(self):
-        """Without dimensions, LazyRasterStack does not create LazyImageRef instances."""
+        """Without dimensions, RasterStack does not create ImageRef instances."""
         geometry = mapping(box(0, 0, 10, 10))
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
@@ -265,7 +260,7 @@ class TestLazyRasterStackWithDimensions:
         task = self._create_mock_task("item1", geometry, mock_image)
 
         # Create without dimension parameters
-        stack = LazyRasterStack(
+        stack = RasterStack(
             tasks=[task],
             key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
@@ -291,7 +286,7 @@ class TestLazyRasterStackWithDimensions:
         }
         task = (mock_future, mock_asset)
 
-        stack = LazyRasterStack(
+        stack = RasterStack(
             tasks=[task],
             key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
@@ -317,11 +312,11 @@ class TestLazyRasterStackWithDimensions:
         mock_future.result.assert_not_called()
 
 
-class TestCollectImagesFromDataWithLazyRefs:
-    """Tests for _collect_images_from_data returning LazyImageRef instances."""
+class TestCollectImagesFromDataWithImageRefs:
+    """Tests for _collect_images_from_data returning ImageRef instances."""
 
-    def _create_lazy_stack_with_refs(self):
-        """Helper to create a LazyRasterStack with LazyImageRef instances."""
+    def _create_stack_with_refs(self):
+        """Helper to create a RasterStack with ImageRef instances."""
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
         geometry = mapping(box(0, 0, 10, 10))
@@ -338,7 +333,7 @@ class TestCollectImagesFromDataWithLazyRefs:
         }
         task = (mock_future, mock_asset)
 
-        return LazyRasterStack(
+        return RasterStack(
             tasks=[task],
             key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
@@ -349,17 +344,17 @@ class TestCollectImagesFromDataWithLazyRefs:
             band_names=["B04"],
         ), mock_future
 
-    def test_collect_images_returns_lazy_refs_when_available(self):
-        """_collect_images_from_data returns LazyImageRef when stack has refs."""
-        stack, mock_future = self._create_lazy_stack_with_refs()
+    def test_collect_images_returns_refs_when_available(self):
+        """_collect_images_from_data returns ImageRef when stack has refs."""
+        stack, mock_future = self._create_stack_with_refs()
 
         images = _collect_images_from_data(stack)
 
         assert len(images) == 1
         key, img_or_ref = images[0]
         assert key == "item1"
-        # Should return LazyImageRef, not ImageData
-        assert isinstance(img_or_ref, LazyImageRef)
+        # Should return ImageRef, not ImageData
+        assert isinstance(img_or_ref, ImageRef)
         # Task should not have been executed
         mock_future.result.assert_not_called()
 
@@ -367,8 +362,8 @@ class TestCollectImagesFromDataWithLazyRefs:
 class TestApplyPixelSelectionTrulyLazy:
     """Tests for apply_pixel_selection with truly lazy behavior."""
 
-    def _create_lazy_stack_with_multiple_items(self):
-        """Create LazyRasterStack with multiple items for pixel selection tests."""
+    def _create_stack_with_multiple_items(self):
+        """Create RasterStack with multiple items for pixel selection tests."""
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
 
@@ -407,7 +402,7 @@ class TestApplyPixelSelectionTrulyLazy:
             },
         )
 
-        stack = LazyRasterStack(
+        stack = RasterStack(
             tasks=[task1, task2],
             key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -423,10 +418,8 @@ class TestApplyPixelSelectionTrulyLazy:
         return stack, mock_task_fn1, mock_task_fn2
 
     def test_apply_pixel_selection_computes_aggregated_cutline_from_refs(self):
-        """apply_pixel_selection computes aggregated cutline from LazyImageRef instances."""
-        stack, mock_task_fn1, mock_task_fn2 = (
-            self._create_lazy_stack_with_multiple_items()
-        )
+        """apply_pixel_selection computes aggregated cutline from ImageRef instances."""
+        stack, mock_task_fn1, mock_task_fn2 = self._create_stack_with_multiple_items()
 
         # Before apply_pixel_selection, verify we have image refs
         refs = stack.get_image_refs()
@@ -444,9 +437,7 @@ class TestApplyPixelSelectionTrulyLazy:
 
     def test_apply_pixel_selection_executes_tasks_when_feeding_pixels(self):
         """apply_pixel_selection only executes tasks when actually feeding pixels."""
-        stack, mock_task_fn1, mock_task_fn2 = (
-            self._create_lazy_stack_with_multiple_items()
-        )
+        stack, mock_task_fn1, mock_task_fn2 = self._create_stack_with_multiple_items()
 
         # Apply pixel selection - this should eventually execute tasks
         result = apply_pixel_selection(data=stack, pixel_selection="first")
