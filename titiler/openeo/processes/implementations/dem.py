@@ -62,4 +62,4 @@ def hillshade(
     for key, img_data in data.items():
         result[key] = _apply_hillshade(img_data, azimuth, angle_altitude, buffer)
 
-    return result
+    return RasterStack.from_images(result)

@@ -364,17 +364,17 @@ class TestTypeNameConversions:
     def test_type_to_openeo_name_custom_types(self):
         """Test custom type names are detected.
 
-        Validates: LazyRasterStack → "datacube".
+        Validates: RasterStack → "datacube".
 
         Why important: Custom types should map to appropriate OpenEO concepts.
         """
         from titiler.openeo.processes.implementations.core import _type_to_openeo_name
 
-        # Mock a LazyRasterStack type
-        class LazyRasterStack:
+        # Mock a RasterStack type
+        class RasterStack:
             pass
 
-        assert _type_to_openeo_name(LazyRasterStack) == "datacube"
+        assert _type_to_openeo_name(RasterStack) == "datacube"
 
     def test_type_to_openeo_name_union(self):
         """Test Union type conversion.

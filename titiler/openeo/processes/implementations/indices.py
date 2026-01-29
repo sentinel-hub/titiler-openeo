@@ -2,7 +2,7 @@
 
 from typing import Dict
 
-from .data_model import ImageData, LazyRasterStack, RasterStack
+from .data_model import ImageData, RasterStack
 from .math import normalized_difference
 
 __all__ = ["ndvi", "ndwi"]
@@ -55,7 +55,7 @@ def ndwi(data: RasterStack, nir: int, swir: int) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndwi(img_data, nir, swir)
-    return LazyRasterStack.from_images(result)
+    return RasterStack.from_images(result)
 
 
 def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
@@ -73,4 +73,4 @@ def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndvi(img_data, nir, red)
-    return LazyRasterStack.from_images(result)
+    return RasterStack.from_images(result)

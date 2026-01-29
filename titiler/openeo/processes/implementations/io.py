@@ -14,7 +14,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
-from .data_model import LazyRasterStack, RasterStack
+from .data_model import RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
@@ -65,8 +65,8 @@ def load_url(
         assets=["data"],
     )
 
-    # Return a LazyRasterStack that will only execute the tasks when accessed
-    return LazyRasterStack(
+    # Return a RasterStack that will only execute the tasks when accessed
+    return RasterStack(
         tasks=tasks,
         key_fn=lambda _: "data",  # Single key since it's a single COG
         timestamp_fn=lambda _: datetime.now(),  # Use current time as timestamp

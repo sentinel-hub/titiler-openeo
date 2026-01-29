@@ -325,7 +325,7 @@ def test_lazy_raster_stack_error_handling():
     assert isinstance(success_img, ImageData)
 
     # Test accessing non-existent key
-    with pytest.raises(KeyError, match="not found in LazyRasterStack"):
+    with pytest.raises(KeyError, match="not found in RasterStack"):
         _ = lazy_stack["non-existent-key"]
 
     # Test get method with non-existent key
@@ -843,7 +843,7 @@ def test_empty_lazy_raster_stack():
     assert list(lazy_stack.items()) == []
 
     # .first should raise error on empty stack
-    with pytest.raises(KeyError, match="LazyRasterStack is empty"):
+    with pytest.raises(KeyError, match="RasterStack is empty"):
         _ = lazy_stack.first
 
     # apply_pixel_selection should also fail gracefully

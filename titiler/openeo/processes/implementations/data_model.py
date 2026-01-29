@@ -36,7 +36,8 @@ from rio_tiler.types import BBox
 # Here it is important to note that openEO does not enforce or define how the datacube should look like on the backend.
 # The datacube can be a set of files, or arrays in memory distributed over a cluster.
 # These choices are left to the backend implementor, this guide only tries to highlight the possibilities.
-RasterStack = Dict[str, ImageData]
+# NOTE: RasterStack is now a class, not a type alias. The class is defined below.
+# LazyRasterStack is a deprecated alias for backwards compatibility.
 
 T = TypeVar("T")
 
@@ -247,8 +248,11 @@ class LazyImageRef:
         return self._task_fn()
 
 
-class LazyRasterStack(Dict[str, ImageData]):
-    """A RasterStack that lazily loads data when accessed.
+class RasterStack(Dict[str, ImageData]):
+    """A raster stack with lazy loading and temporal awareness.
+
+    This is THE data structure for collections of raster images in titiler-openeo.
+    All images share the same spatial extent and CRS.
 
     This implementation separates unique key generation from temporal metadata:
     - Keys are guaranteed unique identifiers
@@ -269,7 +273,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         dst_crs: Optional[CRS] = None,
         band_names: Optional[List[str]] = None,
     ):
-        """Initialize a LazyRasterStack.
+        """Initialize a RasterStack.
 
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
@@ -541,7 +545,7 @@ class LazyRasterStack(Dict[str, ImageData]):
                 return self._data_cache[key]
 
         if key not in self._key_to_task_index:
-            raise KeyError(f"Key '{key}' not found in LazyRasterStack")
+            raise KeyError(f"Key '{key}' not found in RasterStack")
 
         task_index = self._key_to_task_index[key]
         task_func, asset = self._tasks[task_index]
@@ -620,7 +624,7 @@ class LazyRasterStack(Dict[str, ImageData]):
             KeyError: If the stack is empty or first task fails
         """
         if not self._keys:
-            raise KeyError("LazyRasterStack is empty")
+            raise KeyError("RasterStack is empty")
 
         # Try each key in order until we find one that succeeds
         for key in self._keys:
@@ -628,7 +632,7 @@ class LazyRasterStack(Dict[str, ImageData]):
                 return self[key]
             except KeyError:
                 continue
-        raise KeyError("No successful tasks found in LazyRasterStack")
+        raise KeyError("No successful tasks found in RasterStack")
 
     @property
     def last(self) -> ImageData:
@@ -641,7 +645,7 @@ class LazyRasterStack(Dict[str, ImageData]):
             KeyError: If the stack is empty or all tasks fail
         """
         if not self._keys:
-            raise KeyError("LazyRasterStack is empty")
+            raise KeyError("RasterStack is empty")
 
         # Try each key in reverse order until we find one that succeeds
         for key in reversed(self._keys):
@@ -649,26 +653,26 @@ class LazyRasterStack(Dict[str, ImageData]):
                 return self[key]
             except KeyError:
                 continue
-        raise KeyError("No successful tasks found in LazyRasterStack")
+        raise KeyError("No successful tasks found in RasterStack")
 
     @classmethod
-    def from_images(cls, images: Dict[str, ImageData]) -> "LazyRasterStack":
-        """Create a LazyRasterStack from pre-loaded ImageData instances.
+    def from_images(cls, images: Dict[str, ImageData]) -> "RasterStack":
+        """Create a RasterStack from pre-loaded ImageData instances.
 
-        This wraps existing ImageData in the LazyRasterStack interface for consistency.
+        This wraps existing ImageData in the RasterStack interface for consistency.
         The images are already loaded, so no lazy evaluation occurs.
 
         Args:
             images: Dictionary mapping keys to ImageData instances
 
         Returns:
-            LazyRasterStack: A stack containing the provided images
+            RasterStack: A stack containing the provided images
 
         Raises:
             ValueError: If images is empty
         """
         if not images:
-            raise ValueError("Cannot create LazyRasterStack from empty images dict")
+            raise ValueError("Cannot create RasterStack from empty images dict")
 
         # Get first image for dimension parameters
         first_key = next(iter(images))
@@ -693,3 +697,8 @@ class LazyRasterStack(Dict[str, ImageData]):
             dst_crs=first_img.crs,
             band_names=first_img.band_names if first_img.band_names else [],
         )
+
+
+# Deprecated alias for backwards compatibility
+# TODO: Remove in a future version
+LazyRasterStack = RasterStack

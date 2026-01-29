@@ -478,10 +478,66 @@ uv run pytest tests/ --ignore=tests/test_main.py -q
 
 ---
 
+## Phase 4: Rename and Cleanup ✅
+
+### Summary
+
+Renamed the class from `LazyRasterStack` to `RasterStack`, making it the unified type for raster stacks. Added `LazyRasterStack = RasterStack` as a deprecated alias for backwards compatibility.
+
+### Changes Made
+
+**data_model.py:**
+
+- Renamed `class LazyRasterStack` → `class RasterStack`
+- Updated all error messages and docstrings to use `RasterStack`
+- Added deprecation alias: `LazyRasterStack = RasterStack`
+- Removed the old type alias `RasterStack = Dict[str, ImageData]`
+
+**Implementation files updated:**
+
+- `reduce.py` - Import and usages
+- `apply.py` - Import and usages  
+- `core.py` - Import, isinstance checks, type name detection
+- `io.py` - Import and constructor call
+- `image.py` - Import and usages
+- `arrays.py` - Import and type hints
+- `indices.py` - Import and usages
+- `stacapi.py` - Import and constructor call
+- `__init__.py` - Export
+
+**core.py type validation:**
+
+- Updated `_is_dict_type_expected()` to recognize `RasterStack` as a valid datacube type
+- Updated `_type_to_openeo_name()` to map `RasterStack` → `"datacube"`
+
+**Test files updated:**
+
+- `test_lazy_raster_stack.py` - Error message assertions
+- `test_core_coverage.py` - Type name test
+
+### Backwards Compatibility
+
+The `LazyRasterStack` name is preserved as an alias:
+
+```python
+# At end of data_model.py
+LazyRasterStack = RasterStack  # Deprecated alias
+```
+
+This means existing code using `LazyRasterStack` will continue to work without changes.
+
+### Test Results
+
+```bash
+uv run pytest tests/ --ignore=tests/test_main.py -q
+# Result: 479 passed, 11 skipped ✅
+```
+
+---
+
 ## Resume Instructions
 
 1. Check current state: `git status` and `git diff`
 2. Run tests: `uv run pytest tests/ --ignore=tests/test_main.py -q`
-3. All Phase 2 and Phase 3 simplification steps are complete
-4. Next: Phase 4 - Rename `LazyRasterStack` → `RasterStack`
-5. Consider creating PR for review
+3. All Phase 2, Phase 3, and Phase 4 are complete
+4. Consider creating PR for review

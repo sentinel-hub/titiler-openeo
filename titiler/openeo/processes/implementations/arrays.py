@@ -7,7 +7,7 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from .core import process
-from .data_model import LazyRasterStack, RasterStack
+from .data_model import RasterStack
 
 __all__ = [
     "array_element",
@@ -20,7 +20,7 @@ __all__ = [
 
 @process
 def array_element(
-    data: Union[ArrayLike, RasterStack, LazyRasterStack],
+    data: Union[ArrayLike, RasterStack],
     index: Optional[int] = None,
     label: Optional[str] = None,
 ) -> ArrayLike:
@@ -95,7 +95,7 @@ def array_element(
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
     """Create a RasterStack from an array."""
-    return LazyRasterStack.from_images({"data": ImageData(data)})
+    return RasterStack.from_images({"data": ImageData(data)})
 
 
 @process
@@ -143,7 +143,8 @@ def create_data_cube() -> RasterStack:
     Returns:
         An empty data cube (RasterStack) with no dimensions.
     """
-    return {}
+    # Return empty dict - type: ignore needed as RasterStack.from_images requires non-empty
+    return {}  # type: ignore[return-value]
 
 
 @process

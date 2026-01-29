@@ -47,7 +47,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import LazyImageRef, LazyRasterStack, RasterStack
+from .data_model import LazyImageRef, RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -168,7 +168,7 @@ def _create_pixel_selection_result(
         band_names=band_names if band_names is not None else [],
         metadata={"pixel_selection_method": pixel_selection},
     )
-    return LazyRasterStack.from_images({"data": result_img})
+    return RasterStack.from_images({"data": result_img})
 
 
 def _collect_images_from_data(
@@ -176,26 +176,26 @@ def _collect_images_from_data(
 ) -> List[Tuple[str, Union[LazyImageRef, ImageData]]]:
     """Collect all images or image references from a RasterStack.
 
-    For LazyRasterStack with image refs, returns LazyImageRef instances without
+    For RasterStack with image refs, returns LazyImageRef instances without
     executing tasks. This enables deferred execution and cutline mask computation
     without loading actual pixel data.
 
-    For regular RasterStack (dict) or LazyRasterStack without image refs, returns
+    For regular RasterStack (dict) or RasterStack without image refs, returns
     actual ImageData instances.
 
     Args:
-        data: A RasterStack (regular dict or LazyRasterStack)
+        data: A RasterStack (regular dict or RasterStack)
 
     Returns:
         List of (key, Union[LazyImageRef, ImageData]) tuples in temporal order
     """
-    # LazyRasterStack with image refs: return refs without executing tasks (truly lazy)
-    if isinstance(data, LazyRasterStack):
+    # RasterStack with image refs: return refs without executing tasks (truly lazy)
+    if isinstance(data, RasterStack):
         image_refs = data.get_image_refs()
         if image_refs:
             return image_refs
 
-        # LazyRasterStack without image refs: fall back to regular iteration
+        # RasterStack without image refs: fall back to regular iteration
         all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
         for key in data.keys():
             try:
@@ -248,7 +248,7 @@ def apply_pixel_selection(
     pixel selection. This ensures early termination works correctly by knowing upfront
     which pixels will be covered by any image.
 
-    For LazyRasterStack with image refs, cutline masks are computed from geometry metadata
+    For RasterStack with image refs, cutline masks are computed from geometry metadata
     without loading pixel data. Tasks are only executed when actually feeding pixels to
     the pixel selection method.
 
@@ -376,7 +376,7 @@ def _reduce_temporal_dimension(
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
             },
         )
-        return LazyRasterStack.from_images({"reduced": reduced_img})
+        return RasterStack.from_images({"reduced": reduced_img})
 
     # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
@@ -416,7 +416,7 @@ def _reduce_temporal_dimension(
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
         },
     )
-    return LazyRasterStack.from_images({"reduced": reduced_img})
+    return RasterStack.from_images({"reduced": reduced_img})
 
 
 def _reshape_reduced_spectral_data(
@@ -620,7 +620,7 @@ def _reduce_spectral_dimension_stack(
             },
         )
 
-    return LazyRasterStack.from_images(result)
+    return RasterStack.from_images(result)
 
 
 def reduce_dimension(

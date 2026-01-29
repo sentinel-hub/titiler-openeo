@@ -6,7 +6,7 @@ import morecantile
 import numpy
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
-from .data_model import ImageData, LazyRasterStack, RasterStack
+from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
@@ -44,7 +44,7 @@ def apply(
 
     # Apply process to each item in the stack
     result = {k: _process_img(img) for k, img in data.items()}
-    return LazyRasterStack.from_images(result)
+    return RasterStack.from_images(result)
 
 
 def apply_dimension(
@@ -97,7 +97,7 @@ def apply_dimension(
             result_img = _apply_spectral_dimension_single_image(
                 data[key], process, positional_parameters, named_parameters
             )
-            return LazyRasterStack.from_images({key: result_img})
+            return RasterStack.from_images({key: result_img})
         else:
             return _apply_spectral_dimension_stack(
                 data, process, positional_parameters, named_parameters
@@ -174,7 +174,7 @@ def _apply_temporal_dimension(
                     "applied_dimension": "temporal",
                 },
             )
-        return LazyRasterStack.from_images(result)
+        return RasterStack.from_images(result)
     else:
         # Replace temporal dimension with target dimension
         # This collapses to a single result
@@ -189,7 +189,7 @@ def _apply_temporal_dimension(
                 "target_dimension": target_dimension,
             },
         )
-        return LazyRasterStack.from_images({target_dimension: result_img})
+        return RasterStack.from_images({target_dimension: result_img})
 
 
 def _apply_spectral_dimension_single_image(
@@ -321,7 +321,7 @@ def _apply_spectral_dimension_stack(
             },
         )
 
-    return LazyRasterStack.from_images(result)
+    return RasterStack.from_images(result)
 
 
 def xyz_to_bbox(
