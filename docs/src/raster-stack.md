@@ -1,18 +1,23 @@
 # RasterStack Data Model
 
-In titiler-openeo, the RasterStack data model serves as the foundational data structure for handling Earth Observation datasets. This document explains the enhanced RasterStack concept, its implementation with time dimension support, and the performance benefits it provides.
+In titiler-openeo, the `RasterStack` class is the foundational data structure for handling Earth Observation datasets. This document explains the RasterStack architecture, its lazy loading capabilities, and the performance benefits it provides.
 
 ## Overview
 
-The RasterStack is a dictionary-like structure that organizes raster data along multiple dimensions, primarily **time** and **spectral bands**. Each entry in the RasterStack contains an `ImageData` object representing a multi-band image (2D or 3D) at a specific time point.
+`RasterStack` is a class that organizes raster data along multiple dimensions, primarily **time** and **spectral bands**. Each entry contains an `ImageData` object representing a multi-band image at a specific time point. The class inherits from `Dict[str, ImageData]` but adds lazy loading, temporal awareness, and intelligent caching.
 
 ```python
-# Example of time-organized RasterStack structure
-RasterStack = {
-    "2023-01-01": ImageData(...),  # Multi-band image for first date
-    "2023-01-15": ImageData(...),  # Multi-band image for second date  
-    "2023-02-01": ImageData(...),  # Multi-band image for third date
-}
+from titiler.openeo.processes.implementations.data_model import RasterStack
+
+# RasterStack behaves like a dict but with lazy loading
+raster_stack = RasterStack(
+    tasks=tasks,
+    key_fn=lambda asset: asset["id"],
+    timestamp_fn=lambda asset: asset["datetime"],
+)
+
+# Access triggers lazy loading
+first_image = raster_stack["2023-01-01"]  # Loads data on first access
 ```
 
 ## Dimensional Model
@@ -38,15 +43,17 @@ single_observation = temporal_stack["2023-01-01"]
 ## ImageData vs RasterStack
 
 - **ImageData**: Multi-band raster data for a single time point with spatial extent, CRS, and band metadata
-- **RasterStack**: Time-organized collection of ImageData objects, enabling temporal analysis and processing
+- **RasterStack**: Time-organized collection of ImageData objects with lazy loading, enabling temporal analysis and processing
 
-## LazyRasterStack with Temporal Intelligence
+## RasterStack with Temporal Intelligence
 
-The LazyRasterStack extends the basic RasterStack concept with sophisticated time-aware lazy loading and concurrent execution capabilities:
+`RasterStack` provides sophisticated time-aware lazy loading and concurrent execution capabilities:
 
 ```python
-# LazyRasterStack with timestamp support
-raster_stack = LazyRasterStack(
+from titiler.openeo.processes.implementations.data_model import RasterStack
+
+# RasterStack with timestamp support
+raster_stack = RasterStack(
     tasks=tasks,
     key_fn=lambda asset: asset["id"],
     timestamp_fn=lambda asset: asset["datetime"],  # Enable temporal features
@@ -58,7 +65,7 @@ temporal_groups = raster_stack.groupby_timestamp()
 single_date_data = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
 ```
 
-### Key Features of Enhanced LazyRasterStack
+### Key Features of RasterStack
 
 1. **Temporal Organization**: Automatic sorting and grouping by timestamps for time-series analysis
 2. **Concurrent Execution**: Parallel loading of data using ThreadPoolExecutor for improved performance
@@ -83,12 +90,12 @@ first_observation = raster_stack[raster_stack.keys()[0]]  # Earliest
 last_observation = raster_stack[raster_stack.keys()[-1]]   # Latest
 ```
 
-## Advantages of the Enhanced RasterStack Model
+## Advantages of the RasterStack Model
 
 - **Temporal Consistency**: Standardized time-first organization for all Earth Observation workflows
 - **Multi-dimensional Support**: Explicit handling of time and spectral dimensions
 - **Concurrent Performance**: Parallel data loading reduces processing time for large datasets
-- **Memory Efficiency**: LazyRasterStack with intelligent caching minimizes memory usage
+- **Memory Efficiency**: RasterStack with intelligent caching minimizes memory usage
 - **Scalability**: Efficient handling of time-series data with hundreds of temporal observations
 - **Predictability**: Standardized multi-dimensional structure across all operations
 
@@ -137,7 +144,7 @@ mosaicked_stack = apply_pixel_selection(
 
 ### Load Phase - Temporal Organization
 
-Data is loaded and organized temporally into a LazyRasterStack:
+Data is loaded and organized temporally into a RasterStack:
 
 ```python
 # Process graph example - loads multi-band time series
@@ -150,7 +157,7 @@ Data is loaded and organized temporally into a LazyRasterStack:
     "bands": ["B02", "B03", "B04", "B08"]  # Blue, Green, Red, NIR
   }
 }
-# Results in LazyRasterStack with temporal keys, each containing 4-band ImageData
+# Results in RasterStack with temporal keys, each containing 4-band ImageData
 ```
 
 ### Process Phase - Dimension-aware Operations
@@ -189,8 +196,8 @@ Operations are applied respecting dimensional structure:
 ### Working with Temporal RasterStacks
 
 ```python
-# Create a time-aware LazyRasterStack
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+# Create a time-aware RasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 
 # Tasks with temporal metadata
 tasks = [
@@ -198,7 +205,7 @@ tasks = [
     (load_task, {"id": "s2_20230115", "datetime": datetime(2023, 1, 15)}),
 ]
 
-raster_stack = LazyRasterStack(
+raster_stack = RasterStack(
     tasks=tasks,
     key_fn=lambda asset: asset["id"],
     timestamp_fn=lambda asset: asset["datetime"]  # Enable temporal features
@@ -226,23 +233,26 @@ red_band = observation.array[2]  # Red band (B04)
 ndvi = (nir_band - red_band) / (nir_band + red_band)
 ```
 
-### Utility Functions
+### Factory Methods
 
 ```python
-from titiler.openeo.processes.implementations.data_model import to_raster_stack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 
-# Convert single ImageData to temporal RasterStack format
-img_data = ImageData(...)
-raster_stack = to_raster_stack(img_data)  # {"data": img_data}
+# Create RasterStack from pre-loaded images
+images = {
+    "2023-01-01": ImageData(...),
+    "2023-01-15": ImageData(...),
+}
+raster_stack = RasterStack.from_images(images)
 
-# Efficient access to temporal extremes
-first_observation = get_first_item(raster_stack)  # Earliest in time
-last_observation = get_last_item(raster_stack)    # Latest in time
+# Access first and last images
+first_observation = raster_stack.first  # Earliest in time
+last_observation = raster_stack.last    # Latest in time
 ```
 
 ## Performance Benefits
 
-The enhanced LazyRasterStack implementation provides significant performance improvements:
+The `RasterStack` implementation provides significant performance improvements:
 
 ### Concurrent Execution
 
@@ -271,7 +281,7 @@ The enhanced LazyRasterStack implementation provides significant performance imp
 
 ## Best Practices
 
-When working with the enhanced RasterStack data model:
+When working with the RasterStack data model:
 
 ### Temporal Organization
 
@@ -289,7 +299,7 @@ When working with the enhanced RasterStack data model:
 
 7. **Design dimension-aware workflows**: Structure processes to operate on appropriate dimensions (temporal vs spectral)
 8. **Maintain dimensional consistency**: Ensure operations preserve or appropriately transform dimensional structure
-9. **Use utility functions**: Leverage `get_first_item()`, `get_last_item()`, and `to_raster_stack()` for consistent handling
+9. **Use factory methods**: Leverage `RasterStack.from_images()` and `.first`/`.last` properties for consistent handling
 
 ### Error Handling and Resilience
 

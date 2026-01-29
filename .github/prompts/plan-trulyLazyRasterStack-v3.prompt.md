@@ -341,18 +341,31 @@ for key, ref in all_items:
     img = ref.realize()  # Always works!
 ```
 
-### Phase 7: Documentation and Migration Guide
+### Phase 7: Documentation and Migration Guide ✅ COMPLETED
 
-#### Step 7.1: Update Docstrings
+#### Step 7.1: Update Docstrings ✅
 
-Document that `RasterStack` is now a class, not a type alias.
+- `RasterStack` class docstring updated to reflect it's a class, not a type alias
+- `ImageRef` class docstring documents the unified lazy/eager state management
+- All comments referencing `LazyRasterStack` updated to `RasterStack`
 
-#### Step 7.2: Create Migration Guide
+#### Step 7.2: Create Migration Guide ✅
 
-For external users who may create `Dict[str, ImageData]` directly:
+Created `docs/src/migration-rasterstack.md` with:
 
-- Show factory method usage
-- Explain benefits of unified class
+- Summary of changes (old vs new)
+- Step-by-step migration instructions
+- Code examples for all new patterns
+- Factory method documentation
+
+#### Step 7.3: Update Existing Documentation ✅
+
+Updated `docs/src/raster-stack.md`:
+
+- Replaced all `LazyRasterStack` references with `RasterStack`
+- Updated code examples to use factory methods
+- Removed references to deprecated helper functions
+- Added migration guide to mkdocs navigation
 
 ## Files Affected
 
