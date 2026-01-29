@@ -16,12 +16,21 @@ Refactor `LazyRasterStack` to defer task execution until pixel data is actually 
 
 6. **Remove `RasterStack` type definition** in [data_model.py](titiler/openeo/processes/implementations/data_model.py#L27). Rename `LazyRasterStack` `RasterStack` and replace all usages.
 
+7. Remove the deprecated `load_collection_and_reduce` function in stacapi.py.
+
 ## Further Considerations
 
 1. **Affine transform calculation**: Use `rasterio.transform.from_bounds(west, south, east, north, width, height)` to compute transform from metadata — this matches what rio-tiler does internally. Confirm this matches actual image transform.
 
-yes
 
 2. **Band count metadata**: STAC items may have band count in `eo:bands` or asset metadata. If not available, we may need to defer `count` until first task execution or require it as explicit parameter. Recommend requiring explicit `bands` list at construction.
 
-yes
+3. No backward compatibility needed — this is a breaking change. All existing usages of `RasterStack` must be updated to the new lazy behavior.
+
+4. **Testing**: Update existing tests for `RasterStack` to use new lazy behavior. Add tests specifically for `ImageRef` interface, cutline mask computation, and deferred execution in pixel selection.
+
+## General Instructions
+
+Let me validate each step with small commits before proceeding to the next. Ensure thorough testing at each stage to confirm each stage is correctly implemented without regressions.
+
+use uv
