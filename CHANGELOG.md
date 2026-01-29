@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 (2026-01-29)
+
+## What's Changed
+* fix: add version extraction from tags in CI workflow by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/209
+* refactor: spectral dimension reduction to unify handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/211
+* ci: relied on container-registry-cleanup instead of custom script. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/214
+* feat: make LazyRasterStack truly lazy with deferred task execution by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/215
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.11.0...titiler-openeo-v0.12.0
+
 ## 0.11.0 (2026-01-23)
 
 ## What's Changed
