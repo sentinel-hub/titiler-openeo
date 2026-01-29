@@ -93,8 +93,7 @@ class RasterStack(Dict[str, ImageData]):
     @classmethod  
     def from_images(cls, images: Dict[str, ImageData]) -> "RasterStack": ...
     
-    @classmethod
-    def from_single(cls, key: str, image: ImageData) -> "RasterStack": ...
+    # NOTE: from_single() was removed - just use from_images({"key": img}) instead
     
     # Unified access
     def get_ref(self, key: str) -> ImageRef: ...

@@ -415,6 +415,35 @@ Updated:
 2. Consider final rename `LazyRasterStack` → `RasterStack` in future PR
 3. Update `arrays.py` edge cases if needed (empty dict case is special)
 
+### Further Simplification: Removed `from_single` Method
+
+**Rationale:** The `from_single(key, image)` method was just syntactic sugar for `from_images({key: image})`. Since this adds no real value and creates API surface area to maintain, we removed it in favor of the simpler pattern.
+
+**Changes Made:**
+
+- Removed `from_single()` method from `LazyRasterStack` in `data_model.py`
+- Updated all callers (6 locations) to use `from_images({"key": image})` instead:
+  - `reduce.py`: 3 usages → `from_images({"result": ...})`
+  - `apply.py`: 2 usages → `from_images({result_key: ...})`
+  - `arrays.py`: 1 usage → `from_images({output_key: ...})`
+
+**Final API:**
+
+```python
+class LazyRasterStack(Dict[str, ImageData]):
+    @classmethod
+    def from_images(cls, images: Dict[str, ImageData]) -> "LazyRasterStack":
+        """Create RasterStack from pre-loaded ImageData dict."""
+    
+    @property
+    def first(self) -> ImageData:
+        """Get first item (convenience property)."""
+    
+    @property
+    def last(self) -> ImageData:
+        """Get last item (convenience property)."""
+```
+
 ### Test Results
 
 ```bash
