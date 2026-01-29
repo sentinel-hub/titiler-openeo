@@ -200,10 +200,93 @@ def from_single(cls, key: str, image: ImageData) -> "RasterStack":
 
 Split Step 6 into multiple sub-PRs:
 
-- **PR 1 (Current)**: Steps 1-5 complete - LazyRasterStack is truly lazy
-- **PR 2**: Step 6.1-6.2 - Add factory methods and alias
+- **PR 1 (Current)**: Steps 1-5 complete + Step 6.2 (stacapi.py and io.py updates) - LazyRasterStack is truly lazy
+- **PR 2**: Step 6.1 - Add factory methods and alias
 - **PR 3**: Step 6.3-6.6 - Update usages  
 - **PR 4**: Step 6.7 - Final cleanup
+
+### ✅ Step 6.2: Update `stacapi.py` and `io.py` (COMPLETED)
+
+**File:** `titiler/openeo/stacapi.py`
+
+Updated `_process_spatial_extent()` to pass new parameters to `LazyRasterStack`:
+
+```python
+return LazyRasterStack(
+    tasks=tasks,
+    key_fn=lambda asset: asset["id"],
+    timestamp_fn=lambda asset: _props_to_datetime(asset["properties"]),
+    allowed_exceptions=(TileOutsideBounds,),
+    # New parameters for truly lazy behavior
+    width=int(width) if width else None,
+    height=int(height) if height else None,
+    bounds=tuple(bbox),
+    dst_crs=crs,
+    band_names=bands,
+)
+```
+
+**File:** `titiler/openeo/processes/implementations/io.py`
+
+Updated `load_url()` to extract COG metadata and pass to `LazyRasterStack`:
+
+```python
+# Get metadata from COG to set bbox, dimensions, and CRS
+with COGReader(url) as cog:
+    item["bbox"] = [float(x) for x in cog.bounds]
+    cog_width = cog.dataset.width
+    cog_height = cog.dataset.height
+    cog_crs = cog.dataset.crs
+    cog_bounds = tuple(float(x) for x in cog.bounds)
+
+# Return a LazyRasterStack with new parameters
+return LazyRasterStack(
+    tasks=tasks,
+    key_fn=lambda _: "data",
+    timestamp_fn=lambda _: datetime.now(),
+    allowed_exceptions=(),
+    width=cog_width,
+    height=cog_height,
+    bounds=cog_bounds,
+    dst_crs=cog_crs,
+    band_names=["data"],
+)
+```
+
+### ✅ New Test Coverage Added (COMPLETED)
+
+**File:** `tests/test_truly_lazy_raster_stack.py`
+
+Created comprehensive test suite with 15 tests covering:
+
+- `TestComputeCutlineMask`: 4 tests for cutline mask computation
+- `TestLazyImageRef`: 4 tests for LazyImageRef behavior (deferred execution, caching)
+- `TestLazyRasterStackWithDimensions`: 3 tests for LazyRasterStack with dimension parameters
+- `TestCollectImagesFromDataWithLazyRefs`: 1 test for lazy ref collection
+- `TestApplyPixelSelectionTrulyLazy`: 3 tests for pixel selection with lazy execution
+
+### ✅ Fixed `_collect_images_from_data` Duck Typing (COMPLETED)
+
+**File:** `titiler/openeo/processes/implementations/reduce.py`
+
+Updated to use duck typing for timestamp grouping:
+
+```python
+# Check if data is a LazyRasterStack with image refs (truly lazy path)
+if isinstance(data, LazyRasterStack):
+    image_refs = data.get_image_refs()
+    if image_refs:
+        return image_refs
+
+# Fall back to timestamp-based grouping if available (duck typing)
+if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
+    timestamps = data.timestamps()
+    for timestamp in sorted(timestamps):
+        timestamp_items = data.get_by_timestamp(timestamp)
+        if timestamp_items:
+            all_items.extend(timestamp_items.items())
+    return all_items
+```
 
 ### ⏳ Step 7: Remove deprecated `load_collection_and_reduce` (DEFERRED)
 
@@ -220,50 +303,60 @@ Split Step 6 into multiple sub-PRs:
 
 ## Current State (Updated January 29, 2026)
 
-### Phase 1 Complete ✅
+### Phase 1 Complete + Partial Phase 2 ✅
 
-Steps 1-5 are complete. The core lazy infrastructure is in place:
+Steps 1-5 are complete, plus Step 6.2 (stacapi.py and io.py updates):
 
 - `ImageRef` protocol and `LazyImageRef` dataclass work correctly
 - `LazyRasterStack` accepts new dimension parameters
 - `compute_cutline_mask()` can compute masks without loading pixel data
 - `_collect_images_from_data()` returns `LazyImageRef` instances when available
 - `apply_pixel_selection()` defers task execution until pixel feeding
+- **Production code now passes new parameters to `LazyRasterStack`** (stacapi.py and io.py)
+- **Comprehensive test coverage for truly lazy behavior** (15 new tests)
 
 ### Files Modified
 
 1. `titiler/openeo/processes/implementations/data_model.py` - Steps 1, 2, 3 complete
-2. `titiler/openeo/processes/implementations/reduce.py` - Steps 4, 5 complete
+2. `titiler/openeo/processes/implementations/reduce.py` - Steps 4, 5 complete + duck typing fix
+3. `titiler/openeo/stacapi.py` - Step 6.2 complete (new params to LazyRasterStack)
+4. `titiler/openeo/processes/implementations/io.py` - Step 6.2 complete (new params to LazyRasterStack)
+5. `tests/test_truly_lazy_raster_stack.py` - NEW: 15 tests for truly lazy behavior
 
-### Files Still To Modify (Phase 2 - Step 6)
+### Files Still To Modify (Phase 2 - Remaining Steps)
 
 See [plan-trulyLazyRasterStack-v2.prompt.md](plan-trulyLazyRasterStack-v2.prompt.md) for detailed breakdown:
 
-1. `data_model.py` - Add factory methods, rename class
-2. `stacapi.py` - Pass new params, update return types
-3. `apply.py`, `arrays.py`, `dem.py`, `image.py`, `indices.py`, `io.py`, `spatial.py` - Update type hints
-4. `core.py` - Update type validation
-5. 15+ test files - Update fixtures and assertions
+1. `data_model.py` - Add factory methods, rename class (Step 6.1)
+2. `apply.py`, `arrays.py`, `dem.py`, `image.py`, `indices.py`, `spatial.py` - Update type hints (Step 6.3)
+3. `core.py` - Update type validation (Step 6.4)
+4. Various test files - Update fixtures and assertions (Step 6.5)
+5. Final rename `LazyRasterStack` → `RasterStack` (Step 6.6)
 
 ### Test Results
 
 ```
-uv run pytest tests/test_lazy_raster_stack.py tests/test_dimension_reduction.py -v
-# Result: 43 passed ✅
+uv run pytest tests/ --ignore=tests/test_main.py -q
+# Result: 479 passed, 11 skipped ✅
 ```
 
 ### Key Code Locations
 
 - `LazyRasterStack` class: `data_model.py` lines ~338-700
-- `LazyImageRef` dataclass: `data_model.py` lines ~145-245
-- `compute_cutline_mask()`: `data_model.py` lines ~45-90
-- `_collect_images_from_data`: `reduce.py` lines ~175-215
-- `apply_pixel_selection`: `reduce.py` lines ~240-330
+- `LazyImageRef` dataclass: `data_model.py` lines ~159-250
+- `compute_cutline_mask()`: `data_model.py` lines ~44-90
+- `_collect_images_from_data`: `reduce.py` lines ~175-220
+- `apply_pixel_selection`: `reduce.py` lines ~245-335
+- `_process_spatial_extent`: `stacapi.py` lines ~960-1025
+- `load_url`: `io.py` lines ~21-80
 - `_apply_cutline_mask`: `reader.py` lines ~668-710 (to be removed in cleanup)
 
 ### Test Commands
 
 ```bash
+# Run truly lazy tests
+uv run pytest tests/test_truly_lazy_raster_stack.py -v
+
 # Run LazyRasterStack tests
 uv run pytest tests/test_lazy_raster_stack.py -v
 
@@ -271,7 +364,7 @@ uv run pytest tests/test_lazy_raster_stack.py -v
 uv run pytest tests/test_dimension_reduction.py -v
 
 # Run all tests
-uv run pytest tests/ -v --tb=short
+uv run pytest tests/ --ignore=tests/test_main.py -q
 
 # Quick import test
 uv run python -c "from titiler.openeo.processes.implementations.data_model import ImageRef, LazyImageRef, compute_cutline_mask, LazyRasterStack; print('OK')"
@@ -282,7 +375,7 @@ uv run python -c "from titiler.openeo.processes.implementations.data_model impor
 ## Resume Instructions
 
 1. Check current state: `git status` and `git diff`
-2. Verify tests pass: `uv run pytest tests/test_lazy_raster_stack.py tests/test_dimension_reduction.py -v`
+2. Verify tests pass: `uv run pytest tests/ --ignore=tests/test_main.py -q`
 3. Reference the updated plan: [plan-trulyLazyRasterStack-v2.prompt.md](plan-trulyLazyRasterStack-v2.prompt.md)
 4. Continue with Step 6.1: Add factory methods to `LazyRasterStack`
 5. Update this devlog as steps are completed

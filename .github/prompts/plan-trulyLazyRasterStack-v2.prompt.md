@@ -49,12 +49,13 @@ def from_single(cls, key: str, image: ImageData) -> "LazyRasterStack":
     """Create LazyRasterStack with a single image."""
 ```
 
-#### Sub-Step 6.2: Update `stacapi.py`
+#### ✅ Sub-Step 6.2: Update `stacapi.py` and `io.py` (COMPLETED)
 
-**File:** `stacapi.py`
+**Files:** `stacapi.py`, `io.py`
 
-- Pass new parameters (width, height, bounds, dst_crs, band_names) to `LazyRasterStack()`
-- Update `_process_spatial_extent()` return type
+- ✅ Pass new parameters (width, height, bounds, dst_crs, band_names) to `LazyRasterStack()` in `_process_spatial_extent()`
+- ✅ Pass new parameters to `LazyRasterStack()` in `load_url()` with COG metadata extraction
+- Update return types (deferred to Step 6.3)
 
 #### Sub-Step 6.3: Update process implementations
 
@@ -100,18 +101,19 @@ def from_single(cls, key: str, image: ImageData) -> "LazyRasterStack":
 | File | Type | Changes |
 |------|------|---------|
 | `data_model.py` | Core | Remove alias, add factory methods, rename class |
-| `reduce.py` | Core | Update imports and type hints |
-| `stacapi.py` | Core | Add new params, update return types |
+| `reduce.py` | Core | ✅ Updated imports and type hints, duck typing fix |
+| `stacapi.py` | Core | ✅ Added new params to LazyRasterStack |
+| `io.py` | Core | ✅ Added new params to LazyRasterStack with COG metadata |
 | `core.py` | Core | Update isinstance checks, type mapping |
 | `apply.py` | Process | 10+ type hint updates |
 | `arrays.py` | Process | Import updates |
 | `dem.py` | Process | Type hint updates |
 | `image.py` | Process | Type hint updates |
 | `indices.py` | Process | Type hints, dict creation |
-| `io.py` | Process | Type hints, dict creation |
 | `spatial.py` | Process | Type hint updates |
 | `__init__.py` | Export | Update exports |
 | `test_*.py` | Tests | 15+ files, fixtures, assertions |
+| `test_truly_lazy_raster_stack.py` | Tests | ✅ NEW: 15 tests for truly lazy behavior |
 
 ## Key Challenges
 

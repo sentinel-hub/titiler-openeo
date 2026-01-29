@@ -192,21 +192,21 @@ def _collect_images_from_data(
     """
     all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
 
-    # Check if data is a LazyRasterStack with image refs
+    # Check if data is a LazyRasterStack with image refs (truly lazy path)
     if isinstance(data, LazyRasterStack):
         image_refs = data.get_image_refs()
         if image_refs:
             # Return LazyImageRef instances without executing tasks
             return image_refs
 
-        # Fall back to timestamp-based grouping if no image refs
-        if hasattr(data, "timestamps"):
-            timestamps = data.timestamps()
-            for timestamp in sorted(timestamps):
-                timestamp_items = data.get_by_timestamp(timestamp)
-                if timestamp_items:
-                    all_items.extend(timestamp_items.items())
-            return all_items
+    # Fall back to timestamp-based grouping if available (duck typing)
+    if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
+        timestamps = data.timestamps()
+        for timestamp in sorted(timestamps):
+            timestamp_items = data.get_by_timestamp(timestamp)
+            if timestamp_items:
+                all_items.extend(timestamp_items.items())
+        return all_items
 
     # Regular RasterStack - collect all images
     for key in data.keys():
