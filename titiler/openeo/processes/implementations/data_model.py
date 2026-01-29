@@ -250,7 +250,7 @@ class LazyImageRef:
 def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
     """Get the first item from a RasterStack efficiently.
 
-    For LazyRasterStack, this finds the first successful task.
+    For LazyRasterStack, uses the first property.
     For regular RasterStack, this gets the first value.
     For single ImageData, returns it directly.
 
@@ -266,16 +266,7 @@ def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
     if isinstance(data, ImageData):
         return data
     elif isinstance(data, LazyRasterStack):
-        # Try each key in order until we find one that succeeds
-        for key in data.keys():
-            try:
-                return data[key]  # Execute this task
-            except KeyError:
-                # This task failed, try the next one
-                continue
-
-        # If we get here, all tasks failed
-        raise KeyError("No successful tasks found in LazyRasterStack")
+        return data.first
     elif isinstance(data, dict):
         # Regular RasterStack
         return next(iter(data.values()))
@@ -286,7 +277,7 @@ def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
 def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
     """Get the last item from a RasterStack efficiently.
 
-    For LazyRasterStack, this finds the last successful task.
+    For LazyRasterStack, uses the last property.
     For regular RasterStack, this gets the last value.
     For single ImageData, returns it directly.
 
@@ -302,16 +293,7 @@ def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
     if isinstance(data, ImageData):
         return data
     elif isinstance(data, LazyRasterStack):
-        # Try each key in reverse order until we find one that succeeds
-        for key in reversed(list(data.keys())):
-            try:
-                return data[key]  # Execute this task
-            except KeyError:
-                # This task failed, try the previous one
-                continue
-
-        # If we get here, all tasks failed
-        raise KeyError("No successful tasks found in LazyRasterStack")
+        return data.last
     elif isinstance(data, dict):
         # Regular RasterStack - get last value
         return list(data.values())[-1]
@@ -696,3 +678,103 @@ class LazyRasterStack(Dict[str, ImageData]):
             return self[key]  # Uses lazy execution via __getitem__
         except KeyError:
             return default
+
+    @property
+    def first(self) -> ImageData:
+        """Get first item (in temporal/key order).
+
+        Returns:
+            ImageData: The first item in the stack
+
+        Raises:
+            KeyError: If the stack is empty or first task fails
+        """
+        if not self._keys:
+            raise KeyError("LazyRasterStack is empty")
+
+        # Try each key in order until we find one that succeeds
+        for key in self._keys:
+            try:
+                return self[key]
+            except KeyError:
+                continue
+        raise KeyError("No successful tasks found in LazyRasterStack")
+
+    @property
+    def last(self) -> ImageData:
+        """Get last item (in temporal/key order).
+
+        Returns:
+            ImageData: The last item in the stack
+
+        Raises:
+            KeyError: If the stack is empty or all tasks fail
+        """
+        if not self._keys:
+            raise KeyError("LazyRasterStack is empty")
+
+        # Try each key in reverse order until we find one that succeeds
+        for key in reversed(self._keys):
+            try:
+                return self[key]
+            except KeyError:
+                continue
+        raise KeyError("No successful tasks found in LazyRasterStack")
+
+    @classmethod
+    def from_images(cls, images: Dict[str, ImageData]) -> "LazyRasterStack":
+        """Create a LazyRasterStack from pre-loaded ImageData instances.
+
+        This wraps existing ImageData in the LazyRasterStack interface for consistency.
+        The images are already loaded, so no lazy evaluation occurs.
+
+        Args:
+            images: Dictionary mapping keys to ImageData instances
+
+        Returns:
+            LazyRasterStack: A stack containing the provided images
+
+        Raises:
+            ValueError: If images is empty
+        """
+        if not images:
+            raise ValueError("Cannot create LazyRasterStack from empty images dict")
+
+        # Get first image for dimension parameters
+        first_key = next(iter(images))
+        first_img = images[first_key]
+
+        # Create tasks that return pre-loaded images
+        # Each task is a tuple of (callable, asset_dict)
+        tasks = []
+        for key, img in images.items():
+            # Create a closure that captures the image
+            def make_task(captured_img: ImageData) -> Callable[[], ImageData]:
+                return lambda: captured_img
+
+            tasks.append((make_task(img), {"id": key}))
+
+        return cls(
+            tasks=tasks,
+            key_fn=lambda asset: asset["id"],
+            width=first_img.width,
+            height=first_img.height,
+            bounds=first_img.bounds,
+            dst_crs=first_img.crs,
+            band_names=first_img.band_names if first_img.band_names else [],
+        )
+
+    @classmethod
+    def from_single(cls, key: str, image: ImageData) -> "LazyRasterStack":
+        """Create a single-item LazyRasterStack.
+
+        This is a convenience method for creating a stack with one image.
+
+        Args:
+            key: The key for the image
+            image: The ImageData instance
+
+        Returns:
+            LazyRasterStack: A stack containing one image
+        """
+        return cls.from_images({key: image})

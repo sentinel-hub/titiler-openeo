@@ -6,7 +6,7 @@ import numpy
 from rio_tiler.colormap import cmap as default_cmap
 from rio_tiler.types import ColorMapType
 
-from .data_model import ImageData, RasterStack
+from .data_model import ImageData, LazyRasterStack, RasterStack
 
 __all__ = [
     "image_indexes",
@@ -55,7 +55,7 @@ def image_indexes(data: RasterStack, indexes: Sequence[int]) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_image_indexes(img_data, indexes)
-    return result
+    return LazyRasterStack.from_images(result)
 
 
 def to_array(
@@ -92,7 +92,7 @@ def color_formula(data: RasterStack, formula: str) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_color_formula(img_data, formula)
-    return result
+    return LazyRasterStack.from_images(result)
 
 
 def get_colormap(name: str) -> ColorMapType:
@@ -119,4 +119,4 @@ def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_colormap(img_data, colormap)
-    return result
+    return LazyRasterStack.from_images(result)

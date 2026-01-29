@@ -883,7 +883,7 @@ def test_empty_lazy_raster_stack():
     assert list(lazy_stack.items()) == []
 
     # get_first_item should raise error on empty stack
-    with pytest.raises(KeyError, match="No successful tasks found"):
+    with pytest.raises(KeyError, match="LazyRasterStack is empty"):
         get_first_item(lazy_stack)
 
     # apply_pixel_selection should also fail gracefully

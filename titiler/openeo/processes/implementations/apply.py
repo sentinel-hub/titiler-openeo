@@ -6,7 +6,7 @@ import morecantile
 import numpy
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
-from .data_model import ImageData, RasterStack, get_first_item
+from .data_model import ImageData, LazyRasterStack, RasterStack, get_first_item
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
@@ -43,7 +43,8 @@ def apply(
         )
 
     # Apply process to each item in the stack
-    return {k: _process_img(img) for k, img in data.items()}
+    result = {k: _process_img(img) for k, img in data.items()}
+    return LazyRasterStack.from_images(result)
 
 
 def apply_dimension(
@@ -93,11 +94,10 @@ def apply_dimension(
         if len(data) == 1:
             # Get the single image and apply on its spectral dimension
             key = next(iter(data))
-            return {
-                key: _apply_spectral_dimension_single_image(
-                    data[key], process, positional_parameters, named_parameters
-                )
-            }
+            result_img = _apply_spectral_dimension_single_image(
+                data[key], process, positional_parameters, named_parameters
+            )
+            return LazyRasterStack.from_single(key, result_img)
         else:
             return _apply_spectral_dimension_stack(
                 data, process, positional_parameters, named_parameters
@@ -175,23 +175,22 @@ def _apply_temporal_dimension(
                     "applied_dimension": "temporal",
                 },
             )
-        return result
+        return LazyRasterStack.from_images(result)
     else:
         # Replace temporal dimension with target dimension
         # This collapses to a single result
-        return {
-            target_dimension: ImageData(
-                result_array[0] if result_array.shape[0] == 1 else result_array,
-                assets=list(data.keys()),
-                crs=first_img.crs,
-                bounds=first_img.bounds,
-                band_names=first_img.band_names if first_img.band_names else [],
-                metadata={
-                    "applied_dimension": "temporal",
-                    "target_dimension": target_dimension,
-                },
-            )
-        }
+        result_img = ImageData(
+            result_array[0] if result_array.shape[0] == 1 else result_array,
+            assets=list(data.keys()),
+            crs=first_img.crs,
+            bounds=first_img.bounds,
+            band_names=first_img.band_names if first_img.band_names else [],
+            metadata={
+                "applied_dimension": "temporal",
+                "target_dimension": target_dimension,
+            },
+        )
+        return LazyRasterStack.from_single(target_dimension, result_img)
 
 
 def _apply_spectral_dimension_single_image(
@@ -323,7 +322,7 @@ def _apply_spectral_dimension_stack(
             },
         )
 
-    return result
+    return LazyRasterStack.from_images(result)
 
 
 def xyz_to_bbox(

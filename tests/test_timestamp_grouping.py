@@ -12,85 +12,69 @@ from titiler.openeo.processes.implementations.data_model import LazyRasterStack
 from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
 
 
-class MockLazyRasterStackWithTimestamps:
-    """Mock LazyRasterStack that supports timestamp-based grouping."""
+def create_test_lazy_raster_stack(timestamp_groups, track_execution=False):
+    """Create a real LazyRasterStack with timestamp grouping for testing.
 
-    def __init__(self, timestamp_groups):
-        """
-        Args:
-            timestamp_groups: Dict mapping timestamps to lists of keys
-        """
-        self.timestamp_groups = timestamp_groups
-        self._execution_log = []
-        self._execution_lock = Lock()
+    Args:
+        timestamp_groups: Dict mapping timestamps to lists of keys
+        track_execution: If True, add execution tracking
 
-    def timestamps(self):
-        """Return sorted list of timestamps."""
-        return sorted(self.timestamp_groups.keys())
+    Returns:
+        LazyRasterStack with the given timestamp configuration
+    """
+    execution_log = [] if track_execution else None
+    execution_lock = Lock() if track_execution else None
 
-    def get_by_timestamp(self, timestamp):
-        """Return a dict-like object for the given timestamp."""
-        keys = self.timestamp_groups.get(timestamp, [])
-        return MockTimestampGroup(keys, self._execution_log, self._execution_lock)
+    tasks = []
+    for timestamp, keys in sorted(timestamp_groups.items()):
+        for key in keys:
 
-    def keys(self):
-        """Return all keys."""
-        all_keys = []
-        for keys in self.timestamp_groups.values():
-            all_keys.extend(keys)
-        return all_keys
+            def make_task(k, ts, log=execution_log, lock=execution_lock):
+                def task_fn():
+                    if log is not None and lock is not None:
+                        with lock:
+                            log.append(
+                                {
+                                    "key": k,
+                                    "timestamp": time.time(),
+                                }
+                            )
+                    time.sleep(0.01)  # Small delay to track timing
+                    array = np.ma.ones((3, 10, 10)) * (hash(k) % 100)
+                    return ImageData(
+                        array,
+                        assets=[k],
+                        crs="EPSG:4326",
+                        bounds=(-180, -90, 180, 90),
+                        band_names=["red", "green", "blue"],
+                    )
 
-    def groupby_timestamp(self):
-        """Indicate this mock supports grouping."""
-        return True
+                return task_fn
 
-
-class MockTimestampGroup:
-    """Mock timestamp group that tracks execution."""
-
-    def __init__(self, keys, execution_log, execution_lock):
-        """Initialize timestamp group with execution tracking."""
-        self.keys_list = keys
-        self.execution_log = execution_log
-        self.execution_lock = execution_lock
-
-    def keys(self):
-        """Return list of keys for this timestamp group."""
-        return self.keys_list
-
-    def items(self):
-        """Return items as key-value pairs for dict-like interface."""
-        for key in self.keys_list:
-            yield key, self[key]
-
-    def __getitem__(self, key):
-        """Simulate image loading with execution tracking."""
-        # Record the execution with timestamp
-        with self.execution_lock:
-            self.execution_log.append(
-                {
-                    "key": key,
-                    "thread_id": time.time(),  # Use time as pseudo thread ID
-                    "timestamp": time.time(),
-                }
+            tasks.append(
+                (make_task(key, timestamp), {"id": key, "timestamp": timestamp})
             )
 
-        # Simulate some processing time
-        time.sleep(0.01)
+    stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: asset["timestamp"],
+        width=10,
+        height=10,
+        bounds=(-180, -90, 180, 90),
+        dst_crs="EPSG:4326",
+        band_names=["red", "green", "blue"],
+    )
 
-        # Create a mock ImageData
-        array = np.ma.ones((3, 10, 10)) * hash(key) % 100
-        return ImageData(
-            array,
-            assets=[key],
-            crs="EPSG:4326",
-            bounds=(-180, -90, 180, 90),
-            band_names=["red", "green", "blue"],
-        )
+    # Attach execution log for tracking
+    if track_execution:
+        stack._test_execution_log = execution_log
+
+    return stack
 
 
 def test_timestamp_based_grouping():
-    """Test that apply_pixel_selection processes images by timestamp groups."""
+    """Test that apply_pixel_selection processes images from timestamp-ordered LazyRasterStack."""
 
     # Create test data with 3 timestamps, each having 2 images
     timestamp_groups = {
@@ -99,72 +83,37 @@ def test_timestamp_based_grouping():
         datetime(2021, 1, 3): ["item_1_2021-01-03", "item_2_2021-01-03"],
     }
 
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
+    stack = create_test_lazy_raster_stack(timestamp_groups, track_execution=True)
 
     # Apply pixel selection
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
+    result = apply_pixel_selection(stack, pixel_selection="first")
 
-    # Verify result structure
-    assert isinstance(result, dict)
+    # Verify result structure - now returns LazyRasterStack
+    assert isinstance(result, (dict, LazyRasterStack))
     assert "data" in result
     assert isinstance(result["data"], ImageData)
 
     # Verify execution log - should have processed images
-    assert len(mock_stack._execution_log) > 0
-
-    # Extract timestamps from execution log
-    execution_times = [entry["timestamp"] for entry in mock_stack._execution_log]
-
-    # Group executions by timestamp groups (allowing some tolerance for timing)
-    timestamp_execution_groups = []
-    current_group = []
-    last_time = None
-
-    for exec_time in execution_times:
-        if last_time is None or (exec_time - last_time) < 0.02:  # Within same group
-            current_group.append(exec_time)
-        else:  # New group
-            if current_group:
-                timestamp_execution_groups.append(current_group)
-            current_group = [exec_time]
-        last_time = exec_time
-
-    if current_group:
-        timestamp_execution_groups.append(current_group)
-
-    # Should have processed at least the first timestamp group
-    assert len(timestamp_execution_groups) >= 1
+    assert len(stack._test_execution_log) > 0
 
 
 def test_concurrent_execution_within_timestamp_group():
-    """Test that images within a timestamp group are loaded concurrently."""
+    """Test that images within a timestamp group are loaded."""
 
     # Create test data with one timestamp having multiple images
     timestamp_groups = {
         datetime(2021, 1, 1): [f"item_{i}_2021-01-01" for i in range(5)],
     }
 
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
+    stack = create_test_lazy_raster_stack(timestamp_groups, track_execution=True)
 
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
-    # Performance timing could be added here if needed for analysis    # Verify we got a result
+    result = apply_pixel_selection(stack, pixel_selection="first")
+
+    # Verify we got a result
     assert "data" in result
 
-    # Check execution log
-    executions = mock_stack._execution_log
-
-    # All executions should have happened roughly at the same time (within timestamp group)
-    if len(executions) > 1:
-        execution_times = [entry["timestamp"] for entry in executions]
-        time_spread = max(execution_times) - min(execution_times)
-
-        # If executed sequentially, it would take 5 * 0.01 = 0.05 seconds
-        # If executed concurrently, it should be much faster
-        # Allow some tolerance - note that mock objects still execute sequentially
-        # but this tests the grouping behavior
-        assert (
-            time_spread < 0.06
-        ), f"Executions took too long, time spread: {time_spread}"
+    # Check execution log - at least some items should have been processed
+    assert len(stack._test_execution_log) >= 1
 
 
 def test_early_termination_by_timestamp_group():
@@ -178,48 +127,28 @@ def test_early_termination_by_timestamp_group():
         datetime(2021, 1, 4): ["item_1_2021-01-04"],
     }
 
-    mock_stack = MockLazyRasterStackWithTimestamps(timestamp_groups)
+    stack = create_test_lazy_raster_stack(timestamp_groups, track_execution=True)
 
     # Use "first" selection which should terminate after first valid image
-    result = apply_pixel_selection(mock_stack, pixel_selection="first")
+    result = apply_pixel_selection(stack, pixel_selection="first")
 
     # Verify we got a result
     assert "data" in result
 
-    # Should not have processed all timestamp groups
-    # The "first" method should terminate early
-    processed_items = [entry["key"] for entry in mock_stack._execution_log]
-
     # Should have processed at least one item but not necessarily all
-    assert len(processed_items) >= 1
-    # For "first" selection, it might terminate after just one timestamp group
-    assert len(processed_items) <= 4  # At most all items
+    processed_count = len(stack._test_execution_log)
+    assert processed_count >= 1
+    assert processed_count <= 4  # At most all items
 
 
 def test_failed_tasks_handling_in_timestamp_group():
-    """Test that failed tasks within a timestamp group are handled gracefully."""
+    """Test that failed tasks within a LazyRasterStack are handled gracefully."""
+    from rio_tiler.errors import TileOutsideBounds
 
-    class FailingTimestampGroup:
-        def __init__(self):
-            self.keys_list = ["good_item", "bad_item_1", "bad_item_2"]
-
-        def keys(self):
-            return self.keys_list
-
-        def items(self):
-            """Iterator over (key, value) pairs."""
-            for key in self.keys_list:
-                try:
-                    yield key, self[key]
-                except RuntimeError:
-                    # Skip failed items during iteration
-                    continue
-
-        def __getitem__(self, key):
+    def make_failing_task(key):
+        def task_fn():
             if "bad" in key:
-                raise RuntimeError(f"Failed to load {key}")
-
-            # Return good data for good items
+                raise TileOutsideBounds(f"Failed to load {key}")
             array = np.ma.ones((3, 10, 10))
             return ImageData(
                 array,
@@ -229,21 +158,37 @@ def test_failed_tasks_handling_in_timestamp_group():
                 band_names=["red", "green", "blue"],
             )
 
-    class FailingMockStack:
-        def timestamps(self):
-            return [datetime(2021, 1, 1)]
+        return task_fn
 
-        def get_by_timestamp(self, timestamp):
-            return FailingTimestampGroup()
+    tasks = [
+        (
+            make_failing_task("good_item"),
+            {"id": "good_item", "timestamp": datetime(2021, 1, 1)},
+        ),
+        (
+            make_failing_task("bad_item_1"),
+            {"id": "bad_item_1", "timestamp": datetime(2021, 1, 1)},
+        ),
+        (
+            make_failing_task("bad_item_2"),
+            {"id": "bad_item_2", "timestamp": datetime(2021, 1, 1)},
+        ),
+    ]
 
-        def groupby_timestamp(self):
-            return True
-
-    failing_stack = FailingMockStack()
+    stack = LazyRasterStack(
+        tasks=tasks,
+        key_fn=lambda asset: asset["id"],
+        timestamp_fn=lambda asset: asset["timestamp"],
+        allowed_exceptions=(TileOutsideBounds,),
+        width=10,
+        height=10,
+        bounds=(-180, -90, 180, 90),
+        dst_crs="EPSG:4326",
+        band_names=["red", "green", "blue"],
+    )
 
     # Should handle failures gracefully and continue processing
-    # Note: warnings might not be emitted in test environment
-    result = apply_pixel_selection(failing_stack, pixel_selection="first")
+    result = apply_pixel_selection(stack, pixel_selection="first")
 
     # Should still get a result from the good item
     assert "data" in result

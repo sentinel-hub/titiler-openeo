@@ -320,7 +320,10 @@ def _value_to_openeo_name(value: Any) -> str:
         return "bounding-box"
     if isinstance(value, TemporalInterval):
         return "temporal-interval"
-    if isinstance(value, (dict, LazyRasterStack)):
+    # LazyRasterStack is a dict subclass, so check it first for explicit typing
+    if isinstance(value, LazyRasterStack):
+        return "datacube"
+    if isinstance(value, dict):
         return "datacube"
     if hasattr(value, "__array__"):
         return "array"
@@ -348,7 +351,8 @@ def _validate_datacube_param(
     param_name: str, param_value: Any, param_type: Any, func_name: str
 ) -> None:
     """Validate that datacube values are expected by the parameter type."""
-    if not isinstance(param_value, (dict, LazyRasterStack)):
+    # LazyRasterStack is a dict subclass, so isinstance(value, dict) covers both
+    if not isinstance(param_value, dict):
         return
 
     if not _is_dict_type_expected(param_type):

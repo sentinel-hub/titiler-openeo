@@ -158,18 +158,17 @@ def _create_pixel_selection_result(
     bounds: Optional[BBox],
     band_names: Optional[List[str]],
     pixel_selection: str,
-) -> Dict[str, ImageData]:
+) -> RasterStack:
     """Create the final pixel selection result."""
-    return {
-        "data": ImageData(
-            pixsel_method.data,
-            assets=assets_used,
-            crs=crs,
-            bounds=bounds,
-            band_names=band_names if band_names is not None else [],
-            metadata={"pixel_selection_method": pixel_selection},
-        )
-    }
+    result_img = ImageData(
+        pixsel_method.data,
+        assets=assets_used,
+        crs=crs,
+        bounds=bounds,
+        band_names=band_names if band_names is not None else [],
+        metadata={"pixel_selection_method": pixel_selection},
+    )
+    return LazyRasterStack.from_single("data", result_img)
 
 
 def _collect_images_from_data(
@@ -181,7 +180,7 @@ def _collect_images_from_data(
     executing tasks. This enables deferred execution and cutline mask computation
     without loading actual pixel data.
 
-    For regular RasterStack or LazyRasterStack without image refs, returns
+    For regular RasterStack (dict) or LazyRasterStack without image refs, returns
     actual ImageData instances.
 
     Args:
@@ -190,25 +189,23 @@ def _collect_images_from_data(
     Returns:
         List of (key, Union[LazyImageRef, ImageData]) tuples in temporal order
     """
-    all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
-
-    # Check if data is a LazyRasterStack with image refs (truly lazy path)
+    # LazyRasterStack with image refs: return refs without executing tasks (truly lazy)
     if isinstance(data, LazyRasterStack):
         image_refs = data.get_image_refs()
         if image_refs:
-            # Return LazyImageRef instances without executing tasks
             return image_refs
 
-    # Fall back to timestamp-based grouping if available (duck typing)
-    if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
-        timestamps = data.timestamps()
-        for timestamp in sorted(timestamps):
-            timestamp_items = data.get_by_timestamp(timestamp)
-            if timestamp_items:
-                all_items.extend(timestamp_items.items())
+        # LazyRasterStack without image refs: fall back to regular iteration
+        all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
+        for key in data.keys():
+            try:
+                all_items.append((key, data[key]))
+            except KeyError:
+                continue
         return all_items
 
-    # Regular RasterStack - collect all images
+    # Regular dict RasterStack - collect all images
+    all_items = []
     for key in data.keys():
         try:
             img = data[key]
@@ -368,19 +365,18 @@ def _reduce_temporal_dimension(
         # Convert the result to match reduce_dimension's expected output format
         # apply_pixel_selection returns {"data": ImageData}, we return {"reduced": ImageData}
         result_img = result["data"]
-        return {
-            "reduced": ImageData(
-                result_img.array,
-                assets=result_img.assets,
-                crs=result_img.crs,
-                bounds=result_img.bounds,
-                band_names=result_img.band_names,
-                metadata={
-                    "reduced_dimension": "temporal",
-                    "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-                },
-            )
-        }
+        reduced_img = ImageData(
+            result_img.array,
+            assets=result_img.assets,
+            crs=result_img.crs,
+            bounds=result_img.bounds,
+            band_names=result_img.band_names,
+            metadata={
+                "reduced_dimension": "temporal",
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
+        return LazyRasterStack.from_single("reduced", reduced_img)
 
     # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
@@ -409,19 +405,18 @@ def _reduce_temporal_dimension(
     # Get first successful image efficiently for LazyRasterStack - only for metadata
     first_img = get_first_item(data)
 
-    return {
-        "reduced": ImageData(
-            reduced_array,  # Use the reduced array directly since it's already collapsed
-            assets=first_img.assets,
-            crs=first_img.crs,
-            bounds=first_img.bounds,
-            band_names=first_img.band_names,
-            metadata={
-                "reduced_dimension": "temporal",
-                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-            },
-        )
-    }
+    reduced_img = ImageData(
+        reduced_array,  # Use the reduced array directly since it's already collapsed
+        assets=first_img.assets,
+        crs=first_img.crs,
+        bounds=first_img.bounds,
+        band_names=first_img.band_names,
+        metadata={
+            "reduced_dimension": "temporal",
+            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+        },
+    )
+    return LazyRasterStack.from_single("reduced", reduced_img)
 
 
 def _reshape_reduced_spectral_data(
@@ -625,7 +620,7 @@ def _reduce_spectral_dimension_stack(
             },
         )
 
-    return result
+    return LazyRasterStack.from_images(result)
 
 
 def reduce_dimension(
