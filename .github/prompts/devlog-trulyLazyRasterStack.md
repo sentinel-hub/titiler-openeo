@@ -94,19 +94,116 @@ Updated `apply_pixel_selection` to:
 
 **Tests:** All 54 tests pass (dimension_reduction + cutline_mask)
 
-### 🔄 Step 6: Remove `RasterStack` type definition (DEFERRED)
+### 🔄 Step 6: Remove `RasterStack` type definition (NEEDS DETAILED PLAN)
 
 **File:** `titiler/openeo/processes/implementations/data_model.py`
 
-**Decision:** Deferring this step because:
+**Analysis:** This is a large refactoring effort. Here's the comprehensive breakdown:
 
-1. The rename involves 100+ usages across the codebase
-2. Tests are passing with current implementation
-3. The core lazy functionality is complete
-4. Rename can be done as a separate PR to minimize risk
+#### Current State
 
-**Current status:** `LazyRasterStack` now has full lazy behavior with `ImageRef` support.
-The `RasterStack = Dict[str, ImageData]` type alias remains for backwards compatibility.
+- `RasterStack = Dict[str, ImageData]` is a type alias used throughout the codebase
+- `LazyRasterStack(Dict[str, ImageData])` is the actual class with lazy behavior
+- Code uses `RasterStack` in type hints but often creates `Dict[str, ImageData]` literals
+- `isinstance(data, dict)` checks are used to detect RasterStack
+
+#### Files Requiring Changes
+
+**1. Core Data Model (`data_model.py`)**
+
+- Remove `RasterStack = Dict[str, ImageData]` type alias
+- Rename `LazyRasterStack` → `RasterStack`  
+- Update `get_first_item()`, `get_last_item()`, `to_raster_stack()` type hints
+- Add factory method for creating `RasterStack` from `Dict[str, ImageData]`
+
+**2. Process Implementations (7 files)**
+
+- `apply.py` - 10+ usages of `RasterStack` type hint
+- `arrays.py` - imports and usage
+- `dem.py` - type hints
+- `image.py` - type hints  
+- `indices.py` - type hints
+- `io.py` - type hints and dict creation
+- `spatial.py` - type hints
+
+**3. Reduce Module (`reduce.py`)**
+
+- Already updated with `LazyRasterStack` import
+- Update type hints to use new `RasterStack`
+
+**4. STAC API (`stacapi.py`)**
+
+- 5+ method return types
+- `LazyRasterStack` instantiation (needs new params)
+- Update return types to `RasterStack`
+
+**5. Core Module (`core.py`)**
+
+- Type checking: `isinstance(value, (dict, LazyRasterStack))`
+- Type name mapping: `"LazyRasterStack", "RasterStack"`
+- Need to update to new unified `RasterStack`
+
+**6. Tests (15+ files)**
+
+- Type hints in test fixtures
+- `isinstance` checks
+- Direct dict creation `{"key": ImageData(...)}`
+
+#### Key Challenges
+
+1. **Dict Literal Compatibility**: Many places create `{"key": ImageData(...)}` directly.
+   - Need factory method: `RasterStack.from_dict({"key": img})`
+   - Or update all locations to use constructor
+
+2. **isinstance Checks**: Code checks `isinstance(data, dict)` for RasterStack detection.
+   - `LazyRasterStack` inherits from `Dict`, so this still works
+   - But explicit dict literals won't be `RasterStack` instances
+
+3. **Return Types**: Functions return `Dict[str, ImageData]` literals.
+   - Need to wrap in `RasterStack` or use factory method
+
+4. **Type Validation**: `core.py` validates types for openEO.
+   - Need to update type mapping logic
+
+#### Proposed Sub-Steps for Step 6
+
+**6.1** Add `RasterStack` as alias for `LazyRasterStack` (temporary)
+
+```python
+# Keep LazyRasterStack for backwards compat
+RasterStack = LazyRasterStack
+```
+
+**6.2** Add factory methods to `RasterStack`:
+
+```python
+@classmethod
+def from_dict(cls, data: Dict[str, ImageData]) -> "RasterStack":
+    """Create RasterStack from a dictionary of ImageData."""
+
+@classmethod  
+def from_single(cls, key: str, image: ImageData) -> "RasterStack":
+    """Create RasterStack with a single image."""
+```
+
+**6.3** Update `stacapi.py` to pass new parameters to `RasterStack`
+
+**6.4** Update process implementations to use factory methods
+
+**6.5** Update `core.py` type validation
+
+**6.6** Update tests
+
+**6.7** Remove `LazyRasterStack` name, keep only `RasterStack`
+
+#### Decision
+
+Split Step 6 into multiple sub-PRs:
+
+- **PR 1 (Current)**: Steps 1-5 complete - LazyRasterStack is truly lazy
+- **PR 2**: Step 6.1-6.2 - Add factory methods and alias
+- **PR 3**: Step 6.3-6.6 - Update usages  
+- **PR 4**: Step 6.7 - Final cleanup
 
 ### ⏳ Step 7: Remove deprecated `load_collection_and_reduce` (DEFERRED)
 
@@ -121,24 +218,48 @@ The `RasterStack = Dict[str, ImageData]` type alias remains for backwards compat
 
 ---
 
-## Current State (as of conversation break)
+## Current State (Updated January 29, 2026)
+
+### Phase 1 Complete ✅
+
+Steps 1-5 are complete. The core lazy infrastructure is in place:
+
+- `ImageRef` protocol and `LazyImageRef` dataclass work correctly
+- `LazyRasterStack` accepts new dimension parameters
+- `compute_cutline_mask()` can compute masks without loading pixel data
+- `_collect_images_from_data()` returns `LazyImageRef` instances when available
+- `apply_pixel_selection()` defers task execution until pixel feeding
 
 ### Files Modified
 
 1. `titiler/openeo/processes/implementations/data_model.py` - Steps 1, 2, 3 complete
+2. `titiler/openeo/processes/implementations/reduce.py` - Steps 4, 5 complete
 
-### Files To Modify
+### Files Still To Modify (Phase 2 - Step 6)
 
-1. `titiler/openeo/processes/implementations/reduce.py` - Steps 4, 5
-2. `titiler/openeo/reader.py` - Remove `_apply_cutline_mask` (consolidate into data_model)
-3. `titiler/openeo/stacapi.py` - Step 7, plus update calls to LazyRasterStack with new params
+See [plan-trulyLazyRasterStack-v2.prompt.md](plan-trulyLazyRasterStack-v2.prompt.md) for detailed breakdown:
+
+1. `data_model.py` - Add factory methods, rename class
+2. `stacapi.py` - Pass new params, update return types
+3. `apply.py`, `arrays.py`, `dem.py`, `image.py`, `indices.py`, `io.py`, `spatial.py` - Update type hints
+4. `core.py` - Update type validation
+5. 15+ test files - Update fixtures and assertions
+
+### Test Results
+
+```
+uv run pytest tests/test_lazy_raster_stack.py tests/test_dimension_reduction.py -v
+# Result: 43 passed ✅
+```
 
 ### Key Code Locations
 
-- `LazyRasterStack` class: `data_model.py` lines ~340-600
-- `_collect_images_from_data`: `reduce.py` lines ~175-202
-- `apply_pixel_selection`: `reduce.py` lines ~225-295
-- `_apply_cutline_mask`: `reader.py` lines ~668-710
+- `LazyRasterStack` class: `data_model.py` lines ~338-700
+- `LazyImageRef` dataclass: `data_model.py` lines ~145-245
+- `compute_cutline_mask()`: `data_model.py` lines ~45-90
+- `_collect_images_from_data`: `reduce.py` lines ~175-215
+- `apply_pixel_selection`: `reduce.py` lines ~240-330
+- `_apply_cutline_mask`: `reader.py` lines ~668-710 (to be removed in cleanup)
 
 ### Test Commands
 
@@ -146,8 +267,11 @@ The `RasterStack = Dict[str, ImageData]` type alias remains for backwards compat
 # Run LazyRasterStack tests
 uv run pytest tests/test_lazy_raster_stack.py -v
 
+# Run dimension reduction tests
+uv run pytest tests/test_dimension_reduction.py -v
+
 # Run all tests
-uv run pytest tests/ -v
+uv run pytest tests/ -v --tb=short
 
 # Quick import test
 uv run python -c "from titiler.openeo.processes.implementations.data_model import ImageRef, LazyImageRef, compute_cutline_mask, LazyRasterStack; print('OK')"
@@ -157,7 +281,8 @@ uv run python -c "from titiler.openeo.processes.implementations.data_model impor
 
 ## Resume Instructions
 
-1. Check current state of files with `git status` and `git diff`
-2. Verify tests still pass: `uv run pytest tests/test_lazy_raster_stack.py -v`
-3. Continue from the step marked "IN PROGRESS" above
-4. Update this devlog as steps are completed
+1. Check current state: `git status` and `git diff`
+2. Verify tests pass: `uv run pytest tests/test_lazy_raster_stack.py tests/test_dimension_reduction.py -v`
+3. Reference the updated plan: [plan-trulyLazyRasterStack-v2.prompt.md](plan-trulyLazyRasterStack-v2.prompt.md)
+4. Continue with Step 6.1: Add factory methods to `LazyRasterStack`
+5. Update this devlog as steps are completed
