@@ -26,7 +26,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 from titiler.openeo.auth import User
 from titiler.openeo.errors import ProcessParameterMissing
 from titiler.openeo.processes.implementations.core import process
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 
 
 class TestResolvePositionalArgs:
@@ -511,7 +511,7 @@ class TestTypeValidation:
 
     Critical validations:
     - None values only allowed for Optional types
-    - Datacubes (dict/LazyRasterStack) not passed to array parameters
+    - Datacubes (dict/RasterStack) not passed to array parameters
     - Proper handling of subscripted generics (Optional[T])
     - Clear error messages with OpenEO type names
     """
@@ -550,11 +550,11 @@ class TestTypeValidation:
             requires_array(data={"a": 1})
 
     def test_validation_lazy_raster_stack_to_array_mismatch(self):
-        """Test LazyRasterStack to array type mismatch detection.
+        """Test RasterStack to array type mismatch detection.
 
-        Validates: LazyRasterStack treated as datacube, not array.
+        Validates: RasterStack treated as datacube, not array.
 
-        Why important: LazyRasterStack is our custom datacube type. It should
+        Why important: RasterStack is our custom datacube type. It should
         be rejected when array is expected, just like dict.
         """
 
@@ -562,7 +562,7 @@ class TestTypeValidation:
         def requires_array(data: List[int]) -> int:
             return len(data)
 
-        mock_stack = LazyRasterStack(tasks={}, key_fn=None)
+        mock_stack = RasterStack(tasks={}, key_fn=None)
         with pytest.raises(TypeError, match="expected.*List.*got.*datacube"):
             requires_array(data=mock_stack)
 

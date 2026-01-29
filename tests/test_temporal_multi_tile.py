@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.math import first, last
 
 
@@ -61,7 +61,7 @@ def multi_tile_temporal_stack():
         }
         tasks.append((mock_task, asset))
 
-    return LazyRasterStack(
+    return RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: asset["datetime"],
@@ -69,7 +69,7 @@ def multi_tile_temporal_stack():
 
 
 def test_multi_tile_temporal_ordering(multi_tile_temporal_stack):
-    """Test that LazyRasterStack maintains temporal ordering with multiple tiles per datetime."""
+    """Test that RasterStack maintains temporal ordering with multiple tiles per datetime."""
     keys = list(multi_tile_temporal_stack.keys())
 
     # Should have 9 total items (3 + 2 + 4)
@@ -187,7 +187,7 @@ def test_apply_pixel_selection_with_multi_tile_first():
         }
         tasks.append((make_task(20 + i), asset))
 
-    stack = LazyRasterStack(
+    stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: asset["datetime"],

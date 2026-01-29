@@ -8,19 +8,19 @@ import numpy as np
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.models import ImageData
 
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
 
 
 def create_test_lazy_raster_stack(timestamp_groups, track_execution=False):
-    """Create a real LazyRasterStack with timestamp grouping for testing.
+    """Create a real RasterStack with timestamp grouping for testing.
 
     Args:
         timestamp_groups: Dict mapping timestamps to lists of keys
         track_execution: If True, add execution tracking
 
     Returns:
-        LazyRasterStack with the given timestamp configuration
+        RasterStack with the given timestamp configuration
     """
     execution_log = [] if track_execution else None
     execution_lock = Lock() if track_execution else None
@@ -55,7 +55,7 @@ def create_test_lazy_raster_stack(timestamp_groups, track_execution=False):
                 (make_task(key, timestamp), {"id": key, "timestamp": timestamp})
             )
 
-    stack = LazyRasterStack(
+    stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: asset["timestamp"],
@@ -74,7 +74,7 @@ def create_test_lazy_raster_stack(timestamp_groups, track_execution=False):
 
 
 def test_timestamp_based_grouping():
-    """Test that apply_pixel_selection processes images from timestamp-ordered LazyRasterStack."""
+    """Test that apply_pixel_selection processes images from timestamp-ordered RasterStack."""
 
     # Create test data with 3 timestamps, each having 2 images
     timestamp_groups = {
@@ -88,8 +88,8 @@ def test_timestamp_based_grouping():
     # Apply pixel selection
     result = apply_pixel_selection(stack, pixel_selection="first")
 
-    # Verify result structure - now returns LazyRasterStack
-    assert isinstance(result, (dict, LazyRasterStack))
+    # Verify result structure - now returns RasterStack
+    assert isinstance(result, (dict, RasterStack))
     assert "data" in result
     assert isinstance(result["data"], ImageData)
 
@@ -142,7 +142,7 @@ def test_early_termination_by_timestamp_group():
 
 
 def test_failed_tasks_handling_in_timestamp_group():
-    """Test that failed tasks within a LazyRasterStack are handled gracefully."""
+    """Test that failed tasks within a RasterStack are handled gracefully."""
     from rio_tiler.errors import TileOutsideBounds
 
     def make_failing_task(key):
@@ -175,7 +175,7 @@ def test_failed_tasks_handling_in_timestamp_group():
         ),
     ]
 
-    stack = LazyRasterStack(
+    stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: asset["timestamp"],
@@ -195,9 +195,9 @@ def test_failed_tasks_handling_in_timestamp_group():
 
 
 def test_thread_pool_executor_usage():
-    """Test that LazyRasterStack has concurrent execution capabilities."""
+    """Test that RasterStack has concurrent execution capabilities."""
 
-    from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+    from titiler.openeo.processes.implementations.data_model import RasterStack
 
     def create_test_image():
         return ImageData(
@@ -208,13 +208,13 @@ def test_thread_pool_executor_usage():
             band_names=["red", "green", "blue"],
         )
 
-    # Create a LazyRasterStack with multiple items
+    # Create a RasterStack with multiple items
     tasks = [
         (create_test_image, {"timestamp": datetime(2021, 1, 1), "item_id": i})
         for i in range(3)
     ]
 
-    stack = LazyRasterStack(
+    stack = RasterStack(
         tasks,
         key_fn=lambda x: f"item_{x['item_id']}",
         timestamp_fn=lambda x: x["timestamp"],
@@ -232,7 +232,7 @@ def test_thread_pool_executor_usage():
 
 
 def test_real_lazy_raster_stack_integration():
-    """Integration test using real LazyRasterStack with timestamp functionality."""
+    """Integration test using real RasterStack with timestamp functionality."""
 
     execution_log = []
     execution_lock = Lock()
@@ -285,14 +285,14 @@ def test_real_lazy_raster_stack_integration():
             task = create_task_with_timestamp(timestamp_str, item_id)
             tasks.append((task, asset_info))
 
-    # Create LazyRasterStack with timestamp support
+    # Create RasterStack with timestamp support
     def key_fn(asset):
         return asset["id"]
 
     def timestamp_fn(asset):
         return datetime.fromisoformat(asset["timestamp"])
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=key_fn,
         timestamp_fn=timestamp_fn,

@@ -15,7 +15,7 @@ from titiler.openeo.processes.implementations.arrays import (
     array_element,
     create_data_cube,
 )
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.dem import hillshade
 from titiler.openeo.processes.implementations.image import (
     color_formula,
@@ -53,10 +53,10 @@ def sample_raster_stack(sample_image_data):
 
 
 def test_lazy_raster_stack_from_images(sample_image_data, sample_raster_stack):
-    """Test the LazyRasterStack.from_images factory method."""
+    """Test the RasterStack.from_images factory method."""
     # Test creating from single ImageData
-    result = LazyRasterStack.from_images({"data": sample_image_data})
-    assert isinstance(result, LazyRasterStack)
+    result = RasterStack.from_images({"data": sample_image_data})
+    assert isinstance(result, RasterStack)
     assert "data" in result
     assert result["data"].array.shape == sample_image_data.array.shape
 
@@ -335,7 +335,7 @@ def test_apply_dimension_spectral_single_image(sample_image_data):
     """Test apply_dimension on spectral dimension with single image."""
 
     # Convert to RasterStack
-    stack = LazyRasterStack.from_images({"data": sample_image_data})
+    stack = RasterStack.from_images({"data": sample_image_data})
 
     # Define a process that normalizes bands
     def normalize_process(data, **kwargs):
@@ -387,7 +387,7 @@ def test_apply_dimension_single_temporal_image(sample_image_data):
     """Test apply_dimension with single temporal image (no temporal dimension)."""
 
     # Convert to RasterStack
-    stack = LazyRasterStack.from_images({"data": sample_image_data})
+    stack = RasterStack.from_images({"data": sample_image_data})
 
     # Define a process
     def some_process(data, **kwargs):

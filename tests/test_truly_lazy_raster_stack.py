@@ -81,7 +81,7 @@ class TestComputeCutlineMask:
         crs = CRS.from_epsg(4326)
 
         # Note: compute_cutline_mask with None geometry produces all-True mask
-        # (all pixels outside). The LazyImageRef.cutline_mask() handles None
+        # (all pixels outside). The ImageRef.cutline_mask() handles None
         # geometry separately by returning None.
         mask = compute_cutline_mask(None, width, height, bounds, crs)
 

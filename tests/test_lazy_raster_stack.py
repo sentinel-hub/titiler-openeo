@@ -1,4 +1,4 @@
-"""Test LazyRasterStack with apply_pixel_selection."""
+"""Test RasterStack with apply_pixel_selection."""
 
 from datetime import datetime
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
 
 
@@ -27,8 +27,8 @@ def test_lazy_raster_stack():
     # Create a list of tasks
     tasks = [(mock_task, mock_asset)]
 
-    # Create a LazyRasterStack
-    lazy_stack = LazyRasterStack(
+    # Create a RasterStack
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -51,7 +51,7 @@ def test_lazy_raster_stack():
 
 
 def test_lazy_raster_stack_duplicate_timestamps():
-    """Test that LazyRasterStack handles multiple items with the same timestamp correctly."""
+    """Test that RasterStack handles multiple items with the same timestamp correctly."""
     # Create mock assets with same datetime but different IDs
     mock_asset_1 = {
         "id": "item-001",
@@ -65,8 +65,8 @@ def test_lazy_raster_stack_duplicate_timestamps():
     # Create tasks
     tasks = [(mock_task, mock_asset_1), (mock_task, mock_asset_2)]
 
-    # Create a LazyRasterStack
-    lazy_stack = LazyRasterStack(
+    # Create a RasterStack
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -103,15 +103,15 @@ def test_lazy_raster_stack_duplicate_timestamps():
 
 
 def test_lazy_raster_stack_with_key_fn_only():
-    """Test LazyRasterStack with only key_fn (no timestamp_fn)."""
+    """Test RasterStack with only key_fn (no timestamp_fn)."""
     # Create a mock asset
     mock_asset = {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}}
 
     # Create a list of tasks
     tasks = [(mock_task, mock_asset)]
 
-    # Create a LazyRasterStack using new API with only key_fn
-    lazy_stack = LazyRasterStack(
+    # Create a RasterStack using new API with only key_fn
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["properties"]["datetime"],
     )
@@ -132,7 +132,7 @@ def test_lazy_raster_stack_with_key_fn_only():
 
 
 def test_lazy_raster_stack_temporal_ordering():
-    """Test that LazyRasterStack returns data in temporal order."""
+    """Test that RasterStack returns data in temporal order."""
     import datetime
 
     # Test data with timestamps in mixed order
@@ -154,7 +154,7 @@ def test_lazy_raster_stack_temporal_ordering():
     # Create tasks using the same pattern as other tests
     tasks = [(mock_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: asset["datetime"],
@@ -177,7 +177,7 @@ def test_lazy_raster_stack_temporal_ordering():
 
 
 def test_truly_lazy_execution():
-    """Test that LazyRasterStack only executes tasks when specifically requested."""
+    """Test that RasterStack only executes tasks when specifically requested."""
 
     # Create a counter to track how many times tasks are executed
     execution_counter = {"count": 0}
@@ -201,8 +201,8 @@ def test_truly_lazy_execution():
     # Create tasks
     tasks = [(counting_mock_task, asset) for asset in assets]
 
-    # Create LazyRasterStack
-    lazy_stack = LazyRasterStack(
+    # Create RasterStack
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -251,7 +251,7 @@ def test_truly_lazy_execution():
 
 def test_lazy_raster_stack_first_last_properties():
     """Test the first and last properties for efficient RasterStack access."""
-    # Test with LazyRasterStack
+    # Test with RasterStack
     assets = [
         {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}},
         {"id": "item-002", "properties": {"datetime": "2021-01-02T00:00:00Z"}},
@@ -260,7 +260,7 @@ def test_lazy_raster_stack_first_last_properties():
 
     tasks = [(mock_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -282,14 +282,14 @@ def test_lazy_raster_stack_first_last_properties():
 
     # Test from_images factory method
     single_img = mock_task()
-    stack_from_img = LazyRasterStack.from_images({"data": single_img})
-    assert isinstance(stack_from_img, LazyRasterStack)
+    stack_from_img = RasterStack.from_images({"data": single_img})
+    assert isinstance(stack_from_img, RasterStack)
     assert "data" in stack_from_img
     assert stack_from_img["data"].array.shape == single_img.array.shape
 
 
 def test_lazy_raster_stack_error_handling():
-    """Test error handling in LazyRasterStack."""
+    """Test error handling in RasterStack."""
     from rio_tiler.errors import TileOutsideBounds
 
     # Create a task that will fail
@@ -307,7 +307,7 @@ def test_lazy_raster_stack_error_handling():
 
     tasks = [(failing_task, assets[0]), (success_task, assets[1])]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -359,7 +359,7 @@ def test_lazy_raster_stack_selective_execution():
 
     tasks = [(tracking_task(asset["id"]), asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -413,7 +413,7 @@ def test_lazy_raster_stack_timestamps():
 
     tasks = [(mock_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -448,7 +448,7 @@ def test_lazy_raster_stack_timestamps():
 
 
 def test_lazy_raster_stack_without_timestamps():
-    """Test LazyRasterStack without timestamp function."""
+    """Test RasterStack without timestamp function."""
     assets = [
         {"id": "item-001"},
         {"id": "item-002"},
@@ -457,7 +457,7 @@ def test_lazy_raster_stack_without_timestamps():
 
     tasks = [(mock_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         # No timestamp_fn provided
@@ -481,7 +481,7 @@ def test_lazy_raster_stack_without_timestamps():
 
 
 def test_lazy_raster_stack_max_workers():
-    """Test LazyRasterStack with different max_workers settings."""
+    """Test RasterStack with different max_workers settings."""
     assets = [
         {"id": "item-001"},
         {"id": "item-002"},
@@ -491,7 +491,7 @@ def test_lazy_raster_stack_max_workers():
 
     # Test with different max_workers values
     for max_workers in [1, 2, 4]:
-        lazy_stack = LazyRasterStack(
+        lazy_stack = RasterStack(
             tasks=tasks,
             key_fn=lambda asset: asset["id"],
             max_workers=max_workers,
@@ -505,7 +505,7 @@ def test_lazy_raster_stack_max_workers():
 
 
 def test_lazy_raster_stack_future_tasks():
-    """Test LazyRasterStack with Future-based tasks."""
+    """Test RasterStack with Future-based tasks."""
     from concurrent.futures import ThreadPoolExecutor
 
     def slow_task():
@@ -523,7 +523,7 @@ def test_lazy_raster_stack_future_tasks():
             future = executor.submit(slow_task)
             tasks.append((future, asset))
 
-        lazy_stack = LazyRasterStack(
+        lazy_stack = RasterStack(
             tasks=tasks,
             key_fn=lambda asset: asset["id"],
         )
@@ -538,7 +538,7 @@ def test_lazy_raster_stack_future_tasks():
 
 
 def test_lazy_raster_stack_iteration_methods():
-    """Test iteration methods of LazyRasterStack."""
+    """Test iteration methods of RasterStack."""
     assets = [
         {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}},
         {"id": "item-002", "properties": {"datetime": "2021-01-02T00:00:00Z"}},
@@ -546,7 +546,7 @@ def test_lazy_raster_stack_iteration_methods():
 
     tasks = [(mock_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -602,7 +602,7 @@ def test_lazy_raster_stack_execute_all_tasks():
 
     tasks = [(counting_task, asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
     )
@@ -626,7 +626,7 @@ def test_lazy_raster_stack_edge_cases():
     """Test various edge cases and boundary conditions."""
 
     # Test empty task list
-    empty_lazy_stack = LazyRasterStack(
+    empty_lazy_stack = RasterStack(
         tasks=[],
         key_fn=lambda asset: asset["id"],
     )
@@ -647,7 +647,7 @@ def test_lazy_raster_stack_edge_cases():
     tasks = [(mock_task, asset) for asset in assets]
 
     # This should work but keys list will have duplicates
-    lazy_stack_with_dupes = LazyRasterStack(
+    lazy_stack_with_dupes = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
     )
@@ -690,7 +690,7 @@ def test_first_property_with_failing_tasks():
         (create_successful_task(42), assets[2]),
     ]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -718,7 +718,7 @@ def test_first_property_all_tasks_fail():
     assets = [{"id": "fail1"}, {"id": "fail2"}]
     tasks = [(create_failing_task(), asset) for asset in assets]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         allowed_exceptions=(TileOutsideBounds,),
@@ -750,7 +750,7 @@ def test_temporal_sorting_preserves_task_mapping():
         task = create_task_with_value(i * 10)  # Values: 0, 10, 20, 30, 40
         tasks.append((task, asset))
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -809,7 +809,7 @@ def test_apply_pixel_selection_with_failing_tasks():
         (create_successful_task(42), assets[2]),
     ]
 
-    lazy_stack = LazyRasterStack(
+    lazy_stack = RasterStack(
         tasks=tasks,
         key_fn=lambda asset: asset["id"],
         timestamp_fn=lambda asset: datetime.fromisoformat(
@@ -830,9 +830,9 @@ def test_apply_pixel_selection_with_failing_tasks():
 
 
 def test_empty_lazy_raster_stack():
-    """Test LazyRasterStack with empty tasks list."""
-    # Create empty LazyRasterStack
-    lazy_stack = LazyRasterStack(
+    """Test RasterStack with empty tasks list."""
+    # Create empty RasterStack
+    lazy_stack = RasterStack(
         tasks=[],
         key_fn=lambda asset: asset["id"],
     )
