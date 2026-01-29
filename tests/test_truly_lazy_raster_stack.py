@@ -16,6 +16,7 @@ from shapely.geometry import box, mapping
 from titiler.openeo.processes.implementations.data_model import (
     LazyImageRef,
     LazyRasterStack,
+    RasterStack,
     compute_cutline_mask,
 )
 from titiler.openeo.processes.implementations.reduce import (
@@ -461,8 +462,8 @@ class TestApplyPixelSelectionTrulyLazy:
         # Both behaviors are valid - what matters is that tasks are only executed
         # when realize() is called, not during cutline computation
 
-    def test_apply_pixel_selection_with_regular_dict_still_works(self):
-        """apply_pixel_selection still works with regular dict (non-lazy)."""
+    def test_apply_pixel_selection_with_from_images_still_works(self):
+        """apply_pixel_selection still works with RasterStack.from_images() (non-lazy)."""
         bounds = (0.0, 0.0, 10.0, 10.0)
         crs = CRS.from_epsg(4326)
 
@@ -472,9 +473,9 @@ class TestApplyPixelSelectionTrulyLazy:
         data2 = np.ma.array(np.full((1, 10, 10), 20.0, dtype=np.float32))
         img2 = ImageData(data2, bounds=bounds, crs=crs)
 
-        regular_dict = {"2021-01-01": img1, "2021-01-02": img2}
+        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
 
-        result = apply_pixel_selection(data=regular_dict, pixel_selection="first")
+        result = apply_pixel_selection(data=stack, pixel_selection="first")
 
         assert "data" in result
         # Should be first image values

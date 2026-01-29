@@ -180,40 +180,22 @@ def _collect_images_from_data(
     executing tasks. This enables deferred execution and cutline mask computation
     without loading actual pixel data.
 
-    For regular RasterStack (dict) or RasterStack without image refs, returns
-    actual ImageData instances.
+    For RasterStack without image refs (e.g., created via from_images()),
+    returns actual ImageData instances.
 
     Args:
-        data: A RasterStack (regular dict or RasterStack)
+        data: A RasterStack
 
     Returns:
         List of (key, Union[LazyImageRef, ImageData]) tuples in temporal order
     """
-    # RasterStack with image refs: return refs without executing tasks (truly lazy)
-    if isinstance(data, RasterStack):
-        image_refs = data.get_image_refs()
-        if image_refs:
-            return image_refs
+    # Try to get LazyImageRef instances (truly lazy path)
+    image_refs = data.get_image_refs()
+    if image_refs:
+        return image_refs
 
-        # RasterStack without image refs: fall back to regular iteration
-        all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
-        for key in data.keys():
-            try:
-                all_items.append((key, data[key]))
-            except KeyError:
-                continue
-        return all_items
-
-    # Regular dict RasterStack - collect all images
-    all_items = []
-    for key in data.keys():
-        try:
-            img = data[key]
-            all_items.append((key, img))
-        except KeyError:
-            continue
-
-    return all_items
+    # No image refs available - return actual ImageData
+    return [(key, data[key]) for key in data.keys()]
 
 
 def _feed_image_to_pixsel(
