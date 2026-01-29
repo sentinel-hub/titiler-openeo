@@ -194,22 +194,26 @@ Find and update all locations that create `{"key": ImageData(...)}` literals:
 | Test fixtures | `{"k": ImageData(...)}` | `RasterStack.from_single("k", ...)` |
 | apply.py | `{k: _process_img(img) for ...}` | `RasterStack.from_images({...})` |
 
-### Phase 3: Remove Helper Functions
+### Phase 3: Remove Helper Functions ✅ COMPLETED
 
-#### Step 3.1: Replace `get_first_item()` / `get_last_item()`
+#### Step 3.1: Replace `get_first_item()` / `get_last_item()` ✅
 
-Current signature: `get_first_item(data: Union[ImageData, RasterStack]) -> ImageData`
+~~Current signature: `get_first_item(data: Union[ImageData, RasterStack]) -> ImageData`~~
 
-Options:
+~~Options:~~
+~~1. **Keep as utility** but simplify implementation (just call `data.first`)~~
+~~2. **Remove entirely** - callers use `data.first` or handle ImageData separately~~
 
-1. **Keep as utility** but simplify implementation (just call `data.first`)
-2. **Remove entirely** - callers use `data.first` or handle ImageData separately
+**Decision:** Removed. Callers now use:
 
-**Decision:** Remove. The Union type is the problem - callers should know what type they have.
+- `data.first` for LazyRasterStack
+- `next(iter(data.values()))` as fallback for plain dicts in tests
 
-#### Step 3.2: Remove `to_raster_stack()`
+#### Step 3.2: Remove `to_raster_stack()` ✅
 
-This function only exists because we have two types. With unified type, it's unnecessary.
+~~This function only exists because we have two types. With unified type, it's unnecessary.~~
+
+**Decision:** Removed. Callers now use `LazyRasterStack.from_images({"data": img})` instead.
 
 ### Phase 4: Rename and Cleanup
 

@@ -15,7 +15,7 @@ from titiler.openeo.processes.implementations.arrays import (
     array_element,
     create_data_cube,
 )
-from titiler.openeo.processes.implementations.data_model import to_raster_stack
+from titiler.openeo.processes.implementations.data_model import LazyRasterStack
 from titiler.openeo.processes.implementations.dem import hillshade
 from titiler.openeo.processes.implementations.image import (
     color_formula,
@@ -52,17 +52,13 @@ def sample_raster_stack(sample_image_data):
     return {"2021-01-01": sample_image_data, "2021-01-02": image_data2}
 
 
-def test_to_raster_stack(sample_image_data, sample_raster_stack):
-    """Test the to_raster_stack helper function."""
-    # Test converting ImageData to RasterStack
-    result = to_raster_stack(sample_image_data)
-    assert isinstance(result, dict)
+def test_lazy_raster_stack_from_images(sample_image_data, sample_raster_stack):
+    """Test the LazyRasterStack.from_images factory method."""
+    # Test creating from single ImageData
+    result = LazyRasterStack.from_images({"data": sample_image_data})
+    assert isinstance(result, LazyRasterStack)
     assert "data" in result
-    assert result["data"] is sample_image_data
-
-    # Test passing RasterStack directly
-    result = to_raster_stack(sample_raster_stack)
-    assert result is sample_raster_stack
+    assert result["data"].array.shape == sample_image_data.array.shape
 
 
 def test_image_indexes(sample_raster_stack):
@@ -339,7 +335,7 @@ def test_apply_dimension_spectral_single_image(sample_image_data):
     """Test apply_dimension on spectral dimension with single image."""
 
     # Convert to RasterStack
-    stack = to_raster_stack(sample_image_data)
+    stack = LazyRasterStack.from_images({"data": sample_image_data})
 
     # Define a process that normalizes bands
     def normalize_process(data, **kwargs):
@@ -391,7 +387,7 @@ def test_apply_dimension_single_temporal_image(sample_image_data):
     """Test apply_dimension with single temporal image (no temporal dimension)."""
 
     # Convert to RasterStack
-    stack = to_raster_stack(sample_image_data)
+    stack = LazyRasterStack.from_images({"data": sample_image_data})
 
     # Define a process
     def some_process(data, **kwargs):

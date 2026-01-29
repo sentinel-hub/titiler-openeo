@@ -249,29 +249,8 @@ def test_truly_lazy_execution():
     assert len(lazy_stack._data_cache) == 3
 
 
-def test_lazy_raster_stack_utility_functions():
-    """Test the utility functions for efficient RasterStack access."""
-    from titiler.openeo.processes.implementations.data_model import (
-        get_first_item,
-        get_last_item,
-        to_raster_stack,
-    )
-
-    # Test with single ImageData
-    single_img = mock_task()
-
-    # Test get_first_item with ImageData
-    assert get_first_item(single_img) is single_img
-
-    # Test get_last_item with ImageData
-    assert get_last_item(single_img) is single_img
-
-    # Test to_raster_stack with ImageData
-    stack_from_img = to_raster_stack(single_img)
-    assert isinstance(stack_from_img, dict)
-    assert "data" in stack_from_img
-    assert stack_from_img["data"] is single_img
-
+def test_lazy_raster_stack_first_last_properties():
+    """Test the first and last properties for efficient RasterStack access."""
     # Test with LazyRasterStack
     assets = [
         {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}},
@@ -289,37 +268,24 @@ def test_lazy_raster_stack_utility_functions():
         ),
     )
 
-    # Test get_first_item (should only execute first task)
-    first_item = get_first_item(lazy_stack)
+    # Test first property (should only execute first task)
+    first_item = lazy_stack.first
     assert isinstance(first_item, ImageData)
     assert len(lazy_stack._data_cache) == 1
     assert "item-001" in lazy_stack._data_cache
 
-    # Test get_last_item (should execute last task)
-    last_item = get_last_item(lazy_stack)
+    # Test last property (should execute last task)
+    last_item = lazy_stack.last
     assert isinstance(last_item, ImageData)
     assert len(lazy_stack._data_cache) == 2  # First and last now cached
     assert "item-003" in lazy_stack._data_cache
 
-    # Test with regular dict RasterStack
-    regular_stack = {
-        "img1": mock_task(),
-        "img2": mock_task(),
-        "img3": mock_task(),
-    }
-
-    first_regular = get_first_item(regular_stack)
-    last_regular = get_last_item(regular_stack)
-
-    assert isinstance(first_regular, ImageData)
-    assert isinstance(last_regular, ImageData)
-
-    # Test error cases
-    with pytest.raises(ValueError, match="Unsupported data type"):
-        get_first_item("invalid_type")
-
-    with pytest.raises(ValueError, match="Unsupported data type"):
-        get_last_item(123)
+    # Test from_images factory method
+    single_img = mock_task()
+    stack_from_img = LazyRasterStack.from_images({"data": single_img})
+    assert isinstance(stack_from_img, LazyRasterStack)
+    assert "data" in stack_from_img
+    assert stack_from_img["data"].array.shape == single_img.array.shape
 
 
 def test_lazy_raster_stack_error_handling():
@@ -692,11 +658,9 @@ def test_lazy_raster_stack_edge_cases():
     assert "unique-key" in lazy_stack_with_dupes._keys
 
 
-def test_get_first_item_with_failing_tasks():
-    """Test get_first_item finds the first successful task when early tasks fail."""
+def test_first_property_with_failing_tasks():
+    """Test .first property finds the first successful task when early tasks fail."""
     from rio_tiler.errors import TileOutsideBounds
-
-    from titiler.openeo.processes.implementations.data_model import get_first_item
 
     def create_failing_task():
         def task():
@@ -735,17 +699,15 @@ def test_get_first_item_with_failing_tasks():
         allowed_exceptions=(TileOutsideBounds,),
     )
 
-    # get_first_item should find the first successful task (the 3rd one)
-    result = get_first_item(lazy_stack)
+    # .first should find the first successful task (the 3rd one)
+    result = lazy_stack.first
     assert isinstance(result, ImageData)
     assert result.array[0, 0, 0] == 42  # Value from the successful task
 
 
-def test_get_first_item_all_tasks_fail():
-    """Test get_first_item when all tasks fail."""
+def test_first_property_all_tasks_fail():
+    """Test .first property when all tasks fail."""
     from rio_tiler.errors import TileOutsideBounds
-
-    from titiler.openeo.processes.implementations.data_model import get_first_item
 
     def create_failing_task():
         def task():
@@ -762,9 +724,9 @@ def test_get_first_item_all_tasks_fail():
         allowed_exceptions=(TileOutsideBounds,),
     )
 
-    # get_first_item should raise KeyError when all tasks fail
+    # .first should raise KeyError when all tasks fail
     with pytest.raises(KeyError, match="No successful tasks found"):
-        get_first_item(lazy_stack)
+        _ = lazy_stack.first
 
 
 def test_temporal_sorting_preserves_task_mapping():
@@ -869,8 +831,6 @@ def test_apply_pixel_selection_with_failing_tasks():
 
 def test_empty_lazy_raster_stack():
     """Test LazyRasterStack with empty tasks list."""
-    from titiler.openeo.processes.implementations.data_model import get_first_item
-
     # Create empty LazyRasterStack
     lazy_stack = LazyRasterStack(
         tasks=[],
@@ -882,9 +842,9 @@ def test_empty_lazy_raster_stack():
     assert list(lazy_stack.values()) == []
     assert list(lazy_stack.items()) == []
 
-    # get_first_item should raise error on empty stack
+    # .first should raise error on empty stack
     with pytest.raises(KeyError, match="LazyRasterStack is empty"):
-        get_first_item(lazy_stack)
+        _ = lazy_stack.first
 
     # apply_pixel_selection should also fail gracefully
     with pytest.raises(ValueError, match="Method returned an empty array"):

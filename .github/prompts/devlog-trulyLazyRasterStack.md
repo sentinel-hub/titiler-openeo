@@ -444,28 +444,36 @@ class LazyRasterStack(Dict[str, ImageData]):
         """Get last item (convenience property)."""
 ```
 
+---
+
+## Phase 3: Remove Helper Functions ✅
+
+### Summary
+
+Removed the redundant helper functions `get_first_item()`, `get_last_item()`, and `to_raster_stack()` from `data_model.py`. These existed to handle `Union[ImageData, RasterStack]` types, but with the unified `LazyRasterStack` approach, callers should know what type they have.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `data_model.py` | Removed `get_first_item()`, `get_last_item()`, `to_raster_stack()` |
+| `reduce.py` | Use `data.first if hasattr(data, 'first') else next(iter(data.values()))` |
+| `apply.py` | Same pattern for first item access |
+| `math.py` | Use `next(iter(data.values()))` / `list(data.values())[-1]` directly |
+| `test_processes.py` | Replace `to_raster_stack()` with `LazyRasterStack.from_images()` |
+| `test_lazy_raster_stack.py` | Update tests to use `.first` property instead of `get_first_item()` |
+
+### Rationale
+
+- **`get_first_item()`**: Was handling `Union[ImageData, RasterStack]` - callers should use `.first` for stacks
+- **`get_last_item()`**: Same issue - use `.last` for stacks  
+- **`to_raster_stack()`**: Only existed to wrap `ImageData` in a dict - use `LazyRasterStack.from_images({"data": img})` instead
+
 ### Test Results
 
 ```bash
 uv run pytest tests/ --ignore=tests/test_main.py -q
 # Result: 479 passed, 11 skipped ✅
-```
-
-### Test Commands
-
-```bash
-# Run all tests (excluding slow main tests)
-uv run pytest tests/ --ignore=tests/test_main.py -v
-
-# Run specific test files
-uv run pytest tests/test_lazy_raster_stack.py -v
-uv run pytest tests/test_truly_lazy_raster_stack.py -v
-uv run pytest tests/test_dimension_reduction.py -v
-uv run pytest tests/test_processes.py -v
-uv run pytest tests/test_timestamp_grouping.py -v
-
-# Quick smoke test
-uv run python -c "from titiler.openeo.processes.implementations.data_model import LazyRasterStack; print('OK')"
 ```
 
 ---
@@ -474,6 +482,6 @@ uv run python -c "from titiler.openeo.processes.implementations.data_model impor
 
 1. Check current state: `git status` and `git diff`
 2. Run tests: `uv run pytest tests/ --ignore=tests/test_main.py -q`
-3. All Phase 2 simplification steps are complete
-4. Consider creating PR for review
-5. Future work: Rename `LazyRasterStack` → `RasterStack` (separate PR)
+3. All Phase 2 and Phase 3 simplification steps are complete
+4. Next: Phase 4 - Rename `LazyRasterStack` → `RasterStack`
+5. Consider creating PR for review

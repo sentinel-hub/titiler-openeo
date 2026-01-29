@@ -47,7 +47,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import LazyImageRef, LazyRasterStack, RasterStack, get_first_item
+from .data_model import LazyImageRef, LazyRasterStack, RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -402,8 +402,8 @@ def _reduce_temporal_dimension(
             f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
         ) from e
 
-    # Get first successful image efficiently for LazyRasterStack - only for metadata
-    first_img = get_first_item(data)
+    # Get first successful image efficiently - only for metadata
+    first_img = data.first if hasattr(data, "first") else next(iter(data.values()))
 
     reduced_img = ImageData(
         reduced_array,  # Use the reduced array directly since it's already collapsed

@@ -6,7 +6,7 @@ import morecantile
 import numpy
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
-from .data_model import ImageData, LazyRasterStack, RasterStack, get_first_item
+from .data_model import ImageData, LazyRasterStack, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
@@ -150,8 +150,7 @@ def _apply_temporal_dimension(
         )
 
     # Get properties from first image (optimized for LazyRasterStack)
-
-    first_img = get_first_item(data)
+    first_img = data.first if hasattr(data, "first") else next(iter(data.values()))
 
     # If target_dimension is None, preserve the temporal dimension with processed values
     # Create a new stack with the same keys but processed data
