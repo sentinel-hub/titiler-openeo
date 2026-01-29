@@ -2,7 +2,7 @@
 
 from .apply import *  # noqa
 from .arrays import *  # noqa
-from .data_model import RasterStack  # noqa
+from .data_model import ImageRef, RasterStack  # noqa
 from .dem import *  # noqa
 from .get_param_item import *  # noqa
 from .image import *  # noqa

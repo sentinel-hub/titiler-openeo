@@ -2,7 +2,6 @@
 
 import logging
 import threading
-from abc import abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,13 +11,11 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Set,
     Tuple,
     TypeVar,
     Union,
     overload,
-    runtime_checkable,
 )
 
 import numpy as np
@@ -87,93 +84,30 @@ def compute_cutline_mask(
     return cutline_mask
 
 
-@runtime_checkable
-class ImageRef(Protocol):
-    """Protocol for image references that support lazy evaluation.
-
-    ImageRef provides a common interface for accessing image metadata and data.
-    It enables deferred execution by computing cutline masks from geometry metadata
-    without executing the actual raster read tasks.
-    """
-
-    @property
-    def key(self) -> str:
-        """Unique identifier for this image reference."""
-        ...
-
-    @property
-    def geometry(self) -> Optional[Dict[str, Any]]:
-        """GeoJSON geometry dict representing the footprint (typically in EPSG:4326)."""
-        ...
-
-    @property
-    def width(self) -> int:
-        """Output width in pixels."""
-        ...
-
-    @property
-    def height(self) -> int:
-        """Output height in pixels."""
-        ...
-
-    @property
-    def bounds(self) -> BBox:
-        """Bounding box as (west, south, east, north)."""
-        ...
-
-    @property
-    def crs(self) -> Optional[CRS]:
-        """Coordinate reference system."""
-        ...
-
-    @property
-    def band_names(self) -> List[str]:
-        """List of band names."""
-        ...
-
-    @property
-    def count(self) -> int:
-        """Number of bands."""
-        ...
-
-    @abstractmethod
-    def cutline_mask(self) -> Optional[np.ndarray]:
-        """Compute the cutline mask from geometry without executing the task.
-
-        Returns:
-            Boolean mask where True indicates pixels outside the geometry,
-            or None if no geometry is available.
-        """
-        ...
-
-    @abstractmethod
-    def realize(self) -> ImageData:
-        """Execute the task and return the actual ImageData.
-
-        Returns:
-            ImageData: The fully loaded image data.
-        """
-        ...
-
-
 @dataclass
-class LazyImageRef:
-    """A lazy image reference that defers task execution until realize() is called.
+class ImageRef:
+    """A unified image reference that manages lazy or eager data access.
 
-    LazyImageRef stores all metadata needed to compute cutline masks and other
-    spatial operations without actually reading the raster data. The actual data
-    is only loaded when realize() is called.
+    ImageRef provides a single interface for accessing image metadata and data,
+    whether the image is loaded lazily (from a task function) or eagerly (pre-loaded).
+
+    The class tracks its `realized` state:
+    - When created with a task function: starts unrealized, loads on first realize()
+    - When created with pre-loaded ImageData: starts already realized
+
+    This eliminates the need for isinstance checks - all code works with ImageRef.
     """
 
     _key: str
-    _geometry: Optional[Dict[str, Any]]
     _width: int
     _height: int
     _bounds: BBox
     _crs: Optional[CRS]
     _band_names: List[str]
     _count: int
-    _task_fn: Callable[[], ImageData]
+    _geometry: Optional[Dict[str, Any]] = None
+    _task_fn: Optional[Callable[[], ImageData]] = field(default=None, repr=False)
+    _image: Optional[ImageData] = field(default=None, repr=False)
     _cutline_mask_cache: Optional[np.ndarray] = field(default=None, repr=False)
 
     @property
@@ -183,7 +117,7 @@ class LazyImageRef:
 
     @property
     def geometry(self) -> Optional[Dict[str, Any]]:
-        """GeoJSON geometry dict representing the footprint."""
+        """GeoJSON geometry dict representing the footprint (typically in EPSG:4326)."""
         return self._geometry
 
     @property
@@ -216,36 +150,105 @@ class LazyImageRef:
         """Number of bands."""
         return self._count
 
+    @property
+    def realized(self) -> bool:
+        """Whether the image data has been loaded."""
+        return self._image is not None
+
     def cutline_mask(self) -> Optional[np.ndarray]:
-        """Compute the cutline mask from geometry without executing the task.
+        """Compute or return the cutline mask.
+
+        For unrealized refs with geometry: computes from geometry (no data load).
+        For realized refs: returns the image's cutline_mask attribute.
+        For refs without geometry and unrealized: returns None.
 
         The result is cached for subsequent calls.
-
-        Returns:
-            Boolean mask where True indicates pixels outside the geometry,
-            or None if no geometry is available.
         """
-        if self._geometry is None:
-            return None
+        # If already realized, use the image's cutline mask
+        if self._image is not None:
+            return self._image.cutline_mask
 
-        if self._cutline_mask_cache is None:
-            self._cutline_mask_cache = compute_cutline_mask(
-                geometry=self._geometry,
-                width=self._width,
-                height=self._height,
-                bounds=self._bounds,
-                dst_crs=self._crs,
-            )
+        # If we have geometry, compute from it (lazy path)
+        if self._geometry is not None:
+            if self._cutline_mask_cache is None:
+                self._cutline_mask_cache = compute_cutline_mask(
+                    geometry=self._geometry,
+                    width=self._width,
+                    height=self._height,
+                    bounds=self._bounds,
+                    dst_crs=self._crs,
+                )
+            return self._cutline_mask_cache
 
-        return self._cutline_mask_cache
+        return None
 
     def realize(self) -> ImageData:
-        """Execute the task and return the actual ImageData.
+        """Get the ImageData, loading it if necessary.
+
+        For lazy refs: executes the task function on first call, caches result.
+        For eager refs: returns the pre-loaded image immediately.
 
         Returns:
-            ImageData: The fully loaded image data.
+            ImageData: The image data.
         """
-        return self._task_fn()
+        if self._image is None:
+            if self._task_fn is None:
+                raise RuntimeError("ImageRef has no task function and no cached image")
+            self._image = self._task_fn()
+        return self._image
+
+    @classmethod
+    def from_task(
+        cls,
+        key: str,
+        task_fn: Callable[[], ImageData],
+        width: int,
+        height: int,
+        bounds: BBox,
+        crs: Optional[CRS] = None,
+        band_names: Optional[List[str]] = None,
+        geometry: Optional[Dict[str, Any]] = None,
+    ) -> "ImageRef":
+        """Create a lazy ImageRef from a task function.
+
+        The task will be executed when realize() is called.
+        """
+        return cls(
+            _key=key,
+            _width=width,
+            _height=height,
+            _bounds=bounds,
+            _crs=crs,
+            _band_names=band_names or [],
+            _count=len(band_names) if band_names else 0,
+            _geometry=geometry,
+            _task_fn=task_fn,
+            _image=None,
+        )
+
+    @classmethod
+    def from_image(cls, key: str, image: ImageData) -> "ImageRef":
+        """Create an eager ImageRef from pre-loaded ImageData.
+
+        The image is already loaded, so realize() returns it immediately.
+        """
+        return cls(
+            _key=key,
+            _width=image.width,
+            _height=image.height,
+            _bounds=image.bounds,
+            _crs=image.crs,
+            _band_names=image.band_names or [],
+            _count=image.count,
+            _geometry=None,
+            _task_fn=None,
+            _image=image,
+        )
+
+
+# Backwards compatibility aliases
+LazyImageRef = ImageRef
+EagerImageRef = ImageRef
 
 
 class RasterStack(Dict[str, ImageData]):
@@ -367,7 +370,7 @@ class RasterStack(Dict[str, ImageData]):
         ]
 
     def _compute_metadata(self) -> None:
-        """Compute keys, build timestamp mapping, and create LazyImageRef instances."""
+        """Compute keys, build timestamp mapping, and create ImageRef instances."""
         for i, (task_fn, asset) in enumerate(self._tasks):
             key = self._key_fn(asset)
             self._keys.append(key)
@@ -381,7 +384,7 @@ class RasterStack(Dict[str, ImageData]):
                     self._timestamp_groups[timestamp] = []
                 self._timestamp_groups[timestamp].append(key)
 
-            # Create LazyImageRef if we have the required dimensions
+            # Create ImageRef if we have the required dimensions
             if (
                 self._width is not None
                 and self._height is not None
@@ -399,16 +402,15 @@ class RasterStack(Dict[str, ImageData]):
 
                     return executor
 
-                self._image_refs[key] = LazyImageRef(
-                    _key=key,
-                    _geometry=geometry,
-                    _width=self._width,
-                    _height=self._height,
-                    _bounds=self._bounds,
-                    _crs=self._dst_crs,
-                    _band_names=self._band_names,
-                    _count=len(self._band_names) if self._band_names else 0,
-                    _task_fn=make_task_executor(task_fn),
+                self._image_refs[key] = ImageRef.from_task(
+                    key=key,
+                    task_fn=make_task_executor(task_fn),
+                    width=self._width,
+                    height=self._height,
+                    bounds=self._bounds,
+                    crs=self._dst_crs,
+                    band_names=self._band_names,
+                    geometry=geometry,
                 )
 
         # If we have timestamps, sort keys by temporal order
