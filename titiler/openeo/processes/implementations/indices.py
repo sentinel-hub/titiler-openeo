@@ -55,7 +55,7 @@ def ndwi(data: RasterStack, nir: int, swir: int) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndwi(img_data, nir, swir)
-    return result
+    return RasterStack.from_images(result)
 
 
 def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
@@ -73,4 +73,4 @@ def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
     result: Dict[str, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndvi(img_data, nir, red)
-    return result
+    return RasterStack.from_images(result)

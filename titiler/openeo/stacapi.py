@@ -33,7 +33,7 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .processes.implementations.data_model import LazyRasterStack, RasterStack
+from .processes.implementations.data_model import RasterStack
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
@@ -737,7 +737,7 @@ class LoadCollection:
             )
             result[date] = img
 
-        return result
+        return RasterStack.from_images(result)
 
     def load_collection_and_reduce(
         self,
@@ -830,7 +830,7 @@ class LoadCollection:
         elif items:
             key = items[0].datetime.isoformat()
 
-        return {key: img}
+        return RasterStack.from_images({key: img})
 
 
 @define
@@ -982,7 +982,7 @@ class LoadStac:
             tile_buffer: Optional buffer around the tile in pixels
 
         Returns:
-            A LazyRasterStack containing the tasks
+            A RasterStack containing the tasks
 
         Raises:
             NotImplementedError: If spatial_extent is not provided
@@ -1009,7 +1009,7 @@ class LoadStac:
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
         )
 
-        return LazyRasterStack(
+        return RasterStack(
             tasks=tasks,
             key_fn=lambda asset: asset["id"],  # Use item ID as unique key
             timestamp_fn=lambda asset: _props_to_datetime(asset["properties"]),

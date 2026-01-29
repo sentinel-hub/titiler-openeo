@@ -29,7 +29,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
-from .data_model import LazyRasterStack
+from .data_model import RasterStack
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ def _type_to_openeo_name(param_type: Any) -> str:
     # Handle custom types by name
     if hasattr(param_type, "__name__"):
         name = param_type.__name__
-        if name in ("LazyRasterStack", "RasterStack"):
+        if name == "RasterStack":
             return "datacube"
         return name
 
@@ -320,7 +320,10 @@ def _value_to_openeo_name(value: Any) -> str:
         return "bounding-box"
     if isinstance(value, TemporalInterval):
         return "temporal-interval"
-    if isinstance(value, (dict, LazyRasterStack)):
+    # RasterStack is a dict subclass, so check it first for explicit typing
+    if isinstance(value, RasterStack):
+        return "datacube"
+    if isinstance(value, dict):
         return "datacube"
     if hasattr(value, "__array__"):
         return "array"
@@ -329,18 +332,22 @@ def _value_to_openeo_name(value: Any) -> str:
 
 
 def _is_dict_type_expected(param_type: Any) -> bool:
-    """Check if the parameter type expects a dict/datacube."""
+    """Check if the parameter type expects a dict/datacube/RasterStack."""
     origin = get_origin(param_type)
 
     if origin is Union:
         actual_types = [a for a in get_args(param_type) if a is not type(None)]
         return any(
-            t is dict or (hasattr(t, "__origin__") and t.__origin__ is dict)
+            t is dict
+            or t is RasterStack
+            or (hasattr(t, "__origin__") and t.__origin__ is dict)
             for t in actual_types
         )
 
-    return param_type is dict or (
-        hasattr(param_type, "__origin__") and param_type.__origin__ is dict
+    return (
+        param_type is dict
+        or param_type is RasterStack
+        or (hasattr(param_type, "__origin__") and param_type.__origin__ is dict)
     )
 
 
@@ -348,7 +355,8 @@ def _validate_datacube_param(
     param_name: str, param_value: Any, param_type: Any, func_name: str
 ) -> None:
     """Validate that datacube values are expected by the parameter type."""
-    if not isinstance(param_value, (dict, LazyRasterStack)):
+    # RasterStack is a dict subclass, so isinstance(value, dict) covers both
+    if not isinstance(param_value, dict):
         return
 
     if not _is_dict_type_expected(param_type):
@@ -400,7 +408,7 @@ def _validate_parameter_types(
 
     Catches common type mismatches:
     - None values for non-Optional types
-    - Datacubes (dict/LazyRasterStack) passed to array parameters
+    - Datacubes (dict/RasterStack) passed to array parameters
     - General type mismatches via Pydantic validation
     """
     for param_name, param_value in resolved_kwargs.items():

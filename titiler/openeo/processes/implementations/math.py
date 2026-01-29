@@ -4,7 +4,6 @@ import builtins
 
 import numpy
 
-from .data_model import get_first_item, get_last_item
 from .reduce import apply_pixel_selection
 
 __all__ = [
@@ -320,7 +319,7 @@ def first(data):
     """Return the first element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        # Check if data has timestamp-based grouping capability (RasterStack)
         if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
             timestamps = data.timestamps()
             if not timestamps:
@@ -346,7 +345,7 @@ def first(data):
             return mosaic_img.array[0]
         else:
             # Regular RasterStack - use existing logic
-            first_img = get_first_item(data)
+            first_img = next(iter(data.values()))
             return first_img.array
     elif isinstance(data, numpy.ndarray):
         return data[0]
@@ -360,7 +359,7 @@ def last(data):
     """Return the last element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        # Check if data has timestamp-based grouping capability (RasterStack)
         if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
             timestamps = data.timestamps()
             if not timestamps:
@@ -386,7 +385,7 @@ def last(data):
             return mosaic_img.array[-1]
         else:
             # Regular RasterStack - use existing logic
-            last_img = get_last_item(data)
+            last_img = list(data.values())[-1]
             return last_img.array
     elif isinstance(data, numpy.ndarray):
         return data[-1]

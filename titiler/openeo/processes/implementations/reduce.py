@@ -47,7 +47,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import LazyImageRef, LazyRasterStack, RasterStack, get_first_item
+from .data_model import ImageRef, RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
 
@@ -158,65 +158,50 @@ def _create_pixel_selection_result(
     bounds: Optional[BBox],
     band_names: Optional[List[str]],
     pixel_selection: str,
-) -> Dict[str, ImageData]:
+) -> RasterStack:
     """Create the final pixel selection result."""
-    return {
-        "data": ImageData(
-            pixsel_method.data,
-            assets=assets_used,
-            crs=crs,
-            bounds=bounds,
-            band_names=band_names if band_names is not None else [],
-            metadata={"pixel_selection_method": pixel_selection},
-        )
-    }
+    result_img = ImageData(
+        pixsel_method.data,
+        assets=assets_used,
+        crs=crs,
+        bounds=bounds,
+        band_names=band_names if band_names is not None else [],
+        metadata={"pixel_selection_method": pixel_selection},
+    )
+    return RasterStack.from_images({"data": result_img})
 
 
 def _collect_images_from_data(
     data: RasterStack,
-) -> List[Tuple[str, Union[LazyImageRef, ImageData]]]:
-    """Collect all images or image references from a RasterStack.
+) -> List[Tuple[str, ImageRef]]:
+    """Collect all image references from a RasterStack.
 
-    For LazyRasterStack with image refs, returns LazyImageRef instances without
-    executing tasks. This enables deferred execution and cutline mask computation
-    without loading actual pixel data.
+    This function ALWAYS returns ImageRef instances. RasterStack should always
+    have image refs available when created with proper dimensions.
 
-    For regular RasterStack or LazyRasterStack without image refs, returns
-    actual ImageData instances.
+    This enables deferred execution and cutline mask computation without loading
+    actual pixel data, while still providing a uniform interface.
 
     Args:
-        data: A RasterStack (regular dict or LazyRasterStack)
+        data: A RasterStack
 
     Returns:
-        List of (key, Union[LazyImageRef, ImageData]) tuples in temporal order
+        List of (key, ImageRef) tuples in temporal order
     """
-    all_items: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
+    # Get ImageRef instances - RasterStack should always have them
+    image_refs = data.get_image_refs()
+    if image_refs:
+        return image_refs
 
-    # Check if data is a LazyRasterStack with image refs (truly lazy path)
-    if isinstance(data, LazyRasterStack):
-        image_refs = data.get_image_refs()
-        if image_refs:
-            # Return LazyImageRef instances without executing tasks
-            return image_refs
-
-    # Fall back to timestamp-based grouping if available (duck typing)
-    if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
-        timestamps = data.timestamps()
-        for timestamp in sorted(timestamps):
-            timestamp_items = data.get_by_timestamp(timestamp)
-            if timestamp_items:
-                all_items.extend(timestamp_items.items())
-        return all_items
-
-    # Regular RasterStack - collect all images
+    # Fallback: create ImageRef from pre-loaded images
+    # This handles RasterStacks created without dimension info
+    result: List[Tuple[str, ImageRef]] = []
     for key in data.keys():
         try:
-            img = data[key]
-            all_items.append((key, img))
+            result.append((key, ImageRef.from_image(key=key, image=data[key])))
         except KeyError:
             continue
-
-    return all_items
+    return result
 
 
 def _feed_image_to_pixsel(
@@ -246,14 +231,13 @@ def apply_pixel_selection(
 ) -> RasterStack:
     """Apply PixelSelection method on a RasterStack with timestamp-based grouping.
 
-    This function first collects all images/refs and computes the aggregated cutline mask
-    from LazyImageRef instances (without executing tasks), then processes images for
-    pixel selection. This ensures early termination works correctly by knowing upfront
-    which pixels will be covered by any image.
+    This function first collects all image refs and computes the aggregated cutline mask
+    (without executing tasks for lazy refs), then processes images for pixel selection.
+    This ensures early termination works correctly by knowing upfront which pixels will
+    be covered by any image.
 
-    For LazyRasterStack with image refs, cutline masks are computed from geometry metadata
-    without loading pixel data. Tasks are only executed when actually feeding pixels to
-    the pixel selection method.
+    All items are accessed through the ImageRef interface, which provides uniform access
+    to metadata and data regardless of whether the image is lazy or pre-loaded.
 
     Returns:
         RasterStack: A single-image RasterStack containing the result of pixel selection
@@ -264,51 +248,33 @@ def apply_pixel_selection(
     bounds: Optional[BBox] = None
     band_names: Optional[List[str]] = None
 
-    # Collect all images/refs first (without executing tasks for LazyImageRef)
+    # Collect all image refs (without executing tasks for lazy refs)
     all_items = _collect_images_from_data(data)
 
     if not all_items:
         raise ValueError("Method returned an empty array")
 
-    # Compute aggregated cutline mask from all items
-    # For LazyImageRef, this computes from geometry without task execution
-    # For ImageData, this uses the existing cutline_mask attribute
-    cutline_masks = []
-    for _, item in all_items:
-        if isinstance(item, LazyImageRef):
-            cutline_masks.append(item.cutline_mask())
-        else:
-            cutline_masks.append(item.cutline_mask)
+    # Compute aggregated cutline mask from all refs (using metadata, not pixel data)
+    cutline_masks = [ref.cutline_mask() for _, ref in all_items]
     aggregated_cutline = _compute_aggregated_cutline_mask(cutline_masks)
 
-    # Initialize pixsel_method from first item's metadata
-    first_key, first_item = all_items[0]
-    if isinstance(first_item, LazyImageRef):
-        pixsel_method.width = first_item.width
-        pixsel_method.height = first_item.height
-        pixsel_method.count = first_item.count
-        crs = first_item.crs
-        bounds = first_item.bounds
-        band_names = first_item.band_names
-    else:
-        pixsel_method.width = first_item.width
-        pixsel_method.height = first_item.height
-        pixsel_method.count = first_item.count
-        crs = first_item.crs
-        bounds = first_item.bounds
-        band_names = first_item.band_names
+    # Initialize pixsel_method from first ref's metadata
+    first_key, first_ref = all_items[0]
+    pixsel_method.width = first_ref.width
+    pixsel_method.height = first_ref.height
+    pixsel_method.count = first_ref.count
+    crs = first_ref.crs
+    bounds = first_ref.bounds
+    band_names = first_ref.band_names
 
     # Set the aggregated cutline mask
     if aggregated_cutline is not None:
         pixsel_method.cutline_mask = aggregated_cutline
 
     # Process items for pixel selection
-    for key, item in all_items:
-        # Realize the image if it's a LazyImageRef (execute the task now)
-        if isinstance(item, LazyImageRef):
-            img = item.realize()
-        else:
-            img = item
+    for key, ref in all_items:
+        # Realize the image (execute task for lazy refs, return cached for eager refs)
+        img = ref.realize()
 
         # Validate band count
         assert (
@@ -368,19 +334,18 @@ def _reduce_temporal_dimension(
         # Convert the result to match reduce_dimension's expected output format
         # apply_pixel_selection returns {"data": ImageData}, we return {"reduced": ImageData}
         result_img = result["data"]
-        return {
-            "reduced": ImageData(
-                result_img.array,
-                assets=result_img.assets,
-                crs=result_img.crs,
-                bounds=result_img.bounds,
-                band_names=result_img.band_names,
-                metadata={
-                    "reduced_dimension": "temporal",
-                    "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-                },
-            )
-        }
+        reduced_img = ImageData(
+            result_img.array,
+            assets=result_img.assets,
+            crs=result_img.crs,
+            bounds=result_img.bounds,
+            band_names=result_img.band_names,
+            metadata={
+                "reduced_dimension": "temporal",
+                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+            },
+        )
+        return RasterStack.from_images({"reduced": reduced_img})
 
     # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
@@ -406,22 +371,21 @@ def _reduce_temporal_dimension(
             f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
         ) from e
 
-    # Get first successful image efficiently for LazyRasterStack - only for metadata
-    first_img = get_first_item(data)
+    # Get first successful image efficiently - only for metadata
+    first_img = data.first if hasattr(data, "first") else next(iter(data.values()))
 
-    return {
-        "reduced": ImageData(
-            reduced_array,  # Use the reduced array directly since it's already collapsed
-            assets=first_img.assets,
-            crs=first_img.crs,
-            bounds=first_img.bounds,
-            band_names=first_img.band_names,
-            metadata={
-                "reduced_dimension": "temporal",
-                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-            },
-        )
-    }
+    reduced_img = ImageData(
+        reduced_array,  # Use the reduced array directly since it's already collapsed
+        assets=first_img.assets,
+        crs=first_img.crs,
+        bounds=first_img.bounds,
+        band_names=first_img.band_names,
+        metadata={
+            "reduced_dimension": "temporal",
+            "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
+        },
+    )
+    return RasterStack.from_images({"reduced": reduced_img})
 
 
 def _reshape_reduced_spectral_data(
@@ -625,7 +589,7 @@ def _reduce_spectral_dimension_stack(
             },
         )
 
-    return result
+    return RasterStack.from_images(result)
 
 
 def reduce_dimension(

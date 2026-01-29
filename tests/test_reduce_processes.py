@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import (
     DimensionNotAvailable,
     apply_pixel_selection,
@@ -15,16 +16,16 @@ from titiler.openeo.processes.implementations.reduce import (
 def sample_temporal_stack():
     """Create a sample RasterStack with temporal dimension for testing."""
     # Create multiple dates of single-band data
-    stack = {}
+    images = {}
     for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
         data = np.ma.array(
             np.ones((1, 10, 10), dtype=np.float32)
             * (i + 1),  # Each date has different value
             mask=np.zeros((1, 10, 10), dtype=bool),
         )
-        stack[date] = ImageData(data, band_names=["band1"])
+        images[date] = ImageData(data, band_names=["band1"])
 
-    return stack
+    return RasterStack.from_images(images)
 
 
 @pytest.fixture
@@ -42,7 +43,9 @@ def sample_spectral_stack():
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
 
-    return {"2021-01-01": ImageData(data, band_names=["red", "green", "blue"])}
+    return RasterStack.from_images(
+        {"2021-01-01": ImageData(data, band_names=["red", "green", "blue"])}
+    )
 
 
 def test_reduce_temporal_dimension(sample_temporal_stack):

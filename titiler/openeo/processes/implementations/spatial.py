@@ -299,4 +299,6 @@ def resample_spatial(
     dst_crs = CRS.from_epsg(projection)
 
     # Reproject each image in the stack
-    return {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
+    return RasterStack.from_images(
+        {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
+    )
