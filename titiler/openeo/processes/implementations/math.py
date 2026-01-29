@@ -319,7 +319,7 @@ def first(data):
     """Return the first element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        # Check if data has timestamp-based grouping capability (RasterStack)
         if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
             timestamps = data.timestamps()
             if not timestamps:
@@ -359,7 +359,7 @@ def last(data):
     """Return the last element of the array."""
     # Handle RasterStack
     if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
+        # Check if data has timestamp-based grouping capability (RasterStack)
         if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
             timestamps = data.timestamps()
             if not timestamps:
