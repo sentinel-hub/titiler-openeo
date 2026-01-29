@@ -194,8 +194,15 @@ def _collect_images_from_data(
     if image_refs:
         return image_refs
 
-    # No image refs available - return actual ImageData
-    return [(key, data[key]) for key in data.keys()]
+    # RasterStack without refs - return actual ImageData
+    # Use try/except to handle tasks that may fail
+    result: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
+    for key in data.keys():
+        try:
+            result.append((key, data[key]))
+        except KeyError:
+            continue
+    return result
 
 
 def _feed_image_to_pixsel(

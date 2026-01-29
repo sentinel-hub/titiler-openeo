@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import (
     DimensionNotAvailable,
     _reduce_spectral_dimension_stack,
@@ -177,16 +178,17 @@ class TestTemporalDimensionReduction:
         from titiler.openeo.processes.implementations.math import mean
 
         # Create test data with 3 time steps
-        data = {}
+        images = {}
         for i in range(3):
             array = np.ma.ones((2, 10, 10)) * (i + 1)  # Values: 1, 2, 3
-            data[f"time_{i}"] = ImageData(
+            images[f"time_{i}"] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
                 band_names=["red", "green"],
             )
+        data = RasterStack.from_images(images)
 
         # mean is a pixel selection reducer, so it should use the efficient path
         result = _reduce_temporal_dimension(data, mean)

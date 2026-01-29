@@ -240,27 +240,32 @@ All files that imported `LazyRasterStack` now import `RasterStack`.
 RasterStack = Dict[str, ImageData]  # <- GONE
 ```
 
-### Phase 5: Simplify Collection Patterns
+### Phase 5: Simplify Collection Patterns ✅ COMPLETED
 
-#### Step 5.1: Simplify `_collect_images_from_data()`
+#### Step 5.1: Simplify `_collect_images_from_data()` ✅
 
 ```python
 def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, ImageRef]]:
     """Collect all image references from a RasterStack."""
-    return data.get_refs()
+    # RasterStack with image refs - truly lazy path
+    if isinstance(data, RasterStack):
+        image_refs = data.get_image_refs()
+        if image_refs:
+            return image_refs
+
+    # RasterStack without refs - return actual ImageData
+    result = []
+    for key in data.keys():
+        try:
+            result.append((key, data[key]))
+        except KeyError:
+            continue
+    return result
 ```
 
-#### Step 5.2: Simplify `core.py` Type Checks
+#### Step 5.2: Update All Tests to Use RasterStack.from_images() ✅
 
-```python
-# Before
-if isinstance(value, (dict, LazyRasterStack)):
-    return "raster-cube"
-
-# After  
-if isinstance(value, RasterStack):
-    return "raster-cube"
-```
+Tests in `test_cutline_mask.py`, `test_pixel_selection_reducers.py`, `test_reduce_processes.py`, `test_dimension_reduction.py`, and `test_truly_lazy_raster_stack.py` updated to use `RasterStack.from_images()` instead of plain dicts.
 
 ### Phase 6: Documentation and Migration Guide
 

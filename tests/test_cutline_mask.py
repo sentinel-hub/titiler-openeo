@@ -6,6 +6,7 @@ import numpy as np
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import (
     _compute_aggregated_cutline_mask,
     apply_pixel_selection,
@@ -143,7 +144,7 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, cutline2
         )
 
-        stack = {"2021-01-01": img1, "2021-01-02": img2}
+        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
 
         # Apply pixel selection - should work without error
         result = apply_pixel_selection(data=stack, pixel_selection="first")
@@ -160,7 +161,7 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, None
         )
 
-        stack = {"2021-01-01": img1, "2021-01-02": img2}
+        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
@@ -182,7 +183,7 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, None
         )
 
-        stack = {"2021-01-01": img1, "2021-01-02": img2}
+        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
@@ -217,7 +218,7 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             data2, cutline2, bounds=(0, 0, 20, 10), mask=mask2
         )
 
-        stack = {"2021-01-01": img1, "2021-01-02": img2}
+        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
@@ -370,18 +371,20 @@ class TestCutlineMaskWithPixelSelection:
         cutline2 = np.zeros((10, 10), dtype=bool)
         cutline2[:5, :] = True  # Top half is outside footprint
 
-        stack = {
-            "2021-01-01": self.create_image_with_cutline(
-                np.ones((1, 10, 10), dtype=np.float32) * 10,
-                np.zeros((1, 10, 10), dtype=bool),
-                cutline1,
-            ),
-            "2021-01-02": self.create_image_with_cutline(
-                np.ones((1, 10, 10), dtype=np.float32) * 20,
-                np.zeros((1, 10, 10), dtype=bool),
-                cutline2,
-            ),
-        }
+        stack = RasterStack.from_images(
+            {
+                "2021-01-01": self.create_image_with_cutline(
+                    np.ones((1, 10, 10), dtype=np.float32) * 10,
+                    np.zeros((1, 10, 10), dtype=bool),
+                    cutline1,
+                ),
+                "2021-01-02": self.create_image_with_cutline(
+                    np.ones((1, 10, 10), dtype=np.float32) * 20,
+                    np.zeros((1, 10, 10), dtype=bool),
+                    cutline2,
+                ),
+            }
+        )
 
         # Apply pixel selection
         result = apply_pixel_selection(data=stack, pixel_selection="first")
@@ -420,10 +423,12 @@ class TestCutlineMaskWithPixelSelection:
         img2 = ImageData(data2, bounds=(0, 0, 20, 10), crs=CRS.from_epsg(4326))
         img2.cutline_mask = cutline_right
 
-        stack = {
-            "2021-01-01": img1,
-            "2021-01-02": img2,
-        }
+        stack = RasterStack.from_images(
+            {
+                "2021-01-01": img1,
+                "2021-01-02": img2,
+            }
+        )
 
         # With "first" pixel selection, we should get:
         # - Left half: 100 (from first image, which has valid footprint there)
@@ -467,10 +472,12 @@ class TestCutlineMaskWithPixelSelection:
         img2 = ImageData(data2, bounds=(0, 0, 10, 10), crs=CRS.from_epsg(4326))
         img2.cutline_mask = empty_cutline
 
-        stack = {
-            "2021-01-01": img1,
-            "2021-01-02": img2,
-        }
+        stack = RasterStack.from_images(
+            {
+                "2021-01-01": img1,
+                "2021-01-02": img2,
+            }
+        )
 
         # Apply first pixel selection
         result = apply_pixel_selection(data=stack, pixel_selection="first")
@@ -506,10 +513,12 @@ class TestCutlineMaskWithPixelSelection:
         img2 = ImageData(data2, bounds=(0, 0, 10, 10), crs=CRS.from_epsg(4326))
         img2.cutline_mask = cutline2
 
-        stack = {
-            "2021-01-01": img1,
-            "2021-01-02": img2,
-        }
+        stack = RasterStack.from_images(
+            {
+                "2021-01-01": img1,
+                "2021-01-02": img2,
+            }
+        )
 
         # Mean should consider both images
         result = apply_pixel_selection(data=stack, pixel_selection="mean")

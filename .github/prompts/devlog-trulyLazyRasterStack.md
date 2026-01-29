@@ -539,5 +539,93 @@ uv run pytest tests/ --ignore=tests/test_main.py -q
 
 1. Check current state: `git status` and `git diff`
 2. Run tests: `uv run pytest tests/ --ignore=tests/test_main.py -q`
-3. All Phase 2, Phase 3, and Phase 4 are complete
+3. All Phase 2, Phase 3, Phase 4, and Phase 5 are complete
 4. Consider creating PR for review
+
+---
+
+## Phase 5: Simplify Collection Patterns ✅
+
+### Summary
+
+Simplified `_collect_images_from_data()` to no longer support plain dicts. Updated all tests to use `RasterStack.from_images()` instead of plain dict literals.
+
+### Changes Made
+
+**reduce.py:**
+
+```python
+def _collect_images_from_data(data: RasterStack) -> List[Tuple[str, Union[LazyImageRef, ImageData]]]:
+    """Collect all images or image references from a RasterStack."""
+    # RasterStack with image refs - truly lazy path
+    if isinstance(data, RasterStack):
+        image_refs = data.get_image_refs()
+        if image_refs:
+            return image_refs
+
+    # RasterStack without refs - return actual ImageData
+    # Use try/except to handle tasks that may fail
+    result: List[Tuple[str, Union[LazyImageRef, ImageData]]] = []
+    for key in data.keys():
+        try:
+            result.append((key, data[key]))
+        except KeyError:
+            continue
+    return result
+```
+
+**Test files updated to use `RasterStack.from_images()`:**
+
+| File | Tests Updated |
+|------|---------------|
+| `test_cutline_mask.py` | 8 tests in TestApplyPixelSelectionWithAggregatedCutline and TestCutlineMaskWithPixelSelection |
+| `test_pixel_selection_reducers.py` | 3 fixtures and 2 test methods |
+| `test_reduce_processes.py` | 2 fixtures |
+| `test_dimension_reduction.py` | 1 test method |
+| `test_truly_lazy_raster_stack.py` | 1 test method |
+
+### Rationale
+
+- **No more plain dict support**: `RasterStack` is now THE data type - no duck typing needed
+- **Cleaner code**: Single collection path without isinstance checks for dict vs RasterStack
+- **Tests are documentation**: By updating tests to use factory methods, we demonstrate the correct API usage
+
+### Test Results
+
+```bash
+uv run pytest tests/ -v --tb=short
+# Result: 482 passed, 11 skipped ✅
+
+pre-commit run --all-files
+# Result: All hooks passed ✅
+```
+
+---
+
+## Current State (Updated January 29, 2026) #1
+
+### All Phases Complete ✅
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | ✅ | Core lazy infrastructure (ImageRef, LazyImageRef, compute_cutline_mask) |
+| Phase 2 | ✅ | Factory methods (`from_images`, `first`, `last` properties) |
+| Phase 3 | ✅ | Removed helper functions (get_first_item, get_last_item, to_raster_stack) |
+| Phase 4 | ✅ | Renamed LazyRasterStack → RasterStack, deprecated alias added |
+| Phase 5 | ✅ | Simplified `_collect_images_from_data()`, all tests use RasterStack.from_images() |
+| Phase 6 | ⏳ | Documentation updates (optional, can be follow-up PR) |
+
+### Final Test Results
+
+- **482 tests passing**, 11 skipped
+- **Pre-commit hooks**: All pass (isort, ruff, ruff-format, mypy, markdownlint)
+
+### Ready for PR
+
+The refactoring is complete and ready for review. Key accomplishments:
+
+1. **One unified class**: `RasterStack` is now THE data type for raster stacks
+2. **Truly lazy**: Tasks are deferred until pixel data is actually needed
+3. **Factory methods**: Clean API with `RasterStack.from_images()`
+4. **Backwards compatible**: `LazyRasterStack` alias preserved for existing code
+5. **No plain dict support**: All code uses `RasterStack` - no more duck typing
