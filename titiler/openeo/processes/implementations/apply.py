@@ -97,7 +97,7 @@ def apply_dimension(
             result_img = _apply_spectral_dimension_single_image(
                 data[key], process, positional_parameters, named_parameters
             )
-            return LazyRasterStack.from_single(key, result_img)
+            return LazyRasterStack.from_images({key: result_img})
         else:
             return _apply_spectral_dimension_stack(
                 data, process, positional_parameters, named_parameters
@@ -190,7 +190,7 @@ def _apply_temporal_dimension(
                 "target_dimension": target_dimension,
             },
         )
-        return LazyRasterStack.from_single(target_dimension, result_img)
+        return LazyRasterStack.from_images({target_dimension: result_img})
 
 
 def _apply_spectral_dimension_single_image(

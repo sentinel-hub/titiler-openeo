@@ -95,7 +95,7 @@ def array_element(
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
     """Create a RasterStack from an array."""
-    return LazyRasterStack.from_single("data", ImageData(data))
+    return LazyRasterStack.from_images({"data": ImageData(data)})
 
 
 @process

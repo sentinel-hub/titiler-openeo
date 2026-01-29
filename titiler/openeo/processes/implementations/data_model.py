@@ -763,18 +763,3 @@ class LazyRasterStack(Dict[str, ImageData]):
             dst_crs=first_img.crs,
             band_names=first_img.band_names if first_img.band_names else [],
         )
-
-    @classmethod
-    def from_single(cls, key: str, image: ImageData) -> "LazyRasterStack":
-        """Create a single-item LazyRasterStack.
-
-        This is a convenience method for creating a stack with one image.
-
-        Args:
-            key: The key for the image
-            image: The ImageData instance
-
-        Returns:
-            LazyRasterStack: A stack containing one image
-        """
-        return cls.from_images({key: image})

@@ -168,7 +168,7 @@ def _create_pixel_selection_result(
         band_names=band_names if band_names is not None else [],
         metadata={"pixel_selection_method": pixel_selection},
     )
-    return LazyRasterStack.from_single("data", result_img)
+    return LazyRasterStack.from_images({"data": result_img})
 
 
 def _collect_images_from_data(
@@ -376,7 +376,7 @@ def _reduce_temporal_dimension(
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
             },
         )
-        return LazyRasterStack.from_single("reduced", reduced_img)
+        return LazyRasterStack.from_images({"reduced": reduced_img})
 
     # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
@@ -416,7 +416,7 @@ def _reduce_temporal_dimension(
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
         },
     )
-    return LazyRasterStack.from_single("reduced", reduced_img)
+    return LazyRasterStack.from_images({"reduced": reduced_img})
 
 
 def _reshape_reduced_spectral_data(
