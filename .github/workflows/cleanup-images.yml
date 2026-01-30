@@ -1,6 +1,7 @@
 name: Cleanup Container Images
 
 on:
+  push:
   schedule:
     - cron: '0 2 * * 0'
   workflow_run:
@@ -28,11 +29,12 @@ jobs:
       packages: write
       contents: read
     steps:
-      - uses: developmentseed/container-registry-cleanup@v0.1.2
+      - uses: developmentseed/container-registry-cleanup@main
         env:
           REGISTRY_TYPE: ghcr
           REPOSITORY_NAME: titiler-openeo
           GITHUB_REPO_OWNER: sentinel-hub
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          DRY_RUN: ${{ github.event_name == 'push' && 'true' || github.event.inputs.dry_run || 'false' }}
+          DEBUG: true
           TEST_RETENTION_DAYS: ${{ github.event.inputs.test_retention_days || '30' }}
           OTHERS_RETENTION_DAYS: ${{ github.event.inputs.others_retention_days || '7' }}
