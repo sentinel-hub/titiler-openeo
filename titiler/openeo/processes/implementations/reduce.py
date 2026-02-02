@@ -321,22 +321,23 @@ def _reduce_temporal_dimension(
             f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
         ) from e
 
-    # Get first successful image efficiently - only for metadata
-    first_img = data.first if hasattr(data, "first") else next(iter(data.values()))
+    # Get metadata from first ImageRef WITHOUT loading pixel data
+    image_refs = data.get_image_refs()
+    if not image_refs:
+        raise ValueError("No image refs available for metadata")
+    first_key, first_ref = image_refs[0]
 
     reduced_img = ImageData(
         reduced_array,  # Use the reduced array directly since it's already collapsed
-        assets=first_img.assets,
-        crs=first_img.crs,
-        bounds=first_img.bounds,
-        band_names=first_img.band_names,
+        assets=[first_key],
+        crs=first_ref.crs,
+        bounds=first_ref.bounds,
+        band_names=first_ref.band_names,
         metadata={
             "reduced_dimension": "temporal",
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
         },
     )
-    # Use the first timestamp from the data as the result key
-    first_key = next(iter(data.keys()))
     return RasterStack.from_images({first_key: reduced_img})
 
 
