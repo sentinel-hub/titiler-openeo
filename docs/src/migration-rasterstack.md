@@ -226,12 +226,17 @@ for key, ref in raster_stack.get_image_refs():
 ### Temporal Access
 
 ```python
-# Get images by timestamp
-jan_images = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
+# Get sorted timestamps\nfor timestamp in raster_stack.timestamps():
+    print(f"Available: {timestamp}")
 
-# Group by timestamp
-for timestamp, keys in raster_stack.groupby_timestamp().items():
-    print(f"{timestamp}: {len(keys)} images")
+# Keys are already in temporal order
+for key in raster_stack.keys():
+    timestamp = raster_stack.get_timestamp(key)
+    print(f"{key}: {timestamp}")
+
+# Efficient first/last access
+first_image = raster_stack.first
+last_image = raster_stack.last
 ```
 
 ### Testing with Pre-loaded Images

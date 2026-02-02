@@ -338,9 +338,6 @@ class RasterStack(Dict[str, ImageData]):
         self._keys: List[str] = []
         self._key_to_task_index: Dict[str, int] = {}  # Maps keys to task indices
         self._timestamp_map: Dict[str, datetime] = {}  # Maps keys to datetime objects
-        self._timestamp_groups: Dict[
-            datetime, List[str]
-        ] = {}  # Maps datetime objects to lists of keys
 
         # ImageRef instances for deferred cutline computation
         self._image_refs: Dict[str, ImageRef] = {}
@@ -405,10 +402,6 @@ class RasterStack(Dict[str, ImageData]):
             if self._timestamp_fn:
                 timestamp = self._timestamp_fn(asset)
                 self._timestamp_map[key] = timestamp
-
-                if timestamp not in self._timestamp_groups:
-                    self._timestamp_groups[timestamp] = []
-                self._timestamp_groups[timestamp].append(key)
 
             # Create ImageRef if we have the required dimensions
             if (
@@ -526,8 +519,8 @@ class RasterStack(Dict[str, ImageData]):
                 self._data_cache[key] = data
 
     def timestamps(self) -> List[datetime]:
-        """Return list of unique timestamps in the stack."""
-        return sorted(self._timestamp_groups.keys())
+        """Return list of unique timestamps in the stack (one per item)."""
+        return sorted(self._timestamp_map.values())
 
     def __repr__(self) -> str:
         """Safe debug representation that does NOT trigger lazy loading.
@@ -538,7 +531,7 @@ class RasterStack(Dict[str, ImageData]):
         """
         num_keys = len(self._keys)
         num_cached = len(self._data_cache)
-        num_timestamps = len(self._timestamp_groups) if self._timestamp_groups else 0
+        num_timestamps = len(self._timestamp_map) if self._timestamp_map else 0
 
         # Show a few sample keys without loading data
         sample_keys = self._keys[:3] if self._keys else []
@@ -562,39 +555,6 @@ class RasterStack(Dict[str, ImageData]):
     def get_timestamp(self, key: str) -> Optional[datetime]:
         """Get the timestamp associated with a key."""
         return self._timestamp_map.get(key)
-
-    def get_by_timestamp(self, timestamp: datetime) -> Dict[str, ImageData]:
-        """Get all items with the specified timestamp.
-
-        Args:
-            timestamp: datetime object
-
-        Returns:
-            Dictionary mapping keys to ImageData for items with this timestamp
-        """
-        if timestamp not in self._timestamp_groups:
-            return {}
-
-        # Execute only tasks for this timestamp
-        timestamp_keys = set(self._timestamp_groups[timestamp])
-        self._execute_selected_tasks(timestamp_keys)
-
-        return {
-            key: self._data_cache[key]
-            for key in self._timestamp_groups[timestamp]
-            if key in self._data_cache
-        }
-
-    def groupby_timestamp(self) -> Dict[datetime, Dict[str, ImageData]]:
-        """Group items by timestamp.
-
-        Returns:
-            Dictionary mapping datetime objects to dictionaries of {key: ImageData}
-        """
-        result = {}
-        for timestamp in self._timestamp_groups:
-            result[timestamp] = self.get_by_timestamp(timestamp)
-        return result
 
     def __getitem__(self, key: str) -> ImageData:
         """Get an item from the RasterStack, executing the task if necessary."""

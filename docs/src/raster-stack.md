@@ -6,6 +6,8 @@ In titiler-openeo, the `RasterStack` class is the foundational data structure fo
 
 `RasterStack` is a class that organizes raster data along multiple dimensions, primarily **time** and **spectral bands**. Each entry contains an `ImageData` object representing a multi-band image at a specific time point. The class inherits from `Dict[str, ImageData]` but adds lazy loading, temporal awareness, and intelligent caching.
 
+**Key architectural principle**: When `load_collection` creates a RasterStack, it groups items by timestamp and merges overlapping tiles using `mosaic_reader`. This guarantees **one entry per timestamp** - all spatial tiles from the same acquisition are already mosaicked together.
+
 ```python
 from titiler.openeo.processes.implementations.data_model import RasterStack
 
@@ -60,16 +62,16 @@ raster_stack = RasterStack(
     max_workers=5  # Concurrent execution
 )
 
-# Temporal access and grouping
-temporal_groups = raster_stack.groupby_timestamp()
-single_date_data = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
+# Temporal access
+all_timestamps = raster_stack.timestamps()  # Sorted list of timestamps
+first_timestamp = raster_stack.get_timestamp(list(raster_stack.keys())[0])
 ```
 
 ### Key Features of RasterStack
 
-1. **Temporal Organization**: Automatic sorting and grouping by timestamps for time-series analysis
+1. **Temporal Organization**: Automatic sorting by timestamps for time-series analysis (one item per timestamp)
 2. **Concurrent Execution**: Parallel loading of data using ThreadPoolExecutor for improved performance
-3. **Timestamp-based Access**: Direct access to observations by time periods
+3. **Timestamp Metadata**: Access timestamp for any item via `get_timestamp(key)`
 4. **Intelligent Caching**: Per-key caching to avoid redundant computations
 5. **Lazy Evaluation**: Data loaded only when accessed, reducing memory footprint
 6. **Multi-band Support**: Each temporal observation can contain multiple spectral bands
@@ -77,17 +79,19 @@ single_date_data = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
 ### Temporal Processing Capabilities
 
 ```python
-# Access specific time periods
-jan_data = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
-
-# Process data chronologically 
+# Get sorted list of all timestamps
 for timestamp in raster_stack.timestamps():
-    temporal_group = raster_stack.get_by_timestamp(timestamp)
-    # Each temporal_group contains all bands for that time point
+    print(f"Available observation at: {timestamp}")
     
-# Efficient time-series operations
-first_observation = raster_stack[raster_stack.keys()[0]]  # Earliest
-last_observation = raster_stack[raster_stack.keys()[-1]]   # Latest
+# Process data chronologically 
+for key in raster_stack.keys():  # Already in temporal order
+    item = raster_stack[key]
+    timestamp = raster_stack.get_timestamp(key)
+    print(f"Processing {key} from {timestamp}")
+    
+# Efficient time-series operations via first/last properties
+first_observation = raster_stack.first  # Earliest observation
+last_observation = raster_stack.last    # Latest observation
 ```
 
 ## Advantages of the RasterStack Model
@@ -142,9 +146,13 @@ mosaicked_stack = apply_pixel_selection(
 
 ## How Multi-dimensional Processing Works
 
-### Load Phase - Temporal Organization
+### Load Phase - Temporal Organization with Per-Timestamp Mosaic
 
-Data is loaded and organized temporally into a RasterStack:
+When `load_collection` retrieves satellite imagery, it automatically groups STAC items by their acquisition timestamp and merges overlapping tiles using `mosaic_reader`. This means:
+
+- **One entry per timestamp**: Each timestamp in the RasterStack contains a single merged `ImageData`, even if multiple tiles cover the area
+- **Automatic tile merging**: Overlapping tiles from the same acquisition are mosaicked together
+- **No duplicate timestamps**: The RasterStack is guaranteed to have unique timestamps
 
 ```python
 # Process graph example - loads multi-band time series
@@ -157,8 +165,11 @@ Data is loaded and organized temporally into a RasterStack:
     "bands": ["B02", "B03", "B04", "B08"]  # Blue, Green, Red, NIR
   }
 }
-# Results in RasterStack with temporal keys, each containing 4-band ImageData
+# Results in RasterStack with one entry per acquisition date
+# Multiple tiles from the same date are mosaicked into a single ImageData
 ```
+
+This design simplifies temporal processing since each key represents a unique moment in time with all spatial tiles already merged.
 
 ### Process Phase - Dimension-aware Operations
 
@@ -211,13 +222,14 @@ raster_stack = RasterStack(
     timestamp_fn=lambda asset: asset["datetime"]  # Enable temporal features
 )
 
-# Access by time
-january_data = raster_stack.get_by_timestamp(datetime(2023, 1, 1))
+# Access by key (keys are ordered by timestamp)
+first_item = raster_stack.first  # First observation
+last_item = raster_stack.last    # Last observation
 
-# Temporal iteration
-for timestamp in raster_stack.timestamps():
-    temporal_group = raster_stack.get_by_timestamp(timestamp)
-    print(f"Time {timestamp}: {len(temporal_group)} observations")
+# Temporal iteration (keys already in temporal order)
+for key in raster_stack.keys():
+    timestamp = raster_stack.get_timestamp(key)
+    print(f"Time {timestamp}: {key}")
 ```
 
 ### Multi-band Processing
@@ -286,8 +298,8 @@ When working with the RasterStack data model:
 ### Temporal Organization
 
 1. **Use timestamp functions**: Always provide `timestamp_fn` for time-series data to enable temporal features
-2. **Leverage temporal grouping**: Use `get_by_timestamp()` and `groupby_timestamp()` for time-based processing
-3. **Respect temporal order**: Take advantage of automatic temporal sorting for chronological processing
+2. **Leverage temporal ordering**: Keys are automatically sorted by timestamp for chronological processing
+3. **Use first/last properties**: Access `.first` and `.last` for efficient endpoint access
 
 ### Performance Optimization  
 

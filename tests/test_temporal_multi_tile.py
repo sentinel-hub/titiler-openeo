@@ -101,38 +101,38 @@ def test_multi_tile_temporal_ordering(multi_tile_temporal_stack):
 def test_temporal_first_selection(multi_tile_temporal_stack):
     """Test selecting first datetime preserves ALL tiles from that datetime."""
 
-    # Get the timestamp groups
-    timestamp_groups = multi_tile_temporal_stack._timestamp_groups
+    # Get timestamps and find first
+    timestamps = multi_tile_temporal_stack.timestamps()
+    assert len(timestamps) == 9  # Each item has its own timestamp entry
 
-    # Should have 3 datetime groups
-    assert len(timestamp_groups) == 3
+    # First datetime should be 2023-01-01
+    first_datetime = min(timestamps)
+    assert first_datetime == datetime.datetime(2023, 1, 1)
 
-    # First datetime should have 3 tiles
-    first_datetime = min(timestamp_groups.keys())
-    first_tiles = timestamp_groups[first_datetime]
+    # Count items with first datetime
+    first_tiles = [
+        key
+        for key in multi_tile_temporal_stack.keys()
+        if multi_tile_temporal_stack.get_timestamp(key) == first_datetime
+    ]
     assert len(first_tiles) == 3
     assert all("2023-01-01" in tile for tile in first_tiles)
-
-    # Test that we can extract all first datetime tiles
-    first_datetime_stack = {
-        key: multi_tile_temporal_stack._tasks[i][1]
-        for i, (_, asset) in enumerate(multi_tile_temporal_stack._tasks)
-        for key in [multi_tile_temporal_stack._key_fn(asset)]
-        if multi_tile_temporal_stack._timestamp_fn(asset) == first_datetime
-    }
-
-    assert len(first_datetime_stack) == 3
 
 
 def test_temporal_last_selection(multi_tile_temporal_stack):
     """Test selecting last datetime preserves ALL tiles from that datetime."""
 
-    # Get the timestamp groups
-    timestamp_groups = multi_tile_temporal_stack._timestamp_groups
+    # Get timestamps and find last
+    timestamps = multi_tile_temporal_stack.timestamps()
+    last_datetime = max(timestamps)
+    assert last_datetime == datetime.datetime(2023, 1, 3)
 
-    # Last datetime should have 4 tiles
-    last_datetime = max(timestamp_groups.keys())
-    last_tiles = timestamp_groups[last_datetime]
+    # Count items with last datetime
+    last_tiles = [
+        key
+        for key in multi_tile_temporal_stack.keys()
+        if multi_tile_temporal_stack.get_timestamp(key) == last_datetime
+    ]
     assert len(last_tiles) == 4
     assert all("2023-01-03" in tile for tile in last_tiles)
 

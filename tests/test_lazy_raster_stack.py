@@ -80,7 +80,7 @@ def test_lazy_raster_stack_duplicate_timestamps():
 
     # Test timestamp grouping
     timestamps = lazy_stack.timestamps()
-    assert len(timestamps) == 1
+    assert len(timestamps) == 2  # Each item has its own timestamp
     assert isinstance(timestamps[0], datetime)
     assert timestamps[0].year == 2021
     assert timestamps[0].month == 1
@@ -88,18 +88,6 @@ def test_lazy_raster_stack_duplicate_timestamps():
 
     assert isinstance(lazy_stack.get_timestamp("item-001"), datetime)
     assert isinstance(lazy_stack.get_timestamp("item-002"), datetime)
-
-    # Test getting by timestamp - use the actual timestamp from the stack
-    test_dt = timestamps[0]
-    items_by_timestamp = lazy_stack.get_by_timestamp(test_dt)
-    assert len(items_by_timestamp) == 2
-    assert "item-001" in items_by_timestamp
-    assert "item-002" in items_by_timestamp
-
-    # Test groupby timestamp
-    grouped = lazy_stack.groupby_timestamp()
-    assert test_dt in grouped
-    assert len(grouped[test_dt]) == 2
 
 
 def test_lazy_raster_stack_with_key_fn_only():
@@ -238,12 +226,9 @@ def test_truly_lazy_execution():
     assert len(lazy_stack._data_cache) == 2
     assert "item-002" in lazy_stack._data_cache
 
-    # Test timestamp-based access - should execute only remaining task
-    test_dt = datetime.fromisoformat("2021-01-03T00:00:00+00:00")
-    items_by_timestamp = lazy_stack.get_by_timestamp(test_dt)
+    # Access item-003 - should execute only that task
+    _ = lazy_stack["item-003"]
     assert execution_counter["count"] == 3  # Now all three tasks executed
-    assert len(items_by_timestamp) == 1
-    assert "item-003" in items_by_timestamp
 
     # Test that all items are now cached
     assert len(lazy_stack._data_cache) == 3
@@ -346,15 +331,9 @@ def test_lazy_raster_stack_selective_execution():
 
     assets = [
         {"id": "item-001", "properties": {"datetime": "2021-01-01T00:00:00Z"}},
-        {
-            "id": "item-002",
-            "properties": {"datetime": "2021-01-01T00:00:00Z"},
-        },  # Same timestamp
-        {"id": "item-003", "properties": {"datetime": "2021-01-02T00:00:00Z"}},
-        {
-            "id": "item-004",
-            "properties": {"datetime": "2021-01-02T00:00:00Z"},
-        },  # Same timestamp
+        {"id": "item-002", "properties": {"datetime": "2021-01-02T00:00:00Z"}},
+        {"id": "item-003", "properties": {"datetime": "2021-01-03T00:00:00Z"}},
+        {"id": "item-004", "properties": {"datetime": "2021-01-04T00:00:00Z"}},
     ]
 
     tasks = [(tracking_task(asset["id"]), asset) for asset in assets]
@@ -367,31 +346,17 @@ def test_lazy_raster_stack_selective_execution():
         ),
     )
 
-    # Test selective execution by timestamp
-    timestamp1 = datetime.fromisoformat("2021-01-01T00:00:00+00:00")
-    items_t1 = lazy_stack.get_by_timestamp(timestamp1)
+    # Test selective execution by direct access
+    _ = lazy_stack["item-001"]
+    assert execution_order == ["item-001"]
 
-    assert len(items_t1) == 2
-    assert "item-001" in items_t1
-    assert "item-002" in items_t1
+    _ = lazy_stack["item-003"]
+    assert execution_order == ["item-001", "item-003"]
 
-    # Only first timestamp tasks should be executed
-    assert set(execution_order) == {"item-001", "item-002"}
-
-    # Test groupby_timestamp
-    grouped = lazy_stack.groupby_timestamp()
-
-    # Should now have executed all tasks
+    # Access remaining items via values()
+    _ = lazy_stack.values()
     assert len(execution_order) == 4
     assert set(execution_order) == {"item-001", "item-002", "item-003", "item-004"}
-
-    # Verify grouping
-    assert len(grouped) == 2  # Two unique timestamps
-    timestamp2 = datetime.fromisoformat("2021-01-02T00:00:00+00:00")
-    assert timestamp1 in grouped
-    assert timestamp2 in grouped
-    assert len(grouped[timestamp1]) == 2
-    assert len(grouped[timestamp2]) == 2
 
 
 def test_lazy_raster_stack_timestamps():
@@ -441,11 +406,6 @@ def test_lazy_raster_stack_timestamps():
     )
     assert lazy_stack.get_timestamp("non-existent") is None
 
-    # Test get_by_timestamp with non-existent timestamp
-    future_timestamp = datetime.fromisoformat("2021-01-04T00:00:00+00:00")
-    future_items = lazy_stack.get_by_timestamp(future_timestamp)
-    assert len(future_items) == 0
-
 
 def test_lazy_raster_stack_without_timestamps():
     """Test RasterStack without timestamp function."""
@@ -470,14 +430,6 @@ def test_lazy_raster_stack_without_timestamps():
     # Test that timestamp methods return empty/None
     assert len(lazy_stack.timestamps()) == 0
     assert lazy_stack.get_timestamp("item-001") is None
-
-    # Test that get_by_timestamp returns empty for any timestamp
-    any_timestamp = datetime.now()
-    assert len(lazy_stack.get_by_timestamp(any_timestamp)) == 0
-
-    # Test that groupby_timestamp returns empty
-    grouped = lazy_stack.groupby_timestamp()
-    assert len(grouped) == 0
 
 
 def test_lazy_raster_stack_max_workers():
