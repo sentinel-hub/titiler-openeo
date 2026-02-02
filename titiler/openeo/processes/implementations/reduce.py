@@ -38,7 +38,7 @@ READ THIS ENTIRE WARNING CAREFULLY before making changes.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from rasterio.crs import CRS
@@ -47,6 +47,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
+from .core import extract_process_graph_process_id
 from .data_model import ImageRef, RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
@@ -79,29 +80,29 @@ PIXEL_SELECTION_REDUCERS = {
 def _get_pixel_selection_method_name(reducer: Callable) -> Optional[str]:
     """Get the PixelSelectionMethod name for a reducer function if applicable.
 
+    This function handles two cases:
+    1. Direct function calls where __name__ matches a known reducer
+    2. OpenEO process graph callables (functools.partial) where the process_id
+       can be extracted from the closure for single-node graphs
+
     Args:
-        reducer: A reducer function
+        reducer: A reducer function or process graph callable
 
     Returns:
         The PixelSelectionMethod name if the reducer corresponds to one, None otherwise
     """
+    # First, try getting __name__ directly (works for direct function calls)
     reducer_name = getattr(reducer, "__name__", None)
     if reducer_name and reducer_name in PIXEL_SELECTION_REDUCERS:
         return PIXEL_SELECTION_REDUCERS[reducer_name]
+
+    # Second, try extracting process_id from process graph callable
+    # This handles cases like: {'process_graph': {'first1': {'process_id': 'first', ...}}}
+    process_id = extract_process_graph_process_id(reducer)
+    if process_id and process_id in PIXEL_SELECTION_REDUCERS:
+        return PIXEL_SELECTION_REDUCERS[process_id]
+
     return None
-
-
-pixel_methods = Literal[
-    "first",
-    "highest",
-    "lowest",
-    "mean",
-    "median",
-    "stdev",
-    "lastbandlow",
-    "lastbandhight",
-    "count",
-]
 
 
 class DimensionNotAvailable(Exception):
@@ -317,7 +318,8 @@ def _reduce_temporal_dimension(
     Raises:
         ValueError: If the data is not a valid RasterStack or reducer doesn't return expected format
     """
-    if not isinstance(data, dict) or not data:
+    # Validate input - must be a non-empty RasterStack
+    if not data:
         raise ValueError(
             "Expected a non-empty RasterStack for temporal dimension reduction"
         )
@@ -479,7 +481,8 @@ def _reduce_spectral_dimension_stack(
     Raises:
         ValueError: If the reducer doesn't return valid data
     """
-    if not isinstance(data, dict) or not data:
+    # Validate input - must be a non-empty RasterStack
+    if not data:
         raise ValueError(
             "Expected a non-empty RasterStack for spectral dimension reduction"
         )

@@ -39,7 +39,7 @@ T = TypeVar("T")
 
 
 def compute_cutline_mask(
-    geometry: Dict[str, Any],
+    geometry: Union[Dict[str, Any], List[Dict[str, Any]]],
     width: int,
     height: int,
     bounds: BBox,
@@ -48,31 +48,43 @@ def compute_cutline_mask(
     """
     Compute a cutline mask from geometry without needing an existing ImageData.
 
-    This creates a mask from a geometry (typically from STAC item footprint),
-    which indicates which pixels are outside the valid data area.
+    This creates a mask from one or more geometries (typically from STAC item footprints),
+    which indicates which pixels are outside the valid data area. When multiple geometries
+    are provided, the mask represents the union of all footprints.
 
     Args:
-        geometry: GeoJSON geometry dict (typically in EPSG:4326)
+        geometry: GeoJSON geometry dict or list of geometry dicts (typically in EPSG:4326)
         width: Output width in pixels
         height: Output height in pixels
         bounds: Output bounds as (west, south, east, north)
         dst_crs: Target CRS for the geometry transformation
 
     Returns:
-        numpy.ndarray: Boolean mask where True indicates pixels outside the geometry
+        numpy.ndarray: Boolean mask where True indicates pixels outside the geometry/geometries
     """
-    # Transform geometry from WGS84 to the destination CRS if needed
+    # Normalize to list of geometries
+    geometries = geometry if isinstance(geometry, list) else [geometry]
+
+    # Filter out None geometries
+    geometries = [g for g in geometries if g is not None]
+
+    if not geometries:
+        # No valid geometries - return mask indicating all pixels are outside
+        return np.ones((height, width), dtype=bool)
+
+    # Transform geometries from WGS84 to the destination CRS if needed
     if dst_crs is not None and dst_crs != WGS84_CRS:
-        geometry = transform_geom(WGS84_CRS, dst_crs, geometry)
+        geometries = [transform_geom(WGS84_CRS, dst_crs, g) for g in geometries]
 
     # Compute affine transform from bounds
     west, south, east, north = bounds
     transform = from_bounds(west, south, east, north, width, height)
 
-    # Create cutline mask using rasterize
-    # The mask is True where data is invalid (outside the geometry)
+    # Create cutline mask using rasterize with all geometries
+    # The mask is True where data is invalid (outside ALL geometries)
+    # Rasterize fills pixels inside any geometry with 0, outside with 1
     cutline_mask = rasterize(
-        [geometry],
+        geometries,
         out_shape=(height, width),
         transform=transform,
         default_value=0,
@@ -104,7 +116,7 @@ class ImageRef:
     _crs: Optional[CRS]
     _band_names: List[str]
     _count: int
-    _geometry: Optional[Dict[str, Any]] = None
+    _geometry: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
     _task_fn: Optional[Callable[[], ImageData]] = field(default=None, repr=False)
     _image: Optional[ImageData] = field(default=None, repr=False)
     _cutline_mask_cache: Optional[np.ndarray] = field(default=None, repr=False)
@@ -115,8 +127,8 @@ class ImageRef:
         return self._key
 
     @property
-    def geometry(self) -> Optional[Dict[str, Any]]:
-        """GeoJSON geometry dict representing the footprint (typically in EPSG:4326)."""
+    def geometry(self) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+        """GeoJSON geometry dict or list of dicts representing footprints (typically in EPSG:4326)."""
         return self._geometry
 
     @property
@@ -206,11 +218,21 @@ class ImageRef:
         bounds: BBox,
         crs: Optional[CRS] = None,
         band_names: Optional[List[str]] = None,
-        geometry: Optional[Dict[str, Any]] = None,
+        geometry: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     ) -> "ImageRef":
         """Create a lazy ImageRef from a task function.
 
         The task will be executed when realize() is called.
+
+        Args:
+            key: Unique identifier for this image
+            task_fn: Function that loads the image data when called
+            width: Output width in pixels
+            height: Output height in pixels
+            bounds: Bounding box as (west, south, east, north)
+            crs: Coordinate reference system
+            band_names: List of band names
+            geometry: GeoJSON geometry dict or list of dicts for cutline mask computation
         """
         return cls(
             _key=key,
@@ -242,6 +264,16 @@ class ImageRef:
             _geometry=None,
             _task_fn=None,
             _image=image,
+        )
+
+    def __repr__(self) -> str:
+        """Safe debug representation that does NOT trigger lazy loading."""
+        state = "realized" if self._image is not None else "lazy"
+        crs_str = str(self._crs) if self._crs else "None"
+        return (
+            f"ImageRef(key={self._key!r}, state={state}, "
+            f"size={self._width}x{self._height}, bands={self._count}, "
+            f"crs={crs_str})"
         )
 
 
@@ -497,6 +529,36 @@ class RasterStack(Dict[str, ImageData]):
         """Return list of unique timestamps in the stack."""
         return sorted(self._timestamp_groups.keys())
 
+    def __repr__(self) -> str:
+        """Safe debug representation that does NOT trigger lazy loading.
+
+        Shows metadata about the stack without executing any tasks.
+        This is important for debugging with breakpoints, as VS Code's
+        variable watcher calls __repr__ to display objects.
+        """
+        num_keys = len(self._keys)
+        num_cached = len(self._data_cache)
+        num_timestamps = len(self._timestamp_groups) if self._timestamp_groups else 0
+
+        # Show a few sample keys without loading data
+        sample_keys = self._keys[:3] if self._keys else []
+        keys_preview = ", ".join(repr(k) for k in sample_keys)
+        if num_keys > 3:
+            keys_preview += f", ... (+{num_keys - 3} more)"
+
+        crs_str = str(self._dst_crs) if self._dst_crs else "None"
+        size_str = (
+            f"{self._width}x{self._height}"
+            if self._width and self._height
+            else "unknown"
+        )
+
+        return (
+            f"RasterStack(items={num_keys}, cached={num_cached}/{num_keys}, "
+            f"timestamps={num_timestamps}, size={size_str}, crs={crs_str}, "
+            f"keys=[{keys_preview}])"
+        )
+
     def get_timestamp(self, key: str) -> Optional[datetime]:
         """Get the timestamp associated with a key."""
         return self._timestamp_map.get(key)
@@ -652,14 +714,16 @@ class RasterStack(Dict[str, ImageData]):
         raise KeyError("No successful tasks found in RasterStack")
 
     @classmethod
-    def from_images(cls, images: Dict[str, ImageData]) -> "RasterStack":
+    def from_images(cls, images: Dict[str, ImageData], **kwargs) -> "RasterStack":
         """Create a RasterStack from pre-loaded ImageData instances.
 
         This wraps existing ImageData in the RasterStack interface for consistency.
-        The images are already loaded, so no lazy evaluation occurs.
+        The images are already loaded, so they are placed directly in the cache
+        and ImageRefs are created as eager refs (already realized).
 
         Args:
             images: Dictionary mapping keys to ImageData instances
+            **kwargs: Optional overrides for width, height, bounds, dst_crs, band_names
 
         Returns:
             RasterStack: A stack containing the provided images
@@ -674,22 +738,34 @@ class RasterStack(Dict[str, ImageData]):
         first_key = next(iter(images))
         first_img = images[first_key]
 
-        # Create tasks that return pre-loaded images
+        # Create no-op tasks - they won't be executed since we pre-populate the cache
         # Each task is a tuple of (callable, asset_dict)
-        tasks = []
-        for key, img in images.items():
-            # Create a closure that captures the image
-            def make_task(captured_img: ImageData) -> Callable[[], ImageData]:
-                return lambda: captured_img
+        tasks = [
+            (lambda: None, {"id": key})  # Placeholder task, never called
+            for key in images.keys()
+        ]
 
-            tasks.append((make_task(img), {"id": key}))
-
-        return cls(
+        # Create the instance
+        instance = cls(
             tasks=tasks,
             key_fn=lambda asset: asset["id"],
-            width=first_img.width,
-            height=first_img.height,
-            bounds=first_img.bounds,
-            dst_crs=first_img.crs,
-            band_names=first_img.band_names if first_img.band_names else [],
+            width=kwargs.get("width", first_img.width),
+            height=kwargs.get("height", first_img.height),
+            bounds=kwargs.get("bounds", first_img.bounds),
+            dst_crs=kwargs.get("dst_crs", first_img.crs),
+            band_names=kwargs.get(
+                "band_names", first_img.band_names if first_img.band_names else []
+            ),
         )
+
+        # Pre-populate the cache with the provided images
+        # This bypasses task execution since data is already loaded
+        instance._data_cache = dict(images)
+
+        # Replace the lazy ImageRefs with eager ones (already realized)
+        # This ensures get_image_refs() returns refs that don't need task execution
+        instance._image_refs = {
+            key: ImageRef.from_image(key=key, image=img) for key, img in images.items()
+        }
+
+        return instance

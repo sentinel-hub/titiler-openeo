@@ -215,6 +215,7 @@
                 "type": "number",
                 "minimum": 1
             },
+            "default": 1024,
             "optional": true
         },
         {

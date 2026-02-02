@@ -664,7 +664,7 @@ class LoadCollection:
         properties: Optional[dict] = None,
         # private arguments
         width: Optional[int] = 1024,
-        height: Optional[int] = None,
+        height: Optional[int] = 1024,
         tile_buffer: Optional[float] = None,
         named_parameters: Optional[dict] = None,
     ) -> RasterStack:
@@ -713,31 +713,77 @@ class LoadCollection:
         crs = dimensions["crs"]
 
         # Group items by date
-        items_by_date: dict[str, list[dict]] = {}
+        items_by_date: dict[str, list[Item]] = {}
         for item in items:
             date = item.datetime.isoformat()
             if date not in items_by_date:
                 items_by_date[date] = []
             items_by_date[date].append(item)
 
-        # Create a RasterStack with merged items for each date
-        result = {}
-        for date, date_items in items_by_date.items():
-            img, _ = mosaic_reader(
-                date_items,
-                _reader,
-                bbox,
-                bounds_crs=crs,
-                assets=bands,
-                dst_crs=crs,
-                width=int(width) if width else width,
-                height=int(height) if height else height,
-                buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-                pixel_selection=PixelSelectionMethod["first"].value(),
-            )
-            result[date] = img
+        # Create lazy tasks for each date group
+        # Each task will call mosaic_reader when executed
+        def make_mosaic_task(
+            date_items: list[Item],
+            bbox: List[float],
+            crs: Any,
+            bands: Optional[list[str]],
+            width: int,
+            height: int,
+            tile_buffer: Optional[float],
+        ):
+            """Create a closure that loads data for a date group."""
 
-        return RasterStack.from_images(result)
+            def task():
+                img, _ = mosaic_reader(
+                    date_items,
+                    _reader,
+                    bbox,
+                    threads=0,
+                    bounds_crs=crs,
+                    assets=bands,
+                    dst_crs=crs,
+                    width=int(width) if width else width,
+                    height=int(height) if height else height,
+                    buffer=float(tile_buffer)
+                    if tile_buffer is not None
+                    else tile_buffer,
+                    pixel_selection=PixelSelectionMethod["first"].value(),
+                )
+                return img
+
+            return task
+
+        # Build tasks list for RasterStack
+        tasks = []
+        for date, date_items in items_by_date.items():
+            task_fn = make_mosaic_task(
+                date_items, bbox, crs, bands, width, height, tile_buffer
+            )
+            # Collect all geometries from items for cutline mask computation (union of footprints)
+            geometries = [
+                item.geometry for item in date_items if item.geometry is not None
+            ]
+            tasks.append(
+                (
+                    task_fn,
+                    {
+                        "id": date,
+                        "datetime": date_items[0].datetime if date_items else None,
+                        "geometry": geometries if geometries else None,
+                    },
+                )
+            )
+
+        return RasterStack(
+            tasks=tasks,
+            key_fn=lambda asset: asset["id"],
+            timestamp_fn=lambda asset: asset["datetime"],
+            width=int(width) if width else None,
+            height=int(height) if height else None,
+            bounds=bbox,
+            dst_crs=crs,
+            band_names=bands if bands else [],
+        )
 
     def load_collection_and_reduce(
         self,

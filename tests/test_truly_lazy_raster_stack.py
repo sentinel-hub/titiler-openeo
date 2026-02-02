@@ -90,6 +90,52 @@ class TestComputeCutlineMask:
         # All pixels are outside when geometry is None
         assert mask.all()
 
+    def test_compute_cutline_mask_multiple_geometries(self):
+        """Multiple geometries create union mask (valid if inside ANY geometry)."""
+        # Two geometries covering left and right halves
+        geometry1 = mapping(box(0, 0, 5, 10))  # Left half
+        geometry2 = mapping(box(5, 0, 10, 10))  # Right half
+        bounds = (0.0, 0.0, 10.0, 10.0)
+        width, height = 100, 100
+        crs = CRS.from_epsg(4326)
+
+        # Pass as list of geometries
+        mask = compute_cutline_mask([geometry1, geometry2], width, height, bounds, crs)
+
+        assert mask is not None
+        assert mask.shape == (height, width)
+        # Together they cover the entire area - all pixels valid
+        assert not mask.any(), "Union of both geometries should cover entire area"
+
+    def test_compute_cutline_mask_multiple_geometries_partial(self):
+        """Multiple geometries with partial coverage create correct union."""
+        # Two small geometries in different corners
+        geometry1 = mapping(box(0, 0, 3, 3))  # Bottom-left corner
+        geometry2 = mapping(box(7, 7, 10, 10))  # Top-right corner
+        bounds = (0.0, 0.0, 10.0, 10.0)
+        width, height = 100, 100
+        crs = CRS.from_epsg(4326)
+
+        mask = compute_cutline_mask([geometry1, geometry2], width, height, bounds, crs)
+
+        assert mask is not None
+        assert mask.shape == (height, width)
+        # Some pixels should be valid, some outside
+        assert mask.any(), "Some pixels should be outside geometries"
+        assert not mask.all(), "Some pixels should be inside geometries"
+
+    def test_compute_cutline_mask_empty_list(self):
+        """Empty geometry list produces all-True mask (all outside)."""
+        bounds = (0.0, 0.0, 10.0, 10.0)
+        width, height = 100, 100
+        crs = CRS.from_epsg(4326)
+
+        mask = compute_cutline_mask([], width, height, bounds, crs)
+
+        assert mask is not None
+        assert mask.shape == (height, width)
+        assert mask.all(), "All pixels should be outside when no geometries"
+
 
 class TestImageRef:
     """Tests for ImageRef dataclass."""
