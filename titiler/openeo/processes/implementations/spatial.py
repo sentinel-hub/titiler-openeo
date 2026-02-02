@@ -4,7 +4,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from pyproj import CRS
-from rasterio.warp import Resampling as WarpResampling
 
 from .data_model import ImageData, RasterStack
 
@@ -252,7 +251,7 @@ def resample_spatial(
     projection: Union[int, str],
     resolution: Union[float, Tuple[float, float]],
     align: str,
-    method: WarpResampling = "nearest",
+    method: str = "nearest",
 ) -> RasterStack:
     """Resample and warp the spatial dimensions of the raster at a given resolution."""
 
@@ -272,6 +271,7 @@ def resample_spatial(
         # Map the string resampling method to the matching enum name
         resampling_method_map = {
             "nearest": "nearest",
+            "near": "nearest",  # OpenEO alias for nearest
             "bilinear": "bilinear",
             "cubic": "cubic",
             "cubicspline": "cubic_spline",
