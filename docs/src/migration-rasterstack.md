@@ -8,9 +8,10 @@ The RasterStack architecture has been simplified:
 
 | Before | After |
 |--------|-------|
-| `RasterStack = Dict[str, ImageData]` (type alias) | `RasterStack` (class) |
+| `RasterStack = Dict[str, ImageData]` (type alias) | `RasterStack` (class) inherits `Dict[datetime, ImageData]` |
 | `LazyRasterStack` (separate class) | `RasterStack` (unified) |
-| `LazyImageRef` / `EagerImageRef` (two classes) | `ImageRef` (unified) |
+| `LazyImageRef` / `EagerImageRef` (two classes) | `ImageRef` (unified, no `key` field) |
+| `key_fn` + `timestamp_fn` | `timestamp_fn` only (datetime IS the key) |
 | `get_first_item()` / `get_last_item()` | `.first` / `.last` properties |
 | `to_raster_stack()` | `RasterStack.from_images()` |
 
@@ -37,7 +38,7 @@ from titiler.openeo.processes.implementations.data_model import (
 
 ### 2. Replace LazyRasterStack with RasterStack
 
-The class interface remains the same:
+The `key_fn` parameter is no longer needed - the datetime returned by `timestamp_fn` is used directly as the key:
 
 ```python
 # Before
@@ -47,11 +48,10 @@ raster_stack = LazyRasterStack(
     timestamp_fn=lambda asset: asset["datetime"],
 )
 
-# After
+# After - timestamp IS the key (no key_fn needed)
 raster_stack = RasterStack(
     tasks=tasks,
-    key_fn=lambda asset: asset["id"],
-    timestamp_fn=lambda asset: asset["datetime"],
+    timestamp_fn=lambda asset: asset["datetime"],  # Returns datetime, used as key
 )
 ```
 
@@ -64,8 +64,9 @@ from titiler.openeo.processes.implementations.data_model import to_raster_stack
 img_data = ImageData(...)
 raster_stack = to_raster_stack(img_data)  # {"data": img_data}
 
-# After
-raster_stack = RasterStack.from_images({"data": img_data})
+# After - use datetime keys
+from datetime import datetime
+raster_stack = RasterStack.from_images({datetime.now(): img_data})
 ```
 
 ### 4. Replace get_first_item() / get_last_item()
@@ -87,7 +88,7 @@ first = next(iter(my_dict.values()))
 
 ### 5. Replace LazyImageRef with ImageRef
 
-The unified `ImageRef` class handles both lazy and eager states:
+The unified `ImageRef` class handles both lazy and eager states. Note that the `key` field is no longer used - the key is managed by the containing `RasterStack`:
 
 ```python
 # Before (lazy)
@@ -99,17 +100,16 @@ ref = LazyImageRef(
     ...
 )
 
-# After (lazy)
+# After (lazy) - no key parameter
 ref = ImageRef.from_task(
-    key="my_key",
     task_fn=lambda: load_image(),
     width=256,
     height=256,
     ...
 )
 
-# After (eager - pre-loaded image)
-ref = ImageRef.from_image(key="my_key", image=my_image_data)
+# After (eager - pre-loaded image) - no key parameter
+ref = ImageRef.from_image(image=my_image_data)
 ```
 
 ### 6. Update isinstance Checks
@@ -131,7 +131,7 @@ if isinstance(data, RasterStack):
 The new `ImageRef` class manages lazy/eager state internally:
 
 ```python
-ref = ImageRef.from_task(key="my_key", task_fn=load_fn, ...)
+ref = ImageRef.from_task(task_fn=load_fn, ...)
 
 # Check if data is loaded
 if ref.realized:
@@ -150,39 +150,40 @@ assert ref.realized
 
 ### RasterStack.from_images()
 
-Create a RasterStack from pre-loaded ImageData:
+Create a RasterStack from pre-loaded ImageData (uses datetime keys):
 
 ```python
+from datetime import datetime
+
 images = {
-    "2023-01-01": ImageData(...),
-    "2023-01-15": ImageData(...),
+    datetime(2023, 1, 1): ImageData(...),
+    datetime(2023, 1, 15): ImageData(...),
 }
 raster_stack = RasterStack.from_images(images)
 ```
 
 ### RasterStack.from_tasks()
 
-Create a RasterStack from task tuples (same as constructor):
+Create a RasterStack from task tuples (same as constructor). The datetime returned by `timestamp_fn` is used directly as the key:
 
 ```python
 tasks = [
     (load_fn1, {"id": "item1", "datetime": dt1}),
     (load_fn2, {"id": "item2", "datetime": dt2}),
 ]
+# timestamp_fn returns datetime, which IS used as the key (no key_fn)
 raster_stack = RasterStack.from_tasks(
     tasks=tasks,
-    key_fn=lambda a: a["id"],
     timestamp_fn=lambda a: a["datetime"],
 )
 ```
 
 ### ImageRef.from_task()
 
-Create a lazy ImageRef:
+Create a lazy ImageRef (no `key` parameter - key is managed by RasterStack):
 
 ```python
 ref = ImageRef.from_task(
-    key="my_key",
     task_fn=lambda: load_image(),
     width=256,
     height=256,
@@ -195,10 +196,10 @@ ref = ImageRef.from_task(
 
 ### ImageRef.from_image()
 
-Create an eager ImageRef from pre-loaded data:
+Create an eager ImageRef from pre-loaded data (no `key` parameter):
 
 ```python
-ref = ImageRef.from_image(key="my_key", image=my_image_data)
+ref = ImageRef.from_image(image=my_image_data)
 ```
 
 ## Benefits of the New Architecture
@@ -214,8 +215,8 @@ ref = ImageRef.from_image(key="my_key", image=my_image_data)
 ### Processing All Images
 
 ```python
-# Get all image references (lazy)
-for key, ref in raster_stack.get_image_refs():
+# Get all image references (lazy) - keys are datetime objects
+for dt_key, ref in raster_stack.get_image_refs():
     # Compute cutline mask WITHOUT loading data
     mask = ref.cutline_mask()
     
@@ -226,13 +227,13 @@ for key, ref in raster_stack.get_image_refs():
 ### Temporal Access
 
 ```python
-# Get sorted timestamps\nfor timestamp in raster_stack.timestamps():
+# Get sorted timestamps (keys ARE timestamps)
+for timestamp in raster_stack.timestamps():
     print(f"Available: {timestamp}")
 
-# Keys are already in temporal order
-for key in raster_stack.keys():
-    timestamp = raster_stack.get_timestamp(key)
-    print(f"{key}: {timestamp}")
+# Keys are datetime objects, already in temporal order
+for dt_key in raster_stack.keys():
+    print(f"Observation at: {dt_key}")
 
 # Efficient first/last access
 first_image = raster_stack.first
@@ -242,9 +243,12 @@ last_image = raster_stack.last
 ### Testing with Pre-loaded Images
 
 ```python
-# For tests, use from_images() instead of plain dicts
+# For tests, use from_images() with datetime keys
+from datetime import datetime
+
 def test_my_process():
-    images = {"t1": create_test_image(), "t2": create_test_image()}
+    dt1, dt2 = datetime(2023, 1, 1), datetime(2023, 1, 15)
+    images = {dt1: create_test_image(), dt2: create_test_image()}
     raster_stack = RasterStack.from_images(images)
     
     result = my_process(raster_stack)

@@ -4,22 +4,24 @@ In titiler-openeo, the `RasterStack` class is the foundational data structure fo
 
 ## Overview
 
-`RasterStack` is a class that organizes raster data along multiple dimensions, primarily **time** and **spectral bands**. Each entry contains an `ImageData` object representing a multi-band image at a specific time point. The class inherits from `Dict[str, ImageData]` but adds lazy loading, temporal awareness, and intelligent caching.
+`RasterStack` is a class that organizes raster data along multiple dimensions, primarily **time** and **spectral bands**. Each entry contains an `ImageData` object representing a multi-band image at a specific time point. The class inherits from `Dict[datetime, ImageData]` but adds lazy loading, temporal awareness, and intelligent caching.
 
 **Key architectural principle**: When `load_collection` creates a RasterStack, it groups items by timestamp and merges overlapping tiles using `mosaic_reader`. This guarantees **one entry per timestamp** - all spatial tiles from the same acquisition are already mosaicked together.
 
 ```python
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from datetime import datetime
 
 # RasterStack behaves like a dict but with lazy loading
+# Keys are datetime objects directly - no separate key_fn needed
 raster_stack = RasterStack(
     tasks=tasks,
-    key_fn=lambda asset: asset["id"],
-    timestamp_fn=lambda asset: asset["datetime"],
+    timestamp_fn=lambda asset: asset["datetime"],  # Returns datetime, used as key
 )
 
-# Access triggers lazy loading
-first_image = raster_stack["2023-01-01"]  # Loads data on first access
+# Access by datetime key triggers lazy loading
+dt = datetime(2023, 1, 1)
+first_image = raster_stack[dt]  # Loads data on first access
 ```
 
 ## Dimensional Model
@@ -31,14 +33,16 @@ The RasterStack defines a clear dimensional hierarchy:
 3. **Spatial Dimensions**: Each band contains 2D spatial data (height, width)
 
 ```python
-# Time dimension: multiple temporal observations
+# Time dimension: multiple temporal observations (datetime keys)
+from datetime import datetime
+
 temporal_stack = {
-    "2023-01-01": ImageData(array.shape=(4, 512, 512)),  # 4 bands
-    "2023-02-01": ImageData(array.shape=(4, 512, 512)),  # 4 bands
+    datetime(2023, 1, 1): ImageData(array.shape=(4, 512, 512)),  # 4 bands
+    datetime(2023, 2, 1): ImageData(array.shape=(4, 512, 512)),  # 4 bands
 }
 
 # Each ImageData represents multi-band observations at one time point
-single_observation = temporal_stack["2023-01-01"]
+single_observation = temporal_stack[datetime(2023, 1, 1)]
 # single_observation.array.shape = (bands, height, width) = (4, 512, 512)
 ```
 
@@ -54,24 +58,23 @@ single_observation = temporal_stack["2023-01-01"]
 ```python
 from titiler.openeo.processes.implementations.data_model import RasterStack
 
-# RasterStack with timestamp support
+# RasterStack with datetime keys (timestamp IS the key)
 raster_stack = RasterStack(
     tasks=tasks,
-    key_fn=lambda asset: asset["id"],
-    timestamp_fn=lambda asset: asset["datetime"],  # Enable temporal features
+    timestamp_fn=lambda asset: asset["datetime"],  # Returns datetime, used as key
     max_workers=5  # Concurrent execution
 )
 
-# Temporal access
-all_timestamps = raster_stack.timestamps()  # Sorted list of timestamps
-first_timestamp = raster_stack.get_timestamp(list(raster_stack.keys())[0])
+# Temporal access - keys ARE timestamps (datetime objects)
+all_timestamps = raster_stack.timestamps()  # Sorted list of datetime keys
+first_timestamp = next(iter(raster_stack.keys()))  # First datetime key
 ```
 
 ### Key Features of RasterStack
 
 1. **Temporal Organization**: Automatic sorting by timestamps for time-series analysis (one item per timestamp)
 2. **Concurrent Execution**: Parallel loading of data using ThreadPoolExecutor for improved performance
-3. **Timestamp Metadata**: Access timestamp for any item via `get_timestamp(key)`
+3. **Datetime Keys**: Keys are `datetime` objects directly - no separate key/timestamp mapping needed
 4. **Intelligent Caching**: Per-key caching to avoid redundant computations
 5. **Lazy Evaluation**: Data loaded only when accessed, reducing memory footprint
 6. **Multi-band Support**: Each temporal observation can contain multiple spectral bands
@@ -79,15 +82,14 @@ first_timestamp = raster_stack.get_timestamp(list(raster_stack.keys())[0])
 ### Temporal Processing Capabilities
 
 ```python
-# Get sorted list of all timestamps
+# Get sorted list of all timestamps (keys ARE timestamps)
 for timestamp in raster_stack.timestamps():
     print(f"Available observation at: {timestamp}")
     
-# Process data chronologically 
-for key in raster_stack.keys():  # Already in temporal order
-    item = raster_stack[key]
-    timestamp = raster_stack.get_timestamp(key)
-    print(f"Processing {key} from {timestamp}")
+# Process data chronologically - keys are datetime objects
+for dt_key in raster_stack.keys():  # Already in temporal order
+    item = raster_stack[dt_key]
+    print(f"Processing observation from {dt_key}")
     
 # Efficient time-series operations via first/last properties
 first_observation = raster_stack.first  # Earliest observation
@@ -209,6 +211,7 @@ Operations are applied respecting dimensional structure:
 ```python
 # Create a time-aware RasterStack
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from datetime import datetime
 
 # Tasks with temporal metadata
 tasks = [
@@ -216,27 +219,27 @@ tasks = [
     (load_task, {"id": "s2_20230115", "datetime": datetime(2023, 1, 15)}),
 ]
 
+# timestamp_fn returns datetime, which IS used as the key
 raster_stack = RasterStack(
     tasks=tasks,
-    key_fn=lambda asset: asset["id"],
-    timestamp_fn=lambda asset: asset["datetime"]  # Enable temporal features
+    timestamp_fn=lambda asset: asset["datetime"]
 )
 
-# Access by key (keys are ordered by timestamp)
+# Access by datetime key (keys are ordered by timestamp)
 first_item = raster_stack.first  # First observation
 last_item = raster_stack.last    # Last observation
 
-# Temporal iteration (keys already in temporal order)
-for key in raster_stack.keys():
-    timestamp = raster_stack.get_timestamp(key)
-    print(f"Time {timestamp}: {key}")
+# Temporal iteration (keys are datetime objects, already in temporal order)
+for dt_key in raster_stack.keys():
+    print(f"Time {dt_key}")
 ```
 
 ### Multi-band Processing
 
 ```python
 # Access spectral bands within temporal observations
-observation = raster_stack["s2_20230101"]  # Multi-band ImageData
+dt = datetime(2023, 1, 1)
+observation = raster_stack[dt]  # Multi-band ImageData
 bands = observation.band_names  # ["B02", "B03", "B04", "B08"]
 nir_band = observation.array[3]  # NIR band (B08)
 red_band = observation.array[2]  # Red band (B04)
@@ -249,11 +252,12 @@ ndvi = (nir_band - red_band) / (nir_band + red_band)
 
 ```python
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from datetime import datetime
 
-# Create RasterStack from pre-loaded images
+# Create RasterStack from pre-loaded images (datetime keys)
 images = {
-    "2023-01-01": ImageData(...),
-    "2023-01-15": ImageData(...),
+    datetime(2023, 1, 1): ImageData(...),
+    datetime(2023, 1, 15): ImageData(...),
 }
 raster_stack = RasterStack.from_images(images)
 
@@ -297,8 +301,8 @@ When working with the RasterStack data model:
 
 ### Temporal Organization
 
-1. **Use timestamp functions**: Always provide `timestamp_fn` for time-series data to enable temporal features
-2. **Leverage temporal ordering**: Keys are automatically sorted by timestamp for chronological processing
+1. **Use timestamp functions**: Always provide `timestamp_fn` for time-series data - the returned datetime IS the key
+2. **Leverage temporal ordering**: Keys (datetime objects) are automatically sorted for chronological processing
 3. **Use first/last properties**: Access `.first` and `.last` for efficient endpoint access
 
 ### Performance Optimization  

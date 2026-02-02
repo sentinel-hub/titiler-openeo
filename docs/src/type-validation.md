@@ -58,8 +58,8 @@ The validation system understands:
 
 - **Optional types**: `Optional[ArrayLike]` accepts `None` or array-like values
 - **Union types**: `Union[int, float]` accepts either integers or floats
-- **Generic types**: `Dict[str, ImageData]` for RasterStack
-- **Custom types**: `RasterStack`, `LazyRasterStack`, `ArrayLike`
+- **Generic types**: `Dict[datetime, ImageData]` for RasterStack
+- **Custom types**: `RasterStack`, `ArrayLike`
 
 ## Common Type Errors
 
@@ -69,7 +69,8 @@ The validation system understands:
 
 ```python
 # ❌ This will raise a TypeError
-raster_stack = {"band1": ImageData(...)}
+from datetime import datetime
+raster_stack = {datetime(2023, 1, 1): ImageData(...)}
 result = array_create(data=raster_stack)
 ```
 
