@@ -212,7 +212,7 @@ def test_first_last_temporal_behavior():
     """Test that first/last functions now correctly handle temporal data."""
 
     # Create a simple temporal stack to test first/last functions
-    stack = {}
+    images = {}
 
     # Create temporal data where each timestamp has one image
     for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
@@ -220,7 +220,10 @@ def test_first_last_temporal_behavior():
             np.ones((3, 10, 10), dtype=np.float32) * (i + 1),
             mask=np.zeros((3, 10, 10), dtype=bool),
         )
-        stack[date] = ImageData(data, band_names=["red", "green", "blue"])
+        images[date] = ImageData(data, band_names=["red", "green", "blue"])
+
+    # Convert to RasterStack
+    stack = RasterStack.from_images(images)
 
     # Test first() function - should return first temporal element
     first_result = first(stack)
