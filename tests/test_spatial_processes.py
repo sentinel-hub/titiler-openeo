@@ -65,6 +65,87 @@ def test_resample_spatial(sample_raster_stack):
         assert img_data.count == 3
 
 
+@pytest.mark.skip(reason="Requires proper GDAL driver setup")
+def test_resample_spatial_with_near_method(sample_raster_stack):
+    """Test resampling with 'near' method (OpenEO alias for 'nearest')."""
+    # Test that 'near' method works (OpenEO alias for 'nearest')
+    result = resample_spatial(
+        data=sample_raster_stack,
+        projection=3857,  # Web Mercator
+        resolution=1000,  # 1km resolution
+        align=None,
+        method="near",
+    )
+
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+
+    # Each result should be an ImageData with the new CRS
+    for _key, img_data in result.items():
+        assert isinstance(img_data, ImageData)
+        assert img_data.crs.to_epsg() == 3857
+        # Band count should remain the same
+        assert img_data.count == 3
+
+
+def test_resample_spatial_method_validation():
+    """Test that resample_spatial validates resampling methods correctly."""
+    # Create minimal test data
+    data = np.ma.array(
+        np.random.randint(0, 256, size=(1, 10, 10), dtype=np.uint8),
+        mask=np.zeros((1, 10, 10), dtype=bool),
+    )
+    img = ImageData(
+        data,
+        band_names=["band1"],
+        crs=CRS.from_epsg(4326),
+        bounds=(0, 0, 1, 1),
+    )
+    raster_stack = {"test": img}
+
+    # Test that valid method strings are accepted
+    valid_methods = [
+        "nearest",
+        "near",
+        "bilinear",
+        "cubic",
+        "cubicspline",
+        "lanczos",
+        "average",
+        "mode",
+    ]
+
+    for method in valid_methods:
+        try:
+            # Just test that the function accepts these method strings
+            # The actual reprojection may fail due to GDAL setup, but we're testing parameter validation
+            resample_spatial(
+                data=raster_stack,
+                projection=4326,
+                resolution=0.1,
+                align=None,
+                method=method,
+            )
+        except NotImplementedError:
+            # align parameter not implemented is fine
+            pass
+        except Exception as e:
+            # GDAL errors are expected in test environment
+            # We only care that the method parameter is accepted
+            if "Unsupported resampling method" in str(e):
+                pytest.fail(f"Method '{method}' should be supported but was rejected")
+
+    # Test that invalid method raises an error
+    with pytest.raises(ValueError, match="Unsupported resampling method"):
+        resample_spatial(
+            data=raster_stack,
+            projection=4326,
+            resolution=0.1,
+            align=None,
+            method="invalid_method",
+        )
+
+
 def test_aggregate_spatial(sample_raster_stack):
     """Test aggregating statistics over a geometry."""
     # Create a simple geometry (bounding box)
