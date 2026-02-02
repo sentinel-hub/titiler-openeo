@@ -330,17 +330,18 @@ def save_result(
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
         # Create a RasterStack with a single ImageData
-        data = {datetime.now(): ImageData(data)}
+        data = RasterStack.from_images({datetime.now(): ImageData(data)})
 
     # If data is a RasterStack, handle appropriately
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         # If there is only one item, save it as a single result
         if len(data) == 1:
-            return _save_single_result(list(data.values())[0], format, options)
+            return _save_single_result(data.first, format, options)
 
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
             combined_img = _handle_raster_geotiff(data)
             return _save_single_result(combined_img, format, options)
+
     # Otherwise, save as a single result
     return _save_single_result(data, format, options)

@@ -192,9 +192,13 @@ def add_dimension(
 
     # For non-empty data cube, we need to ensure the new dimension is compatible
     # with existing spatial dimensions
-    first_image = next(iter(data.values()))
+    # Use get_image_refs() to get metadata WITHOUT loading pixel data
+    image_refs = data.get_image_refs()
+    if not image_refs:
+        raise ValueError("No image refs available for metadata")
+    _first_key, first_ref = image_refs[0]
     empty_array = numpy.ma.masked_array(
-        numpy.zeros((1, first_image.height, first_image.width)),
+        numpy.zeros((1, first_ref.height, first_ref.width)),
         mask=True,  # All values are masked initially
     )
 
@@ -203,8 +207,8 @@ def add_dimension(
     new_data[datetime.now()] = ImageData(
         empty_array,
         metadata={"dimension": name, "label": label, "type": type},
-        crs=first_image.crs,
-        bounds=first_image.bounds,
+        crs=first_ref.crs,
+        bounds=first_ref.bounds,
     )
 
     return RasterStack.from_images(new_data)

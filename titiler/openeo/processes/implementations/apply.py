@@ -149,8 +149,11 @@ def _apply_temporal_dimension(
             "The process must return a numpy array for temporal dimension processing"
         )
 
-    # Get properties from first image (optimized for RasterStack)
-    first_img = data.first if hasattr(data, "first") else next(iter(data.values()))
+    # Get metadata from first ImageRef WITHOUT loading pixel data
+    image_refs = data.get_image_refs()
+    if not image_refs:
+        raise ValueError("No image refs available for metadata")
+    first_key, first_ref = image_refs[0]
 
     # If target_dimension is None, preserve the temporal dimension with processed values
     # Create a new stack with the same keys but processed data
@@ -167,9 +170,9 @@ def _apply_temporal_dimension(
             result[key] = ImageData(
                 result_array[i],
                 assets=[key],
-                crs=first_img.crs,
-                bounds=first_img.bounds,
-                band_names=first_img.band_names if first_img.band_names else [],
+                crs=first_ref.crs,
+                bounds=first_ref.bounds,
+                band_names=first_ref.band_names if first_ref.band_names else [],
                 metadata={
                     "applied_dimension": "temporal",
                 },
@@ -181,16 +184,15 @@ def _apply_temporal_dimension(
         result_img = ImageData(
             result_array[0] if result_array.shape[0] == 1 else result_array,
             assets=list(data.keys()),
-            crs=first_img.crs,
-            bounds=first_img.bounds,
-            band_names=first_img.band_names if first_img.band_names else [],
+            crs=first_ref.crs,
+            bounds=first_ref.bounds,
+            band_names=first_ref.band_names if first_ref.band_names else [],
             metadata={
                 "applied_dimension": "temporal",
                 "target_dimension": target_dimension,
             },
         )
-        # Use the first timestamp from the data as the result key
-        first_key = next(iter(data.keys()))
+        # Use the first key from the image_refs as the result key
         return RasterStack.from_images({first_key: result_img})
 
 

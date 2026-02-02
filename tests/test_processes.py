@@ -42,7 +42,7 @@ def sample_image_data():
 
 @pytest.fixture
 def sample_raster_stack(sample_image_data):
-    """Create a sample RasterStack (dict of ImageData) for testing."""
+    """Create a sample RasterStack for testing."""
     # Create a second ImageData
     data2 = np.ma.array(
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
@@ -50,8 +50,10 @@ def sample_raster_stack(sample_image_data):
     )
     image_data2 = ImageData(data2, band_names=["red", "green", "blue"])
 
-    # Return a RasterStack with two samples
-    return {datetime(2021, 1, 1): sample_image_data, datetime(2021, 1, 2): image_data2}
+    # Return a proper RasterStack with two samples
+    return RasterStack.from_images(
+        {datetime(2021, 1, 1): sample_image_data, datetime(2021, 1, 2): image_data2}
+    )
 
 
 def test_lazy_raster_stack_from_images(sample_image_data, sample_raster_stack):
