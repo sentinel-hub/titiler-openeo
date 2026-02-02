@@ -50,9 +50,10 @@ def test_lazy_raster_stack():
     assert len(lazy_stack._data_cache) > 0
 
 
-def test_lazy_raster_stack_duplicate_timestamps():
-    """Test that RasterStack handles multiple items with the same timestamp correctly."""
+def test_lazy_raster_stack_same_timestamp_different_keys():
+    """Test that RasterStack handles multiple items with the same timestamp value."""
     # Create mock assets with same datetime but different IDs
+    # This tests that items are stored by key, not grouped by timestamp
     mock_asset_1 = {
         "id": "item-001",
         "properties": {"datetime": "2021-01-01T00:00:00Z"},
