@@ -1,5 +1,6 @@
 """titiler.processes.implementations arrays."""
 
+from datetime import datetime
 from typing import Optional, Union
 
 import numpy
@@ -95,7 +96,7 @@ def array_element(
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
     """Create a RasterStack from an array."""
-    return RasterStack.from_images({"data": ImageData(data)})
+    return RasterStack.from_images({datetime.now(): ImageData(data)})
 
 
 @process
@@ -166,7 +167,9 @@ def add_dimension(
         ValueError: If a dimension with the specified name already exists.
         ValueError: If trying to add a spatial dimension (not supported).
     """
-    if name in data:
+    # Check if dimension name conflicts with existing timestamps (converted to string)
+    existing_keys = [str(k) for k in data.keys()]
+    if name in existing_keys:
         raise ValueError(f"A dimension with name '{name}' already exists")
 
     if type == "spatial":
@@ -177,13 +180,15 @@ def add_dimension(
     # For empty data cube, we can add any non-spatial dimension
     if not data:
         # Create an ImageData with a default shape for XYZ tiles
-        data[name] = ImageData(
-            numpy.ma.masked_array(array_create()),
-            metadata={"dimension": name, "label": label, "type": type},
-            bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
-            crs="EPSG:4326",  # Default CRS
-        )
-        return data
+        new_data = {
+            datetime.now(): ImageData(
+                numpy.ma.masked_array(array_create()),
+                metadata={"dimension": name, "label": label, "type": type},
+                bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
+                crs="EPSG:4326",  # Default CRS
+            )
+        }
+        return RasterStack.from_images(new_data)
 
     # For non-empty data cube, we need to ensure the new dimension is compatible
     # with existing spatial dimensions
@@ -193,11 +198,13 @@ def add_dimension(
         mask=True,  # All values are masked initially
     )
 
-    data[name] = ImageData(
+    # Copy existing data and add the new dimension with a new timestamp
+    new_data = dict(data.items())
+    new_data[datetime.now()] = ImageData(
         empty_array,
         metadata={"dimension": name, "label": label, "type": type},
         crs=first_image.crs,
         bounds=first_image.bounds,
     )
 
-    return data
+    return RasterStack.from_images(new_data)

@@ -776,7 +776,6 @@ class LoadCollection:
 
         return RasterStack(
             tasks=tasks,
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: asset["datetime"],
             width=int(width) if width else None,
             height=int(height) if height else None,
@@ -869,14 +868,16 @@ class LoadCollection:
             pixel_selection=PixelSelectionMethod[pixel_selection or "first"].value(),
         )
         # Return a RasterStack with a single entry
-        # Use a consistent key naming approach
-        key = "reduced"
-        if temporal_extent and temporal_extent[0]:
-            key = str(temporal_extent[0].to_numpy())
-        elif items:
-            key = items[0].datetime.isoformat()
+        # Use datetime as key (datetime required for RasterStack)
+        from datetime import datetime
 
-        return RasterStack.from_images({key: img})
+        dt = datetime.now()
+        if temporal_extent and temporal_extent[0]:
+            dt = temporal_extent[0].to_numpy().astype("datetime64[us]").astype(datetime)
+        elif items and items[0].datetime:
+            dt = items[0].datetime
+
+        return RasterStack.from_images({dt: img})
 
 
 @define
@@ -1057,7 +1058,6 @@ class LoadStac:
 
         return RasterStack(
             tasks=tasks,
-            key_fn=lambda asset: asset["id"],  # Use item ID as unique key
             timestamp_fn=lambda asset: _props_to_datetime(asset["properties"]),
             allowed_exceptions=(TileOutsideBounds,),
             # New parameters for truly lazy behavior

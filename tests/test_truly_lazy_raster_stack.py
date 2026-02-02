@@ -148,7 +148,6 @@ class TestImageRef:
         task_fn = MagicMock(return_value=None)
 
         ref = ImageRef.from_task(
-            key="item1",
             task_fn=task_fn,
             width=256,
             height=256,
@@ -158,7 +157,6 @@ class TestImageRef:
             geometry=geometry,
         )
 
-        assert ref.key == "item1"
         assert ref.geometry == geometry
         assert ref.width == 256
         assert ref.height == 256
@@ -175,7 +173,6 @@ class TestImageRef:
         task_fn = MagicMock(return_value=None)
 
         ref = ImageRef.from_task(
-            key="item1",
             task_fn=task_fn,
             width=100,
             height=100,
@@ -201,7 +198,6 @@ class TestImageRef:
         task_fn = MagicMock(return_value=None)
 
         ref = ImageRef.from_task(
-            key="item1",
             task_fn=task_fn,
             width=100,
             height=100,
@@ -231,7 +227,6 @@ class TestImageRef:
         task_fn = MagicMock(return_value=mock_image)
 
         ref = ImageRef.from_task(
-            key="item1",
             task_fn=task_fn,
             width=100,
             height=100,
@@ -275,7 +270,6 @@ class TestRasterStackWithDimensions:
 
         stack = RasterStack(
             tasks=[task],
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
             width=256,
             height=256,
@@ -289,7 +283,7 @@ class TestRasterStackWithDimensions:
         assert len(image_refs) == 1
 
         key, ref = image_refs[0]
-        assert key == "item1"
+        assert key == datetime(2021, 1, 1)  # Keys are now datetime objects
         assert isinstance(ref, ImageRef)
         assert ref.width == 256
         assert ref.height == 256
@@ -308,7 +302,6 @@ class TestRasterStackWithDimensions:
         # Create without dimension parameters
         stack = RasterStack(
             tasks=[task],
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
             # No width, height, bounds, dst_crs, band_names
         )
@@ -334,7 +327,6 @@ class TestRasterStackWithDimensions:
 
         stack = RasterStack(
             tasks=[task],
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
             width=100,
             height=100,
@@ -381,7 +373,6 @@ class TestCollectImagesFromDataWithImageRefs:
 
         return RasterStack(
             tasks=[task],
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime(2021, 1, 1),
             width=100,
             height=100,
@@ -398,7 +389,7 @@ class TestCollectImagesFromDataWithImageRefs:
 
         assert len(images) == 1
         key, img_or_ref = images[0]
-        assert key == "item1"
+        assert key == datetime(2021, 1, 1)  # Keys are now datetime objects
         # Should return ImageRef, not ImageData
         assert isinstance(img_or_ref, ImageRef)
         # Task should not have been executed
@@ -450,7 +441,6 @@ class TestApplyPixelSelectionTrulyLazy:
 
         stack = RasterStack(
             tasks=[task1, task2],
-            key_fn=lambda asset: asset["id"],
             timestamp_fn=lambda asset: datetime.fromisoformat(
                 asset["properties"]["datetime"].replace("Z", "+00:00")
             ),
@@ -488,8 +478,8 @@ class TestApplyPixelSelectionTrulyLazy:
         # Apply pixel selection - this should eventually execute tasks
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
-        assert result["data"].array.shape == (1, 100, 100)
+        assert result.first is not None  # Use .first property for single results
+        assert result.first.array.shape == (1, 100, 100)
 
         # At least one task should have been executed (the first one definitely)
         # Note: due to early termination in pixel selection, the second task
@@ -510,10 +500,12 @@ class TestApplyPixelSelectionTrulyLazy:
         data2 = np.ma.array(np.full((1, 10, 10), 20.0, dtype=np.float32))
         img2 = ImageData(data2, bounds=bounds, crs=crs)
 
-        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
+        stack = RasterStack.from_images(
+            {datetime(2021, 1, 1): img1, datetime(2021, 1, 2): img2}
+        )
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
+        assert result.first is not None  # Use .first property for single results
         # Should be first image values
-        np.testing.assert_array_equal(result["data"].array.data, 10.0)
+        np.testing.assert_array_equal(result.first.array.data, 10.0)

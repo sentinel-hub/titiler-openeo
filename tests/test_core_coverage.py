@@ -13,6 +13,7 @@ The tests are organized into logical groups covering:
 Each test is documented to explain what it validates and why it's important.
 """
 
+from datetime import datetime
 from typing import List, Optional, Union
 
 import numpy as np
@@ -562,7 +563,8 @@ class TestTypeValidation:
         def requires_array(data: List[int]) -> int:
             return len(data)
 
-        mock_stack = RasterStack(tasks={}, key_fn=None)
+        # Create an empty RasterStack (without tasks, but with required timestamp_fn)
+        mock_stack = RasterStack(tasks=[], timestamp_fn=lambda x: datetime.now())
         with pytest.raises(TypeError, match="expected.*List.*got.*datacube"):
             requires_array(data=mock_stack)
 

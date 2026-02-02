@@ -109,7 +109,6 @@ class ImageRef:
     This eliminates the need for isinstance checks - all code works with ImageRef.
     """
 
-    _key: str
     _width: int
     _height: int
     _bounds: BBox
@@ -120,11 +119,6 @@ class ImageRef:
     _task_fn: Optional[Callable[[], ImageData]] = field(default=None, repr=False)
     _image: Optional[ImageData] = field(default=None, repr=False)
     _cutline_mask_cache: Optional[np.ndarray] = field(default=None, repr=False)
-
-    @property
-    def key(self) -> str:
-        """Unique identifier for this image reference."""
-        return self._key
 
     @property
     def geometry(self) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
@@ -211,7 +205,6 @@ class ImageRef:
     @classmethod
     def from_task(
         cls,
-        key: str,
         task_fn: Callable[[], ImageData],
         width: int,
         height: int,
@@ -225,7 +218,6 @@ class ImageRef:
         The task will be executed when realize() is called.
 
         Args:
-            key: Unique identifier for this image
             task_fn: Function that loads the image data when called
             width: Output width in pixels
             height: Output height in pixels
@@ -235,7 +227,6 @@ class ImageRef:
             geometry: GeoJSON geometry dict or list of dicts for cutline mask computation
         """
         return cls(
-            _key=key,
             _width=width,
             _height=height,
             _bounds=bounds,
@@ -248,13 +239,12 @@ class ImageRef:
         )
 
     @classmethod
-    def from_image(cls, key: str, image: ImageData) -> "ImageRef":
+    def from_image(cls, image: ImageData) -> "ImageRef":
         """Create an eager ImageRef from pre-loaded ImageData.
 
         The image is already loaded, so realize() returns it immediately.
         """
         return cls(
-            _key=key,
             _width=image.width,
             _height=image.height,
             _bounds=image.bounds,
@@ -271,29 +261,29 @@ class ImageRef:
         state = "realized" if self._image is not None else "lazy"
         crs_str = str(self._crs) if self._crs else "None"
         return (
-            f"ImageRef(key={self._key!r}, state={state}, "
+            f"ImageRef(state={state}, "
             f"size={self._width}x{self._height}, bands={self._count}, "
             f"crs={crs_str})"
         )
 
 
-class RasterStack(Dict[str, ImageData]):
+class RasterStack(Dict[datetime, ImageData]):
     """A raster stack with lazy loading and temporal awareness.
 
     This is THE data structure for collections of raster images in titiler-openeo.
     All images share the same spatial extent and CRS.
 
-    This implementation separates unique key generation from temporal metadata:
-    - Keys are guaranteed unique identifiers
-    - Temporal metadata enables grouping and filtering by datetime
+    Keys are datetime objects, ensuring:
+    - Unique identification for each temporal slice
+    - Natural temporal ordering
+    - No string conversion overhead
     - ImageRef instances enable cutline mask computation without task execution
     """
 
     def __init__(
         self,
         tasks: TaskType,
-        key_fn: Callable[[Dict[str, Any]], str],
-        timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
+        timestamp_fn: Callable[[Dict[str, Any]], datetime],
         allowed_exceptions: Optional[Tuple] = None,
         max_workers: int = MAX_THREADS,
         width: Optional[int] = None,
@@ -306,8 +296,8 @@ class RasterStack(Dict[str, ImageData]):
 
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
-            key_fn: Function that generates unique keys from assets
-            timestamp_fn: Optional function that extracts datetime objects from assets
+            timestamp_fn: Function that extracts datetime objects from assets.
+                         The datetime is used directly as the key.
             allowed_exceptions: Exceptions allowed during task execution
             max_workers: Maximum number of threads for concurrent execution
             width: Output width in pixels (for ImageRef)
@@ -320,7 +310,6 @@ class RasterStack(Dict[str, ImageData]):
         self._tasks = tasks
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
         self._max_workers = max_workers
-        self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
 
         # Output dimensions for ImageRef
@@ -331,16 +320,17 @@ class RasterStack(Dict[str, ImageData]):
         self._band_names = band_names or []
 
         # Per-key execution cache instead of global execution flag
-        self._data_cache: Dict[str, ImageData] = {}
+        self._data_cache: Dict[datetime, ImageData] = {}
         self._cache_lock = threading.Lock()  # Thread-safe cache access
 
-        # Pre-compute keys and timestamp metadata
-        self._keys: List[str] = []
-        self._key_to_task_index: Dict[str, int] = {}  # Maps keys to task indices
-        self._timestamp_map: Dict[str, datetime] = {}  # Maps keys to datetime objects
+        # Pre-compute keys (timestamps) in sorted order
+        self._keys: List[datetime] = []
+        self._key_to_task_index: Dict[
+            datetime, int
+        ] = {}  # Maps timestamps to task indices
 
         # ImageRef instances for deferred cutline computation
-        self._image_refs: Dict[str, ImageRef] = {}
+        self._image_refs: Dict[datetime, ImageRef] = {}
 
         self._compute_metadata()
 
@@ -369,22 +359,22 @@ class RasterStack(Dict[str, ImageData]):
         """List of band names."""
         return self._band_names
 
-    def get_image_ref(self, key: str) -> Optional[ImageRef]:
-        """Get the ImageRef for a given key.
+    def get_image_ref(self, key: datetime) -> Optional[ImageRef]:
+        """Get the ImageRef for a given timestamp key.
 
         Args:
-            key: The key to look up
+            key: The datetime key to look up
 
         Returns:
             ImageRef if available, None otherwise
         """
         return self._image_refs.get(key)
 
-    def get_image_refs(self) -> List[Tuple[str, ImageRef]]:
+    def get_image_refs(self) -> List[Tuple[datetime, ImageRef]]:
         """Get all ImageRef instances in temporal order.
 
         Returns:
-            List of (key, ImageRef) tuples in temporal order
+            List of (datetime, ImageRef) tuples in temporal order
         """
         return [
             (key, self._image_refs[key])
@@ -393,15 +383,23 @@ class RasterStack(Dict[str, ImageData]):
         ]
 
     def _compute_metadata(self) -> None:
-        """Compute keys, build timestamp mapping, and create ImageRef instances."""
-        for i, (task_fn, asset) in enumerate(self._tasks):
-            key = self._key_fn(asset)
-            self._keys.append(key)
-            self._key_to_task_index[key] = i
+        """Compute keys from timestamps and create ImageRef instances.
 
-            if self._timestamp_fn:
-                timestamp = self._timestamp_fn(asset)
-                self._timestamp_map[key] = timestamp
+        Keys are datetime objects directly, ensuring natural temporal ordering.
+        """
+        # First pass: extract timestamps
+        timestamp_task_pairs: List[Tuple[datetime, int, Dict[str, Any]]] = []
+        for i, (_task_fn, asset) in enumerate(self._tasks):
+            timestamp = self._timestamp_fn(asset)
+            timestamp_task_pairs.append((timestamp, i, asset))
+
+        # Sort by timestamp to ensure temporal ordering
+        timestamp_task_pairs.sort(key=lambda x: x[0])
+
+        # Second pass: build keys and mappings in sorted order
+        for timestamp, task_index, asset in timestamp_task_pairs:
+            self._keys.append(timestamp)
+            self._key_to_task_index[timestamp] = task_index
 
             # Create ImageRef if we have the required dimensions
             if (
@@ -410,6 +408,7 @@ class RasterStack(Dict[str, ImageData]):
                 and self._bounds is not None
             ):
                 geometry = asset.get("geometry") if isinstance(asset, dict) else None
+                task_fn, _ = self._tasks[task_index]
 
                 # Create a closure that captures the task_fn for this specific item
                 def make_task_executor(tf: Any) -> Callable[[], ImageData]:
@@ -421,8 +420,7 @@ class RasterStack(Dict[str, ImageData]):
 
                     return executor
 
-                self._image_refs[key] = ImageRef.from_task(
-                    key=key,
+                self._image_refs[timestamp] = ImageRef.from_task(
                     task_fn=make_task_executor(task_fn),
                     width=self._width,
                     height=self._height,
@@ -432,25 +430,11 @@ class RasterStack(Dict[str, ImageData]):
                     geometry=geometry,
                 )
 
-        # If we have timestamps, sort keys by temporal order
-        if self._timestamp_fn and self._timestamp_map:
-            # Create a list of (timestamp, key) pairs and sort by timestamp
-            timestamp_key_pairs = [
-                (self._timestamp_map[key], key) for key in self._keys
-            ]
-            timestamp_key_pairs.sort(key=lambda x: x[0])  # Sort by timestamp
-            # Update _keys to be in temporal order
-            self._keys = [key for _, key in timestamp_key_pairs]
-
-            # IMPORTANT: The _key_to_task_index mapping is still correct
-            # because it maps keys to their original task indices,
-            # regardless of the order in _keys
-
-    def _execute_task(self, key: str, task_func: Any) -> ImageData:
+    def _execute_task(self, key: datetime, task_func: Any) -> ImageData:
         """Execute a single task and return the result.
 
         Args:
-            key: The key for error reporting
+            key: The datetime key for error reporting
             task_func: The task function or Future to execute
 
         Returns:
@@ -461,7 +445,7 @@ class RasterStack(Dict[str, ImageData]):
         else:
             return task_func()
 
-    def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
+    def _execute_selected_tasks(self, selected_keys: Set[datetime]) -> None:
         """Execute tasks for the selected keys only with concurrent execution.
 
         Args:
@@ -514,13 +498,13 @@ class RasterStack(Dict[str, ImageData]):
         for data, asset in filter_tasks(
             self._tasks, allowed_exceptions=self._allowed_exceptions
         ):
-            key = self._key_fn(asset)
+            timestamp = self._timestamp_fn(asset)
             with self._cache_lock:
-                self._data_cache[key] = data
+                self._data_cache[timestamp] = data
 
     def timestamps(self) -> List[datetime]:
-        """Return list of unique timestamps in the stack (one per item)."""
-        return sorted(self._timestamp_map.values())
+        """Return list of timestamps in the stack (keys are timestamps)."""
+        return list(self._keys)
 
     def __repr__(self) -> str:
         """Safe debug representation that does NOT trigger lazy loading.
@@ -531,11 +515,10 @@ class RasterStack(Dict[str, ImageData]):
         """
         num_keys = len(self._keys)
         num_cached = len(self._data_cache)
-        num_timestamps = len(self._timestamp_map) if self._timestamp_map else 0
 
-        # Show a few sample keys without loading data
+        # Show a few sample timestamps without loading data
         sample_keys = self._keys[:3] if self._keys else []
-        keys_preview = ", ".join(repr(k) for k in sample_keys)
+        keys_preview = ", ".join(k.isoformat() for k in sample_keys)
         if num_keys > 3:
             keys_preview += f", ... (+{num_keys - 3} more)"
 
@@ -548,15 +531,11 @@ class RasterStack(Dict[str, ImageData]):
 
         return (
             f"RasterStack(items={num_keys}, cached={num_cached}/{num_keys}, "
-            f"timestamps={num_timestamps}, size={size_str}, crs={crs_str}, "
-            f"keys=[{keys_preview}])"
+            f"size={size_str}, crs={crs_str}, "
+            f"timestamps=[{keys_preview}])"
         )
 
-    def get_timestamp(self, key: str) -> Optional[datetime]:
-        """Get the timestamp associated with a key."""
-        return self._timestamp_map.get(key)
-
-    def __getitem__(self, key: str) -> ImageData:
+    def __getitem__(self, key: datetime) -> ImageData:
         """Get an item from the RasterStack, executing the task if necessary."""
         with self._cache_lock:
             if key in self._data_cache:
@@ -617,12 +596,14 @@ class RasterStack(Dict[str, ImageData]):
             ]
 
     @overload
-    def get(self, key: str) -> Optional[ImageData]: ...
+    def get(self, key: datetime) -> Optional[ImageData]: ...
 
     @overload
-    def get(self, key: str, default: T) -> Union[ImageData, T]: ...
+    def get(self, key: datetime, default: T) -> Union[ImageData, T]: ...
 
-    def get(self, key: str, default: Optional[T] = None) -> Union[ImageData, T, None]:
+    def get(
+        self, key: datetime, default: Optional[T] = None
+    ) -> Union[ImageData, T, None]:
         """Get an item from the RasterStack, executing the task if necessary."""
         if key not in self:
             return default
@@ -674,7 +655,7 @@ class RasterStack(Dict[str, ImageData]):
         raise KeyError("No successful tasks found in RasterStack")
 
     @classmethod
-    def from_images(cls, images: Dict[str, ImageData], **kwargs) -> "RasterStack":
+    def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
         """Create a RasterStack from pre-loaded ImageData instances.
 
         This wraps existing ImageData in the RasterStack interface for consistency.
@@ -682,7 +663,7 @@ class RasterStack(Dict[str, ImageData]):
         and ImageRefs are created as eager refs (already realized).
 
         Args:
-            images: Dictionary mapping keys to ImageData instances
+            images: Dictionary mapping datetime keys to ImageData instances
             **kwargs: Optional overrides for width, height, bounds, dst_crs, band_names
 
         Returns:
@@ -699,16 +680,12 @@ class RasterStack(Dict[str, ImageData]):
         first_img = images[first_key]
 
         # Create no-op tasks - they won't be executed since we pre-populate the cache
-        # Each task is a tuple of (callable, asset_dict)
-        tasks = [
-            (lambda: None, {"id": key})  # Placeholder task, never called
-            for key in images.keys()
-        ]
+        tasks = [(lambda: None, {"datetime": dt}) for dt in images.keys()]
 
         # Create the instance
         instance = cls(
             tasks=tasks,
-            key_fn=lambda asset: asset["id"],
+            timestamp_fn=lambda asset: asset["datetime"],
             width=kwargs.get("width", first_img.width),
             height=kwargs.get("height", first_img.height),
             bounds=kwargs.get("bounds", first_img.bounds),
@@ -719,13 +696,11 @@ class RasterStack(Dict[str, ImageData]):
         )
 
         # Pre-populate the cache with the provided images
-        # This bypasses task execution since data is already loaded
         instance._data_cache = dict(images)
 
         # Replace the lazy ImageRefs with eager ones (already realized)
-        # This ensures get_image_refs() returns refs that don't need task execution
         instance._image_refs = {
-            key: ImageRef.from_image(key=key, image=img) for key, img in images.items()
+            dt: ImageRef.from_image(image=img) for dt, img in images.items()
         }
 
         return instance

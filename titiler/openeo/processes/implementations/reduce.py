@@ -38,6 +38,7 @@ READ THIS ENTIRE WARNING CAREFULLY before making changes.
 """
 
 import logging
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
@@ -140,12 +141,14 @@ def _create_pixel_selection_result(
         band_names=band_names if band_names is not None else [],
         metadata={"pixel_selection_method": pixel_selection},
     )
-    return RasterStack.from_images({"data": result_img})
+    # Use the first asset's datetime as the result key
+    result_datetime = assets_used[0] if assets_used else datetime.now()
+    return RasterStack.from_images({result_datetime: result_img})
 
 
 def _collect_images_from_data(
     data: RasterStack,
-) -> List[Tuple[str, ImageRef]]:
+) -> List[Tuple[datetime, ImageRef]]:
     """Collect all image references from a RasterStack.
 
     This function ALWAYS returns ImageRef instances. RasterStack should always
@@ -158,7 +161,7 @@ def _collect_images_from_data(
         data: A RasterStack
 
     Returns:
-        List of (key, ImageRef) tuples in temporal order
+        List of (datetime, ImageRef) tuples in temporal order
     """
     # Get ImageRef instances - RasterStack should always have them
     image_refs = data.get_image_refs()
@@ -167,10 +170,10 @@ def _collect_images_from_data(
 
     # Fallback: create ImageRef from pre-loaded images
     # This handles RasterStacks created without dimension info
-    result: List[Tuple[str, ImageRef]] = []
+    result: List[Tuple[datetime, ImageRef]] = []
     for key in data.keys():
         try:
-            result.append((key, ImageRef.from_image(key=key, image=data[key])))
+            result.append((key, ImageRef.from_image(image=data[key])))
         except KeyError:
             continue
     return result
@@ -332,7 +335,9 @@ def _reduce_temporal_dimension(
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
         },
     )
-    return RasterStack.from_images({"reduced": reduced_img})
+    # Use the first timestamp from the data as the result key
+    first_key = next(iter(data.keys()))
+    return RasterStack.from_images({first_key: reduced_img})
 
 
 def _reshape_reduced_spectral_data(

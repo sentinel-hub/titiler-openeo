@@ -189,7 +189,9 @@ def _apply_temporal_dimension(
                 "target_dimension": target_dimension,
             },
         )
-        return RasterStack.from_images({target_dimension: result_img})
+        # Use the first timestamp from the data as the result key
+        first_key = next(iter(data.keys()))
+        return RasterStack.from_images({first_key: result_img})
 
 
 def _apply_spectral_dimension_single_image(

@@ -1,5 +1,6 @@
 """Tests for cutline_mask functionality."""
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -144,13 +145,15 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, cutline2
         )
 
-        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
+        stack = RasterStack.from_images(
+            {datetime(2021, 1, 1): img1, datetime(2021, 1, 2): img2}
+        )
 
         # Apply pixel selection - should work without error
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
-        assert result["data"].array.shape == (1, 10, 10)
+        assert result.first is not None
+        assert result.first.array.shape == (1, 10, 10)
 
     def test_no_cutline_masks_all_none(self):
         """When all images have no cutline_mask, aggregated should be None."""
@@ -161,13 +164,15 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, None
         )
 
-        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
+        stack = RasterStack.from_images(
+            {datetime(2021, 1, 1): img1, datetime(2021, 1, 2): img2}
+        )
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
+        assert result.first is not None
         # All pixels should be from first image
-        np.testing.assert_array_equal(result["data"].array.data, 10)
+        np.testing.assert_array_equal(result.first.array.data, 10)
 
     def test_one_image_no_cutline_makes_all_valid(self):
         """If one image has no cutline_mask, all pixels are considered valid."""
@@ -183,13 +188,15 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             np.ones((1, 10, 10), dtype=np.float32) * 20, None
         )
 
-        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
+        stack = RasterStack.from_images(
+            {datetime(2021, 1, 1): img1, datetime(2021, 1, 2): img2}
+        )
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
+        assert result.first is not None
         # With aggregated cutline = None (all valid), first image fills everything
-        np.testing.assert_array_equal(result["data"].array.data, 10)
+        np.testing.assert_array_equal(result.first.array.data, 10)
 
     def test_early_termination_with_full_coverage_aggregated(self):
         """Early termination works correctly with aggregated cutline."""
@@ -218,12 +225,14 @@ class TestApplyPixelSelectionWithAggregatedCutline:
             data2, cutline2, bounds=(0, 0, 20, 10), mask=mask2
         )
 
-        stack = RasterStack.from_images({"2021-01-01": img1, "2021-01-02": img2})
+        stack = RasterStack.from_images(
+            {datetime(2021, 1, 1): img1, datetime(2021, 1, 2): img2}
+        )
 
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
-        img = result["data"]
+        assert result.first is not None
+        img = result.first
         assert img.array.shape == (1, 10, 20)
 
 
@@ -373,12 +382,12 @@ class TestCutlineMaskWithPixelSelection:
 
         stack = RasterStack.from_images(
             {
-                "2021-01-01": self.create_image_with_cutline(
+                datetime(2021, 1, 1): self.create_image_with_cutline(
                     np.ones((1, 10, 10), dtype=np.float32) * 10,
                     np.zeros((1, 10, 10), dtype=bool),
                     cutline1,
                 ),
-                "2021-01-02": self.create_image_with_cutline(
+                datetime(2021, 1, 2): self.create_image_with_cutline(
                     np.ones((1, 10, 10), dtype=np.float32) * 20,
                     np.zeros((1, 10, 10), dtype=bool),
                     cutline2,
@@ -389,8 +398,8 @@ class TestCutlineMaskWithPixelSelection:
         # Apply pixel selection
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
-        img = result["data"]
+        assert result.first is not None
+        img = result.first
         assert isinstance(img, ImageData)
 
     def test_cutline_mask_affects_mosaic_result(self):
@@ -425,8 +434,8 @@ class TestCutlineMaskWithPixelSelection:
 
         stack = RasterStack.from_images(
             {
-                "2021-01-01": img1,
-                "2021-01-02": img2,
+                datetime(2021, 1, 1): img1,
+                datetime(2021, 1, 2): img2,
             }
         )
 
@@ -435,8 +444,8 @@ class TestCutlineMaskWithPixelSelection:
         # - Right half: depends on implementation - first valid or 200 from second
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        assert "data" in result
-        img = result["data"]
+        assert result.first is not None
+        img = result.first
         assert img.array.shape == (1, 10, 20)
 
     def test_cutline_enables_early_termination(self):
@@ -474,15 +483,15 @@ class TestCutlineMaskWithPixelSelection:
 
         stack = RasterStack.from_images(
             {
-                "2021-01-01": img1,
-                "2021-01-02": img2,
+                datetime(2021, 1, 1): img1,
+                datetime(2021, 1, 2): img2,
             }
         )
 
         # Apply first pixel selection
         result = apply_pixel_selection(data=stack, pixel_selection="first")
 
-        img = result["data"]
+        img = result.first
 
         # All values should be from first image (value 1)
         # because it provides full coverage
@@ -515,14 +524,14 @@ class TestCutlineMaskWithPixelSelection:
 
         stack = RasterStack.from_images(
             {
-                "2021-01-01": img1,
-                "2021-01-02": img2,
+                datetime(2021, 1, 1): img1,
+                datetime(2021, 1, 2): img2,
             }
         )
 
         # Mean should consider both images
         result = apply_pixel_selection(data=stack, pixel_selection="mean")
-        assert "data" in result
+        assert result.first is not None
 
 
 class TestCutlineMaskWithReaderIntegration:

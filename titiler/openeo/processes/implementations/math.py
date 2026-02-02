@@ -234,7 +234,7 @@ def median(data, axis=None, keepdims=False):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="median")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.median(data, axis=axis, keepdims=keepdims)
 
@@ -249,7 +249,7 @@ def mean(data, axis=None, keepdims=False):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="mean")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
 
@@ -269,7 +269,7 @@ def stdev(data, axis=None, keepdims=False):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="stdev")
-        return result["data"].array
+        return result.first.array
     return numpy.std(data, axis=axis, keepdims=keepdims, ddof=1)
 
 
@@ -293,7 +293,7 @@ def count(data, condition=None):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="count")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         # Count non-masked values
         if condition is not None:
@@ -404,7 +404,7 @@ def highestpixel(data):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="highest")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, return max along first axis (temporal)
         return _max(data, ignore_nodata=True, axis=0)
@@ -428,7 +428,7 @@ def lowestpixel(data):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lowest")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, return min along first axis (temporal)
         return _min(data, ignore_nodata=True, axis=0)
@@ -452,7 +452,7 @@ def lastbandlow(data):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lastbandlow")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, find indices where last band is minimum and select those pixels
         if data.ndim < 2:
@@ -489,7 +489,7 @@ def lastbandhight(data):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lastbandhight")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, find indices where last band is maximum and select those pixels
         if data.ndim < 2:
@@ -528,7 +528,7 @@ def firstpixel(data):
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="first")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         # For masked arrays, iterate through temporal axis and pick first valid
         if data.ndim < 2:

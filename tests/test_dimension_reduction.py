@@ -1,5 +1,7 @@
 """Test dimension reduction functionality."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from rio_tiler.models import ImageData
@@ -112,7 +114,8 @@ class TestTemporalDimensionReduction:
         images = {}
         for i in range(3):
             array = np.ma.ones((2, 10, 10)) * (i + 1)  # Different values per time
-            images[f"time_{i}"] = ImageData(
+            dt = datetime(2021, 1, i + 1)
+            images[dt] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -124,11 +127,11 @@ class TestTemporalDimensionReduction:
         result = _reduce_temporal_dimension(data, mock_temporal_reducer)
 
         # Should return a single-item RasterStack
-        assert isinstance(result, dict)
+        assert isinstance(result, RasterStack)
         assert len(result) == 1
-        assert "reduced" in result
+        assert result.first is not None
 
-        reduced_img = result["reduced"]
+        reduced_img = result.first
         assert isinstance(reduced_img, ImageData)
         assert reduced_img.array.shape == (2, 10, 10)  # Same spatial/spectral shape
 
@@ -152,7 +155,7 @@ class TestTemporalDimensionReduction:
         """Test temporal reduction with reducer returning dict."""
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((2, 10, 10)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -170,7 +173,7 @@ class TestTemporalDimensionReduction:
         """Test temporal reduction with reducer returning string."""
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((2, 10, 10)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -190,7 +193,7 @@ class TestTemporalDimensionReduction:
         images = {}
         for i in range(3):
             array = np.ma.ones((2, 10, 10)) * (i + 1)  # Values: 1, 2, 3
-            images[f"time_{i}"] = ImageData(
+            images[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -203,8 +206,8 @@ class TestTemporalDimensionReduction:
         result = _reduce_temporal_dimension(data, mean)
 
         assert isinstance(result, dict)
-        assert "reduced" in result
-        reduced_img = result["reduced"]
+        assert result.first is not None
+        reduced_img = result.first
 
         # Mean of 1, 2, 3 should be 2.0
         np.testing.assert_array_almost_equal(reduced_img.array.data, 2.0)
@@ -231,9 +234,9 @@ class TestSpectralDimensionReduction:
         )
 
         # Wrap in single-item RasterStack as required by the unified function
-        stack = RasterStack.from_images({"single_image": img})
+        stack = RasterStack.from_images({datetime.now(): img})
         result_stack = _reduce_spectral_dimension_stack(stack, mock_spectral_reducer)
-        result = result_stack["single_image"]
+        result = result_stack.first
 
         assert isinstance(result, ImageData)
         # After reduction from (4, 10, 10) to (10, 10), result should be (10, 10)
@@ -273,9 +276,9 @@ class TestSpectralDimensionReduction:
         )
 
         # Wrap in single-item RasterStack as required by the unified function
-        stack = RasterStack.from_images({"single_image": img})
+        stack = RasterStack.from_images({datetime.now(): img})
         result_stack = _reduce_spectral_dimension_stack(stack, mock_spectral_reducer)
-        result = result_stack["single_image"]
+        result = result_stack.first
 
         # After reducing 4 bands to 1, band_names should be cleared to avoid mismatch
         # The result should have empty band_names since we can't know which band it represents
@@ -293,7 +296,7 @@ class TestSpectralDimensionReduction:
             array[1] = 2 + i  # green: 2, 3
             array[2] = 3 + i  # blue: 3, 4
 
-            data[f"time_{i}"] = ImageData(
+            data[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -325,7 +328,7 @@ class TestSpectralDimensionReduction:
             array[2] = 3.0 + i
             array[3] = 4.0 + i
 
-            data[f"time_{i}"] = ImageData(
+            data[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -348,15 +351,14 @@ class TestSpectralDimensionReduction:
         )
 
         # Should return a stack with same temporal dimension
-        assert isinstance(result, dict)
+        assert isinstance(result, RasterStack)
         assert len(result) == 3
 
         # Verify results are correct for each time slice
-        # time_0: mean(1,2,3,4) = 2.5
-        # time_1: mean(2,3,4,5) = 3.5
-        # time_2: mean(3,4,5,6) = 4.5
-        for i, key in enumerate(["time_0", "time_1", "time_2"]):
-            assert key in result
+        # time_0 (2021-01-01): mean(1,2,3,4) = 2.5
+        # time_1 (2021-01-02): mean(2,3,4,5) = 3.5
+        # time_2 (2021-01-03): mean(3,4,5,6) = 4.5
+        for i, key in enumerate(result.keys()):
             reduced_img = result[key]
             assert isinstance(reduced_img, ImageData)
 
@@ -381,7 +383,7 @@ class TestSpectralDimensionReduction:
         """Test spectral reduction with reducer returning dict."""
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((3, 5, 5)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -399,7 +401,7 @@ class TestSpectralDimensionReduction:
         """Test spectral reduction with reducer returning string."""
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((3, 5, 5)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -417,7 +419,7 @@ class TestSpectralDimensionReduction:
         images = {}
         for i in range(2):
             array = np.ma.ones((3, 5, 5))
-            images[f"time_{i}"] = ImageData(
+            images[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -442,7 +444,7 @@ class TestSpectralDimensionReduction:
         # Create test data with 1 time step
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((3, 5, 5)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -459,7 +461,7 @@ class TestSpectralDimensionReduction:
         result = _reduce_spectral_dimension_stack(data, reducer_2d_spatial)
         assert len(result) == 1
         # Should work correctly
-        img = result["time_0"]
+        img = result.first
         assert img.array.ndim in [2, 3]
 
     def test_spectral_reduction_4d_output(self):
@@ -468,7 +470,7 @@ class TestSpectralDimensionReduction:
         data = {}
         for i in range(2):
             array = np.ma.ones((3, 5, 5))
-            data[f"time_{i}"] = ImageData(
+            data[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -498,7 +500,7 @@ class TestSpectralDimensionReduction:
         # Create test data
         data = RasterStack.from_images(
             {
-                "time_0": ImageData(
+                datetime(2021, 1, 1): ImageData(
                     np.ma.ones((3, 5, 5)),
                     assets=["asset_0"],
                     crs="EPSG:4326",
@@ -526,7 +528,7 @@ class TestReduceDimensionIntegration:
         images = {}
         for i in range(2):
             array = np.ma.ones((2, 3, 3)) * (i + 1)
-            images[f"time_{i}"] = ImageData(
+            images[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -540,9 +542,9 @@ class TestReduceDimensionIntegration:
 
             assert isinstance(result, dict)
             assert len(result) == 1
-            assert "reduced" in result
+            assert result.first is not None
 
-            reduced_img = result["reduced"]
+            reduced_img = result.first
             assert reduced_img.array.shape == (2, 3, 3)
             np.testing.assert_array_almost_equal(
                 reduced_img.array.data, 1.5
@@ -557,7 +559,7 @@ class TestReduceDimensionIntegration:
 
         data = RasterStack.from_images(
             {
-                "single": ImageData(
+                datetime.now(): ImageData(
                     array,
                     assets=["asset"],
                     crs="EPSG:4326",
@@ -572,9 +574,9 @@ class TestReduceDimensionIntegration:
 
             assert isinstance(result, dict)
             assert len(result) == 1
-            assert "single" in result
+            assert result.first is not None
 
-            reduced_img = result["single"]
+            reduced_img = result.first
             # After reducing from 3 bands to scalar per pixel, expect (height, width) or (1, height, width)
             assert reduced_img.array.shape[-2:] == (
                 4,
@@ -592,7 +594,7 @@ class TestReduceDimensionIntegration:
             array[0] = 1 + i
             array[1] = 2 + i
 
-            images[f"time_{i}"] = ImageData(
+            images[datetime(2021, 1, i + 1)] = ImageData(
                 array,
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
@@ -602,11 +604,11 @@ class TestReduceDimensionIntegration:
 
         result = reduce_dimension(data, mock_spectral_reducer, "bands")
 
-        assert isinstance(result, dict)
+        assert isinstance(result, RasterStack)
         assert len(result) == 2
 
-        # time_0: mean(1,2) = 1.5, time_1: mean(2,3) = 2.5
-        for i, key in enumerate(["time_0", "time_1"]):
+        # time_0 (2021-01-01): mean(1,2) = 1.5, time_1 (2021-01-02): mean(2,3) = 2.5
+        for i, key in enumerate(result.keys()):
             reduced_img = result[key]
             expected_value = 1.5 + i
             np.testing.assert_array_almost_equal(reduced_img.array.data, expected_value)
@@ -615,7 +617,7 @@ class TestReduceDimensionIntegration:
         """Test that single-item stack returns as-is for temporal reduction."""
         data = RasterStack.from_images(
             {
-                "single": ImageData(
+                datetime.now(): ImageData(
                     np.ma.ones((2, 3, 3)),
                     assets=["asset"],
                     crs="EPSG:4326",
@@ -633,7 +635,7 @@ class TestReduceDimensionIntegration:
         """Test error for unsupported dimension."""
         data = RasterStack.from_images(
             {
-                "test": ImageData(
+                datetime.now(): ImageData(
                     np.ma.ones((2, 3, 3)),
                     assets=["asset"],
                     crs="EPSG:4326",
