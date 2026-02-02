@@ -141,7 +141,9 @@ class TestTemporalDimensionReduction:
 
     def test_temporal_reduction_empty_data(self):
         """Test temporal reduction with empty data."""
-        with pytest.raises(ValueError, match="Expected a non-empty RasterStack"):
+        with pytest.raises(
+            ValueError, match="Cannot create RasterStack from empty images dict"
+        ):
             _reduce_temporal_dimension(
                 RasterStack.from_images({}), mock_temporal_reducer
             )
@@ -368,7 +370,9 @@ class TestSpectralDimensionReduction:
 
     def test_spectral_reduction_stack_empty_data(self):
         """Test spectral reduction with empty stack."""
-        with pytest.raises(ValueError, match="Expected a non-empty RasterStack"):
+        with pytest.raises(
+            ValueError, match="Cannot create RasterStack from empty images dict"
+        ):
             _reduce_spectral_dimension_stack(
                 RasterStack.from_images({}), mock_spectral_reducer
             )

@@ -47,7 +47,6 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .core import extract_process_graph_process_id
 from .data_model import ImageRef, RasterStack
 
 __all__ = ["apply_pixel_selection", "reduce_dimension"]
@@ -75,34 +74,6 @@ PIXEL_SELECTION_REDUCERS = {
     "lastbandlow": "lastbandlow",
     "lastbandhight": "lastbandhight",
 }
-
-
-def _get_pixel_selection_method_name(reducer: Callable) -> Optional[str]:
-    """Get the PixelSelectionMethod name for a reducer function if applicable.
-
-    This function handles two cases:
-    1. Direct function calls where __name__ matches a known reducer
-    2. OpenEO process graph callables (functools.partial) where the process_id
-       can be extracted from the closure for single-node graphs
-
-    Args:
-        reducer: A reducer function or process graph callable
-
-    Returns:
-        The PixelSelectionMethod name if the reducer corresponds to one, None otherwise
-    """
-    # First, try getting __name__ directly (works for direct function calls)
-    reducer_name = getattr(reducer, "__name__", None)
-    if reducer_name and reducer_name in PIXEL_SELECTION_REDUCERS:
-        return PIXEL_SELECTION_REDUCERS[reducer_name]
-
-    # Second, try extracting process_id from process graph callable
-    # This handles cases like: {'process_graph': {'first1': {'process_id': 'first', ...}}}
-    process_id = extract_process_graph_process_id(reducer)
-    if process_id and process_id in PIXEL_SELECTION_REDUCERS:
-        return PIXEL_SELECTION_REDUCERS[process_id]
-
-    return None
 
 
 class DimensionNotAvailable(Exception):
@@ -324,32 +295,6 @@ def _reduce_temporal_dimension(
             "Expected a non-empty RasterStack for temporal dimension reduction"
         )
 
-    # Check if the reducer corresponds to a PixelSelectionMethod
-    # This enables the efficient streaming approach for supported reducers
-    pixel_selection_method = _get_pixel_selection_method_name(reducer)
-
-    if pixel_selection_method is not None:
-        # Use the efficient streaming approach via apply_pixel_selection
-        # This processes data incrementally without loading everything into memory
-        result = apply_pixel_selection(data, pixel_selection=pixel_selection_method)
-
-        # Convert the result to match reduce_dimension's expected output format
-        # apply_pixel_selection returns {"data": ImageData}, we return {"reduced": ImageData}
-        result_img = result["data"]
-        reduced_img = ImageData(
-            result_img.array,
-            assets=result_img.assets,
-            crs=result_img.crs,
-            bounds=result_img.bounds,
-            band_names=result_img.band_names,
-            metadata={
-                "reduced_dimension": "temporal",
-                "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
-            },
-        )
-        return RasterStack.from_images({"reduced": reduced_img})
-
-    # Fallback: Apply the reducer to the stack for custom reducers
     # Note: The reducer will determine how much data it actually needs
     # Some reducers might be able to work with partial data
     reduced_array = reducer(data=data)

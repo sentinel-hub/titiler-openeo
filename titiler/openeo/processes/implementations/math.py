@@ -227,14 +227,30 @@ def _max(data, ignore_nodata=True, axis=None, keepdims=False):
 
 
 def median(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
+    """Calculate median across the data.
+
+    When used with RasterStack, it uses the efficient streaming approach.
+    """
+    # Handle RasterStack - use apply_pixel_selection for efficiency
+    if isinstance(data, RasterStack):
+        result = apply_pixel_selection(data, pixel_selection="median")
+        return result["data"].array
+    elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.median(data, axis=axis, keepdims=keepdims)
 
     return numpy.median(data, axis=axis, keepdims=keepdims)
 
 
 def mean(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
+    """Calculate mean across the data.
+
+    When used with RasterStack, it uses the efficient streaming approach.
+    """
+    # Handle RasterStack - use apply_pixel_selection for efficiency
+    if isinstance(data, RasterStack):
+        result = apply_pixel_selection(data, pixel_selection="mean")
+        return result["data"].array
+    elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
 
     return numpy.mean(data, axis=axis, keepdims=keepdims)
@@ -318,10 +334,9 @@ def linear_scale_range(
 
 def first(data):
     """Return the first element of the array."""
-    # Handle RasterStack
+    # Handle RasterStack - use .first property for efficient single-item access
     if isinstance(data, RasterStack):
-        first_img = next(iter(data.values()))
-        return first_img.array
+        return data.first.array
     elif isinstance(data, numpy.ndarray):
         return data[0]
     elif isinstance(data, numpy.ma.MaskedArray):
@@ -332,10 +347,9 @@ def first(data):
 
 def last(data):
     """Return the last element of the array."""
-    # Handle RasterStack
+    # Handle RasterStack - use .last property for efficient single-item access
     if isinstance(data, RasterStack):
-        last_img = list(data.values())[-1]
-        return last_img.array
+        return data.last.array
     elif isinstance(data, numpy.ndarray):
         return data[-1]
     elif isinstance(data, numpy.ma.MaskedArray):

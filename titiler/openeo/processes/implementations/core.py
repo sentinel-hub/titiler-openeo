@@ -16,11 +16,10 @@ Key Design Decisions:
   and regular Python function calls (with positional args)
 """
 
-import functools
 import inspect
 import logging
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Tuple, Union, get_args, get_origin
+from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
 from openeo_pg_parser_networkx.pg_schema import (
     BoundingBox,
@@ -33,98 +32,6 @@ from ...errors import ProcessParameterMissing
 from .data_model import RasterStack
 
 logger = logging.getLogger(__name__)
-
-
-def extract_process_graph_process_id(callable_obj: Callable) -> Optional[str]:  # noqa: C901
-    """Extract process_id from a single-node OpenEO process graph callable.
-
-    When a callable is an OpenEOProcessGraph instance (or a functools.partial wrapping one),
-    for a single-node process graph (e.g., just 'first' or 'mean'), we can extract
-    the process_id from the graph.
-
-    This is useful for identifying simple reducer process graphs like:
-    {'process_graph': {'first1': {'process_id': 'first', 'arguments': {'data': ...}, 'result': True}}}
-
-    Args:
-        callable_obj: A callable that may be an OpenEOProcessGraph or a wrapper around one
-
-    Returns:
-        The process_id if this is a single-node process graph, None otherwise.
-
-    Example:
-        >>> reducer_pg = {'process_graph': {'first1': {'process_id': 'first', ...}}}
-        >>> pg = OpenEOProcessGraph(pg_data=reducer_pg)
-        >>> extract_process_graph_process_id(pg)
-        'first'
-    """
-    # Lazy import to avoid circular dependencies
-    try:
-        from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
-    except ImportError:
-        return None
-
-    graph = None
-
-    # Check if callable_obj is directly an OpenEOProcessGraph
-    if isinstance(callable_obj, OpenEOProcessGraph):
-        graph = callable_obj
-    # Check if it's a partial (created by OpenEOProcessGraph.to_callable())
-    elif isinstance(callable_obj, functools.partial):
-        # Check partial's positional args
-        for arg in callable_obj.args:
-            if isinstance(arg, OpenEOProcessGraph):
-                graph = arg
-                break
-        # Check partial's keyword args
-        if graph is None:
-            for val in callable_obj.keywords.values():
-                if isinstance(val, OpenEOProcessGraph):
-                    graph = val
-                    break
-        # Check if the wrapped function itself has the graph in closure
-        if graph is None:
-            func = callable_obj.func
-            if hasattr(func, "__closure__") and func.__closure__ is not None:
-                for cell in func.__closure__:
-                    try:
-                        val = cell.cell_contents
-                        if isinstance(val, OpenEOProcessGraph):
-                            graph = val
-                            break
-                        # The closure may contain node data directly with process_id
-                        # e.g., {'process_id': 'first', 'node_name': 'first1', ...}
-                        if isinstance(val, dict) and "process_id" in val:
-                            # This is a single node - return the process_id directly
-                            return val.get("process_id")
-                        # Check if it's wrapped: {"process_graph": {...}}
-                        if isinstance(val, dict) and "process_graph" in val:
-                            graph = OpenEOProcessGraph(pg_data=val)
-                            break
-                        # Or it may be the process graph dict (nodes with process_id)
-                        # e.g., {"first1": {"process_id": "first", ...}}
-                        if (
-                            isinstance(val, dict)
-                            and val
-                            and all(
-                                isinstance(v, dict) and "process_id" in v
-                                for v in val.values()
-                            )
-                        ):
-                            graph = OpenEOProcessGraph(pg_data={"process_graph": val})
-                            break
-                    except ValueError:
-                        continue
-
-    # If we found the graph, check if it has only one node (single process)
-    if graph and hasattr(graph, "G"):
-        nodes = list(graph.G.nodes())
-        if len(nodes) == 1:
-            # Single node process graph - extract process_id
-            node_data = graph.G.nodes[nodes[0]]
-            return node_data.get("process_id")
-
-    return None
-
 
 # Arguments that may appear in named_parameters but should be removed
 # if not explicitly in the function signature
