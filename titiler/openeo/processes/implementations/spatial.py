@@ -1,5 +1,6 @@
 """titiler.openeo.processes Spatial."""
 
+import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
@@ -264,6 +265,11 @@ def resample_spatial(
         # align parameter is accepted but not yet implemented
         # We silently ignore it for now (uses GDAL defaults)
 
+        logging.info(
+            f"resample_spatial: input crs={img.crs}, dst_crs={dst_crs}, "
+            f"resolution={resolution}, size={img.width}x{img.height}, bounds={img.bounds}"
+        )
+
         # If no projection change requested and no resolution change, return as-is
         if dst_crs is None and (resolution is None or resolution == 0):
             return img
@@ -300,9 +306,14 @@ def resample_spatial(
         actual_resolution = None if resolution == 0 else resolution
 
         # Reproject the image with the string method name
-        return img.reproject(
+        result = img.reproject(
             target_crs, resolution=actual_resolution, reproject_method=resampling_method
         )
+        logging.info(
+            f"resample_spatial: output crs={result.crs}, "
+            f"size={result.width}x{result.height}, bounds={result.bounds}"
+        )
+        return result
 
     # Get destination CRS from parameters (None if not specified)
     dst_crs: Optional[CRS] = None

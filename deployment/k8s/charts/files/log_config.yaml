@@ -18,12 +18,12 @@ handlers:
     stream: ext://sys.stdout
 loggers:
   uvicorn.error:
-    level: INFO
+    level: WARN
     handlers:
       - default
     propagate: no
   uvicorn.access:
-    level: INFO
+    level: WARN
     handlers:
       - access
     propagate: no
@@ -33,7 +33,7 @@ loggers:
       - default
     propagate: no
 root:
-  level: INFO
+  level: WARN
   handlers:
     - default
   propagate: no
