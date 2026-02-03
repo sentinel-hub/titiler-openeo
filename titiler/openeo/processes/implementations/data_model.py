@@ -199,6 +199,10 @@ class ImageRef:
         if self._image is None:
             if self._task_fn is None:
                 raise RuntimeError("ImageRef has no task function and no cached image")
+            logging.info(
+                f"Realizing ImageRef: size={self._width}x{self._height}, "
+                f"bands={self._band_names}, bounds={self._bounds}"
+            )
             self._image = self._task_fn()
         return self._image
 
