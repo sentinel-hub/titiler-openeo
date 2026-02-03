@@ -6,6 +6,7 @@ import pytest
 import rasterio
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
+from rasterio.warp import transform_bounds
 
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.reader import (
@@ -676,3 +677,119 @@ def test_target_crs_from_asset_properties():
     # Should detect UTM 32632 from asset properties
     assert result["crs"].to_epsg() == 32632
     assert result["bounds_crs"].to_epsg() == 4326
+
+
+def test_target_crs_bounds_consistency():
+    """Test that bbox is properly reprojected when target_crs differs from bounds_crs.
+
+    This ensures the output GeoTIFF has coordinates in the correct CRS, not a mismatch
+    where CRS metadata says UTM but coordinates are still in WGS84 degrees.
+    """
+    from rasterio.crs import CRS
+
+    # Create extent in WGS84 (lat/lon degrees)
+    extent = BoundingBox(
+        crs="EPSG:4326",
+        west=33.9,
+        south=-0.2,
+        east=34.1,
+        north=0.0,
+    )
+
+    # Item with UTM projection
+    item_utm = Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+            ],
+            "id": "utm-item",
+            "bbox": [33.9, -0.2, 34.1, 0.0],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [[33.9, -0.2], [34.1, -0.2], [34.1, 0.0], [33.9, 0.0], [33.9, -0.2]]
+                ],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                "proj:epsg": 32736,  # UTM zone 36S
+                "proj:shape": [10980, 10980],
+                "proj:transform": [10, 0, 699960, 0, -10, 10000000, 0, 0, 1],
+            },
+            "assets": {
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "proj:epsg": 32736,
+                },
+            },
+        }
+    )
+
+    # Test with explicit target_crs=32736 (UTM zone 36S)
+    result = _estimate_output_dimensions(
+        [item_utm],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=32736,
+    )
+
+    # Verify the CRS and bounds_crs are as expected
+    assert result["crs"].to_epsg() == 32736  # Output CRS is UTM
+    assert result["bounds_crs"].to_epsg() == 4326  # Input bbox CRS is WGS84
+    bbox = result["bbox"]
+
+    # The bbox returned should still be in bounds_crs (WGS84) - that's correct
+    # But when creating the RasterStack, the bbox needs to be reprojected to output CRS
+
+    # Verify that if we reproject the bbox to UTM, we get meters (not degrees)
+    reprojected_bbox = transform_bounds(
+        CRS.from_epsg(4326), CRS.from_epsg(32736), *bbox, densify_pts=21
+    )
+
+    # UTM coordinates should be in hundreds of thousands of meters
+    # WGS84 coordinates would be small degrees (33.9 to 34.1)
+    west, south, east, north = reprojected_bbox
+
+    # UTM zone 36S coordinates for this area should be approximately:
+    # - Easting: ~600,000 - 620,000 meters
+    # - Northing: 9,970,000 - 10,000,000 meters (southern hemisphere)
+    assert west > 100000, f"West {west} should be UTM meters, not degrees"
+    assert east > 100000, f"East {east} should be UTM meters, not degrees"
+    assert south > 1000000, f"South {south} should be UTM meters, not degrees"
+    assert north > 1000000, f"North {north} should be UTM meters, not degrees"
+
+    # More specific bounds check for UTM zone 36S
+    assert 590000 < west < 620000, f"West {west} not in expected UTM range"
+    assert 610000 < east < 640000, f"East {east} not in expected UTM range"
+    assert 9970000 < south < 10000000, f"South {south} not in expected UTM range"
+    assert 9990000 < north < 10010000, f"North {north} not in expected UTM range"
+
+    # Test that when bounds_crs == output_crs, no reprojection needed
+    extent_utm = BoundingBox(
+        crs="EPSG:32736",
+        west=700000,
+        south=9978000,
+        east=722000,
+        north=10000000,
+    )
+    result_same_crs = _estimate_output_dimensions(
+        [item_utm],
+        extent_utm,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=32736,
+    )
+
+    # bounds_crs and crs should both be UTM
+    assert result_same_crs["crs"].to_epsg() == 32736
+    assert result_same_crs["bounds_crs"].to_epsg() == 32736
+
+    # bbox should already be in UTM meters
+    bbox_utm = result_same_crs["bbox"]
+    assert bbox_utm[0] > 100000, "West should already be UTM meters"
+    assert bbox_utm[2] > 100000, "East should already be UTM meters"
