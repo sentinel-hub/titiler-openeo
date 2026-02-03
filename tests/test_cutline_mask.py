@@ -684,7 +684,17 @@ class TestCutlineMaskEdgeCases:
 
 
 class TestReaderGeometryIntegration:
-    """Tests for _reader function with geometry detection and cutline_mask application."""
+    """Tests for _reader function.
+
+    NOTE: As of the fix for multi-tile mosaic aggregation, _reader no longer applies
+    cutline_mask directly. This is because rio-tiler's mosaic_reader only uses the
+    cutline_mask from the FIRST image processed. When the first tile is small, this
+    causes the mosaic to exit early (via FirstMethod.is_done), leaving other tiles
+    unprocessed.
+
+    The cutline masking is now handled at the RasterStack level after all tiles
+    have been aggregated.
+    """
 
     def _create_mock_image_data(self, width=100, height=100):
         """Create a mock ImageData object."""
@@ -700,8 +710,12 @@ class TestReaderGeometryIntegration:
         return img
 
     @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_detects_geometry_from_dict_item(self, mock_reader_class):
-        """Test that _reader extracts geometry from dict items and applies cutline_mask."""
+    def test_reader_returns_imagedata_without_cutline_mask(self, mock_reader_class):
+        """Test that _reader returns ImageData without cutline_mask.
+
+        cutline_mask is intentionally not set in _reader to prevent early exit
+        in multi-tile mosaics. The masking is applied at the RasterStack level.
+        """
         # Setup mock
         mock_reader_instance = MagicMock()
         mock_reader_class.return_value.__enter__ = MagicMock(
@@ -733,17 +747,12 @@ class TestReaderGeometryIntegration:
         # Call _reader
         result = _reader(item_dict, bbox, dst_crs=CRS.from_epsg(4326))
 
-        # Verify cutline_mask was applied
-        assert result.cutline_mask is not None
-        assert result.cutline_mask.shape == (100, 100)
-        # Left half should be inside (False), right half outside (True)
-        assert np.sum(~result.cutline_mask[:, :50]) > np.sum(
-            ~result.cutline_mask[:, 50:]
-        )
+        # Verify cutline_mask is NOT set (intentionally removed for multi-tile support)
+        assert result.cutline_mask is None
 
     @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_detects_geometry_from_pystac_item(self, mock_reader_class):
-        """Test that _reader extracts geometry via src_dst.item.geometry."""
+    def test_reader_returns_valid_imagedata(self, mock_reader_class):
+        """Test that _reader returns valid ImageData with correct properties."""
         # Setup mock
         mock_reader_instance = MagicMock()
         mock_reader_class.return_value.__enter__ = MagicMock(
@@ -775,15 +784,15 @@ class TestReaderGeometryIntegration:
         # Call _reader
         result = _reader(item_dict, bbox, dst_crs=CRS.from_epsg(4326))
 
-        # Verify cutline_mask was applied (geometry covers full bbox)
-        assert result.cutline_mask is not None
-        assert result.cutline_mask.shape == (100, 100)
-        # All pixels should be inside the geometry
-        assert np.all(~result.cutline_mask)
+        # Verify basic ImageData properties
+        assert result is not None
+        assert result.data is not None
+        assert result.bounds is not None
+        assert result.crs is not None
 
     @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_no_cutline_when_no_geometry(self, mock_reader_class):
-        """Test that _reader doesn't apply cutline_mask when item has no geometry."""
+    def test_reader_handles_item_without_geometry(self, mock_reader_class):
+        """Test that _reader works correctly with items that have no geometry."""
         # Setup mock
         mock_reader_instance = MagicMock()
         mock_reader_class.return_value.__enter__ = MagicMock(
@@ -813,88 +822,5 @@ class TestReaderGeometryIntegration:
 
         # Verify no cutline_mask was applied
         assert result.cutline_mask is None
-
-    @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_applies_cutline_with_crs_transform(self, mock_reader_class):
-        """Test that _reader correctly transforms geometry when dst_crs differs."""
-        # Setup mock - image in Web Mercator
-        mock_reader_instance = MagicMock()
-        mock_reader_class.return_value.__enter__ = MagicMock(
-            return_value=mock_reader_instance
-        )
-        mock_reader_class.return_value.__exit__ = MagicMock(return_value=False)
-
-        # Create ImageData in Web Mercator
-        data = np.ma.array(
-            np.ones((1, 100, 100), dtype=np.float32),
-            mask=np.zeros((1, 100, 100), dtype=bool),
-        )
-        img = ImageData(
-            data,
-            bounds=(0, 0, 1000000, 1000000),
-            crs=CRS.from_epsg(3857),
-        )
-        mock_reader_instance.part.return_value = img
-
-        # Set up the geometry in WGS84 that src_dst.item.geometry will return
-        geometry = {
-            "type": "Polygon",
-            "coordinates": [[[0, 0], [4.5, 0], [4.5, 4.5], [0, 4.5], [0, 0]]],
-        }
-        mock_reader_instance.item.geometry = geometry
-
-        # Create item with geometry in WGS84
-        item_dict = {
-            "type": "Feature",
-            "stac_version": "1.0.0",
-            "id": "test-item-crs",
-            "bbox": [0, 0, 9, 9],  # Approximate bbox in WGS84
-            "geometry": geometry,
-            "properties": {"datetime": "2025-01-01T00:00:00Z"},
-            "assets": {},
-        }
-
-        bbox = (0, 0, 1000000, 1000000)
-
-        # Call _reader with Web Mercator dst_crs
-        result = _reader(item_dict, bbox, dst_crs=CRS.from_epsg(3857))
-
-        # Verify cutline_mask was applied and some pixels are in/out
-        assert result.cutline_mask is not None
-        assert result.cutline_mask.shape == (100, 100)
-        # Should have both inside and outside pixels
-        assert np.any(result.cutline_mask)  # Some outside
-        assert np.any(~result.cutline_mask)  # Some inside
-
-    @patch("titiler.openeo.reader.SimpleSTACReader")
-    def test_reader_geometry_none_value(self, mock_reader_class):
-        """Test that _reader handles None geometry value correctly."""
-        # Setup mock
-        mock_reader_instance = MagicMock()
-        mock_reader_class.return_value.__enter__ = MagicMock(
-            return_value=mock_reader_instance
-        )
-        mock_reader_class.return_value.__exit__ = MagicMock(return_value=False)
-        mock_reader_instance.part.return_value = self._create_mock_image_data()
-
-        # Set item.geometry to None
-        mock_reader_instance.item.geometry = None
-
-        # Create a STAC item with explicit None geometry
-        item_dict = {
-            "type": "Feature",
-            "stac_version": "1.0.0",
-            "id": "test-item-null-geometry",
-            "bbox": [0, 0, 10, 10],
-            "geometry": None,  # Explicit None
-            "properties": {"datetime": "2025-01-01T00:00:00Z"},
-            "assets": {},
-        }
-
-        bbox = (0, 0, 10, 10)
-
-        # Call _reader
-        result = _reader(item_dict, bbox, dst_crs=CRS.from_epsg(4326))
-
-        # Verify no cutline_mask was applied
-        assert result.cutline_mask is None
+        # But ImageData is still valid
+        assert result.data is not None

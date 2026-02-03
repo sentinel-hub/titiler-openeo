@@ -163,27 +163,37 @@ class ImageRef:
     def cutline_mask(self) -> Optional[np.ndarray]:
         """Compute or return the cutline mask.
 
-        For unrealized refs with geometry: computes from geometry (no data load).
-        For realized refs: returns the image's cutline_mask attribute.
-        For refs without geometry and unrealized: returns None.
+        Priority order:
+        1. Return cached cutline_mask if already computed
+        2. Compute from geometry if available (doesn't require image data)
+        3. Return image's cutline_mask if image is realized
+        4. Return None if no geometry and not realized
 
-        The result is cached for subsequent calls.
+        The result is cached for subsequent calls to avoid recomputation.
+
+        Note: We prioritize geometry-based computation over image.cutline_mask because
+        the _reader function intentionally does NOT set cutline_mask on ImageData
+        (to avoid early exit issues in multi-tile mosaics). The cutline_mask should
+        be computed from the original STAC item geometry.
         """
-        # If already realized, use the image's cutline mask
+        # Return cached value if already computed
+        if self._cutline_mask_cache is not None:
+            return self._cutline_mask_cache
+
+        # Compute from geometry if available (preferred path)
+        if self._geometry is not None:
+            self._cutline_mask_cache = compute_cutline_mask(
+                geometry=self._geometry,
+                width=self._width,
+                height=self._height,
+                bounds=self._bounds,
+                dst_crs=self._crs,
+            )
+            return self._cutline_mask_cache
+
+        # Fall back to image's cutline_mask if realized (for ImageRef.from_image cases)
         if self._image is not None:
             return self._image.cutline_mask
-
-        # If we have geometry, compute from it (lazy path)
-        if self._geometry is not None:
-            if self._cutline_mask_cache is None:
-                self._cutline_mask_cache = compute_cutline_mask(
-                    geometry=self._geometry,
-                    width=self._width,
-                    height=self._height,
-                    bounds=self._bounds,
-                    dst_crs=self._crs,
-                )
-            return self._cutline_mask_cache
 
         return None
 

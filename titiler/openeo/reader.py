@@ -718,7 +718,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
         **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
-        ImageData object with cutline_mask set from item geometry if available
+        ImageData object (cutline_mask NOT set to avoid early exit in multi-tile mosaics)
     """
     max_retries = 10
     retry_delay = 1.0  # seconds
@@ -729,9 +729,11 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
             with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
-                # Create cutline_mask from item geometry if available
-                if geometry := src_dst.item.geometry:
-                    img = _apply_cutline_mask(img, geometry, kwargs.get("dst_crs"))
+                # NOTE: We intentionally do NOT set cutline_mask here.
+                # rio-tiler's mosaic_reader only uses the first tile's cutline_mask
+                # for early exit checks, which causes incomplete mosaics when
+                # multiple tiles are involved. The RasterStack's cutline_mask
+                # computation handles geometry masking at a higher level.
 
                 return img
         except RasterioIOError as e:
