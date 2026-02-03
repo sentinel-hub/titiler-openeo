@@ -1,5 +1,6 @@
 """titiler.openeo.processes Spatial."""
 
+import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
@@ -248,26 +249,33 @@ def aggregate_spatial(
 
 def resample_spatial(
     data: RasterStack,
-    projection: Union[int, str],
-    resolution: Union[float, Tuple[float, float]],
-    align: str,
-    method: str = "nearest",
+    projection: Optional[Union[int, str]] = None,
+    resolution: Union[float, Tuple[float, float], None] = 0,
+    align: str = "upper-left",
+    method: str = "near",
 ) -> RasterStack:
     """Resample and warp the spatial dimensions of the raster at a given resolution."""
 
     def _reproject_img(
         img: ImageData,
-        dst_crs: CRS,
+        dst_crs: Optional[CRS],
         resolution: Union[float, Tuple[float, float], None],
         method: str,
     ) -> ImageData:
-        # align is not yet implemented
-        if align is not None:
-            raise NotImplementedError(
-                "resample_spatial: align parameter is not yet implemented"
-            )
+        # align parameter is accepted but not yet implemented
+        # We silently ignore it for now (uses GDAL defaults)
 
-        dst_crs = CRS.from_user_input(projection)
+        logging.info(
+            f"resample_spatial: input crs={img.crs}, dst_crs={dst_crs}, "
+            f"resolution={resolution}, size={img.width}x{img.height}, bounds={img.bounds}"
+        )
+
+        # If no projection change requested and no resolution change, return as-is
+        if dst_crs is None and (resolution is None or resolution == 0):
+            return img
+
+        # Use the image's existing CRS if no new projection specified
+        target_crs = dst_crs if dst_crs is not None else img.crs
         # Map the string resampling method to the matching enum name
         resampling_method_map = {
             "nearest": "nearest",
@@ -287,16 +295,35 @@ def resample_spatial(
 
         resampling_method = resampling_method_map[method]
 
-        if resolution is not None and not isinstance(resolution, (list, tuple)):
+        if (
+            resolution is not None
+            and resolution != 0
+            and not isinstance(resolution, (list, tuple))
+        ):
             resolution = (resolution, resolution)
 
-        # Reproject the image with the string method name
-        return img.reproject(
-            dst_crs, resolution=resolution, reproject_method=resampling_method
-        )
+        # Handle resolution of 0 as no resolution change
+        actual_resolution = None if resolution == 0 else resolution
 
-    """ Get destination CRS from parameters """
-    dst_crs = CRS.from_epsg(projection)
+        # Reproject the image with the string method name
+        result = img.reproject(
+            target_crs, resolution=actual_resolution, reproject_method=resampling_method
+        )
+        logging.info(
+            f"resample_spatial: output crs={result.crs}, "
+            f"size={result.width}x{result.height}, bounds={result.bounds}"
+        )
+        return result
+
+    # Get destination CRS from parameters (None if not specified)
+    dst_crs: Optional[CRS] = None
+    if projection is not None:
+        if isinstance(projection, int):
+            dst_crs = CRS.from_epsg(projection)
+        else:
+            dst_crs = CRS.from_user_input(projection)
 
     # Reproject each image in the stack
-    return {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
+    return RasterStack.from_images(
+        {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
+    )

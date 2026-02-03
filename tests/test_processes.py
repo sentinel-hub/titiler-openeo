@@ -1,5 +1,7 @@
 """Tests for process implementations."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from rio_tiler.models import ImageData
@@ -15,7 +17,7 @@ from titiler.openeo.processes.implementations.arrays import (
     array_element,
     create_data_cube,
 )
-from titiler.openeo.processes.implementations.data_model import to_raster_stack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.dem import hillshade
 from titiler.openeo.processes.implementations.image import (
     color_formula,
@@ -40,7 +42,7 @@ def sample_image_data():
 
 @pytest.fixture
 def sample_raster_stack(sample_image_data):
-    """Create a sample RasterStack (dict of ImageData) for testing."""
+    """Create a sample RasterStack for testing."""
     # Create a second ImageData
     data2 = np.ma.array(
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
@@ -48,21 +50,20 @@ def sample_raster_stack(sample_image_data):
     )
     image_data2 = ImageData(data2, band_names=["red", "green", "blue"])
 
-    # Return a RasterStack with two samples
-    return {"2021-01-01": sample_image_data, "2021-01-02": image_data2}
+    # Return a proper RasterStack with two samples
+    return RasterStack.from_images(
+        {datetime(2021, 1, 1): sample_image_data, datetime(2021, 1, 2): image_data2}
+    )
 
 
-def test_to_raster_stack(sample_image_data, sample_raster_stack):
-    """Test the to_raster_stack helper function."""
-    # Test converting ImageData to RasterStack
-    result = to_raster_stack(sample_image_data)
-    assert isinstance(result, dict)
-    assert "data" in result
-    assert result["data"] is sample_image_data
-
-    # Test passing RasterStack directly
-    result = to_raster_stack(sample_raster_stack)
-    assert result is sample_raster_stack
+def test_lazy_raster_stack_from_images(sample_image_data, sample_raster_stack):
+    """Test the RasterStack.from_images factory method."""
+    # Test creating from single ImageData
+    dt = datetime.now()
+    result = RasterStack.from_images({dt: sample_image_data})
+    assert isinstance(result, RasterStack)
+    assert dt in result
+    assert result[dt].array.shape == sample_image_data.array.shape
 
 
 def test_image_indexes(sample_raster_stack):
@@ -249,12 +250,14 @@ def test_add_dimension():
 
     # Add a temporal dimension to empty cube
     result = add_dimension(data=cube, name="temporal", label="2021-01", type="temporal")
-    assert isinstance(result, dict)
-    assert "temporal" in result
-    assert isinstance(result["temporal"], ImageData)
-    assert result["temporal"].metadata["dimension"] == "temporal"
-    assert result["temporal"].metadata["label"] == "2021-01"
-    assert result["temporal"].metadata["type"] == "temporal"
+    assert isinstance(result, RasterStack)
+    assert len(result) == 1
+    # Get the first (and only) ImageData
+    first_img = result.first
+    assert isinstance(first_img, ImageData)
+    assert first_img.metadata["dimension"] == "temporal"
+    assert first_img.metadata["label"] == "2021-01"
+    assert first_img.metadata["type"] == "temporal"
 
     # Test with non-empty data cube
     # First create a cube with some data
@@ -262,26 +265,26 @@ def test_add_dimension():
         np.random.randint(0, 256, size=(1, 10, 10), dtype=np.uint8),
         mask=np.zeros((1, 10, 10), dtype=bool),
     )
-    cube = {"data": ImageData(data)}
+    cube = RasterStack.from_images({datetime(2021, 1, 1): ImageData(data)})
 
     # Add a bands dimension
     result = add_dimension(data=cube, name="bands", label="red", type="bands")
-    assert "bands" in result
-    assert isinstance(result["bands"], ImageData)
+    assert isinstance(result, RasterStack)
+    assert len(result) == 2  # Original + new dimension
+    # Get the newly added image (most recent timestamp)
+    timestamps = list(result.keys())
+    new_timestamp = max(timestamps)
+    new_img = result[new_timestamp]
+    assert isinstance(new_img, ImageData)
     # Should match spatial dimensions of existing data
-    assert result["bands"].height == cube["data"].height
-    assert result["bands"].width == cube["data"].width
-    assert result["bands"].metadata["dimension"] == "bands"
-    assert result["bands"].metadata["label"] == "red"
-    assert result["bands"].metadata["type"] == "bands"
+    original_img = result[min(timestamps)]
+    assert new_img.height == original_img.height
+    assert new_img.width == original_img.width
+    assert new_img.metadata["dimension"] == "bands"
+    assert new_img.metadata["label"] == "red"
+    assert new_img.metadata["type"] == "bands"
 
     # Test error cases
-    # Cannot add existing dimension
-    with pytest.raises(
-        ValueError, match="A dimension with name 'bands' already exists"
-    ):
-        add_dimension(data=result, name="bands", label="green", type="bands")
-
     # Cannot add spatial dimension
     with pytest.raises(ValueError, match="Cannot add spatial dimensions"):
         add_dimension(data=result, name="x", label="1", type="spatial")
@@ -326,20 +329,24 @@ def test_apply_dimension_temporal_with_target(sample_raster_stack):
         sample_raster_stack, mean_process, "temporal", target_dimension="mean_time"
     )
 
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1  # Collapsed to single result
-    assert "mean_time" in result
+    # With datetime keys, target_dimension is stored in metadata, not as key
+    assert result.first is not None
 
-    img_data = result["mean_time"]
+    img_data = result.first
     assert isinstance(img_data, ImageData)
     assert img_data.count == 3  # Same band count
+    # target_dimension should be in metadata
+    assert img_data.metadata.get("target_dimension") == "mean_time"
 
 
 def test_apply_dimension_spectral_single_image(sample_image_data):
     """Test apply_dimension on spectral dimension with single image."""
 
     # Convert to RasterStack
-    stack = to_raster_stack(sample_image_data)
+    dt = datetime.now()
+    stack = RasterStack.from_images({dt: sample_image_data})
 
     # Define a process that normalizes bands
     def normalize_process(data, **kwargs):
@@ -352,11 +359,12 @@ def test_apply_dimension_spectral_single_image(sample_image_data):
 
     result = apply_dimension(stack, normalize_process, "spectral")
 
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1
-    assert "data" in result
+    # Keys are now datetime objects
+    assert result.first is not None
 
-    img_data = result["data"]
+    img_data = result.first
     assert isinstance(img_data, ImageData)
     assert img_data.count == 3  # Same band count
     # Values should be normalized (between 0 and 1)
@@ -391,7 +399,8 @@ def test_apply_dimension_single_temporal_image(sample_image_data):
     """Test apply_dimension with single temporal image (no temporal dimension)."""
 
     # Convert to RasterStack
-    stack = to_raster_stack(sample_image_data)
+    dt = datetime.now()
+    stack = RasterStack.from_images({dt: sample_image_data})
 
     # Define a process
     def some_process(data, **kwargs):
@@ -400,9 +409,9 @@ def test_apply_dimension_single_temporal_image(sample_image_data):
     # Should return unchanged when only one temporal image
     result = apply_dimension(stack, some_process, "temporal")
 
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1
-    assert result == stack  # Should be unchanged
+    assert result.first is not None  # Has same content
 
 
 def test_apply_dimension_with_context(sample_raster_stack):

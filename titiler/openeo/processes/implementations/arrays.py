@@ -1,5 +1,6 @@
 """titiler.processes.implementations arrays."""
 
+from datetime import datetime
 from typing import Optional, Union
 
 import numpy
@@ -7,7 +8,7 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from .core import process
-from .data_model import LazyRasterStack, RasterStack
+from .data_model import RasterStack
 
 __all__ = [
     "array_element",
@@ -20,7 +21,7 @@ __all__ = [
 
 @process
 def array_element(
-    data: Union[ArrayLike, RasterStack, LazyRasterStack],
+    data: Union[ArrayLike, RasterStack],
     index: Optional[int] = None,
     label: Optional[str] = None,
 ) -> ArrayLike:
@@ -59,7 +60,7 @@ def array_element(
         if label is not None:
             array_dict = {k: v.array for k, v in data.items() if k == label}
         # return a multi-dimensional array
-        # For LazyRasterStack, this will execute all tasks when stacking is needed
+        # For RasterStack, this will execute all tasks when stacking is needed
         # This is expected behavior for array operations
         return numpy.stack(list(array_dict.values()), axis=0)
 
@@ -95,7 +96,7 @@ def array_element(
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
     """Create a RasterStack from an array."""
-    return {"data": ImageData(data)}
+    return RasterStack.from_images({datetime.now(): ImageData(data)})
 
 
 @process
@@ -143,7 +144,8 @@ def create_data_cube() -> RasterStack:
     Returns:
         An empty data cube (RasterStack) with no dimensions.
     """
-    return {}
+    # Return empty dict - type: ignore needed as RasterStack.from_images requires non-empty
+    return {}  # type: ignore[return-value]
 
 
 @process
@@ -165,7 +167,9 @@ def add_dimension(
         ValueError: If a dimension with the specified name already exists.
         ValueError: If trying to add a spatial dimension (not supported).
     """
-    if name in data:
+    # Check if dimension name conflicts with existing timestamps (converted to string)
+    existing_keys = [str(k) for k in data.keys()]
+    if name in existing_keys:
         raise ValueError(f"A dimension with name '{name}' already exists")
 
     if type == "spatial":
@@ -176,27 +180,35 @@ def add_dimension(
     # For empty data cube, we can add any non-spatial dimension
     if not data:
         # Create an ImageData with a default shape for XYZ tiles
-        data[name] = ImageData(
-            numpy.ma.masked_array(array_create()),
-            metadata={"dimension": name, "label": label, "type": type},
-            bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
-            crs="EPSG:4326",  # Default CRS
-        )
-        return data
+        new_data = {
+            datetime.now(): ImageData(
+                numpy.ma.masked_array(array_create()),
+                metadata={"dimension": name, "label": label, "type": type},
+                bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
+                crs="EPSG:4326",  # Default CRS
+            )
+        }
+        return RasterStack.from_images(new_data)
 
     # For non-empty data cube, we need to ensure the new dimension is compatible
     # with existing spatial dimensions
-    first_image = next(iter(data.values()))
+    # Use get_image_refs() to get metadata WITHOUT loading pixel data
+    image_refs = data.get_image_refs()
+    if not image_refs:
+        raise ValueError("No image refs available for metadata")
+    _first_key, first_ref = image_refs[0]
     empty_array = numpy.ma.masked_array(
-        numpy.zeros((1, first_image.height, first_image.width)),
+        numpy.zeros((1, first_ref.height, first_ref.width)),
         mask=True,  # All values are masked initially
     )
 
-    data[name] = ImageData(
+    # Copy existing data and add the new dimension with a new timestamp
+    new_data = dict(data.items())
+    new_data[datetime.now()] = ImageData(
         empty_array,
         metadata={"dimension": name, "label": label, "type": type},
-        crs=first_image.crs,
-        bounds=first_image.bounds,
+        crs=first_ref.crs,
+        bounds=first_ref.bounds,
     )
 
-    return data
+    return RasterStack.from_images(new_data)

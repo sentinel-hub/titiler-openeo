@@ -2,7 +2,6 @@
 
 import logging
 import threading
-from abc import abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,13 +11,11 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Set,
     Tuple,
     TypeVar,
     Union,
     overload,
-    runtime_checkable,
 )
 
 import numpy as np
@@ -36,13 +33,13 @@ from rio_tiler.types import BBox
 # Here it is important to note that openEO does not enforce or define how the datacube should look like on the backend.
 # The datacube can be a set of files, or arrays in memory distributed over a cluster.
 # These choices are left to the backend implementor, this guide only tries to highlight the possibilities.
-RasterStack = Dict[str, ImageData]
+# NOTE: RasterStack is now a class, not a type alias. The class is defined below.
 
 T = TypeVar("T")
 
 
 def compute_cutline_mask(
-    geometry: Dict[str, Any],
+    geometry: Union[Dict[str, Any], List[Dict[str, Any]]],
     width: int,
     height: int,
     bounds: BBox,
@@ -51,31 +48,43 @@ def compute_cutline_mask(
     """
     Compute a cutline mask from geometry without needing an existing ImageData.
 
-    This creates a mask from a geometry (typically from STAC item footprint),
-    which indicates which pixels are outside the valid data area.
+    This creates a mask from one or more geometries (typically from STAC item footprints),
+    which indicates which pixels are outside the valid data area. When multiple geometries
+    are provided, the mask represents the union of all footprints.
 
     Args:
-        geometry: GeoJSON geometry dict (typically in EPSG:4326)
+        geometry: GeoJSON geometry dict or list of geometry dicts (typically in EPSG:4326)
         width: Output width in pixels
         height: Output height in pixels
         bounds: Output bounds as (west, south, east, north)
         dst_crs: Target CRS for the geometry transformation
 
     Returns:
-        numpy.ndarray: Boolean mask where True indicates pixels outside the geometry
+        numpy.ndarray: Boolean mask where True indicates pixels outside the geometry/geometries
     """
-    # Transform geometry from WGS84 to the destination CRS if needed
+    # Normalize to list of geometries
+    geometries = geometry if isinstance(geometry, list) else [geometry]
+
+    # Filter out None geometries
+    geometries = [g for g in geometries if g is not None]
+
+    if not geometries:
+        # No valid geometries - return mask indicating all pixels are outside
+        return np.ones((height, width), dtype=bool)
+
+    # Transform geometries from WGS84 to the destination CRS if needed
     if dst_crs is not None and dst_crs != WGS84_CRS:
-        geometry = transform_geom(WGS84_CRS, dst_crs, geometry)
+        geometries = [transform_geom(WGS84_CRS, dst_crs, g) for g in geometries]
 
     # Compute affine transform from bounds
     west, south, east, north = bounds
     transform = from_bounds(west, south, east, north, width, height)
 
-    # Create cutline mask using rasterize
-    # The mask is True where data is invalid (outside the geometry)
+    # Create cutline mask using rasterize with all geometries
+    # The mask is True where data is invalid (outside ALL geometries)
+    # Rasterize fills pixels inside any geometry with 0, outside with 1
     cutline_mask = rasterize(
-        [geometry],
+        geometries,
         out_shape=(height, width),
         transform=transform,
         default_value=0,
@@ -86,103 +95,34 @@ def compute_cutline_mask(
     return cutline_mask
 
 
-@runtime_checkable
-class ImageRef(Protocol):
-    """Protocol for image references that support lazy evaluation.
-
-    ImageRef provides a common interface for accessing image metadata and data.
-    It enables deferred execution by computing cutline masks from geometry metadata
-    without executing the actual raster read tasks.
-    """
-
-    @property
-    def key(self) -> str:
-        """Unique identifier for this image reference."""
-        ...
-
-    @property
-    def geometry(self) -> Optional[Dict[str, Any]]:
-        """GeoJSON geometry dict representing the footprint (typically in EPSG:4326)."""
-        ...
-
-    @property
-    def width(self) -> int:
-        """Output width in pixels."""
-        ...
-
-    @property
-    def height(self) -> int:
-        """Output height in pixels."""
-        ...
-
-    @property
-    def bounds(self) -> BBox:
-        """Bounding box as (west, south, east, north)."""
-        ...
-
-    @property
-    def crs(self) -> Optional[CRS]:
-        """Coordinate reference system."""
-        ...
-
-    @property
-    def band_names(self) -> List[str]:
-        """List of band names."""
-        ...
-
-    @property
-    def count(self) -> int:
-        """Number of bands."""
-        ...
-
-    @abstractmethod
-    def cutline_mask(self) -> Optional[np.ndarray]:
-        """Compute the cutline mask from geometry without executing the task.
-
-        Returns:
-            Boolean mask where True indicates pixels outside the geometry,
-            or None if no geometry is available.
-        """
-        ...
-
-    @abstractmethod
-    def realize(self) -> ImageData:
-        """Execute the task and return the actual ImageData.
-
-        Returns:
-            ImageData: The fully loaded image data.
-        """
-        ...
-
-
 @dataclass
-class LazyImageRef:
-    """A lazy image reference that defers task execution until realize() is called.
+class ImageRef:
+    """A unified image reference that manages lazy or eager data access.
 
-    LazyImageRef stores all metadata needed to compute cutline masks and other
-    spatial operations without actually reading the raster data. The actual data
-    is only loaded when realize() is called.
+    ImageRef provides a single interface for accessing image metadata and data,
+    whether the image is loaded lazily (from a task function) or eagerly (pre-loaded).
+
+    The class tracks its `realized` state:
+    - When created with a task function: starts unrealized, loads on first realize()
+    - When created with pre-loaded ImageData: starts already realized
+
+    This eliminates the need for isinstance checks - all code works with ImageRef.
     """
 
-    _key: str
-    _geometry: Optional[Dict[str, Any]]
     _width: int
     _height: int
     _bounds: BBox
     _crs: Optional[CRS]
     _band_names: List[str]
     _count: int
-    _task_fn: Callable[[], ImageData]
+    _geometry: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
+    _task_fn: Optional[Callable[[], ImageData]] = field(default=None, repr=False)
+    _image: Optional[ImageData] = field(default=None, repr=False)
     _cutline_mask_cache: Optional[np.ndarray] = field(default=None, repr=False)
 
     @property
-    def key(self) -> str:
-        """Unique identifier for this image reference."""
-        return self._key
-
-    @property
-    def geometry(self) -> Optional[Dict[str, Any]]:
-        """GeoJSON geometry dict representing the footprint."""
+    def geometry(self) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+        """GeoJSON geometry dict or list of dicts representing footprints (typically in EPSG:4326)."""
         return self._geometry
 
     @property
@@ -215,140 +155,139 @@ class LazyImageRef:
         """Number of bands."""
         return self._count
 
+    @property
+    def realized(self) -> bool:
+        """Whether the image data has been loaded."""
+        return self._image is not None
+
     def cutline_mask(self) -> Optional[np.ndarray]:
-        """Compute the cutline mask from geometry without executing the task.
+        """Compute or return the cutline mask.
+
+        For unrealized refs with geometry: computes from geometry (no data load).
+        For realized refs: returns the image's cutline_mask attribute.
+        For refs without geometry and unrealized: returns None.
 
         The result is cached for subsequent calls.
-
-        Returns:
-            Boolean mask where True indicates pixels outside the geometry,
-            or None if no geometry is available.
         """
-        if self._geometry is None:
-            return None
+        # If already realized, use the image's cutline mask
+        if self._image is not None:
+            return self._image.cutline_mask
 
-        if self._cutline_mask_cache is None:
-            self._cutline_mask_cache = compute_cutline_mask(
-                geometry=self._geometry,
-                width=self._width,
-                height=self._height,
-                bounds=self._bounds,
-                dst_crs=self._crs,
-            )
+        # If we have geometry, compute from it (lazy path)
+        if self._geometry is not None:
+            if self._cutline_mask_cache is None:
+                self._cutline_mask_cache = compute_cutline_mask(
+                    geometry=self._geometry,
+                    width=self._width,
+                    height=self._height,
+                    bounds=self._bounds,
+                    dst_crs=self._crs,
+                )
+            return self._cutline_mask_cache
 
-        return self._cutline_mask_cache
+        return None
 
     def realize(self) -> ImageData:
-        """Execute the task and return the actual ImageData.
+        """Get the ImageData, loading it if necessary.
+
+        For lazy refs: executes the task function on first call, caches result.
+        For eager refs: returns the pre-loaded image immediately.
 
         Returns:
-            ImageData: The fully loaded image data.
+            ImageData: The image data.
         """
-        return self._task_fn()
+        if self._image is None:
+            if self._task_fn is None:
+                raise RuntimeError("ImageRef has no task function and no cached image")
+            logging.info(
+                f"Realizing ImageRef: size={self._width}x{self._height}, "
+                f"bands={self._band_names}, bounds={self._bounds}"
+            )
+            self._image = self._task_fn()
+        return self._image
+
+    @classmethod
+    def from_task(
+        cls,
+        task_fn: Callable[[], ImageData],
+        width: int,
+        height: int,
+        bounds: BBox,
+        crs: Optional[CRS] = None,
+        band_names: Optional[List[str]] = None,
+        geometry: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
+    ) -> "ImageRef":
+        """Create a lazy ImageRef from a task function.
+
+        The task will be executed when realize() is called.
+
+        Args:
+            task_fn: Function that loads the image data when called
+            width: Output width in pixels
+            height: Output height in pixels
+            bounds: Bounding box as (west, south, east, north)
+            crs: Coordinate reference system
+            band_names: List of band names
+            geometry: GeoJSON geometry dict or list of dicts for cutline mask computation
+        """
+        return cls(
+            _width=width,
+            _height=height,
+            _bounds=bounds,
+            _crs=crs,
+            _band_names=band_names or [],
+            _count=len(band_names) if band_names else 0,
+            _geometry=geometry,
+            _task_fn=task_fn,
+            _image=None,
+        )
+
+    @classmethod
+    def from_image(cls, image: ImageData) -> "ImageRef":
+        """Create an eager ImageRef from pre-loaded ImageData.
+
+        The image is already loaded, so realize() returns it immediately.
+        """
+        return cls(
+            _width=image.width,
+            _height=image.height,
+            _bounds=image.bounds,
+            _crs=image.crs,
+            _band_names=image.band_names or [],
+            _count=image.count,
+            _geometry=None,
+            _task_fn=None,
+            _image=image,
+        )
+
+    def __repr__(self) -> str:
+        """Safe debug representation that does NOT trigger lazy loading."""
+        state = "realized" if self._image is not None else "lazy"
+        crs_str = str(self._crs) if self._crs else "None"
+        return (
+            f"ImageRef(state={state}, "
+            f"size={self._width}x{self._height}, bands={self._count}, "
+            f"crs={crs_str})"
+        )
 
 
-def get_first_item(data: Union[ImageData, RasterStack]) -> ImageData:
-    """Get the first item from a RasterStack efficiently.
+class RasterStack(Dict[datetime, ImageData]):
+    """A raster stack with lazy loading and temporal awareness.
 
-    For LazyRasterStack, this finds the first successful task.
-    For regular RasterStack, this gets the first value.
-    For single ImageData, returns it directly.
+    This is THE data structure for collections of raster images in titiler-openeo.
+    All images share the same spatial extent and CRS.
 
-    Args:
-        data: Input data (ImageData or RasterStack)
-
-    Returns:
-        ImageData: The first successful item
-
-    Raises:
-        KeyError: If no successful tasks are found in the stack
-    """
-    if isinstance(data, ImageData):
-        return data
-    elif isinstance(data, LazyRasterStack):
-        # Try each key in order until we find one that succeeds
-        for key in data.keys():
-            try:
-                return data[key]  # Execute this task
-            except KeyError:
-                # This task failed, try the next one
-                continue
-
-        # If we get here, all tasks failed
-        raise KeyError("No successful tasks found in LazyRasterStack")
-    elif isinstance(data, dict):
-        # Regular RasterStack
-        return next(iter(data.values()))
-    else:
-        raise ValueError(f"Unsupported data type: {type(data)}")
-
-
-def get_last_item(data: Union[ImageData, RasterStack]) -> ImageData:
-    """Get the last item from a RasterStack efficiently.
-
-    For LazyRasterStack, this finds the last successful task.
-    For regular RasterStack, this gets the last value.
-    For single ImageData, returns it directly.
-
-    Args:
-        data: Input data (ImageData or RasterStack)
-
-    Returns:
-        ImageData: The last successful item
-
-    Raises:
-        KeyError: If no successful tasks are found in the stack
-    """
-    if isinstance(data, ImageData):
-        return data
-    elif isinstance(data, LazyRasterStack):
-        # Try each key in reverse order until we find one that succeeds
-        for key in reversed(list(data.keys())):
-            try:
-                return data[key]  # Execute this task
-            except KeyError:
-                # This task failed, try the previous one
-                continue
-
-        # If we get here, all tasks failed
-        raise KeyError("No successful tasks found in LazyRasterStack")
-    elif isinstance(data, dict):
-        # Regular RasterStack - get last value
-        return list(data.values())[-1]
-    else:
-        raise ValueError(f"Unsupported data type: {type(data)}")
-
-
-def to_raster_stack(data: Union[ImageData, RasterStack]) -> RasterStack:
-    """Convert ImageData to RasterStack if necessary.
-
-    Args:
-        data: ImageData or RasterStack to convert
-
-    Returns:
-        RasterStack: Always a RasterStack, even if input was a single ImageData
-    """
-    if isinstance(data, ImageData):
-        # Convert single ImageData to a RasterStack with one item
-        # Using "data" as the key for single images
-        return {"data": data}
-    return data
-
-
-class LazyRasterStack(Dict[str, ImageData]):
-    """A RasterStack that lazily loads data when accessed.
-
-    This implementation separates unique key generation from temporal metadata:
-    - Keys are guaranteed unique identifiers
-    - Temporal metadata enables grouping and filtering by datetime
-    - LazyImageRef instances enable cutline mask computation without task execution
+    Keys are datetime objects, ensuring:
+    - Unique identification for each temporal slice
+    - Natural temporal ordering
+    - No string conversion overhead
+    - ImageRef instances enable cutline mask computation without task execution
     """
 
     def __init__(
         self,
         tasks: TaskType,
-        key_fn: Callable[[Dict[str, Any]], str],
-        timestamp_fn: Optional[Callable[[Dict[str, Any]], datetime]] = None,
+        timestamp_fn: Callable[[Dict[str, Any]], datetime],
         allowed_exceptions: Optional[Tuple] = None,
         max_workers: int = MAX_THREADS,
         width: Optional[int] = None,
@@ -357,28 +296,27 @@ class LazyRasterStack(Dict[str, ImageData]):
         dst_crs: Optional[CRS] = None,
         band_names: Optional[List[str]] = None,
     ):
-        """Initialize a LazyRasterStack.
+        """Initialize a RasterStack.
 
         Args:
             tasks: The tasks created by rio_tiler.tasks.create_tasks
-            key_fn: Function that generates unique keys from assets
-            timestamp_fn: Optional function that extracts datetime objects from assets
+            timestamp_fn: Function that extracts datetime objects from assets.
+                         The datetime is used directly as the key.
             allowed_exceptions: Exceptions allowed during task execution
             max_workers: Maximum number of threads for concurrent execution
-            width: Output width in pixels (for LazyImageRef)
-            height: Output height in pixels (for LazyImageRef)
-            bounds: Output bounds as (west, south, east, north) (for LazyImageRef)
-            dst_crs: Target CRS (for LazyImageRef)
-            band_names: List of band names (for LazyImageRef)
+            width: Output width in pixels (for ImageRef)
+            height: Output height in pixels (for ImageRef)
+            bounds: Output bounds as (west, south, east, north) (for ImageRef)
+            dst_crs: Target CRS (for ImageRef)
+            band_names: List of band names (for ImageRef)
         """
         super().__init__()
         self._tasks = tasks
         self._allowed_exceptions = allowed_exceptions or (TileOutsideBounds,)
         self._max_workers = max_workers
-        self._key_fn = key_fn
         self._timestamp_fn = timestamp_fn
 
-        # Output dimensions for LazyImageRef
+        # Output dimensions for ImageRef
         self._width = width
         self._height = height
         self._bounds = bounds
@@ -386,19 +324,17 @@ class LazyRasterStack(Dict[str, ImageData]):
         self._band_names = band_names or []
 
         # Per-key execution cache instead of global execution flag
-        self._data_cache: Dict[str, ImageData] = {}
+        self._data_cache: Dict[datetime, ImageData] = {}
         self._cache_lock = threading.Lock()  # Thread-safe cache access
 
-        # Pre-compute keys and timestamp metadata
-        self._keys: List[str] = []
-        self._key_to_task_index: Dict[str, int] = {}  # Maps keys to task indices
-        self._timestamp_map: Dict[str, datetime] = {}  # Maps keys to datetime objects
-        self._timestamp_groups: Dict[
-            datetime, List[str]
-        ] = {}  # Maps datetime objects to lists of keys
+        # Pre-compute keys (timestamps) in sorted order
+        self._keys: List[datetime] = []
+        self._key_to_task_index: Dict[
+            datetime, int
+        ] = {}  # Maps timestamps to task indices
 
-        # LazyImageRef instances for deferred cutline computation
-        self._image_refs: Dict[str, LazyImageRef] = {}
+        # ImageRef instances for deferred cutline computation
+        self._image_refs: Dict[datetime, ImageRef] = {}
 
         self._compute_metadata()
 
@@ -427,22 +363,22 @@ class LazyRasterStack(Dict[str, ImageData]):
         """List of band names."""
         return self._band_names
 
-    def get_image_ref(self, key: str) -> Optional[LazyImageRef]:
-        """Get the LazyImageRef for a given key.
+    def get_image_ref(self, key: datetime) -> Optional[ImageRef]:
+        """Get the ImageRef for a given timestamp key.
 
         Args:
-            key: The key to look up
+            key: The datetime key to look up
 
         Returns:
-            LazyImageRef if available, None otherwise
+            ImageRef if available, None otherwise
         """
         return self._image_refs.get(key)
 
-    def get_image_refs(self) -> List[Tuple[str, LazyImageRef]]:
-        """Get all LazyImageRef instances in temporal order.
+    def get_image_refs(self) -> List[Tuple[datetime, ImageRef]]:
+        """Get all ImageRef instances in temporal order.
 
         Returns:
-            List of (key, LazyImageRef) tuples in temporal order
+            List of (datetime, ImageRef) tuples in temporal order
         """
         return [
             (key, self._image_refs[key])
@@ -451,27 +387,32 @@ class LazyRasterStack(Dict[str, ImageData]):
         ]
 
     def _compute_metadata(self) -> None:
-        """Compute keys, build timestamp mapping, and create LazyImageRef instances."""
-        for i, (task_fn, asset) in enumerate(self._tasks):
-            key = self._key_fn(asset)
-            self._keys.append(key)
-            self._key_to_task_index[key] = i
+        """Compute keys from timestamps and create ImageRef instances.
 
-            if self._timestamp_fn:
-                timestamp = self._timestamp_fn(asset)
-                self._timestamp_map[key] = timestamp
+        Keys are datetime objects directly, ensuring natural temporal ordering.
+        """
+        # First pass: extract timestamps
+        timestamp_task_pairs: List[Tuple[datetime, int, Dict[str, Any]]] = []
+        for i, (_task_fn, asset) in enumerate(self._tasks):
+            timestamp = self._timestamp_fn(asset)
+            timestamp_task_pairs.append((timestamp, i, asset))
 
-                if timestamp not in self._timestamp_groups:
-                    self._timestamp_groups[timestamp] = []
-                self._timestamp_groups[timestamp].append(key)
+        # Sort by timestamp to ensure temporal ordering
+        timestamp_task_pairs.sort(key=lambda x: x[0])
 
-            # Create LazyImageRef if we have the required dimensions
+        # Second pass: build keys and mappings in sorted order
+        for timestamp, task_index, asset in timestamp_task_pairs:
+            self._keys.append(timestamp)
+            self._key_to_task_index[timestamp] = task_index
+
+            # Create ImageRef if we have the required dimensions
             if (
                 self._width is not None
                 and self._height is not None
                 and self._bounds is not None
             ):
                 geometry = asset.get("geometry") if isinstance(asset, dict) else None
+                task_fn, _ = self._tasks[task_index]
 
                 # Create a closure that captures the task_fn for this specific item
                 def make_task_executor(tf: Any) -> Callable[[], ImageData]:
@@ -483,37 +424,21 @@ class LazyRasterStack(Dict[str, ImageData]):
 
                     return executor
 
-                self._image_refs[key] = LazyImageRef(
-                    _key=key,
-                    _geometry=geometry,
-                    _width=self._width,
-                    _height=self._height,
-                    _bounds=self._bounds,
-                    _crs=self._dst_crs,
-                    _band_names=self._band_names,
-                    _count=len(self._band_names) if self._band_names else 0,
-                    _task_fn=make_task_executor(task_fn),
+                self._image_refs[timestamp] = ImageRef.from_task(
+                    task_fn=make_task_executor(task_fn),
+                    width=self._width,
+                    height=self._height,
+                    bounds=self._bounds,
+                    crs=self._dst_crs,
+                    band_names=self._band_names,
+                    geometry=geometry,
                 )
 
-        # If we have timestamps, sort keys by temporal order
-        if self._timestamp_fn and self._timestamp_map:
-            # Create a list of (timestamp, key) pairs and sort by timestamp
-            timestamp_key_pairs = [
-                (self._timestamp_map[key], key) for key in self._keys
-            ]
-            timestamp_key_pairs.sort(key=lambda x: x[0])  # Sort by timestamp
-            # Update _keys to be in temporal order
-            self._keys = [key for _, key in timestamp_key_pairs]
-
-            # IMPORTANT: The _key_to_task_index mapping is still correct
-            # because it maps keys to their original task indices,
-            # regardless of the order in _keys
-
-    def _execute_task(self, key: str, task_func: Any) -> ImageData:
+    def _execute_task(self, key: datetime, task_func: Any) -> ImageData:
         """Execute a single task and return the result.
 
         Args:
-            key: The key for error reporting
+            key: The datetime key for error reporting
             task_func: The task function or Future to execute
 
         Returns:
@@ -524,7 +449,7 @@ class LazyRasterStack(Dict[str, ImageData]):
         else:
             return task_func()
 
-    def _execute_selected_tasks(self, selected_keys: Set[str]) -> None:
+    def _execute_selected_tasks(self, selected_keys: Set[datetime]) -> None:
         """Execute tasks for the selected keys only with concurrent execution.
 
         Args:
@@ -577,59 +502,51 @@ class LazyRasterStack(Dict[str, ImageData]):
         for data, asset in filter_tasks(
             self._tasks, allowed_exceptions=self._allowed_exceptions
         ):
-            key = self._key_fn(asset)
+            timestamp = self._timestamp_fn(asset)
             with self._cache_lock:
-                self._data_cache[key] = data
+                self._data_cache[timestamp] = data
 
     def timestamps(self) -> List[datetime]:
-        """Return list of unique timestamps in the stack."""
-        return sorted(self._timestamp_groups.keys())
+        """Return list of timestamps in the stack (keys are timestamps)."""
+        return list(self._keys)
 
-    def get_timestamp(self, key: str) -> Optional[datetime]:
-        """Get the timestamp associated with a key."""
-        return self._timestamp_map.get(key)
+    def __repr__(self) -> str:
+        """Safe debug representation that does NOT trigger lazy loading.
 
-    def get_by_timestamp(self, timestamp: datetime) -> Dict[str, ImageData]:
-        """Get all items with the specified timestamp.
-
-        Args:
-            timestamp: datetime object
-
-        Returns:
-            Dictionary mapping keys to ImageData for items with this timestamp
+        Shows metadata about the stack without executing any tasks.
+        This is important for debugging with breakpoints, as VS Code's
+        variable watcher calls __repr__ to display objects.
         """
-        if timestamp not in self._timestamp_groups:
-            return {}
+        num_keys = len(self._keys)
+        num_cached = len(self._data_cache)
 
-        # Execute only tasks for this timestamp
-        timestamp_keys = set(self._timestamp_groups[timestamp])
-        self._execute_selected_tasks(timestamp_keys)
+        # Show a few sample timestamps without loading data
+        sample_keys = self._keys[:3] if self._keys else []
+        keys_preview = ", ".join(k.isoformat() for k in sample_keys)
+        if num_keys > 3:
+            keys_preview += f", ... (+{num_keys - 3} more)"
 
-        return {
-            key: self._data_cache[key]
-            for key in self._timestamp_groups[timestamp]
-            if key in self._data_cache
-        }
+        crs_str = str(self._dst_crs) if self._dst_crs else "None"
+        size_str = (
+            f"{self._width}x{self._height}"
+            if self._width and self._height
+            else "unknown"
+        )
 
-    def groupby_timestamp(self) -> Dict[datetime, Dict[str, ImageData]]:
-        """Group items by timestamp.
+        return (
+            f"RasterStack(items={num_keys}, cached={num_cached}/{num_keys}, "
+            f"size={size_str}, crs={crs_str}, "
+            f"timestamps=[{keys_preview}])"
+        )
 
-        Returns:
-            Dictionary mapping datetime objects to dictionaries of {key: ImageData}
-        """
-        result = {}
-        for timestamp in self._timestamp_groups:
-            result[timestamp] = self.get_by_timestamp(timestamp)
-        return result
-
-    def __getitem__(self, key: str) -> ImageData:
+    def __getitem__(self, key: datetime) -> ImageData:
         """Get an item from the RasterStack, executing the task if necessary."""
         with self._cache_lock:
             if key in self._data_cache:
                 return self._data_cache[key]
 
         if key not in self._key_to_task_index:
-            raise KeyError(f"Key '{key}' not found in LazyRasterStack")
+            raise KeyError(f"Key '{key}' not found in RasterStack")
 
         task_index = self._key_to_task_index[key]
         task_func, asset = self._tasks[task_index]
@@ -683,12 +600,14 @@ class LazyRasterStack(Dict[str, ImageData]):
             ]
 
     @overload
-    def get(self, key: str) -> Optional[ImageData]: ...
+    def get(self, key: datetime) -> Optional[ImageData]: ...
 
     @overload
-    def get(self, key: str, default: T) -> Union[ImageData, T]: ...
+    def get(self, key: datetime, default: T) -> Union[ImageData, T]: ...
 
-    def get(self, key: str, default: Optional[T] = None) -> Union[ImageData, T, None]:
+    def get(
+        self, key: datetime, default: Optional[T] = None
+    ) -> Union[ImageData, T, None]:
         """Get an item from the RasterStack, executing the task if necessary."""
         if key not in self:
             return default
@@ -696,3 +615,96 @@ class LazyRasterStack(Dict[str, ImageData]):
             return self[key]  # Uses lazy execution via __getitem__
         except KeyError:
             return default
+
+    @property
+    def first(self) -> ImageData:
+        """Get first item (in temporal/key order).
+
+        Returns:
+            ImageData: The first item in the stack
+
+        Raises:
+            KeyError: If the stack is empty or first task fails
+        """
+        if not self._keys:
+            raise KeyError("RasterStack is empty")
+
+        # Try each key in order until we find one that succeeds
+        for key in self._keys:
+            try:
+                return self[key]
+            except KeyError:
+                continue
+        raise KeyError("No successful tasks found in RasterStack")
+
+    @property
+    def last(self) -> ImageData:
+        """Get last item (in temporal/key order).
+
+        Returns:
+            ImageData: The last item in the stack
+
+        Raises:
+            KeyError: If the stack is empty or all tasks fail
+        """
+        if not self._keys:
+            raise KeyError("RasterStack is empty")
+
+        # Try each key in reverse order until we find one that succeeds
+        for key in reversed(self._keys):
+            try:
+                return self[key]
+            except KeyError:
+                continue
+        raise KeyError("No successful tasks found in RasterStack")
+
+    @classmethod
+    def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
+        """Create a RasterStack from pre-loaded ImageData instances.
+
+        This wraps existing ImageData in the RasterStack interface for consistency.
+        The images are already loaded, so they are placed directly in the cache
+        and ImageRefs are created as eager refs (already realized).
+
+        Args:
+            images: Dictionary mapping datetime keys to ImageData instances
+            **kwargs: Optional overrides for width, height, bounds, dst_crs, band_names
+
+        Returns:
+            RasterStack: A stack containing the provided images
+
+        Raises:
+            ValueError: If images is empty
+        """
+        if not images:
+            raise ValueError("Cannot create RasterStack from empty images dict")
+
+        # Get first image for dimension parameters
+        first_key = next(iter(images))
+        first_img = images[first_key]
+
+        # Create no-op tasks - they won't be executed since we pre-populate the cache
+        tasks = [(lambda: None, {"datetime": dt}) for dt in images.keys()]
+
+        # Create the instance
+        instance = cls(
+            tasks=tasks,
+            timestamp_fn=lambda asset: asset["datetime"],
+            width=kwargs.get("width", first_img.width),
+            height=kwargs.get("height", first_img.height),
+            bounds=kwargs.get("bounds", first_img.bounds),
+            dst_crs=kwargs.get("dst_crs", first_img.crs),
+            band_names=kwargs.get(
+                "band_names", first_img.band_names if first_img.band_names else []
+            ),
+        )
+
+        # Pre-populate the cache with the provided images
+        instance._data_cache = dict(images)
+
+        # Replace the lazy ImageRefs with eager ones (already realized)
+        instance._image_refs = {
+            dt: ImageRef.from_image(image=img) for dt, img in images.items()
+        }
+
+        return instance

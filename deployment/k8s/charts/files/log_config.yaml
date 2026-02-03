@@ -18,17 +18,22 @@ handlers:
     stream: ext://sys.stdout
 loggers:
   uvicorn.error:
-    level: INFO
+    level: WARN
     handlers:
       - default
     propagate: no
   uvicorn.access:
-    level: INFO
+    level: WARN
     handlers:
       - access
     propagate: no
+  titiler.openeo:
+    level: INFO
+    handlers:
+      - default
+    propagate: no
 root:
-  level: INFO
+  level: WARN
   handlers:
     - default
   propagate: no

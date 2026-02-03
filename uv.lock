@@ -3966,6 +3966,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-vcr" },
+    { name = "shapely" },
     { name = "sqlalchemy" },
 ]
 docs = [
@@ -4014,6 +4015,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-vcr" },
+    { name = "shapely", specifier = ">=2.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
 ]
 docs = [

@@ -4,7 +4,7 @@ import builtins
 
 import numpy
 
-from .data_model import get_first_item, get_last_item
+from .data_model import RasterStack
 from .reduce import apply_pixel_selection
 
 __all__ = [
@@ -227,14 +227,30 @@ def _max(data, ignore_nodata=True, axis=None, keepdims=False):
 
 
 def median(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
+    """Calculate median across the data.
+
+    When used with RasterStack, it uses the efficient streaming approach.
+    """
+    # Handle RasterStack - use apply_pixel_selection for efficiency
+    if isinstance(data, RasterStack):
+        result = apply_pixel_selection(data, pixel_selection="median")
+        return result.first.array
+    elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.median(data, axis=axis, keepdims=keepdims)
 
     return numpy.median(data, axis=axis, keepdims=keepdims)
 
 
 def mean(data, axis=None, keepdims=False):
-    if isinstance(data, numpy.ma.MaskedArray):
+    """Calculate mean across the data.
+
+    When used with RasterStack, it uses the efficient streaming approach.
+    """
+    # Handle RasterStack - use apply_pixel_selection for efficiency
+    if isinstance(data, RasterStack):
+        result = apply_pixel_selection(data, pixel_selection="mean")
+        return result.first.array
+    elif isinstance(data, numpy.ma.MaskedArray):
         return numpy.ma.mean(data, axis=axis, keepdims=keepdims)
 
     return numpy.mean(data, axis=axis, keepdims=keepdims)
@@ -251,9 +267,9 @@ def stdev(data, axis=None, keepdims=False):
     When used with RasterStack, it uses the efficient streaming approach.
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="stdev")
-        return result["data"].array
+        return result.first.array
     return numpy.std(data, axis=axis, keepdims=keepdims, ddof=1)
 
 
@@ -275,9 +291,9 @@ def count(data, condition=None):
         Array with count of valid pixels
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="count")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         # Count non-masked values
         if condition is not None:
@@ -318,36 +334,9 @@ def linear_scale_range(
 
 def first(data):
     """Return the first element of the array."""
-    # Handle RasterStack
-    if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
-        if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
-            timestamps = data.timestamps()
-            if not timestamps:
-                raise ValueError("No timestamps available for first operation")
-
-            # Get the first timestamp and mosaic all images from that timestamp
-            first_timestamp = builtins.min(timestamps)
-            timestamp_group = data.get_by_timestamp(first_timestamp)
-
-            if not timestamp_group:
-                raise ValueError("No data available for first timestamp")
-
-            # If there's only one image in the group, return its first band
-            if len(timestamp_group) == 1:
-                img = next(iter(timestamp_group.values()))
-                return img.array[0]
-
-            # Multiple images - apply pixel selection to create mosaic, then get first band
-            mosaic_result = apply_pixel_selection(
-                timestamp_group, pixel_selection="first"
-            )
-            mosaic_img = next(iter(mosaic_result.values()))
-            return mosaic_img.array[0]
-        else:
-            # Regular RasterStack - use existing logic
-            first_img = get_first_item(data)
-            return first_img.array
+    # Handle RasterStack - use .first property for efficient single-item access
+    if isinstance(data, RasterStack):
+        return data.first.array
     elif isinstance(data, numpy.ndarray):
         return data[0]
     elif isinstance(data, numpy.ma.MaskedArray):
@@ -358,36 +347,9 @@ def first(data):
 
 def last(data):
     """Return the last element of the array."""
-    # Handle RasterStack
-    if isinstance(data, dict):
-        # Check if data has timestamp-based grouping capability (LazyRasterStack)
-        if hasattr(data, "timestamps") and hasattr(data, "get_by_timestamp"):
-            timestamps = data.timestamps()
-            if not timestamps:
-                raise ValueError("No timestamps available for last operation")
-
-            # Get the last timestamp and mosaic all images from that timestamp
-            last_timestamp = builtins.max(timestamps)
-            timestamp_group = data.get_by_timestamp(last_timestamp)
-
-            if not timestamp_group:
-                raise ValueError("No data available for last timestamp")
-
-            # If there's only one image in the group, return its last band
-            if len(timestamp_group) == 1:
-                img = next(iter(timestamp_group.values()))
-                return img.array[-1]
-
-            # Multiple images - apply pixel selection to create mosaic, then get last band
-            mosaic_result = apply_pixel_selection(
-                timestamp_group, pixel_selection="first"
-            )
-            mosaic_img = next(iter(mosaic_result.values()))
-            return mosaic_img.array[-1]
-        else:
-            # Regular RasterStack - use existing logic
-            last_img = get_last_item(data)
-            return last_img.array
+    # Handle RasterStack - use .last property for efficient single-item access
+    if isinstance(data, RasterStack):
+        return data.last.array
     elif isinstance(data, numpy.ndarray):
         return data[-1]
     elif isinstance(data, numpy.ma.MaskedArray):
@@ -399,7 +361,7 @@ def last(data):
 def max(data, ignore_nodata=True):
     """Return the maximum value of the array."""
     # Handle RasterStack
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         # Return a single array with the maximum value for each array items in the stack
         stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
         return _max(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
@@ -414,7 +376,7 @@ def max(data, ignore_nodata=True):
 def min(data, ignore_nodata=True):
     """Return the minimum value of the array."""
     # Handle RasterStack
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         # Return a single array with the minimum value for each array items in the stack
         stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
         return _min(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
@@ -440,9 +402,9 @@ def highestpixel(data):
         Array with the highest pixel values
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="highest")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, return max along first axis (temporal)
         return _max(data, ignore_nodata=True, axis=0)
@@ -464,9 +426,9 @@ def lowestpixel(data):
         Array with the lowest pixel values
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lowest")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, return min along first axis (temporal)
         return _min(data, ignore_nodata=True, axis=0)
@@ -488,9 +450,9 @@ def lastbandlow(data):
         Array with pixel selection based on lowest last band value
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lastbandlow")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, find indices where last band is minimum and select those pixels
         if data.ndim < 2:
@@ -525,9 +487,9 @@ def lastbandhight(data):
         Array with pixel selection based on highest last band value
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="lastbandhight")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ndarray) or isinstance(data, numpy.ma.MaskedArray):
         # For arrays, find indices where last band is maximum and select those pixels
         if data.ndim < 2:
@@ -564,9 +526,9 @@ def firstpixel(data):
         Array with first available pixel values
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         result = apply_pixel_selection(data, pixel_selection="first")
-        return result["data"].array
+        return result.first.array
     elif isinstance(data, numpy.ma.MaskedArray):
         # For masked arrays, iterate through temporal axis and pick first valid
         if data.ndim < 2:

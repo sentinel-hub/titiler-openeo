@@ -246,7 +246,7 @@ def test_resolution_based_dimension_calculation(monkeypatch):
     spatial_extent = BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326")
 
     # Call without explicit width/height to trigger resolution-based calculation
-    loader.load_collection(
+    result = loader.load_collection(
         id="test",
         spatial_extent=spatial_extent,
         width=None,
@@ -255,7 +255,11 @@ def test_resolution_based_dimension_calculation(monkeypatch):
 
     # Check that calculated dimensions are close to expected (1000x1000)
     # Allow some flexibility due to rounding
-    width = captured_params.get("width", 0)
-    height = captured_params.get("height", 0)
+    # With RasterStack, dimensions are stored on the stack itself
+    from titiler.openeo.processes.implementations.data_model import RasterStack
+
+    assert isinstance(result, RasterStack)
+    width = result.width or 0
+    height = result.height or 0
     assert 950 <= width <= 1050, f"Width {width} is not within expected range"
     assert 950 <= height <= 1050, f"Height {height} is not within expected range"

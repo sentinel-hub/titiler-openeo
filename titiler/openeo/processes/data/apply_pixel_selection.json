@@ -1,7 +1,8 @@
 {
     "id": "apply_pixel_selection",
     "summary": "Apply pixel selection on a datacube.",
-    "description": "Apply `Pixel Selection` method on a datacube to create a new datacube",
+    "description": "Apply `Pixel Selection` method on a datacube to create a new datacube.\n\n**DEPRECATED**: This process is deprecated in favor of `reduce_dimension` with `dimension='t'` or `dimension='temporal'`. Use the appropriate reducer function (e.g., `first`, `mean`, `median`) with `reduce_dimension` instead. This process will be removed in a future version.",
+    "deprecated": true,
     "categories": [
         "cubes",
         "aggregate",

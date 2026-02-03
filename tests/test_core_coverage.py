@@ -13,6 +13,7 @@ The tests are organized into logical groups covering:
 Each test is documented to explain what it validates and why it's important.
 """
 
+from datetime import datetime
 from typing import List, Optional, Union
 
 import numpy as np
@@ -26,7 +27,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 from titiler.openeo.auth import User
 from titiler.openeo.errors import ProcessParameterMissing
 from titiler.openeo.processes.implementations.core import process
-from titiler.openeo.processes.implementations.data_model import LazyRasterStack
+from titiler.openeo.processes.implementations.data_model import RasterStack
 
 
 class TestResolvePositionalArgs:
@@ -364,17 +365,17 @@ class TestTypeNameConversions:
     def test_type_to_openeo_name_custom_types(self):
         """Test custom type names are detected.
 
-        Validates: LazyRasterStack → "datacube".
+        Validates: RasterStack → "datacube".
 
         Why important: Custom types should map to appropriate OpenEO concepts.
         """
         from titiler.openeo.processes.implementations.core import _type_to_openeo_name
 
-        # Mock a LazyRasterStack type
-        class LazyRasterStack:
+        # Mock a RasterStack type
+        class RasterStack:
             pass
 
-        assert _type_to_openeo_name(LazyRasterStack) == "datacube"
+        assert _type_to_openeo_name(RasterStack) == "datacube"
 
     def test_type_to_openeo_name_union(self):
         """Test Union type conversion.
@@ -511,7 +512,7 @@ class TestTypeValidation:
 
     Critical validations:
     - None values only allowed for Optional types
-    - Datacubes (dict/LazyRasterStack) not passed to array parameters
+    - Datacubes (dict/RasterStack) not passed to array parameters
     - Proper handling of subscripted generics (Optional[T])
     - Clear error messages with OpenEO type names
     """
@@ -550,11 +551,11 @@ class TestTypeValidation:
             requires_array(data={"a": 1})
 
     def test_validation_lazy_raster_stack_to_array_mismatch(self):
-        """Test LazyRasterStack to array type mismatch detection.
+        """Test RasterStack to array type mismatch detection.
 
-        Validates: LazyRasterStack treated as datacube, not array.
+        Validates: RasterStack treated as datacube, not array.
 
-        Why important: LazyRasterStack is our custom datacube type. It should
+        Why important: RasterStack is our custom datacube type. It should
         be rejected when array is expected, just like dict.
         """
 
@@ -562,7 +563,8 @@ class TestTypeValidation:
         def requires_array(data: List[int]) -> int:
             return len(data)
 
-        mock_stack = LazyRasterStack(tasks={}, key_fn=None)
+        # Create an empty RasterStack (without tasks, but with required timestamp_fn)
+        mock_stack = RasterStack(tasks=[], timestamp_fn=lambda x: datetime.now())
         with pytest.raises(TypeError, match="expected.*List.*got.*datacube"):
             requires_array(data=mock_stack)
 

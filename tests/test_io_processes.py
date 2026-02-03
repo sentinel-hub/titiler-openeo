@@ -1,10 +1,13 @@
 """Tests for I/O process implementations."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from rasterio.errors import RasterioIOError
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.io import (
     SaveResultData,
     load_url,
@@ -39,8 +42,10 @@ def sample_raster_stack(sample_image_data):
     )
     image_data2 = ImageData(data2, band_names=["red", "green", "blue"])
 
-    # Return a RasterStack with two samples
-    return {"2021-01-01": sample_image_data, "2021-01-02": image_data2}
+    # Return a RasterStack with two samples (datetime keys)
+    return RasterStack.from_images(
+        {datetime(2021, 1, 1): sample_image_data, datetime(2021, 1, 2): image_data2}
+    )
 
 
 @pytest.fixture
@@ -87,8 +92,8 @@ def test_load_url_invalid():
 
 def test_save_result_png(sample_image_data):
     """Test saving a single ImageData as PNG."""
-    # Create a single-entry RasterStack
-    single_stack = {"2021-01-01": sample_image_data}
+    # Create a single-entry RasterStack with datetime key
+    single_stack = RasterStack.from_images({datetime(2021, 1, 1): sample_image_data})
 
     # Save as PNG
     result = save_result(data=single_stack, format="png")
@@ -115,8 +120,9 @@ def test_save_result_numpy_array():
 
 def test_save_result_single_image_stack(sample_raster_stack):
     """Test saving a RasterStack with a single image."""
-    # Create a stack with just one image
-    single_stack = {"2021-01-01": list(sample_raster_stack.values())[0]}
+    # Create a stack with just one image using datetime key
+    first_key = next(iter(sample_raster_stack.keys()))
+    single_stack = RasterStack.from_images({first_key: sample_raster_stack[first_key]})
 
     # Save as PNG
     result = save_result(data=single_stack, format="png")

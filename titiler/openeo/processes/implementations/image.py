@@ -1,5 +1,6 @@
 """titiler.openeo.processes.implementations image methods."""
 
+from datetime import datetime
 from typing import Dict, Sequence
 
 import numpy
@@ -52,10 +53,10 @@ def image_indexes(data: RasterStack, indexes: Sequence[int]) -> RasterStack:
         RasterStack with selected indexes
     """
     # Apply to each item in the RasterStack
-    result: Dict[str, ImageData] = {}
+    result: Dict[datetime, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_image_indexes(img_data, indexes)
-    return result
+    return RasterStack.from_images(result)
 
 
 def to_array(
@@ -89,10 +90,10 @@ def color_formula(data: RasterStack, formula: str) -> RasterStack:
         RasterStack with color formula applied
     """
     # Apply to each item in the RasterStack
-    result: Dict[str, ImageData] = {}
+    result: Dict[datetime, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_color_formula(img_data, formula)
-    return result
+    return RasterStack.from_images(result)
 
 
 def get_colormap(name: str) -> ColorMapType:
@@ -116,7 +117,7 @@ def colormap(data: RasterStack, colormap: ColorMapType) -> RasterStack:
         RasterStack with colormap applied
     """
     # Apply to each item in the RasterStack
-    result: Dict[str, ImageData] = {}
+    result: Dict[datetime, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_colormap(img_data, colormap)
-    return result
+    return RasterStack.from_images(result)

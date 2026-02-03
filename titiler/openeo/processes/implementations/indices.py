@@ -1,5 +1,6 @@
 """titiler.openeo.processes indices."""
 
+from datetime import datetime
 from typing import Dict
 
 from .data_model import ImageData, RasterStack
@@ -52,10 +53,10 @@ def ndwi(data: RasterStack, nir: int, swir: int) -> RasterStack:
         RasterStack with NDWI results
     """
     # Apply NDWI to each item in the stack
-    result: Dict[str, ImageData] = {}
+    result: Dict[datetime, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndwi(img_data, nir, swir)
-    return result
+    return RasterStack.from_images(result)
 
 
 def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
@@ -67,10 +68,10 @@ def ndvi(data: RasterStack, nir: int, red: int) -> RasterStack:
         red: Index of the red band (1-based)
 
     Returns:
-        RasterStack (Dict[str, ImageData]) containing NDVI results
+        RasterStack (Dict[datetime, ImageData]) containing NDVI results
     """
     # Apply NDVI to each item in the stack
-    result: Dict[str, ImageData] = {}
+    result: Dict[datetime, ImageData] = {}
     for key, img_data in data.items():
         result[key] = _apply_ndvi(img_data, nir, red)
-    return result
+    return RasterStack.from_images(result)

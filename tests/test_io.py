@@ -1,9 +1,12 @@
 """Test titiler.openeo.processes.implementations.io."""
 
+from datetime import datetime
+
 import numpy
 import pytest
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.io import (
     SaveResultData,
     _handle_json_format,
@@ -50,9 +53,11 @@ def test_handle_raster_geotiff():
         None, ...
     ]  # Shape: (1, 2, 2)
 
+    dt1 = datetime(2023, 1, 1)
+    dt2 = datetime(2023, 1, 2)
     data = {
-        "band1": ImageData(array1),
-        "band2": ImageData(array2),
+        dt1: ImageData(array1),
+        dt2: ImageData(array2),
     }
 
     result = _handle_raster_geotiff(data)
@@ -60,7 +65,7 @@ def test_handle_raster_geotiff():
     assert result.array.shape == (2, 2, 2)  # 2 bands, 2x2 image
     assert (result.array[0] == array1[0]).all()
     assert (result.array[1] == array2[0]).all()
-    assert result.band_names == ["band1", "band2"]
+    assert len(result.band_names) == 2
 
 
 def test_handle_raster_geotiff_validation():
@@ -73,9 +78,11 @@ def test_handle_raster_geotiff_validation():
         None, ...
     ]  # Shape: (1, 2, 3)
 
+    dt1 = datetime(2023, 1, 1)
+    dt2 = datetime(2023, 1, 2)
     data = {
-        "band1": ImageData(array1),
-        "band2": ImageData(array2),
+        dt1: ImageData(array1),
+        dt2: ImageData(array2),
     }
 
     with pytest.raises(ValueError, match="same shape"):
@@ -120,10 +127,14 @@ def test_save_result_geotiff():
     array2 = numpy.array([[5, 6], [7, 8]], dtype=numpy.byte)[
         None, ...
     ]  # Shape: (1, 2, 2)
-    data = {
-        "band1": ImageData(array1),
-        "band2": ImageData(array2),
-    }
+    dt1 = datetime(2023, 1, 1)
+    dt2 = datetime(2023, 1, 2)
+    data = RasterStack.from_images(
+        {
+            dt1: ImageData(array1),
+            dt2: ImageData(array2),
+        }
+    )
 
     result = save_result(data, "gtiff")
     assert isinstance(result, SaveResultData)
@@ -136,7 +147,7 @@ def test_save_result_single_image():
     array = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
         None, ...
     ]  # Shape: (1, 2, 2)
-    data = {"single": ImageData(array)}
+    data = RasterStack.from_images({datetime(2023, 1, 1): ImageData(array)})
 
     result = save_result(data, "png")
     assert isinstance(result, SaveResultData)

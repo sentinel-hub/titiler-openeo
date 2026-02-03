@@ -1,9 +1,12 @@
 """Tests for reduction process implementations."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.reduce import (
     DimensionNotAvailable,
     apply_pixel_selection,
@@ -15,16 +18,17 @@ from titiler.openeo.processes.implementations.reduce import (
 def sample_temporal_stack():
     """Create a sample RasterStack with temporal dimension for testing."""
     # Create multiple dates of single-band data
-    stack = {}
-    for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
+    images = {}
+    for i in range(3):
+        date = datetime(2021, 1, i + 1)
         data = np.ma.array(
             np.ones((1, 10, 10), dtype=np.float32)
             * (i + 1),  # Each date has different value
             mask=np.zeros((1, 10, 10), dtype=bool),
         )
-        stack[date] = ImageData(data, band_names=["band1"])
+        images[date] = ImageData(data, band_names=["band1"])
 
-    return stack
+    return RasterStack.from_images(images)
 
 
 @pytest.fixture
@@ -42,7 +46,9 @@ def sample_spectral_stack():
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
 
-    return {"2021-01-01": ImageData(data, band_names=["red", "green", "blue"])}
+    return RasterStack.from_images(
+        {datetime(2021, 1, 1): ImageData(data, band_names=["red", "green", "blue"])}
+    )
 
 
 def test_reduce_temporal_dimension(sample_temporal_stack):
@@ -63,10 +69,10 @@ def test_reduce_temporal_dimension(sample_temporal_stack):
     )
 
     # Result should be a RasterStack with 1 ImageData
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1
-    assert "reduced" in result
-    img = result["reduced"]
+    assert result.first is not None
+    img = result.first
     assert img.count == 1
     assert img.array.shape == (1, 10, 10)  # Single band with original shape
     assert img.band_names == ["band1"]
@@ -96,12 +102,13 @@ def test_reduce_spectral_dimension(sample_spectral_stack):
     )
 
     # Result should still be a RasterStack but with single-band images
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1
-    assert "2021-01-01" in result
+    # Keys are now datetime objects
+    assert result.first is not None
 
     # Check that each image now has 1 band with mean value of (1+2+3)/3 = 2
-    img = result["2021-01-01"]
+    img = result.first
     assert img.count == 1
     assert np.allclose(img.array.mean(), 2.0)
 
@@ -126,10 +133,10 @@ def test_apply_pixel_selection(sample_temporal_stack):
     result = apply_pixel_selection(data=sample_temporal_stack, pixel_selection="mean")
 
     # Result should be a RasterStack with a single ImageData
-    assert isinstance(result, dict)
+    assert isinstance(result, RasterStack)
     assert len(result) == 1
-    assert "data" in result
-    img = result["data"]
+    assert result.first is not None
+    img = result.first
     assert isinstance(img, ImageData)
     assert img.count == 1
 

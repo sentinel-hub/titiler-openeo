@@ -14,7 +14,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
-from .data_model import LazyRasterStack, RasterStack
+from .data_model import RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
@@ -65,10 +65,9 @@ def load_url(
         assets=["data"],
     )
 
-    # Return a LazyRasterStack that will only execute the tasks when accessed
-    return LazyRasterStack(
+    # Return a RasterStack that will only execute the tasks when accessed
+    return RasterStack(
         tasks=tasks,
-        key_fn=lambda _: "data",  # Single key since it's a single COG
         timestamp_fn=lambda _: datetime.now(),  # Use current time as timestamp
         allowed_exceptions=(),
         # New parameters for truly lazy behavior
@@ -216,11 +215,11 @@ def _handle_json_format(data: Dict, format: str) -> SaveResultData:
     return SaveResultData(data=json_bytes, media_type="application/json")
 
 
-def _handle_raster_geotiff(data: Dict[str, ImageData]) -> ImageData:
+def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     """Handle combining multiple ImageData objects into a single multi-band GeoTIFF.
 
     Args:
-        data: Dictionary mapping band names to ImageData objects
+        data: Dictionary mapping timestamps to ImageData objects
 
     Returns:
         ImageData: Combined multi-band image
@@ -229,7 +228,7 @@ def _handle_raster_geotiff(data: Dict[str, ImageData]) -> ImageData:
         ValueError: If ImageData objects have incompatible properties
     """
     # Get all ImageData objects from the RasterStack
-    # For LazyRasterStack, this will execute all tasks but only when needed for saving
+    # For RasterStack, this will execute all tasks but only when needed for saving
     image_data_list = list(data.values())
 
     # Check if this is a RasterStack with ImageData objects
@@ -310,31 +309,39 @@ def save_result(
     if format.lower() in ["txt", "plain"]:
         return _handle_text_format(data)
 
-    # Handle JSON formats
-    if format.lower() in ["json", "geojson"] and isinstance(data, dict):
-        if data.get("type") == "FeatureCollection":
-            return _save_single_result(data, format, options)
-        return _handle_json_format(data, format)
+    # Handle JSON formats (but not RasterStack)
+    if format.lower() in ["json", "geojson"]:
+        # Check for GeoJSON FeatureCollection (plain dict, not RasterStack)
+        if isinstance(data, dict) and not isinstance(data, RasterStack):
+            plain_dict: Dict[str, Any] = data  # type: ignore[assignment]
+            if plain_dict.get("type") == "FeatureCollection":
+                return _save_single_result(data, format, options)
+            return _handle_json_format(data, format)
 
-    # Handle json for dictionaries structure
-    if format.lower() in ["json", "geojson"] and isinstance(data, dict):
+    # Handle json for dictionaries structure (but not RasterStack)
+    if (
+        format.lower() in ["json", "geojson"]
+        and isinstance(data, dict)
+        and not isinstance(data, RasterStack)
+    ):
         data = json.dumps(data).encode("utf-8")
         return SaveResultData(data=data, media_type="application/json")
 
     # Handle special cases for numpy arrays
     if isinstance(data, (numpy.ndarray, numpy.ma.MaskedArray)):
         # Create a RasterStack with a single ImageData
-        data = {"data": ImageData(data)}
+        data = RasterStack.from_images({datetime.now(): ImageData(data)})
 
     # If data is a RasterStack, handle appropriately
-    if isinstance(data, dict):
+    if isinstance(data, RasterStack):
         # If there is only one item, save it as a single result
         if len(data) == 1:
-            return _save_single_result(list(data.values())[0], format, options)
+            return _save_single_result(data.first, format, options)
 
         # For GeoTIFF format, combine all bands into a single multi-band image
         if format.lower() in ["tiff", "gtiff"]:
             combined_img = _handle_raster_geotiff(data)
             return _save_single_result(combined_img, format, options)
+
     # Otherwise, save as a single result
     return _save_single_result(data, format, options)

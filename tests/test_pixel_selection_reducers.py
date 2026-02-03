@@ -1,9 +1,12 @@
 """Tests for pixel selection reducers in math.py and reduce.py."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.math import (
     count,
     firstpixel,
@@ -15,7 +18,6 @@ from titiler.openeo.processes.implementations.math import (
 )
 from titiler.openeo.processes.implementations.reduce import (
     PIXEL_SELECTION_REDUCERS,
-    _get_pixel_selection_method_name,
     apply_pixel_selection,
 )
 
@@ -39,30 +41,6 @@ class TestPixelSelectionReducersMapping:
         }
         assert set(PIXEL_SELECTION_REDUCERS.keys()) == expected
 
-    def test_get_pixel_selection_method_name_with_valid_reducer(self):
-        """Test _get_pixel_selection_method_name returns correct method name."""
-        # Test with a function that has __name__ in the mapping
-        assert _get_pixel_selection_method_name(stdev) == "stdev"
-        assert _get_pixel_selection_method_name(count) == "count"
-        assert _get_pixel_selection_method_name(highestpixel) == "highest"
-        assert _get_pixel_selection_method_name(lowestpixel) == "lowest"
-        assert _get_pixel_selection_method_name(firstpixel) == "first"
-        assert _get_pixel_selection_method_name(lastbandlow) == "lastbandlow"
-        assert _get_pixel_selection_method_name(lastbandhight) == "lastbandhight"
-
-    def test_get_pixel_selection_method_name_with_unknown_reducer(self):
-        """Test _get_pixel_selection_method_name returns None for unknown reducers."""
-
-        def custom_reducer(data):
-            return data
-
-        assert _get_pixel_selection_method_name(custom_reducer) is None
-
-    def test_get_pixel_selection_method_name_with_no_name(self):
-        """Test _get_pixel_selection_method_name handles functions without __name__."""
-        # Lambda functions have __name__ as '<lambda>'
-        assert _get_pixel_selection_method_name(lambda x: x) is None
-
 
 class TestPixelSelectionReducersWithRasterStack:
     """Tests for pixel selection reducers with RasterStack input."""
@@ -70,21 +48,23 @@ class TestPixelSelectionReducersWithRasterStack:
     @pytest.fixture
     def raster_stack(self):
         """Create a sample RasterStack for testing."""
-        stack = {}
-        for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
+        images = {}
+        for i in range(3):
+            date = datetime(2021, 1, i + 1)
             # Create data where each date has increasing values
             data = np.ma.array(
                 np.ones((1, 10, 10), dtype=np.float32) * (i + 1),
                 mask=np.zeros((1, 10, 10), dtype=bool),
             )
-            stack[date] = ImageData(data, band_names=["band1"])
-        return stack
+            images[date] = ImageData(data, band_names=["band1"])
+        return RasterStack.from_images(images)
 
     @pytest.fixture
     def raster_stack_with_masks(self):
         """Create a RasterStack with partial masking for testing."""
-        stack = {}
-        for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
+        images = {}
+        for i in range(3):
+            date = datetime(2021, 1, i + 1)
             data = np.ones((1, 10, 10), dtype=np.float32) * (i + 1)
             mask = np.zeros((1, 10, 10), dtype=bool)
             # Mask different regions for each date
@@ -93,8 +73,8 @@ class TestPixelSelectionReducersWithRasterStack:
             elif i == 1:
                 mask[:, 5:, :] = True  # Second date: mask right half
             # Third date: no mask
-            stack[date] = ImageData(np.ma.array(data, mask=mask), band_names=["band1"])
-        return stack
+            images[date] = ImageData(np.ma.array(data, mask=mask), band_names=["band1"])
+        return RasterStack.from_images(images)
 
     def test_highestpixel_with_raster_stack(self, raster_stack):
         """Test highestpixel returns highest values from RasterStack."""
@@ -217,10 +197,11 @@ class TestLastBandSelectors:
     @pytest.fixture
     def multiband_stack(self):
         """Create a RasterStack with multi-band images for last band tests."""
-        stack = {}
+        images = {}
         # Create 3 dates with 2-band images
         # The last band value determines which pixel gets selected
-        for i, date in enumerate(["2021-01-01", "2021-01-02", "2021-01-03"]):
+        for i in range(3):
+            date = datetime(2021, 1, i + 1)
             # Band 1: data values, Band 2: decision values
             band1 = np.ones((10, 10), dtype=np.float32) * (i + 1) * 10
             band2 = np.ones((10, 10), dtype=np.float32) * (3 - i)  # 3, 2, 1
@@ -228,8 +209,8 @@ class TestLastBandSelectors:
                 np.stack([band1, band2]),
                 mask=np.zeros((2, 10, 10), dtype=bool),
             )
-            stack[date] = ImageData(data, band_names=["data", "decision"])
-        return stack
+            images[date] = ImageData(data, band_names=["data", "decision"])
+        return RasterStack.from_images(images)
 
     def test_lastbandlow_with_raster_stack(self, multiband_stack):
         """Test lastbandlow selects based on lowest last band value."""
@@ -323,14 +304,15 @@ class TestApplyPixelSelectionMethods:
     @pytest.fixture
     def sample_stack(self):
         """Create a simple RasterStack for testing."""
-        stack = {}
-        for i, date in enumerate(["2021-01-01", "2021-01-02"]):
+        images = {}
+        for i in range(2):
+            date = datetime(2021, 1, i + 1)
             data = np.ma.array(
                 np.ones((1, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((1, 5, 5), dtype=bool),
             )
-            stack[date] = ImageData(data, band_names=["band1"])
-        return stack
+            images[date] = ImageData(data, band_names=["band1"])
+        return RasterStack.from_images(images)
 
     @pytest.mark.parametrize(
         "method",
@@ -339,36 +321,40 @@ class TestApplyPixelSelectionMethods:
     def test_apply_pixel_selection_methods(self, sample_stack, method):
         """Test apply_pixel_selection with various methods."""
         result = apply_pixel_selection(sample_stack, pixel_selection=method)
-        assert isinstance(result, dict)
-        assert "data" in result
-        assert isinstance(result["data"], ImageData)
-        assert result["data"].metadata["pixel_selection_method"] == method
+        assert isinstance(result, RasterStack)
+        assert result.first is not None
+        assert isinstance(result.first, ImageData)
+        assert result.first.metadata["pixel_selection_method"] == method
 
     def test_apply_pixel_selection_lastbandlow(self):
         """Test apply_pixel_selection with lastbandlow method."""
-        stack = {}
-        for i, date in enumerate(["2021-01-01", "2021-01-02"]):
+        images = {}
+        for i in range(2):
+            date = datetime(2021, 1, i + 1)
             # Multi-band data for lastband methods
             data = np.ma.array(
                 np.ones((2, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((2, 5, 5), dtype=bool),
             )
-            stack[date] = ImageData(data, band_names=["band1", "band2"])
+            images[date] = ImageData(data, band_names=["band1", "band2"])
+        stack = RasterStack.from_images(images)
 
         result = apply_pixel_selection(stack, pixel_selection="lastbandlow")
-        assert isinstance(result, dict)
-        assert "data" in result
+        assert isinstance(result, RasterStack)
+        assert result.first is not None
 
     def test_apply_pixel_selection_lastbandhight(self):
         """Test apply_pixel_selection with lastbandhight method."""
-        stack = {}
-        for i, date in enumerate(["2021-01-01", "2021-01-02"]):
+        images = {}
+        for i in range(2):
+            date = datetime(2021, 1, i + 1)
             data = np.ma.array(
                 np.ones((2, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((2, 5, 5), dtype=bool),
             )
-            stack[date] = ImageData(data, band_names=["band1", "band2"])
+            images[date] = ImageData(data, band_names=["band1", "band2"])
+        stack = RasterStack.from_images(images)
 
         result = apply_pixel_selection(stack, pixel_selection="lastbandhight")
-        assert isinstance(result, dict)
-        assert "data" in result
+        assert isinstance(result, RasterStack)
+        assert result.first is not None
