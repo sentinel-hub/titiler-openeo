@@ -28,6 +28,17 @@ class UserProcess(BaseModel):
     links: Optional[List[Dict[str, Any]]] = None
 
 
+class ProcessGraphValidation(BaseModel):
+    """Model for process graph validation endpoint (id is optional)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    process_graph: Dict[str, ProcessGraph] = Field(
+        ..., description="Process graph definition"
+    )
+    parameters: Optional[List] = None
+
+
 class UserProcesses(BaseModel):
     """Collection wrapper for UDP listings."""
 

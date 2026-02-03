@@ -754,7 +754,7 @@ class EndpointsFactory(BaseFactory):
             tags=["Data Processing"],
         )
         def validate_process_graph(
-            body: udp_models.UserProcess,
+            body: udp_models.ProcessGraphValidation,
             user=Depends(self.auth.validate_optional),
         ):
             """Validate a process graph without executing it."""
