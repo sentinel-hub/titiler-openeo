@@ -29,6 +29,8 @@ from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
 
+logger = logging.getLogger(__name__)
+
 
 class Dims(TypedDict):
     """Estimate Dimensions."""
@@ -159,9 +161,34 @@ class SimpleSTACReader(MultiBaseReader):
             ):
                 info["dataset_statistics"] = stats
             else:
-                logging.warning(
+                logger.warning(
                     "Some statistics data in STAC are invalid, they will be ignored."
                 )
+
+            # Extract nodata from raster:bands if present.
+            # This is critical for proper mosaicking: pixels with nodata values
+            # will be masked, allowing subsequent tiles to fill those areas.
+            #
+            # Look for nodata in multiple possible locations:
+            # - nodata (per STAC raster extension v2.0)
+            # - raster:nodata (deprecated but still common in older catalogs)
+            nodata_values = []
+            for b in bands:
+                nodata = b.get("nodata") or b.get("raster:nodata")
+                if nodata is not None:
+                    nodata_values.append(nodata)
+
+            # Only use nodata if all bands have the same value
+            if nodata_values and len(set(nodata_values)) == 1:
+                info["nodata"] = nodata_values[0]
+
+        # Extract nodata from asset level if not found in raster:bands.
+        # Asset-level nodata is common in STAC catalogs like Copernicus Sentinel-2
+        # where each asset (e.g., B04.tif) has a "nodata": 0 field.
+        if "nodata" not in info and not vrt_options:
+            asset_nodata = extras.get("nodata")
+            if asset_nodata is not None:
+                info["nodata"] = asset_nodata
 
         if vrt_options:
             info["url"] = f"vrt://{info['url']}?{vrt_options}"
@@ -191,7 +218,7 @@ class SimpleSTACReader(MultiBaseReader):
         """
         assets = cast_to_sequence(assets)
         if assets and expression:
-            logging.warning(
+            logger.warning(
                 "Both expression and assets passed; expression will overwrite assets parameter."
             )
 
@@ -199,7 +226,7 @@ class SimpleSTACReader(MultiBaseReader):
             assets = self.parse_expression(expression, asset_as_band=asset_as_band)
 
         if not assets and self.default_assets:
-            logging.warning(
+            logger.warning(
                 "No assets/expression passed, defaults to %s", self.default_assets
             )
             assets = self.default_assets
@@ -255,6 +282,38 @@ class SimpleSTACReader(MultiBaseReader):
             return img.apply_expression(expression)
 
         return img
+
+    def _get_reader(self, asset_info: AssetInfo) -> Tuple[Type[BaseReader], Dict]:
+        """Get Asset Reader with nodata from STAC metadata.
+
+        This method is called by MultiBaseReader's part/tile/preview methods
+        to get the reader class and options for each asset. We override it to
+        inject nodata from STAC metadata into the Reader's options.
+
+        The nodata value flows through the system as follows:
+        1. _get_asset_info() extracts nodata from STAC (raster:bands or asset level)
+        2. _get_reader() adds nodata to Reader's options dict
+        3. Reader stores it in self.options
+        4. Reader.part() merges self.options into kwargs: {**self.options, **kwargs}
+        5. rio_tiler.reader.part() receives nodata and uses it for mask creation
+
+        Args:
+            asset_info: Asset information dict containing url, nodata, etc.
+
+        Returns:
+            Tuple of (reader_class, options_dict) where options may include
+            {"options": {"nodata": value}} if nodata was found in STAC metadata.
+        """
+        reader = self.reader
+        options: Dict[str, Any] = {}
+
+        # Pass nodata from STAC metadata to the reader.
+        # This enables proper mask creation for pixels with nodata values.
+        nodata = asset_info.get("nodata")
+        if nodata is not None:
+            options["options"] = {"nodata": nodata}
+
+        return reader, options
 
 
 def _get_asset_crs(
@@ -724,24 +783,64 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     retry_delay = 1.0  # seconds
     retries = 0
 
+    # Extract item info for logging
+    item_id = (
+        item.get("id", "unknown")
+        if isinstance(item, dict)
+        else getattr(item, "id", "unknown")
+    )
+    item_datetime = (
+        item.get("properties", {}).get("datetime", "unknown")
+        if isinstance(item, dict)
+        else getattr(item, "datetime", None) or "unknown"
+    )
+
+    logger.debug(f"Loading STAC item: {item_id} (datetime: {item_datetime})")
+
     while True:
         try:
             with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
-                # Create cutline_mask from item geometry if available
-                if geometry := src_dst.item.geometry:
-                    img = _apply_cutline_mask(img, geometry, kwargs.get("dst_crs"))
+                # IMPORTANT: We intentionally do NOT set cutline_mask on individual tiles.
+                #
+                # Background: rio-tiler's mosaic_reader uses cutline_mask from the FIRST
+                # image to determine when mosaicking is complete (via FirstMethod.is_done).
+                # The is_done check only verifies that pixels INSIDE the first tile's
+                # footprint geometry are filled, ignoring pixels outside that footprint.
+                #
+                # Problem: For multi-tile mosaics where each tile covers only a portion
+                # of the target bbox, this causes early termination after the first tile.
+                # Example: If tile 1 covers 7% of the bbox and has valid data for that 7%,
+                # is_done returns True even though 93% of the mosaic is still empty.
+                #
+                # Solution: By not setting cutline_mask, is_done falls back to checking
+                # if ALL pixels in the mosaic are filled (not numpy.ma.is_masked(mosaic)).
+                # This allows mosaicking to continue until all tiles are processed or
+                # all pixels have valid data.
+                #
+                # The nodata mask (created from the nodata value in STAC metadata)
+                # correctly tracks which pixels have valid data vs nodata, and this
+                # mask is properly combined during mosaicking via FirstMethod.feed().
+
+                logger.debug(
+                    f"  Loaded {item_id}: {img.width}x{img.height}, "
+                    f"bands={img.count}, dtype={img.data.dtype}"
+                )
 
                 return img
         except RasterioIOError as e:
             retries += 1
             if retries >= max_retries:
                 # If we've reached max retries, re-raise the exception
+                logger.error(
+                    f"Failed to load {item_id} after {max_retries} retries: {e}"
+                )
                 raise
             # Log the error and retry after a delay
-            print(
-                f"RasterioIOError encountered: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})"
+            logger.warning(
+                f"RasterioIOError loading {item_id}: {str(e)}. "
+                f"Retrying in {retry_delay}s... (Attempt {retries}/{max_retries})"
             )
             time.sleep(retry_delay)
             # Increase delay for next retry (exponential backoff)
@@ -753,11 +852,20 @@ def _apply_cutline_mask(
     geometry: Dict[str, Any],
     dst_crs: Optional[rasterio.crs.CRS] = None,
 ) -> ImageData:
-    """
-    Apply a cutline mask to an ImageData object based on item geometry.
+    """Apply a cutline mask to an ImageData object based on item geometry.
 
-    This creates a mask from the STAC item's footprint geometry, which can be used
-    to optimize mosaicking by indicating which pixels are outside the valid data area.
+    Creates a mask from a geometry (e.g., STAC item footprint) indicating which
+    pixels fall inside vs outside the geometry.
+
+    IMPORTANT: This function should NOT be used on individual tiles when mosaicking
+    multiple STAC items. mosaic_reader uses cutline_mask from the FIRST image only
+    for early termination, which causes incorrect behavior when tiles partially
+    overlap the target bbox. See the documentation in _reader() for details.
+
+    Use cases where cutline_mask IS appropriate:
+    - Single-tile reads (no mosaicking)
+    - Post-mosaic masking with aggregated geometry
+    - Clipping to a user-provided geometry
 
     Args:
         img: ImageData object to apply the mask to
@@ -765,14 +873,14 @@ def _apply_cutline_mask(
         dst_crs: Target CRS for the geometry transformation
 
     Returns:
-        ImageData object with cutline_mask set
+        ImageData object with cutline_mask set (True = outside geometry)
     """
     # Transform geometry from WGS84 to the destination CRS if needed
     if dst_crs is not None and dst_crs != WGS84_CRS:
         geometry = transform_geom(WGS84_CRS, dst_crs, geometry)
 
     # Create cutline mask using rasterize
-    # The mask is True where data is valid (inside the geometry)
+    # The mask is True where pixels are OUTSIDE the geometry (invalid)
     cutline_mask = rasterize(
         [geometry],
         out_shape=(img.height, img.width),

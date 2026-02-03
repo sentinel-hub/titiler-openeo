@@ -310,16 +310,19 @@ def _reduce_temporal_dimension(
             "and return the resulting array directly."
         )
 
-    # Check if it's array-like (more compliant than checking only numpy.ndarray)
-    try:
-        reduced_array = numpy.asarray(reduced_array)
-    except (TypeError, ValueError) as e:
-        reducer_type = type(reduced_array).__name__
-        raise ValueError(
-            f"The reducer must return an array-like object for temporal dimension reduction, "
-            f"but returned {reducer_type} which cannot be converted to an array. "
-            f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
-        ) from e
+    # Validate array-like output while preserving MaskedArray.
+    # IMPORTANT: We must NOT use numpy.asarray() on MaskedArray because it strips
+    # the mask, losing nodata information. This would break transparency in outputs.
+    if not isinstance(reduced_array, (numpy.ndarray, numpy.ma.MaskedArray)):
+        try:
+            reduced_array = numpy.asarray(reduced_array)
+        except (TypeError, ValueError) as e:
+            reducer_type = type(reduced_array).__name__
+            raise ValueError(
+                f"The reducer must return an array-like object for temporal dimension reduction, "
+                f"but returned {reducer_type} which cannot be converted to an array. "
+                f"Expected array-like data with dimensions like (bands, height, width) or (height, width)."
+            ) from e
 
     # Get metadata from first ImageRef WITHOUT loading pixel data
     image_refs = data.get_image_refs()
@@ -495,16 +498,19 @@ def _reduce_spectral_dimension_stack(
             "and return the resulting array directly."
         )
 
-    # Check if it's array-like
-    try:
-        reduced_data = numpy.asarray(reduced_data)
-    except (TypeError, ValueError) as e:
-        reducer_type = type(reduced_data).__name__
-        raise ValueError(
-            f"The reducer must return an array-like object for spectral dimension reduction, "
-            f"but returned {reducer_type} which cannot be converted to an array. "
-            f"Expected array-like data with reduced spectral bands."
-        ) from e
+    # Validate array-like output while preserving MaskedArray.
+    # IMPORTANT: We must NOT use numpy.asarray() on MaskedArray because it strips
+    # the mask, losing nodata information. This would break transparency in outputs.
+    if not isinstance(reduced_data, (numpy.ndarray, numpy.ma.MaskedArray)):
+        try:
+            reduced_data = numpy.asarray(reduced_data)
+        except (TypeError, ValueError) as e:
+            reducer_type = type(reduced_data).__name__
+            raise ValueError(
+                f"The reducer must return an array-like object for spectral dimension reduction, "
+                f"but returned {reducer_type} which cannot be converted to an array. "
+                f"Expected array-like data with reduced spectral bands."
+            ) from e
 
     # Transform the result back to (time, ...) format for splitting into time slices
     final_data = _reshape_reduced_spectral_data(reduced_data, len(images))

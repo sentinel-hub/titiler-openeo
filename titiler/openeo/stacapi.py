@@ -760,20 +760,25 @@ class LoadCollection:
             """Create a closure that loads data for a date group."""
 
             def task():
+                # Build kwargs for mosaic_reader
+                mosaic_kwargs = {
+                    "threads": 0,
+                    "bounds_crs": bounds_crs,
+                    "assets": bands,
+                    "dst_crs": output_crs,
+                    "width": int(width) if width else width,
+                    "height": int(height) if height else height,
+                    "buffer": float(tile_buffer)
+                    if tile_buffer is not None
+                    else tile_buffer,
+                    "pixel_selection": PixelSelectionMethod["first"].value(),
+                }
+
                 img, _ = mosaic_reader(
                     date_items,
                     _reader,
                     bbox,
-                    threads=0,
-                    bounds_crs=bounds_crs,
-                    assets=bands,
-                    dst_crs=output_crs,
-                    width=int(width) if width else width,
-                    height=int(height) if height else height,
-                    buffer=float(tile_buffer)
-                    if tile_buffer is not None
-                    else tile_buffer,
-                    pixel_selection=PixelSelectionMethod["first"].value(),
+                    **mosaic_kwargs,
                 )
                 return img
 
