@@ -18,6 +18,7 @@ from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
+from rasterio.warp import transform_bounds
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.mosaic.methods import PixelSelectionMethod
@@ -667,8 +668,22 @@ class LoadCollection:
         height: Optional[int] = 1024,
         tile_buffer: Optional[float] = None,
         named_parameters: Optional[dict] = None,
+        target_crs: Optional[Union[int, str]] = None,
     ) -> RasterStack:
-        """Load Collection."""
+        """Load Collection.
+
+        Args:
+            id: Collection ID
+            spatial_extent: Bounding box for the output (coordinates in its own CRS)
+            temporal_extent: Temporal filter
+            bands: Band names to load
+            properties: Metadata filters
+            width: Output width in pixels
+            height: Output height in pixels
+            tile_buffer: Tile overlap buffer
+            named_parameters: Named parameters for process graph evaluation
+            target_crs: Target CRS for output. If None, uses native CRS from source images.
+        """
         items = self._get_items(
             id,
             spatial_extent=spatial_extent,
@@ -703,14 +718,24 @@ class LoadCollection:
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height
+            items, spatial_extent, bands, width, height, target_crs=target_crs
         )
 
         # Extract values from the result
         width = dimensions["width"]
         height = dimensions["height"]
         bbox = dimensions["bbox"]
-        crs = dimensions["crs"]
+        bounds_crs = dimensions["bounds_crs"]
+        output_crs = dimensions["crs"]
+
+        # Reproject bbox from bounds_crs to output_crs for the RasterStack bounds
+        # This ensures the output GeoTIFF has coordinates in the correct CRS
+        if bounds_crs != output_crs:
+            output_bbox = list(
+                transform_bounds(bounds_crs, output_crs, *bbox, densify_pts=21)
+            )
+        else:
+            output_bbox = bbox
 
         # Group items by date
         items_by_date: dict[str, list[Item]] = {}
@@ -725,7 +750,8 @@ class LoadCollection:
         def make_mosaic_task(
             date_items: list[Item],
             bbox: List[float],
-            crs: Any,
+            bounds_crs: Any,
+            output_crs: Any,
             bands: Optional[list[str]],
             width: int,
             height: int,
@@ -739,9 +765,9 @@ class LoadCollection:
                     _reader,
                     bbox,
                     threads=0,
-                    bounds_crs=crs,
+                    bounds_crs=bounds_crs,
                     assets=bands,
-                    dst_crs=crs,
+                    dst_crs=output_crs,
                     width=int(width) if width else width,
                     height=int(height) if height else height,
                     buffer=float(tile_buffer)
@@ -757,7 +783,14 @@ class LoadCollection:
         tasks = []
         for date, date_items in items_by_date.items():
             task_fn = make_mosaic_task(
-                date_items, bbox, crs, bands, width, height, tile_buffer
+                date_items,
+                bbox,
+                bounds_crs,
+                output_crs,
+                bands,
+                width,
+                height,
+                tile_buffer,
             )
             # Collect all geometries from items for cutline mask computation (union of footprints)
             geometries = [
@@ -779,8 +812,8 @@ class LoadCollection:
             timestamp_fn=lambda asset: asset["datetime"],
             width=int(width) if width else None,
             height=int(height) if height else None,
-            bounds=bbox,
-            dst_crs=crs,
+            bounds=output_bbox,
+            dst_crs=output_crs,
             band_names=bands if bands else [],
         )
 
@@ -845,6 +878,7 @@ class LoadCollection:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
         # Estimate dimensions based on items and spatial extent
+        # Note: load_collection_and_reduce doesn't support target_crs, uses bbox CRS
         dimensions = _estimate_output_dimensions(
             items, spatial_extent, bands, width, height
         )
@@ -853,15 +887,16 @@ class LoadCollection:
         width = dimensions["width"]
         height = dimensions["height"]
         bbox = dimensions["bbox"]
-        crs = dimensions["crs"]
+        bounds_crs = dimensions["bounds_crs"]
+        output_crs = dimensions["crs"]
 
         img, _ = mosaic_reader(
             items,
             _reader,
             bbox,
-            bounds_crs=crs,
+            bounds_crs=bounds_crs,
             assets=bands,
-            dst_crs=crs,
+            dst_crs=output_crs,
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
@@ -1156,14 +1191,15 @@ class LoadStac:
         width = dimensions["width"]
         height = dimensions["height"]
         bbox = dimensions["bbox"]
-        crs = dimensions["crs"]
+        bounds_crs = dimensions["bounds_crs"]
+        output_crs = dimensions["crs"]
 
         img, _ = mosaic_reader(
             items,
             _reader,
             bbox,
-            bounds_crs=crs,
-            dst_crs=crs,
+            bounds_crs=bounds_crs,
+            dst_crs=output_crs,
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
