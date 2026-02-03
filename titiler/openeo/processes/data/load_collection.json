@@ -227,6 +227,35 @@
             },
             "default": 0,
             "optional": true
+        },
+        {
+            "name": "target_crs",
+            "description": "The target coordinate reference system (CRS) for the output data cube. If not specified (`null`), the native CRS of the source images is preserved. This allows working with data in its original coordinate system, which is important when applying processes that depend on resolution (e.g., `resample_spatial` with meter-based resolution).\n\nCan be specified as an EPSG code (integer) or WKT2 string. For tile-based services (XYZ tiles), this is automatically set to the tile matrix set CRS.",
+            "schema": [
+                {
+                    "title": "EPSG Code",
+                    "type": "integer",
+                    "subtype": "epsg-code",
+                    "minimum": 1000,
+                    "examples": [
+                        32632,
+                        3857,
+                        4326
+                    ]
+                },
+                {
+                    "title": "WKT2",
+                    "type": "string",
+                    "subtype": "wkt2-definition"
+                },
+                {
+                    "title": "Native CRS",
+                    "description": "Use the native CRS of the source images.",
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "optional": true
         }
     ],
     "returns": {

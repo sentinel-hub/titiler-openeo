@@ -35,6 +35,7 @@ class Dims(TypedDict):
 
     width: int
     height: int
+    bounds_crs: rasterio.crs.CRS
     crs: rasterio.crs.CRS
     bbox: List[float]
 
@@ -464,14 +465,70 @@ def _check_pixel_limit(
         )
 
 
+def _get_native_crs_from_item(
+    item: pystac.Item,
+    reader_crs: Optional[rasterio.crs.CRS],
+) -> Optional[rasterio.crs.CRS]:
+    """Extract native CRS from a STAC item.
+
+    Tries multiple sources in order:
+    1. Reader CRS (if non-WGS84, from full projection info)
+    2. Item-level proj:epsg via ProjectionExtension
+    3. First asset's proj:epsg via ProjectionExtension
+
+    Args:
+        item: STAC item
+        reader_crs: CRS from SimpleSTACReader (may be WGS84 if no full proj info)
+
+    Returns:
+        Native CRS or None if not found
+    """
+    # First check if reader has non-WGS84 CRS (from full projection info)
+    if reader_crs and reader_crs != WGS84_CRS:
+        return reader_crs
+
+    # Then check item-level proj:epsg via ProjectionExtension
+    if ProjectionExtension.has_extension(item):
+        proj_ext = ProjectionExtension.ext(item)
+        if proj_ext.epsg:
+            return rasterio.crs.CRS.from_epsg(proj_ext.epsg)
+        if proj_ext.crs_string:
+            return rasterio.crs.CRS.from_string(proj_ext.crs_string)
+
+    # Finally check first asset's proj:epsg via ProjectionExtension
+    if ProjectionExtension.has_extension(item):
+        for asset in item.assets.values():
+            asset_proj = ProjectionExtension.ext(asset)
+            if asset_proj.epsg:
+                return rasterio.crs.CRS.from_epsg(asset_proj.epsg)
+            if asset_proj.crs_string:
+                return rasterio.crs.CRS.from_string(asset_proj.crs_string)
+
+    return None
+
+
 def _get_target_crs_bbox(
     items: List[pystac.Item],
     spatial_extent: Optional[BoundingBox],
-) -> Tuple[rasterio.crs.CRS, List[float]]:
-    """Get target CRS and bbox from items and spatial extent."""
-    target_crs = (
+    target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
+) -> Tuple[rasterio.crs.CRS, rasterio.crs.CRS, List[float]]:
+    """Get bounds CRS, target CRS, and bbox from items and spatial extent.
+
+    Args:
+        items: List of STAC items
+        spatial_extent: Optional bounding box for the output
+        target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
+
+    Returns:
+        Tuple of (bounds_crs, target_crs, bbox) where:
+            - bounds_crs: CRS of the input bounding box coordinates
+            - target_crs: CRS for the output data
+            - bbox: Bounding box as [west, south, east, north]
+    """
+    # bounds_crs is always from spatial_extent or WGS84
+    bounds_crs = (
         rasterio.crs.CRS.from_user_input(spatial_extent.crs)
-        if spatial_extent
+        if spatial_extent and spatial_extent.crs
         else WGS84_CRS
     )
 
@@ -486,7 +543,10 @@ def _get_target_crs_bbox(
         else []
     )
 
-    # Process each item to update bbox
+    # Determine the native CRS from items (for when target_crs is None)
+    native_crs: Optional[rasterio.crs.CRS] = None
+
+    # Process each item to update bbox and find native CRS
     for item in items:
         with SimpleSTACReader(item) as src_dst:
             item_bbox = src_dst.bounds
@@ -503,13 +563,30 @@ def _get_target_crs_bbox(
                             max(target_bbox[3], item_bbox[3]),  # north
                         ]
 
-                    if target_crs == WGS84_CRS:  # Only update if still default
-                        target_crs = src_dst.crs
+            # Capture native CRS from first item
+            if native_crs is None:
+                native_crs = _get_native_crs_from_item(item, src_dst.crs)
 
     if not target_bbox:
         raise ValueError("No valid bounding box found in items")
 
-    return target_crs, target_bbox
+    # Determine output CRS
+    if target_crs is not None:
+        # User explicitly specified target CRS
+        if isinstance(target_crs, rasterio.crs.CRS):
+            output_crs = target_crs
+        elif isinstance(target_crs, int):
+            output_crs = rasterio.crs.CRS.from_epsg(target_crs)
+        else:
+            output_crs = rasterio.crs.CRS.from_user_input(target_crs)
+    elif native_crs is not None:
+        # Use native CRS from items
+        output_crs = native_crs
+    else:
+        # Fallback to bounds CRS
+        output_crs = bounds_crs
+
+    return bounds_crs, output_crs, target_bbox
 
 
 def _get_cube_resolutions(
@@ -565,6 +642,7 @@ def _estimate_output_dimensions(
     width: Optional[int] = None,
     height: Optional[int] = None,
     check_max_pixels: bool = True,
+    target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -576,19 +654,23 @@ def _estimate_output_dimensions(
         width: Optional user-specified width
         height: Optional user-specified height
         check_max_pixels: Whether to check pixel count limit
+        target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
 
     Returns:
         Dictionary containing:
             - width: Estimated or specified width
             - height: Estimated or specified height
-            - crs: Target CRS to use
+            - bounds_crs: CRS of the input bounding box
+            - crs: Target CRS to use for output
             - bbox: Bounding box as a list [west, south, east, north]
     """
-    # Get target CRS and bbox
-    target_crs, target_bbox = _get_target_crs_bbox(items, spatial_extent)
+    # Get bounds CRS, target CRS, and bbox
+    bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
+        items, spatial_extent, target_crs
+    )
 
     # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(items, target_crs, target_bbox, bands)
+    cube_resolutions = _get_cube_resolutions(items, output_crs, target_bbox, bands)
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -620,7 +702,8 @@ def _estimate_output_dimensions(
     return Dims(
         width=width,  # type: ignore
         height=height,  # type: ignore
-        crs=target_crs,
+        bounds_crs=bounds_crs,
+        crs=output_crs,
         bbox=target_bbox,
     )
 

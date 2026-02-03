@@ -26,6 +26,74 @@ The backend intelligently handles resolution and dimensions using these key prin
    - Cropping adjusts resolution proportionally
    - CRS reprojection accounts for resolution changes
 
+### CRS Management and the `target_crs` Parameter
+
+openEO by TiTiler is designed primarily for **tiling applications**, where data needs to be served efficiently through XYZ tile endpoints. This context strongly influences how Coordinate Reference Systems (CRS) are handled.
+
+#### Tile-Centric CRS Design
+
+When serving tiles, the output CRS is determined by the Tile Matrix Set (TMS) being used—typically Web Mercator (EPSG:3857) for web mapping. This means:
+
+- **XYZ Tile Endpoints**: Always reproject data to match the TMS CRS automatically
+- **Process Graph Endpoints**: Can preserve native CRS or use explicit `target_crs`
+- **Resolution Units**: Match the CRS being used (meters for UTM/Web Mercator, degrees for EPSG:4326)
+
+#### The `target_crs` Parameter
+
+The `load_collection` process accepts a `target_crs` parameter that controls the output CRS independently of the bounding box CRS:
+
+| `target_crs` Value | Behavior |
+|-------------------|----------|
+| `null` (default) | Preserve the native CRS from the source images |
+| EPSG code (e.g., `32632`) | Reproject output to that CRS |
+| WKT2 string | Reproject output to the specified CRS |
+
+**Important distinction**: The `spatial_extent` defines **where** to load data (bbox coordinates), while `target_crs` defines **what CRS** the output should be in:
+
+```json
+{
+  "process_id": "load_collection",
+  "arguments": {
+    "id": "sentinel-2-l2a",
+    "spatial_extent": {
+      "west": 10.0,
+      "east": 11.0,
+      "south": 45.0,
+      "north": 46.0,
+      "crs": 4326
+    },
+    "target_crs": null
+  }
+}
+```
+
+In this example:
+
+- The bbox is interpreted in EPSG:4326 (lat/lon degrees)
+- The output preserves the native CRS of the source data (e.g., UTM zone 32N for Sentinel-2)
+
+#### Resolution and CRS Interaction
+
+When specifying resolution in meters (e.g., `resample_spatial` with `resolution: 100`), the CRS must be in a projected coordinate system where units are meters:
+
+| CRS Type | Resolution Interpretation |
+|----------|--------------------------|
+| UTM (e.g., EPSG:32632) | 100 = 100 meters |
+| Web Mercator (EPSG:3857) | 100 = ~100 meters (with distortion at higher latitudes) |
+| WGS84 (EPSG:4326) | 100 = 100 degrees (incorrect for most use cases!) |
+
+**Best Practice**: When using `resample_spatial` with meter-based resolution, ensure `target_crs` is set to a projected CRS or left as `null` to preserve the native projected CRS of the source data.
+
+#### XYZ Tile Endpoint Behavior
+
+The XYZ tile endpoint automatically sets `target_crs` to match the Tile Matrix Set's CRS:
+
+```
+GET /xyz/{z}/{x}/{y}.png?process=...
+```
+
+This ensures tiles are served in the correct projection regardless of what `target_crs` is specified in the process graph. The tile endpoint overrides `target_crs` with `tms.crs` (typically Web Mercator).
+
 ### Raster Data Model
 
 The backend uses three primary data structures for efficient processing:

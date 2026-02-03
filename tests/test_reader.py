@@ -318,12 +318,14 @@ def test_multiple_items_resolution(complex_stac_items):
     for asset in item2.assets.values():
         asset.extra_fields["proj:epsg"] = 32632
 
+    # Explicitly request web mercator output (matches the old behavior)
     result = _estimate_output_dimensions(
         [item1, item2],
         extent,
         ["B02"],  # Same band from different UTM zones
         width=None,
         height=None,
+        target_crs=3857,  # Explicit target CRS
     )
 
     # Since both items have same resolution, output should maintain it
@@ -415,7 +417,8 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
         height=None,
         check_max_pixels=False,  # Disable limit for this test
     )
-    assert result["crs"].to_epsg() == 4326  # No spatial extent, default to EPSG:4326
+    # No spatial extent, uses native CRS from item (UTM 32631)
+    assert result["crs"].to_epsg() == 32631
 
     # Test combining different resolution bands
     result = _estimate_output_dimensions(
@@ -430,7 +433,7 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
     assert result["width"] > 100  # Should be higher than lowres dimensions
     assert result["height"] > 100
 
-    # Test combining bands from different items
+    # Test combining bands from different items with explicit target_crs
     result = _estimate_output_dimensions(
         complex_stac_items,  # Both items
         mixed_extent,
@@ -438,8 +441,238 @@ def test_estimate_output_dimensions(sample_stac_item, complex_stac_items):
         width=None,
         height=None,
         check_max_pixels=False,  # Disable limit for this test
+        target_crs=4326,  # Explicitly request WGS84 output
     )
-    # Should handle mixed CRS and resolutions properly
-    assert result["crs"].to_epsg() == 4326  # Target CRS from extent
+    # Should use explicitly specified target CRS
+    assert result["crs"].to_epsg() == 4326
     assert result["width"] > 0
     assert result["height"] > 0
+
+
+def test_target_crs_parameter(complex_stac_items):
+    """Test target_crs parameter behavior in _estimate_output_dimensions."""
+    # Create extent in WGS84
+    extent = BoundingBox(
+        crs="EPSG:4326",
+        west=0,
+        south=40,
+        east=6,
+        north=46,
+    )
+
+    # Create an item with full projection info at item level
+    item_with_proj = Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+            ],
+            "id": "utm-item",
+            "bbox": [0, 40, 6, 46],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                "proj:epsg": 32631,
+                "proj:shape": [10980, 10980],
+                "proj:transform": [10, 0, 243900, 0, -10, 5098424, 0, 0, 1],
+            },
+            "assets": {
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "proj:epsg": 32631,
+                    "proj:shape": [10980, 10980],
+                    "proj:transform": [10, 0, 243900, 0, -10, 5098424, 0, 0, 1],
+                },
+            },
+        }
+    )
+
+    # Test 1: target_crs=None should use native CRS from first item (UTM 32631)
+    result = _estimate_output_dimensions(
+        [item_with_proj],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=None,  # Should use native CRS
+    )
+    # Native CRS of first item is UTM 32631
+    assert result["crs"].to_epsg() == 32631
+    # bounds_crs should be the bbox CRS (4326)
+    assert result["bounds_crs"].to_epsg() == 4326
+
+    # Test 2: Explicit target_crs should override native CRS
+    result = _estimate_output_dimensions(
+        [item_with_proj],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=3857,  # Request Web Mercator
+    )
+    assert result["crs"].to_epsg() == 3857
+    assert result["bounds_crs"].to_epsg() == 4326
+
+    # Test 3: target_crs as WKT string
+    result = _estimate_output_dimensions(
+        [item_with_proj],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs="EPSG:32632",  # UTM zone 32N as string
+    )
+    assert result["crs"].to_epsg() == 32632
+
+    # Test 4: No spatial_extent, target_crs=None should use native CRS
+    result = _estimate_output_dimensions(
+        [item_with_proj],
+        None,  # No spatial extent
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=None,
+    )
+    # Should use native CRS from items
+    assert result["crs"].to_epsg() == 32631
+
+
+def test_target_crs_with_resolution(complex_stac_items):
+    """Test that target_crs properly affects resolution calculations."""
+    # Create a small extent in UTM meters (roughly 10km x 10km)
+    extent = BoundingBox(
+        crs="EPSG:32631",
+        west=500000,
+        south=4500000,
+        east=510000,
+        north=4510000,
+    )
+
+    # Test with native CRS (UTM) - resolution should be reasonable
+    result = _estimate_output_dimensions(
+        [complex_stac_items[0]],
+        extent,
+        ["B02"],
+        width=None,  # Let it calculate from resolution
+        height=None,
+        check_max_pixels=False,
+        target_crs=32631,  # Keep in UTM
+    )
+    # 10km / 10m resolution = ~1000 pixels
+    assert 500 <= result["width"] <= 2000
+    assert 500 <= result["height"] <= 2000
+    assert result["crs"].to_epsg() == 32631
+
+
+def test_target_crs_from_item_properties():
+    """Test that native CRS is detected from item properties when proj:transform/shape are missing.
+
+    This covers the Earth Search case where items have proj:epsg but not full projection info.
+    """
+    extent = BoundingBox(
+        crs="EPSG:4326",
+        west=0,
+        south=40,
+        east=6,
+        north=46,
+    )
+
+    # Item with only proj:epsg at item level (no transform/shape)
+    # This is how Earth Search Sentinel-2 items typically look
+    item_with_epsg_only = Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+            ],
+            "id": "earthsearch-style-item",
+            "bbox": [0, 40, 6, 46],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                "proj:epsg": 32631,  # Only EPSG, no shape/transform
+            },
+            "assets": {
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "proj:epsg": 32631,
+                    "proj:shape": [10980, 10980],
+                    "proj:transform": [10, 0, 243900, 0, -10, 5098424, 0, 0, 1],
+                },
+            },
+        }
+    )
+
+    # Test: target_crs=None should detect native CRS from item properties
+    result = _estimate_output_dimensions(
+        [item_with_epsg_only],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=None,
+    )
+    # Should detect UTM 32631 from item properties
+    assert result["crs"].to_epsg() == 32631
+    assert result["bounds_crs"].to_epsg() == 4326
+
+
+def test_target_crs_from_asset_properties():
+    """Test that native CRS is detected from asset properties as fallback."""
+    extent = BoundingBox(
+        crs="EPSG:4326",
+        west=0,
+        south=40,
+        east=6,
+        north=46,
+    )
+
+    # Item with proj:epsg only at asset level (not in item properties)
+    item_with_asset_epsg = Item.from_dict(
+        {
+            "type": "Feature",
+            "stac_version": "1.0.0",
+            "stac_extensions": [
+                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+            ],
+            "id": "asset-crs-item",
+            "bbox": [0, 40, 6, 46],
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 40], [6, 40], [6, 46], [0, 46], [0, 40]]],
+            },
+            "properties": {
+                "datetime": "2025-01-01T00:00:00Z",
+                # No proj:epsg at item level
+            },
+            "assets": {
+                "B02": {
+                    "href": "https://example.com/B02.tif",
+                    "proj:epsg": 32632,  # CRS only at asset level
+                    "proj:shape": [10980, 10980],
+                    "proj:transform": [10, 0, 243900, 0, -10, 5098424, 0, 0, 1],
+                },
+            },
+        }
+    )
+
+    # Test: target_crs=None should detect native CRS from asset properties
+    result = _estimate_output_dimensions(
+        [item_with_asset_epsg],
+        extent,
+        ["B02"],
+        width=1024,
+        height=1024,
+        target_crs=None,
+    )
+    # Should detect UTM 32632 from asset properties
+    assert result["crs"].to_epsg() == 32632
+    assert result["bounds_crs"].to_epsg() == 4326
