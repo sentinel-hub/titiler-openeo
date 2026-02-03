@@ -760,6 +760,10 @@ class LoadCollection:
             """Create a closure that loads data for a date group."""
 
             def task():
+                # Note: We don't pre-set cutline_mask because rio-tiler's mosaic_reader
+                # unconditionally overwrites pixel_selection.cutline_mask from the first
+                # image. Instead, _reader returns images without cutline_mask, so
+                # mosaic_reader uses the "fill entire bbox" logic for early termination.
                 img, _ = mosaic_reader(
                     date_items,
                     _reader,
@@ -890,6 +894,10 @@ class LoadCollection:
         bounds_crs = dimensions["bounds_crs"]
         output_crs = dimensions["crs"]
 
+        # Note: We don't pre-set cutline_mask because rio-tiler's mosaic_reader
+        # unconditionally overwrites pixel_selection.cutline_mask from the first
+        # image. Instead, _reader returns images without cutline_mask, so
+        # mosaic_reader uses the "fill entire bbox" logic for early termination.
         img, _ = mosaic_reader(
             items,
             _reader,
