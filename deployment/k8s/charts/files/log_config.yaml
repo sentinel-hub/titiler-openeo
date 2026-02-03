@@ -27,6 +27,11 @@ loggers:
     handlers:
       - access
     propagate: no
+  titiler.openeo:
+    level: INFO
+    handlers:
+      - default
+    propagate: no
 root:
   level: INFO
   handlers:

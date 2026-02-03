@@ -42,8 +42,13 @@ loggers:
     handlers:
       - default
     propagate: yes
+  titiler.openeo:
+    level: INFO
+    handlers:
+      - default
+    propagate: no
 root:
-  level: DEBUG
+  level: INFO
   handlers:
     - default
   propagate: no
