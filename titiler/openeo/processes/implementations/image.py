@@ -35,7 +35,7 @@ def _apply_image_indexes(data: ImageData, indexes: Sequence[int]) -> ImageData:
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_names=[data.band_names[ix - 1] for ix in indexes],
+        band_descriptions=[data.band_descriptions[ix - 1] for ix in indexes],
         metadata=data.metadata,
         dataset_statistics=stats,
         cutline_mask=data.cutline_mask,

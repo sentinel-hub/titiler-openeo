@@ -21,7 +21,7 @@ def sample_raster_stack():
     )
     img1 = ImageData(
         data1,
-        band_names=["red", "green", "blue"],
+        band_descriptions=["red", "green", "blue"],
         crs=CRS.from_epsg(4326),  # WGS84
         bounds=(-180, -90, 180, 90),  # World bounds
     )
@@ -33,7 +33,7 @@ def sample_raster_stack():
     )
     img2 = ImageData(
         data2,
-        band_names=["red", "green", "blue"],
+        band_descriptions=["red", "green", "blue"],
         crs=CRS.from_epsg(4326),  # WGS84
         bounds=(-180, -90, 180, 90),  # World bounds
     )
@@ -97,7 +97,7 @@ def test_resample_spatial_method_validation():
     )
     img = ImageData(
         data,
-        band_names=["band1"],
+        band_descriptions=["band1"],
         crs=CRS.from_epsg(4326),
         bounds=(0, 0, 1, 1),
     )

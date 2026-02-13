@@ -155,7 +155,7 @@ def test_first_last_temporal_behavior():
             np.ones((3, 10, 10), dtype=np.float32) * (i + 1),
             mask=np.zeros((3, 10, 10), dtype=bool),
         )
-        images[date] = ImageData(data, band_names=["red", "green", "blue"])
+        images[date] = ImageData(data, band_descriptions=["red", "green", "blue"])
 
     # Convert to RasterStack
     stack = RasterStack.from_images(images)

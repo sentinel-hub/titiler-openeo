@@ -138,7 +138,7 @@ def _create_pixel_selection_result(
         assets=assets_used,
         crs=crs,
         bounds=bounds,
-        band_names=band_names if band_names is not None else [],
+        band_descriptions=band_names if band_names is not None else [],
         metadata={"pixel_selection_method": pixel_selection},
     )
     # Use the first asset's datetime as the result key
@@ -335,7 +335,7 @@ def _reduce_temporal_dimension(
         assets=[first_key],
         crs=first_ref.crs,
         bounds=first_ref.bounds,
-        band_names=first_ref.band_names,
+        band_descriptions=first_ref.band_names,
         metadata={
             "reduced_dimension": "temporal",
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
@@ -455,7 +455,9 @@ def _reduce_spectral_dimension_stack(
                 {
                     "crs": img.crs,
                     "bounds": img.bounds,
-                    "band_names": img.band_names if img.band_names is not None else [],
+                    "band_descriptions": img.band_descriptions
+                    if img.band_descriptions is not None
+                    else [],
                     "assets": [key],
                 }
             )
@@ -532,17 +534,17 @@ def _reduce_spectral_dimension_stack(
         output_band_names = []
         if (
             num_output_bands > 0
-            and meta["band_names"]
-            and len(meta["band_names"]) == num_output_bands
+            and meta["band_descriptions"]
+            and len(meta["band_descriptions"]) == num_output_bands
         ):
-            output_band_names = meta["band_names"]
+            output_band_names = meta["band_descriptions"]
 
         result[key] = ImageData(
             time_slice_data,
             assets=meta["assets"],
             crs=meta["crs"],
             bounds=meta["bounds"],
-            band_names=output_band_names,
+            band_descriptions=output_band_names,
             metadata={
                 "reduced_dimension": "spectral",
                 "reduction_method": getattr(reducer, "__name__", "custom_reducer"),

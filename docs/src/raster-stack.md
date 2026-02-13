@@ -240,7 +240,7 @@ for dt_key in raster_stack.keys():
 # Access spectral bands within temporal observations
 dt = datetime(2023, 1, 1)
 observation = raster_stack[dt]  # Multi-band ImageData
-bands = observation.band_names  # ["B02", "B03", "B04", "B08"]
+bands = observation.band_descriptions  # ["B02", "B03", "B04", "B08"]
 nir_band = observation.array[3]  # NIR band (B08)
 red_band = observation.array[2]  # Red band (B04)
 

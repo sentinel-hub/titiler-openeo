@@ -56,7 +56,7 @@ class TestPixelSelectionReducersWithRasterStack:
                 np.ones((1, 10, 10), dtype=np.float32) * (i + 1),
                 mask=np.zeros((1, 10, 10), dtype=bool),
             )
-            images[date] = ImageData(data, band_names=["band1"])
+            images[date] = ImageData(data, band_descriptions=["band1"])
         return RasterStack.from_images(images)
 
     @pytest.fixture
@@ -73,7 +73,9 @@ class TestPixelSelectionReducersWithRasterStack:
             elif i == 1:
                 mask[:, 5:, :] = True  # Second date: mask right half
             # Third date: no mask
-            images[date] = ImageData(np.ma.array(data, mask=mask), band_names=["band1"])
+            images[date] = ImageData(
+                np.ma.array(data, mask=mask), band_descriptions=["band1"]
+            )
         return RasterStack.from_images(images)
 
     def test_highestpixel_with_raster_stack(self, raster_stack):
@@ -209,7 +211,7 @@ class TestLastBandSelectors:
                 np.stack([band1, band2]),
                 mask=np.zeros((2, 10, 10), dtype=bool),
             )
-            images[date] = ImageData(data, band_names=["data", "decision"])
+            images[date] = ImageData(data, band_descriptions=["data", "decision"])
         return RasterStack.from_images(images)
 
     def test_lastbandlow_with_raster_stack(self, multiband_stack):
@@ -311,7 +313,7 @@ class TestApplyPixelSelectionMethods:
                 np.ones((1, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((1, 5, 5), dtype=bool),
             )
-            images[date] = ImageData(data, band_names=["band1"])
+            images[date] = ImageData(data, band_descriptions=["band1"])
         return RasterStack.from_images(images)
 
     @pytest.mark.parametrize(
@@ -336,7 +338,7 @@ class TestApplyPixelSelectionMethods:
                 np.ones((2, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((2, 5, 5), dtype=bool),
             )
-            images[date] = ImageData(data, band_names=["band1", "band2"])
+            images[date] = ImageData(data, band_descriptions=["band1", "band2"])
         stack = RasterStack.from_images(images)
 
         result = apply_pixel_selection(stack, pixel_selection="lastbandlow")
@@ -352,7 +354,7 @@ class TestApplyPixelSelectionMethods:
                 np.ones((2, 5, 5), dtype=np.float32) * (i + 1),
                 mask=np.zeros((2, 5, 5), dtype=bool),
             )
-            images[date] = ImageData(data, band_names=["band1", "band2"])
+            images[date] = ImageData(data, band_descriptions=["band1", "band2"])
         stack = RasterStack.from_images(images)
 
         result = apply_pixel_selection(stack, pixel_selection="lastbandhight")

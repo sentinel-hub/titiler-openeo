@@ -65,7 +65,7 @@ def test_handle_raster_geotiff():
     assert result.array.shape == (2, 2, 2)  # 2 bands, 2x2 image
     assert (result.array[0] == array1[0]).all()
     assert (result.array[1] == array2[0]).all()
-    assert len(result.band_names) == 2
+    assert len(result.band_descriptions) == 2
 
 
 def test_handle_raster_geotiff_validation():

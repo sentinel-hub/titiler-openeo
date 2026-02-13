@@ -172,7 +172,7 @@ def _apply_temporal_dimension(
                 assets=[key],
                 crs=first_ref.crs,
                 bounds=first_ref.bounds,
-                band_names=first_ref.band_names if first_ref.band_names else [],
+                band_descriptions=first_ref.band_names if first_ref.band_names else [],
                 metadata={
                     "applied_dimension": "temporal",
                 },
@@ -186,7 +186,7 @@ def _apply_temporal_dimension(
             assets=list(data.keys()),
             crs=first_ref.crs,
             bounds=first_ref.bounds,
-            band_names=first_ref.band_names if first_ref.band_names else [],
+            band_descriptions=first_ref.band_names if first_ref.band_names else [],
             metadata={
                 "applied_dimension": "temporal",
                 "target_dimension": target_dimension,
@@ -246,7 +246,7 @@ def _apply_spectral_dimension_single_image(
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_names=data.band_names if data.band_names else [],
+        band_descriptions=data.band_descriptions if data.band_descriptions else [],
         metadata={
             "applied_dimension": "spectral",
         },
@@ -319,7 +319,7 @@ def _apply_spectral_dimension_stack(
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,
-            band_names=img.band_names if img.band_names else [],
+            band_descriptions=img.band_names if img.band_names else [],
             metadata={
                 "applied_dimension": "spectral",
             },

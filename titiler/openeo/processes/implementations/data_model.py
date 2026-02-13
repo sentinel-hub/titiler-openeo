@@ -253,7 +253,7 @@ class ImageRef:
             _height=image.height,
             _bounds=image.bounds,
             _crs=image.crs,
-            _band_names=image.band_names or [],
+            _band_names=image.band_descriptions or [],
             _count=image.count,
             _geometry=None,
             _task_fn=None,
@@ -695,7 +695,8 @@ class RasterStack(Dict[datetime, ImageData]):
             bounds=kwargs.get("bounds", first_img.bounds),
             dst_crs=kwargs.get("dst_crs", first_img.crs),
             band_names=kwargs.get(
-                "band_names", first_img.band_names if first_img.band_names else []
+                "band_names",
+                first_img.band_descriptions if first_img.band_descriptions else [],
             ),
         )
 

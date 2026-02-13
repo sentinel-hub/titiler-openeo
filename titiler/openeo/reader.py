@@ -2,6 +2,7 @@
 
 import logging
 import time
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from urllib.parse import urlparse
 
@@ -23,8 +24,8 @@ from rio_tiler.io.base import BaseReader, MultiBaseReader
 from rio_tiler.io.stac import STAC_ALTERNATE_KEY
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
-from rio_tiler.types import AssetInfo, BBox, Indexes
-from rio_tiler.utils import cast_to_sequence
+from rio_tiler.types import AssetInfo, BBox
+from rio_tiler.utils import cast_to_sequence, inherit_rasterio_env
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
@@ -93,6 +94,10 @@ class SimpleSTACReader(MultiBaseReader):
                 "No valid asset found. Asset's media types not supported"
             )
 
+    def _get_reader(self, asset_info: AssetInfo) -> type[BaseReader]:
+        """Get Asset Reader."""
+        return self.reader
+
     def _parse_vrt_asset(self, asset: str) -> Tuple[str, Optional[str]]:
         if asset.startswith("vrt://") and asset not in self.assets:
             parsed = urlparse(asset)
@@ -110,7 +115,7 @@ class SimpleSTACReader(MultiBaseReader):
 
         return asset, None
 
-    def _get_asset_info(self, asset: str) -> AssetInfo:
+    def _get_asset_info(self, asset: str) -> AssetInfo:  # noqa: C901
         """Validate asset names and return asset's info.
 
         Args:
@@ -121,33 +126,53 @@ class SimpleSTACReader(MultiBaseReader):
 
         """
         asset, vrt_options = self._parse_vrt_asset(asset)
+
+        method_options: dict[str, Any] = {}
+
+        # NOTE: asset can be in form of
+        # "{asset_name}|some_option=some_value&another_option=another_value"
+        if "|" in asset:
+            asset, params = asset.split("|", 1)
+            # NOTE: Construct method options from params
+            if params:
+                for param in params.split("&"):
+                    key, value = param.split("=", 1)
+                    if key == "indexes":
+                        method_options["indexes"] = list(map(int, value.split(",")))
+                    elif key == "expression":
+                        method_options["expression"] = value
+
         if asset not in self.assets:
             raise InvalidAssetName(
                 f"'{asset}' is not valid, should be one of {self.assets}"
             )
 
+        asset_modified = "expression" in method_options or vrt_options
+
         asset_info = self.item.assets[asset]
         extras = asset_info.extra_fields
 
-        info = AssetInfo(
-            url=asset_info.get_absolute_href() or asset_info.href,
-            metadata=extras if not vrt_options else None,
-        )
+        info = {
+            "url": asset_info.get_absolute_href() or asset_info.href,
+            "name": asset,
+            "media_type": asset_info.media_type,
+            "reader_options": {},
+            "method_options": method_options,
+        }
+
+        if not asset_modified:
+            info["metadata"] = extras
 
         if STAC_ALTERNATE_KEY and extras.get("alternate"):
             if alternate := extras["alternate"].get(STAC_ALTERNATE_KEY):
                 info["url"] = alternate["href"]
-
-        if asset_info.media_type:
-            info["media_type"] = asset_info.media_type
 
         # https://github.com/stac-extensions/file
         if head := extras.get("file:header_size"):
             info["env"] = {"GDAL_INGESTED_BYTES_AT_OPEN": head}
 
         # https://github.com/stac-extensions/raster
-        if extras.get("raster:bands") and not vrt_options:
-            bands = extras.get("raster:bands")
+        if (bands := extras.get("raster:bands", [])) and not asset_modified:
             stats = [
                 (b["statistics"]["minimum"], b["statistics"]["maximum"])
                 for b in bands
@@ -179,16 +204,16 @@ class SimpleSTACReader(MultiBaseReader):
                     nodata_values.append(nodata)
 
             # Only use nodata if all bands have the same value
-            if nodata_values and len(set(nodata_values)) == 1:
-                info["nodata"] = nodata_values[0]
+            if len(set(nodata_values)) == 1:
+                info["reader_options"]["nodata"] = nodata_values[0]
 
         # Extract nodata from asset level if not found in raster:bands.
         # Asset-level nodata is common in STAC catalogs like Copernicus Sentinel-2
         # where each asset (e.g., B04.tif) has a "nodata": 0 field.
-        if "nodata" not in info and not vrt_options:
+        if "nodata" not in info["reader_options"] and not vrt_options:
             asset_nodata = extras.get("nodata")
             if asset_nodata is not None:
-                info["nodata"] = asset_nodata
+                info["reader_options"]["nodata"] = asset_nodata
 
         if vrt_options:
             info["url"] = f"vrt://{info['url']}?{vrt_options}"
@@ -200,7 +225,6 @@ class SimpleSTACReader(MultiBaseReader):
         self,
         assets: Optional[Union[Sequence[str], str]] = None,
         expression: Optional[str] = None,
-        asset_indexes: Optional[Dict[str, Indexes]] = None,
         asset_as_band: bool = False,
         **kwargs: Any,
     ) -> ImageData:
@@ -208,23 +232,22 @@ class SimpleSTACReader(MultiBaseReader):
 
         Args:
             assets (sequence of str or str, optional): assets to fetch info from.
-            expression (str, optional): rio-tiler expression for the asset list (e.g. asset1/asset2+asset3).
-            asset_indexes (dict, optional): Band indexes for each asset (e.g {"asset1": 1, "asset2": (1, 2,)}).
+            expression (str, optional): rio-tiler expression (e.g. b1/b2+b3).
+            asset_as_band (bool, optional): treat each asset as a separate band. Defaults to False.
             kwargs (optional): Options to forward to the `self.reader.preview` method.
 
         Returns:
             rio_tiler.models.ImageData: ImageData instance with data, mask and tile spatial info.
 
         """
-        assets = cast_to_sequence(assets)
-        if assets and expression:
-            logger.warning(
-                "Both expression and assets passed; expression will overwrite assets parameter."
+        if kwargs.pop("asset_indexes", None):
+            warnings.warn(
+                "`asset_indexes` parameter is deprecated in `tile` method and will be ignored.",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
-        if expression:
-            assets = self.parse_expression(expression, asset_as_band=asset_as_band)
-
+        assets = cast_to_sequence(assets)
         if not assets and self.default_assets:
             logger.warning(
                 "No assets/expression passed, defaults to %s", self.default_assets
@@ -233,31 +256,23 @@ class SimpleSTACReader(MultiBaseReader):
 
         if not assets:
             raise MissingAssets(
-                "assets must be passed via `expression` or `assets` options, or via class-level `default_assets`."
+                "No Asset defined by `assets` option or class-level `default_assets`."
             )
 
-        asset_indexes = asset_indexes or {}
-
-        # We fall back to `indexes` if provided
-        indexes = kwargs.pop("indexes", None)
-
+        @inherit_rasterio_env
         def _reader(asset: str, **kwargs: Any) -> ImageData:
-            idx = asset_indexes.get(asset) or indexes  # type: ignore
-
             asset_info = self._get_asset_info(asset)
-            reader, options = self._get_reader(asset_info)
+            asset_name = asset_info["name"]
+            reader = self._get_reader(asset_info)
+            reader_options = {**self.reader_options, **asset_info["reader_options"]}
+            method_options = {**asset_info["method_options"], **kwargs}
 
             with self.ctx(**asset_info.get("env", {})):
-                with reader(
-                    asset_info["url"],
-                    tms=self.tms,
-                    **{**self.reader_options, **options},
-                ) as src:
-                    data = src.preview(indexes=idx, **kwargs)
+                with reader(asset_info["url"], tms=self.tms, **reader_options) as src:
+                    data = src.preview(**method_options)
 
                     self._update_statistics(
                         data,
-                        indexes=idx,
                         statistics=asset_info.get("dataset_statistics"),
                     )
 
@@ -266,54 +281,24 @@ class SimpleSTACReader(MultiBaseReader):
                         metadata.update(m)
                     data.metadata = {asset: metadata}
 
+                    data.band_descriptions = [
+                        f"{asset_name}_{n}" for n in data.band_descriptions
+                    ]
                     if asset_as_band:
                         if len(data.band_names) > 1:
                             raise AssetAsBandError(
                                 "Can't use `asset_as_band` for multibands asset"
                             )
-                        data.band_names = [asset]
-                    else:
-                        data.band_names = [f"{asset}_{n}" for n in data.band_names]
+                        data.band_descriptions = [asset_name]
 
                     return data
 
         img = multi_arrays(assets, _reader, **kwargs)
+        img.band_names = [f"b{ix + 1}" for ix in range(img.count)]
         if expression:
             return img.apply_expression(expression)
 
         return img
-
-    def _get_reader(self, asset_info: AssetInfo) -> Tuple[Type[BaseReader], Dict]:
-        """Get Asset Reader with nodata from STAC metadata.
-
-        This method is called by MultiBaseReader's part/tile/preview methods
-        to get the reader class and options for each asset. We override it to
-        inject nodata from STAC metadata into the Reader's options.
-
-        The nodata value flows through the system as follows:
-        1. _get_asset_info() extracts nodata from STAC (raster:bands or asset level)
-        2. _get_reader() adds nodata to Reader's options dict
-        3. Reader stores it in self.options
-        4. Reader.part() merges self.options into kwargs: {**self.options, **kwargs}
-        5. rio_tiler.reader.part() receives nodata and uses it for mask creation
-
-        Args:
-            asset_info: Asset information dict containing url, nodata, etc.
-
-        Returns:
-            Tuple of (reader_class, options_dict) where options may include
-            {"options": {"nodata": value}} if nodata was found in STAC metadata.
-        """
-        reader = self.reader
-        options: Dict[str, Any] = {}
-
-        # Pass nodata from STAC metadata to the reader.
-        # This enables proper mask creation for pixels with nodata values.
-        nodata = asset_info.get("nodata")
-        if nodata is not None:
-            options["options"] = {"nodata": nodata}
-
-        return reader, options
 
 
 def _get_asset_crs(
