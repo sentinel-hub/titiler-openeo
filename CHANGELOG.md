@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.1 (2026-02-13)
+
+## What's Changed
+* docs: add openeo-titiler logos by @zacdezgeo in https://github.com/sentinel-hub/titiler-openeo/pull/223
+* fix: set titiler requirement upper limit by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/226
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-v0.12.0...titiler-openeo-v0.12.1
+
 ## 0.12.0 (2026-02-03)
 
 ## What's Changed
