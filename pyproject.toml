@@ -30,7 +30,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-    "titiler.core>=1.1.1",
+    "titiler.core>=1.1.1,<2.0",
     "starlette-cramjam>=0.4,<0.6",
     "openeo-pg-parser-networkx==2026.1.2",
     "pystac-client",
