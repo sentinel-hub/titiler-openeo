@@ -28,7 +28,7 @@ jobs:
       packages: write
       contents: read
     steps:
-      - uses: developmentseed/container-registry-cleanup@v0.1.2
+      - uses: developmentseed/container-registry-cleanup@v0.2.0
         env:
           REGISTRY_TYPE: ghcr
           REPOSITORY_NAME: titiler-openeo
