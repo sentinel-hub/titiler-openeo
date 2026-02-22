@@ -24,7 +24,7 @@ from rio_tiler.io.base import BaseReader, MultiBaseReader
 from rio_tiler.io.stac import STAC_ALTERNATE_KEY
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
-from rio_tiler.types import AssetInfo, BBox
+from rio_tiler.types import AssetInfo, AssetType, BBox
 from rio_tiler.utils import cast_to_sequence, inherit_rasterio_env
 from typing_extensions import TypedDict
 
@@ -52,7 +52,7 @@ class SimpleSTACReader(MultiBaseReader):
     maxzoom: int = attr.ib(default=None)
 
     assets: Sequence[str] = attr.ib(init=False)
-    default_assets: Optional[Sequence[str]] = attr.ib(default=None)
+    default_assets: Optional[Sequence[AssetType]] = attr.ib(default=None)
 
     reader: Type[BaseReader] = attr.ib(default=Reader)
     reader_options: Dict = attr.ib(factory=dict)
@@ -115,48 +115,49 @@ class SimpleSTACReader(MultiBaseReader):
 
         return asset, None
 
-    def _get_asset_info(self, asset: str) -> AssetInfo:  # noqa: C901
+    def _get_asset_info(self, asset: AssetType) -> AssetInfo:  # noqa: C901
         """Validate asset names and return asset's info.
 
         Args:
-            asset (str): STAC asset name.
+            asset (AssetType): STAC asset name.
 
         Returns:
             AssetInfo: STAC asset info.
 
         """
-        asset, vrt_options = self._parse_vrt_asset(asset)
+        asset_name: str
+        if isinstance(asset, dict):
+            if not asset.get("name"):
+                raise ValueError("asset dictionary does not have `name` key")
+            asset_name = asset["name"]
+        else:
+            asset_name = asset
 
-        method_options: dict[str, Any] = {}
+        asset_name, vrt_options = self._parse_vrt_asset(asset_name)
 
-        # NOTE: asset can be in form of
-        # "{asset_name}|some_option=some_value&another_option=another_value"
-        if "|" in asset:
-            asset, params = asset.split("|", 1)
-            # NOTE: Construct method options from params
-            if params:
-                for param in params.split("&"):
-                    key, value = param.split("=", 1)
-                    if key == "indexes":
-                        method_options["indexes"] = list(map(int, value.split(",")))
-                    elif key == "expression":
-                        method_options["expression"] = value
-
-        if asset not in self.assets:
+        if asset_name not in self.assets:
             raise InvalidAssetName(
                 f"'{asset}' is not valid, should be one of {self.assets}"
             )
 
-        asset_modified = "expression" in method_options or vrt_options
-
-        asset_info = self.item.assets[asset]
+        asset_info = self.item.assets[asset_name]
         extras = asset_info.extra_fields
+
+        method_options: dict[str, Any] = {}
+        reader_options: dict[str, Any] = {}
+        if isinstance(asset, dict):
+            if indexes := asset.get("indexes"):
+                method_options["indexes"] = indexes
+            if expr := asset.get("expression"):
+                method_options["expression"] = expr
+
+        asset_modified = "expression" in method_options or vrt_options
 
         info = {
             "url": asset_info.get_absolute_href() or asset_info.href,
-            "name": asset,
+            "name": asset_name,
             "media_type": asset_info.media_type,
-            "reader_options": {},
+            "reader_options": reader_options,
             "method_options": method_options,
         }
 
@@ -223,7 +224,7 @@ class SimpleSTACReader(MultiBaseReader):
     # The regular STAC Reader doesn't have a `read` method
     def read(
         self,
-        assets: Optional[Union[Sequence[str], str]] = None,
+        assets: Optional[Union[Sequence[AssetType], AssetType]] = None,
         expression: Optional[str] = None,
         asset_as_band: bool = False,
         **kwargs: Any,
@@ -260,7 +261,7 @@ class SimpleSTACReader(MultiBaseReader):
             )
 
         @inherit_rasterio_env
-        def _reader(asset: str, **kwargs: Any) -> ImageData:
+        def _reader(asset: AssetType, **kwargs: Any) -> ImageData:
             asset_info = self._get_asset_info(asset)
             asset_name = asset_info["name"]
             reader = self._get_reader(asset_info)
