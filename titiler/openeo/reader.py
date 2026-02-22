@@ -137,7 +137,7 @@ class SimpleSTACReader(MultiBaseReader):
 
         if asset_name not in self.assets:
             raise InvalidAssetName(
-                f"'{asset}' is not valid, should be one of {self.assets}"
+                f"'{asset_name}' is not valid, should be one of {self.assets}"
             )
 
         asset_info = self.item.assets[asset_name]
