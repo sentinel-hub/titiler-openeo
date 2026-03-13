@@ -66,7 +66,7 @@ helm install titiler-openeo . -f values-cdse.yaml -n your-namespace
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `image.repository` | Container image repository | `ghcr.io/sentinel-hub/titiler-openeo` |
-| `image.tag` | Container image tag | `dev` |
+| `image.tag` | Container image tag (defaults to `titiler-openeo-v{{ .Chart.AppVersion }}` when unset) | `titiler-openeo-v0.12.0` |
 | `image.pullPolicy` | Container image pull policy | `IfNotPresent` |
 | `replicaCount` | Number of replicas | `1` |
 
