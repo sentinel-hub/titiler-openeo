@@ -1,0 +1,80 @@
+name: Rebuild Release Images
+
+on:
+  push:
+    branches:
+      - '**'  # Trigger on any branch push
+    paths:
+      - '.github/workflows/rebuild-release-images.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  rebuild-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Add the tags you want to rebuild here
+        tag:
+          - v0.9.1
+          - v0.9.0
+          - v0.8.0
+          - v0.7.0
+          - v0.6.1
+          - v0.6.0
+          - v0.5.0
+          - v0.3.0
+          - v0.2.1
+          - v0.2.0
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare tags
+        id: tags
+        run: |
+          echo "tags=ghcr.io/${{ github.repository }}:${{ matrix.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ matrix.tag }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### ✅ Successfully rebuilt image for ${{ matrix.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${{ matrix.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`ghcr.io/${{ github.repository }}:${{ matrix.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To pull this image:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/${{ github.repository }}:${{ matrix.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
