@@ -1,11 +1,10 @@
 {
-  "include-component-in-tag": true,
   "separate-pull-requests": true,
   "packages": {
     ".": {
       "release-type": "python",
       "package-name": "titiler-openeo",
-      "component": "titiler-openeo",
+      "include-component-in-tag": false,
       "changelog-type": "github",
       "exclude-paths": ["deployment/k8s/charts/**"],
       "changelog-sections": [
@@ -40,6 +39,7 @@
       "release-type": "helm",
       "package-name": "titiler-openeo-chart",
       "component": "titiler-openeo-chart",
+      "include-component-in-tag": true,
       "changelog-type": "github",
       "changelog-sections": [
         { "type": "feat", "section": "Features", "hidden": false },
