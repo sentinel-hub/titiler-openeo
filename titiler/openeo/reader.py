@@ -287,7 +287,7 @@ class SimpleSTACReader(MultiBaseReader):
                     metadata = data.metadata or {}
                     if m := asset_info.get("metadata"):
                         metadata.update(m)
-                    data.metadata = {asset: metadata}
+                    data.metadata = {asset_name: metadata}
 
                     data.band_descriptions = [
                         f"{asset_name}_{n}" for n in data.band_descriptions
