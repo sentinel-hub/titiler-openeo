@@ -2,29 +2,28 @@
 
 import logging
 import time
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
-from urllib.parse import urlparse
 
 import attr
 import pystac
 import rasterio
-from affine import Affine
 from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
+from rasterio.features import bounds as featureBounds
 from rasterio.features import rasterize
-from rasterio.transform import array_bounds
 from rasterio.warp import transform_bounds, transform_geom
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import AssetAsBandError, InvalidAssetName, MissingAssets
 from rio_tiler.io import Reader
 from rio_tiler.io.base import BaseReader, MultiBaseReader
-from rio_tiler.io.stac import STAC_ALTERNATE_KEY
+from rio_tiler.io.stac import STAC_ALTERNATE_KEY, _extract_proj_info
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
-from rio_tiler.types import AssetInfo, BBox, Indexes
-from rio_tiler.utils import cast_to_sequence
+from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
+from rio_tiler.utils import cast_to_sequence, inherit_rasterio_env
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
@@ -46,124 +45,160 @@ class Dims(TypedDict):
 class SimpleSTACReader(MultiBaseReader):
     """Simplified STAC Reader."""
 
+    input: pystac.Item = attr.ib()
+
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
     minzoom: int = attr.ib(default=None)
     maxzoom: int = attr.ib(default=None)
 
     assets: Sequence[str] = attr.ib(init=False)
-    default_assets: Optional[Sequence[str]] = attr.ib(default=None)
+    default_assets: Optional[Sequence[AssetType]] = attr.ib(default=None)
 
     reader: Type[BaseReader] = attr.ib(default=Reader)
     reader_options: Dict = attr.ib(factory=dict)
 
     ctx: Any = attr.ib(default=rasterio.Env)
 
-    item: pystac.Item = attr.ib(init=False)
-
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
-        self.item = self.input
-
-        # Get bounding box and default CRS
-        self.bounds = self.item.bbox
-        self.crs = WGS84_CRS  # Default to WGS84
-
-        # Get projection information using STAC extension
-        if ProjectionExtension.has_extension(self.item):
-            proj_ext = ProjectionExtension.ext(self.item)
-            if all(
-                [
-                    proj_ext.transform,
-                    proj_ext.shape,
-                    proj_ext.crs_string,
-                ]
-            ):
-                self.height, self.width = proj_ext.shape
-                self.transform = Affine(*proj_ext.transform)
-                self.bounds = array_bounds(self.height, self.width, self.transform)
-                self.crs = rasterio.crs.CRS.from_string(proj_ext.crs_string)
-
-        self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
-        self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
-
-        self.assets = self.item.get_assets().keys()
-
+        self.assets = self.input.get_assets().keys()
         if not self.assets:
             raise MissingAssets(
                 "No valid asset found. Asset's media types not supported"
             )
 
-    def _parse_vrt_asset(self, asset: str) -> Tuple[str, Optional[str]]:
-        if asset.startswith("vrt://") and asset not in self.assets:
-            parsed = urlparse(asset)
-            if not parsed.netloc:
-                raise InvalidAssetName(
-                    f"'{asset}' is not valid, couldn't find valid asset"
+        if proj := _extract_proj_info(self.input, assets=self.assets):
+            self.height = proj["height"]
+            self.width = proj["width"]
+            self.bounds = proj["bounds"]
+            self.transform = proj["transform"]
+            self.crs = proj["crs"]
+        else:
+            self.bounds = (
+                tuple(self.input.bbox)
+                if self.input.bbox
+                else featureBounds(self.input.geometry)
+            )
+            self.crs = WGS84_CRS
+
+        self.minzoom = self.minzoom if self.minzoom is not None else self._minzoom
+        self.maxzoom = self.maxzoom if self.maxzoom is not None else self._maxzoom
+
+    def _get_reader(self, asset_info: AssetInfo) -> type[BaseReader]:
+        """Get Asset Reader."""
+        return self.reader
+
+    def _get_options(
+        self,
+        asset: AssetWithOptions,
+        metadata: pystac.Asset,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Copy from rio_tiler.io.stac._get_options."""
+        method_options: dict[str, Any] = {}
+        reader_options: dict[str, Any] = {}
+
+        # Indexes
+        if indexes := asset.get("indexes"):
+            method_options["indexes"] = indexes
+        # Expression
+        if expr := asset.get("expression"):
+            method_options["expression"] = expr
+        # Bands
+        if bands := asset.get("bands"):
+            stac_bands = (
+                metadata.extra_fields.get("bands")
+                or metadata.extra_fields.get("eo:bands")  # V1.0
+            )
+            if not stac_bands:
+                raise ValueError(
+                    "Asset does not have 'bands' metadata, unable to use 'bands' option"
                 )
 
-            if parsed.netloc not in self.assets:
-                raise InvalidAssetName(
-                    f"'{parsed.netloc}' is not valid, should be one of {self.assets}"
-                )
+            # There is no standard for precedence between 'eo:common_name' and 'name'
+            # in STAC specification, so we will use 'eo:common_name' if it exists,
+            # otherwise fallback to 'name', and if not exist use the band index as last resource.
+            common_to_variable = {
+                b.get("eo:common_name")
+                or b.get("common_name")
+                or b.get("name")
+                or ix: ix
+                for ix, b in enumerate(stac_bands, 1)
+            }
+            band_indexes: list[int] = []
+            for b in bands:
+                if idx := common_to_variable.get(b):
+                    band_indexes.append(idx)
+                else:
+                    raise ValueError(
+                        f"Band '{b}' not found in asset metadata, unable to use 'bands' option"
+                    )
 
-            return parsed.netloc, parsed.query
+                method_options["indexes"] = band_indexes
 
-        return asset, None
+        return reader_options, method_options
 
-    def _get_asset_info(self, asset: str) -> AssetInfo:
-        """Validate asset names and return asset's info.
-
-        Args:
-            asset (str): STAC asset name.
-
-        Returns:
-            AssetInfo: STAC asset info.
+    def _get_asset_info(self, asset: AssetType) -> AssetInfo:  # noqa: C901
+        """Custom version of rio_tiler.io.stac.STACReader()._get_asset_info
+        which add support for nodata.
 
         """
-        asset, vrt_options = self._parse_vrt_asset(asset)
-        if asset not in self.assets:
+        if isinstance(asset, str):
+            asset = {"name": asset}
+
+        if not asset.get("name"):
+            raise ValueError("asset dictionary does not have `name` key")
+
+        asset_name = asset["name"]
+        if asset_name not in self.assets:
             raise InvalidAssetName(
-                f"'{asset}' is not valid, should be one of {self.assets}"
+                f"'{asset_name}' is not valid, should be one of {self.assets}"
             )
 
-        asset_info = self.item.assets[asset]
+        asset_info = self.input.assets[asset_name]
         extras = asset_info.extra_fields
+
+        reader_options, method_options = self._get_options(asset, asset_info)
+
+        asset_modified = "expression" in method_options
 
         info = AssetInfo(
             url=asset_info.get_absolute_href() or asset_info.href,
-            metadata=extras if not vrt_options else None,
+            name=asset_name,
+            media_type=asset_info.media_type,
+            reader_options=reader_options,
+            method_options=method_options,
         )
+
+        if not asset_modified:
+            info["metadata"] = extras
 
         if STAC_ALTERNATE_KEY and extras.get("alternate"):
             if alternate := extras["alternate"].get(STAC_ALTERNATE_KEY):
                 info["url"] = alternate["href"]
-
-        if asset_info.media_type:
-            info["media_type"] = asset_info.media_type
 
         # https://github.com/stac-extensions/file
         if head := extras.get("file:header_size"):
             info["env"] = {"GDAL_INGESTED_BYTES_AT_OPEN": head}
 
         # https://github.com/stac-extensions/raster
-        if extras.get("raster:bands") and not vrt_options:
-            bands = extras.get("raster:bands")
-            stats = [
-                (b["statistics"]["minimum"], b["statistics"]["maximum"])
-                for b in bands
-                if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
-            ]
-            # check that stats data are all double and make warning if not
-            if (
-                stats
-                and all(isinstance(v, (int, float)) for stat in stats for v in stat)
-                and len(stats) == len(bands)
-            ):
-                info["dataset_statistics"] = stats
-            else:
-                logger.warning(
-                    "Some statistics data in STAC are invalid, they will be ignored."
-                )
+        if bands := (extras.get("bands") or extras.get("raster:bands")):
+            if not asset_modified:
+                stats = [
+                    (b["statistics"]["minimum"], b["statistics"]["maximum"])
+                    for b in bands
+                    if {"minimum", "maximum"}.issubset(b.get("statistics", {}))
+                ]
+                # check that stats data are all double and make warning if not
+                if (
+                    stats
+                    and all(isinstance(v, (int, float)) for stat in stats for v in stat)
+                    and len(stats) == len(bands)
+                ):
+                    info["dataset_statistics"] = stats
+                else:
+                    logger.warning(
+                        "Some statistics data in STAC are invalid, they will be ignored."
+                    )
 
             # Extract nodata from raster:bands if present.
             # This is critical for proper mosaicking: pixels with nodata values
@@ -179,28 +214,24 @@ class SimpleSTACReader(MultiBaseReader):
                     nodata_values.append(nodata)
 
             # Only use nodata if all bands have the same value
-            if nodata_values and len(set(nodata_values)) == 1:
-                info["nodata"] = nodata_values[0]
+            if len(set(nodata_values)) == 1:
+                info["method_options"]["nodata"] = nodata_values[0]
 
         # Extract nodata from asset level if not found in raster:bands.
         # Asset-level nodata is common in STAC catalogs like Copernicus Sentinel-2
         # where each asset (e.g., B04.tif) has a "nodata": 0 field.
-        if "nodata" not in info and not vrt_options:
+        if "nodata" not in info["method_options"]:
             asset_nodata = extras.get("nodata")
             if asset_nodata is not None:
-                info["nodata"] = asset_nodata
-
-        if vrt_options:
-            info["url"] = f"vrt://{info['url']}?{vrt_options}"
+                info["method_options"]["nodata"] = asset_nodata
 
         return info
 
     # The regular STAC Reader doesn't have a `read` method
     def read(
         self,
-        assets: Optional[Union[Sequence[str], str]] = None,
+        assets: Optional[Union[Sequence[AssetType], AssetType]] = None,
         expression: Optional[str] = None,
-        asset_indexes: Optional[Dict[str, Indexes]] = None,
         asset_as_band: bool = False,
         **kwargs: Any,
     ) -> ImageData:
@@ -208,23 +239,22 @@ class SimpleSTACReader(MultiBaseReader):
 
         Args:
             assets (sequence of str or str, optional): assets to fetch info from.
-            expression (str, optional): rio-tiler expression for the asset list (e.g. asset1/asset2+asset3).
-            asset_indexes (dict, optional): Band indexes for each asset (e.g {"asset1": 1, "asset2": (1, 2,)}).
+            expression (str, optional): rio-tiler expression (e.g. b1/b2+b3).
+            asset_as_band (bool, optional): treat each asset as a separate band. Defaults to False.
             kwargs (optional): Options to forward to the `self.reader.preview` method.
 
         Returns:
             rio_tiler.models.ImageData: ImageData instance with data, mask and tile spatial info.
 
         """
-        assets = cast_to_sequence(assets)
-        if assets and expression:
-            logger.warning(
-                "Both expression and assets passed; expression will overwrite assets parameter."
+        if kwargs.pop("asset_indexes", None):
+            warnings.warn(
+                "`asset_indexes` parameter is deprecated in `tile` method and will be ignored.",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
-        if expression:
-            assets = self.parse_expression(expression, asset_as_band=asset_as_band)
-
+        assets = cast_to_sequence(assets)
         if not assets and self.default_assets:
             logger.warning(
                 "No assets/expression passed, defaults to %s", self.default_assets
@@ -233,87 +263,50 @@ class SimpleSTACReader(MultiBaseReader):
 
         if not assets:
             raise MissingAssets(
-                "assets must be passed via `expression` or `assets` options, or via class-level `default_assets`."
+                "No Asset defined by `assets` option or class-level `default_assets`."
             )
 
-        asset_indexes = asset_indexes or {}
-
-        # We fall back to `indexes` if provided
-        indexes = kwargs.pop("indexes", None)
-
-        def _reader(asset: str, **kwargs: Any) -> ImageData:
-            idx = asset_indexes.get(asset) or indexes  # type: ignore
-
+        @inherit_rasterio_env
+        def _reader(asset: AssetType, **kwargs: Any) -> ImageData:
             asset_info = self._get_asset_info(asset)
-            reader, options = self._get_reader(asset_info)
+            asset_name = asset_info["name"]
+            reader = self._get_reader(asset_info)
+            reader_options = {**self.reader_options, **asset_info["reader_options"]}
+            method_options = {**asset_info["method_options"], **kwargs}
 
             with self.ctx(**asset_info.get("env", {})):
-                with reader(
-                    asset_info["url"],
-                    tms=self.tms,
-                    **{**self.reader_options, **options},
-                ) as src:
-                    data = src.preview(indexes=idx, **kwargs)
+                with reader(asset_info["url"], tms=self.tms, **reader_options) as src:
+                    data = src.preview(**method_options)
 
                     self._update_statistics(
                         data,
-                        indexes=idx,
+                        indexes=method_options.get("indexes"),
                         statistics=asset_info.get("dataset_statistics"),
                     )
 
                     metadata = data.metadata or {}
                     if m := asset_info.get("metadata"):
                         metadata.update(m)
-                    data.metadata = {asset: metadata}
+                    data.metadata = {asset_name: metadata}
 
+                    data.band_descriptions = [
+                        f"{asset_name}_{n}" for n in data.band_descriptions
+                    ]
                     if asset_as_band:
                         if len(data.band_names) > 1:
                             raise AssetAsBandError(
                                 "Can't use `asset_as_band` for multibands asset"
                             )
-                        data.band_names = [asset]
-                    else:
-                        data.band_names = [f"{asset}_{n}" for n in data.band_names]
+                        data.band_descriptions = [asset_name]
 
                     return data
 
         img = multi_arrays(assets, _reader, **kwargs)
+        img.band_names = [f"b{ix + 1}" for ix in range(img.count)]
         if expression:
             return img.apply_expression(expression)
 
         return img
-
-    def _get_reader(self, asset_info: AssetInfo) -> Tuple[Type[BaseReader], Dict]:
-        """Get Asset Reader with nodata from STAC metadata.
-
-        This method is called by MultiBaseReader's part/tile/preview methods
-        to get the reader class and options for each asset. We override it to
-        inject nodata from STAC metadata into the Reader's options.
-
-        The nodata value flows through the system as follows:
-        1. _get_asset_info() extracts nodata from STAC (raster:bands or asset level)
-        2. _get_reader() adds nodata to Reader's options dict
-        3. Reader stores it in self.options
-        4. Reader.part() merges self.options into kwargs: {**self.options, **kwargs}
-        5. rio_tiler.reader.part() receives nodata and uses it for mask creation
-
-        Args:
-            asset_info: Asset information dict containing url, nodata, etc.
-
-        Returns:
-            Tuple of (reader_class, options_dict) where options may include
-            {"options": {"nodata": value}} if nodata was found in STAC metadata.
-        """
-        reader = self.reader
-        options: Dict[str, Any] = {}
-
-        # Pass nodata from STAC metadata to the reader.
-        # This enables proper mask creation for pixels with nodata values.
-        nodata = asset_info.get("nodata")
-        if nodata is not None:
-            options["options"] = {"nodata": nodata}
-
-        return reader, options
 
 
 def _get_asset_crs(
@@ -680,7 +673,7 @@ def _get_cube_resolutions(
                     x_val = float(reprojected[0])
                     y_val = float(reprojected[1])
 
-                item_datetime = src_dst.item.datetime.isoformat()
+                item_datetime = src_dst.input.datetime.isoformat()
                 if item_datetime not in cube_resolutions:
                     cube_resolutions[item_datetime] = {}
 

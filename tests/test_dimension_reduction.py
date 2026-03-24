@@ -120,7 +120,7 @@ class TestTemporalDimensionReduction:
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
-                band_names=["red", "green"],
+                band_descriptions=["red", "green"],
             )
         data = RasterStack.from_images(images)
 
@@ -198,7 +198,7 @@ class TestTemporalDimensionReduction:
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
-                band_names=["red", "green"],
+                band_descriptions=["red", "green"],
             )
         data = RasterStack.from_images(images)
 
@@ -230,7 +230,7 @@ class TestSpectralDimensionReduction:
             assets=["test_asset"],
             crs="EPSG:4326",
             bounds=(-180, -90, 180, 90),
-            band_names=["red", "green", "blue", "nir"],
+            band_descriptions=["red", "green", "blue", "nir"],
         )
 
         # Wrap in single-item RasterStack as required by the unified function
@@ -272,7 +272,7 @@ class TestSpectralDimensionReduction:
             assets=["test_asset"],
             crs="EPSG:4326",
             bounds=(-180, -90, 180, 90),
-            band_names=["red", "green", "blue", "nir"],
+            band_descriptions=["red", "green", "blue", "nir"],
         )
 
         # Wrap in single-item RasterStack as required by the unified function
@@ -283,8 +283,8 @@ class TestSpectralDimensionReduction:
         # After reducing 4 bands to 1, band_names should be cleared to avoid mismatch
         # The result should have empty band_names since we can't know which band it represents
         assert (
-            result.band_names == []
-        ), f"Expected empty band_names, got {result.band_names}"
+            result.band_descriptions == []
+        ), f"Expected empty band_names, got {result.band_descriptions}"
 
     def test_spectral_reduction_stack_success(self):
         """Test successful spectral reduction on stack."""
@@ -301,7 +301,7 @@ class TestSpectralDimensionReduction:
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
-                band_names=["red", "green", "blue"],
+                band_descriptions=["red", "green", "blue"],
             )
 
         result = _reduce_spectral_dimension_stack(
@@ -333,7 +333,7 @@ class TestSpectralDimensionReduction:
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
-                band_names=["red", "green", "blue", "nir"],
+                band_descriptions=["red", "green", "blue", "nir"],
             )
 
         # Use a stateful reducer that caches results
@@ -475,7 +475,7 @@ class TestSpectralDimensionReduction:
                 assets=[f"asset_{i}"],
                 crs="EPSG:4326",
                 bounds=(-180, -90, 180, 90),
-                band_names=["red", "green", "blue"],
+                band_descriptions=["red", "green", "blue"],
             )
 
         # Reducer that does partial reduction (3 bands -> 2 bands)
@@ -493,7 +493,7 @@ class TestSpectralDimensionReduction:
         for img in result.values():
             assert img.array.shape[0] == 2
             # band_names should be cleared since count changed
-            assert img.band_names == []
+            assert img.band_descriptions == []
 
     def test_spectral_reduction_unexpected_dims(self):
         """Test spectral reduction with unexpected dimensionality (5D)."""

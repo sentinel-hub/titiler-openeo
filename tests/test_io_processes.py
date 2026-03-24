@@ -29,7 +29,7 @@ def sample_image_data():
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
-    return ImageData(data, band_names=["red", "green", "blue"])
+    return ImageData(data, band_descriptions=["red", "green", "blue"])
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def sample_raster_stack(sample_image_data):
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
-    image_data2 = ImageData(data2, band_names=["red", "green", "blue"])
+    image_data2 = ImageData(data2, band_descriptions=["red", "green", "blue"])
 
     # Return a RasterStack with two samples (datetime keys)
     return RasterStack.from_images(

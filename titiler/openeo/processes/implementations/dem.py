@@ -39,7 +39,7 @@ def _apply_hillshade(
         assets=data.assets,
         crs=data.crs,
         bounds=bounds,
-        band_names=["hillshade"],
+        band_descriptions=["hillshade"],
     )
 
 
