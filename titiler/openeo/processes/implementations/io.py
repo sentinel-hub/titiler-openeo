@@ -285,7 +285,7 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
         bounds=bounds,
         crs=crs,
         metadata=combined_metadata,
-        band_names=band_names_list,
+        band_descriptions=band_names_list,
     )
 
 

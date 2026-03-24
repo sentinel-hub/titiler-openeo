@@ -19,7 +19,7 @@ def _apply_ndvi(data: ImageData, nir: int, red: int) -> ImageData:
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_names=[
+        band_descriptions=[
             "ndvi",
         ],
     )
@@ -35,7 +35,7 @@ def _apply_ndwi(data: ImageData, nir: int, swir: int) -> ImageData:
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_names=[
+        band_descriptions=[
             "ndwi",
         ],
     )

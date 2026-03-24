@@ -26,7 +26,7 @@ def sample_temporal_stack():
             * (i + 1),  # Each date has different value
             mask=np.zeros((1, 10, 10), dtype=bool),
         )
-        images[date] = ImageData(data, band_names=["band1"])
+        images[date] = ImageData(data, band_descriptions=["band1"])
 
     return RasterStack.from_images(images)
 
@@ -47,7 +47,11 @@ def sample_spectral_stack():
     )
 
     return RasterStack.from_images(
-        {datetime(2021, 1, 1): ImageData(data, band_names=["red", "green", "blue"])}
+        {
+            datetime(2021, 1, 1): ImageData(
+                data, band_descriptions=["red", "green", "blue"]
+            )
+        }
     )
 
 
@@ -75,7 +79,7 @@ def test_reduce_temporal_dimension(sample_temporal_stack):
     img = result.first
     assert img.count == 1
     assert img.array.shape == (1, 10, 10)  # Single band with original shape
-    assert img.band_names == ["band1"]
+    assert img.band_descriptions == ["band1"]
     assert img.metadata["reduced_dimension"] == "temporal"
     assert img.metadata["reduction_method"] == "mean_reducer"
     # Check the mean value is approximately 2.0

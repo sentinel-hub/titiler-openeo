@@ -37,7 +37,7 @@ def sample_image_data():
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
-    return ImageData(data, band_names=["red", "green", "blue"])
+    return ImageData(data, band_descriptions=["red", "green", "blue"])
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def sample_raster_stack(sample_image_data):
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
-    image_data2 = ImageData(data2, band_names=["red", "green", "blue"])
+    image_data2 = ImageData(data2, band_descriptions=["red", "green", "blue"])
 
     # Return a proper RasterStack with two samples
     return RasterStack.from_images(
@@ -78,7 +78,7 @@ def test_image_indexes(sample_raster_stack):
     for _key, img_data in result.items():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1
-        assert img_data.band_names == ["red"]  # First band name
+        assert img_data.band_descriptions == ["red"]  # First band name
 
 
 def test_to_array(sample_raster_stack):
@@ -121,7 +121,7 @@ def test_ndvi(sample_raster_stack):
     for _key, img_data in result.items():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1  # NDVI results in a single band
-        assert img_data.band_names == ["ndvi"]  # Should be named "ndvi"
+        assert img_data.band_descriptions == ["ndvi"]  # Should be named "ndvi"
 
 
 def test_ndwi(sample_raster_stack):
@@ -137,7 +137,7 @@ def test_ndwi(sample_raster_stack):
     for _key, img_data in result.items():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1  # NDWI results in a single band
-        assert img_data.band_names == ["ndwi"]  # Should be named "ndwi"
+        assert img_data.band_descriptions == ["ndwi"]  # Should be named "ndwi"
 
 
 def test_apply(sample_raster_stack):
@@ -209,7 +209,7 @@ def test_hillshade(sample_raster_stack):
             np.random.randint(0, 256, size=(1, 10, 10), dtype=np.uint8),
             mask=np.zeros((1, 10, 10), dtype=bool),
         )
-        dem_data[key] = ImageData(single_band, band_names=["elevation"])
+        dem_data[key] = ImageData(single_band, band_descriptions=["elevation"])
 
     result = hillshade(dem_data)
 
@@ -220,7 +220,9 @@ def test_hillshade(sample_raster_stack):
     for img_data in result.values():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 1  # Hillshade is single band
-        assert img_data.band_names == ["hillshade"]  # Should be named "hillshade"
+        assert img_data.band_descriptions == [
+            "hillshade"
+        ]  # Should be named "hillshade"
 
 
 def test_array_create():
@@ -520,7 +522,7 @@ def test_if_with_image_data(sample_image_data):
         np.random.randint(0, 256, size=(3, 10, 10), dtype=np.uint8),
         mask=np.zeros((3, 10, 10), dtype=bool),
     )
-    data2 = ImageData(data2_array, band_names=["red", "green", "blue"])
+    data2 = ImageData(data2_array, band_descriptions=["red", "green", "blue"])
 
     # Test that if returns the correct ImageData
     result = if_(True, data1, data2)
