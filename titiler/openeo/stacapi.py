@@ -1,5 +1,6 @@
 """Stac API backend."""
 
+from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pyproj
@@ -43,6 +44,13 @@ pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
 processing_settings = ProcessingSettings()
 
+collections_cache: TTLCache = TTLCache(
+    maxsize=cache_config.maxsize, ttl=cache_config.ttl
+)
+collection_cache: TTLCache = TTLCache(
+    maxsize=cache_config.maxsize, ttl=cache_config.ttl
+)
+
 
 @define
 class stacApiBackend:
@@ -66,22 +74,29 @@ class stacApiBackend:
         return self._client_cache
 
     @cached(  # type: ignore
-        TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),
+        collections_cache,
         key=lambda self, **kwargs: hashkey(self.url, **kwargs),
+        lock=Lock(),
     )
     def get_collections(self, **kwargs) -> List[Dict]:
         """Return List of STAC Collections."""
-        collections = []
+        collections: List[Dict] = []
         for collection in self.client.get_collections():
             if collection.id in self.exclude_collections:
                 continue
+
             collection = self.add_version_if_missing(collection)
             collection = self.add_data_cubes_if_missing(collection)
-            collections.append(collection)
-        result = [col.to_dict() for col in collections]
-        for col in result:
-            self._normalize_summaries(col)
-        return result
+
+            col_dict = collection.to_dict()
+            self._fix_collection(col_dict)
+            collections.append(col_dict)
+
+        return collections
+
+    def _fix_collection(self, collection: Dict) -> None:
+        self._normalize_summaries(collection)
+        return
 
     @staticmethod
     def _normalize_summaries(collection: Dict):
@@ -193,17 +208,25 @@ class stacApiBackend:
         return variables
 
     @cached(  # type: ignore
-        TTLCache(maxsize=cache_config.maxsize, ttl=cache_config.ttl),
+        collection_cache,
         key=lambda self, collection_id, **kwargs: hashkey(
             self.url, collection_id, **kwargs
         ),
+        lock=Lock(),
     )
     def get_collection(self, collection_id: str, **kwargs) -> Dict:
         """Return STAC Collection"""
-        col = self.client.get_collection(collection_id)
-        col = self.add_version_if_missing(col)
-        col = self.add_data_cubes_if_missing(col)
-        return col.to_dict()
+        if collection_id in self.exclude_collections:
+            raise ValueError(f"Collection {collection_id} is not available.")
+
+        collection = self.client.get_collection(collection_id)
+        collection = self.add_version_if_missing(collection)
+        collection = self.add_data_cubes_if_missing(collection)
+
+        col_dict = collection.to_dict()
+        self._fix_collection(col_dict)
+
+        return col_dict
 
     def get_items(
         self,
