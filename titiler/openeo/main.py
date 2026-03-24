@@ -34,7 +34,10 @@ except Exception as err:
         "Please set TITILER_OPENEO_STAC_API_URL and TITILER_OPENEO_STORE_URL"
     ) from err
 
-stac_client = stacApiBackend(str(backend_settings.stac_api_url))  # type: ignore
+stac_client = stacApiBackend(
+    str(backend_settings.stac_api_url),
+    exclude_collections=backend_settings.exclude_collections,
+)  # type: ignore
 service_store = get_store(str(backend_settings.store_url))
 udp_store = get_udp_store(str(backend_settings.store_url))
 tile_store = (

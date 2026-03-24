@@ -169,12 +169,24 @@ class BackendSettings(BaseSettings):
     default_services_file: Optional[str] = (
         None  # Path to default services configuration file
     )
+    exclude_collections: list[str] = Field(
+        default_factory=list,
+        description="List of collection IDs to exclude from the API (e.g. non-compliant STAC collections).",
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_",
         env_file=".env",
         extra="ignore",
     )
+
+    @field_validator("exclude_collections", mode="before")
+    @classmethod
+    def parse_exclude_collections(cls, v):
+        """Parse comma-separated string into list."""
+        if isinstance(v, str):
+            return [c.strip() for c in v.split(",") if c.strip()]
+        return v
 
 
 class PySTACSettings(BaseSettings):
