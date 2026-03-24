@@ -49,6 +49,7 @@ class stacApiBackend:
     """PySTAC-Client Backend."""
 
     url: str = field()
+    exclude_collections: list = field(factory=list)
     _client_cache: Client = field(default=None, init=False)
 
     @property
@@ -72,10 +73,31 @@ class stacApiBackend:
         """Return List of STAC Collections."""
         collections = []
         for collection in self.client.get_collections():
+            if collection.id in self.exclude_collections:
+                continue
             collection = self.add_version_if_missing(collection)
             collection = self.add_data_cubes_if_missing(collection)
             collections.append(collection)
-        return [col.to_dict() for col in collections]
+        result = [col.to_dict() for col in collections]
+        for col in result:
+            self._normalize_summaries(col)
+        return result
+
+    @staticmethod
+    def _normalize_summaries(collection: Dict):
+        """Normalize summaries so scalar values are wrapped in a list.
+
+        The openEO spec requires summary values to be a list, a stats
+        object, or a JSON Schema.  Some STAC APIs return plain scalars
+        (e.g. ``"processing:level": "L2A"``), which causes validation
+        errors.
+        """
+        summaries = collection.get("summaries")
+        if not isinstance(summaries, dict):
+            return
+        for key, value in summaries.items():
+            if not isinstance(value, (list, dict)):
+                summaries[key] = [value]
 
     def add_version_if_missing(self, collection: Collection):
         """Add version to collection if missing."""
