@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.0 (2026-03-24)
+
+## What's Changed
+* docs: add openeo-titiler logos by @zacdezgeo in https://github.com/sentinel-hub/titiler-openeo/pull/223
+* fix: set titiler requirement upper limit by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/226
+* fix: update versioning in CI and deployment configurations by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/230
+* fix: helm chart default version for docker container. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/229
+* feat: update for titiler 2.0 and rio-tiler 9.0 by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/227
+* fix: handle non-compliant STAC collection summaries by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/233
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.12.0...v0.13.0
+
 ## 0.12.0 (2026-02-03)
 
 ## What's Changed
