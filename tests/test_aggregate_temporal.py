@@ -1,6 +1,6 @@
 """Test aggregate_temporal process."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pytest
@@ -11,6 +11,9 @@ from titiler.openeo.processes.implementations.reduce import (
     DimensionNotAvailable,
     DistinctDimensionLabelsRequired,
     TemporalExtentEmpty,
+    _coerce_reduced_array,
+    _normalize_to_naive_utc,
+    _parse_temporal_value,
     aggregate_temporal,
 )
 
@@ -617,3 +620,186 @@ class TestAggregateTemporalPreservesMetadata:
         )
         img = result.first
         assert img.array.shape == (2, 4, 4)
+
+
+class TestParseTemporalValue:
+    """Test _parse_temporal_value edge cases."""
+
+    def test_tz_aware_datetime_normalized_to_utc(self):
+        """Timezone-aware datetime strings are normalized to naive UTC."""
+        result = _parse_temporal_value("2020-06-15T12:00:00+05:00")
+        assert result.tzinfo is None
+        assert result == datetime(2020, 6, 15, 7, 0, 0)
+
+    def test_z_suffix(self):
+        """Z suffix is handled as UTC."""
+        result = _parse_temporal_value("2020-06-15T12:00:00Z")
+        assert result.tzinfo is None
+        assert result == datetime(2020, 6, 15, 12, 0, 0)
+
+
+class TestNormalizeToNaiveUtc:
+    """Test _normalize_to_naive_utc."""
+
+    def test_aware_datetime_converted(self):
+        """Tz-aware datetime is converted to naive UTC."""
+        aware = datetime(2020, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        result = _normalize_to_naive_utc(aware)
+        assert result.tzinfo is None
+        assert result == datetime(2020, 6, 15, 12, 0, 0)
+
+    def test_naive_datetime_unchanged(self):
+        """Naive datetime is returned as-is."""
+        naive = datetime(2020, 6, 15, 12, 0, 0)
+        result = _normalize_to_naive_utc(naive)
+        assert result is naive
+
+
+class TestCoerceReducedArray:
+    """Test _coerce_reduced_array edge cases."""
+
+    def test_dict_raises(self):
+        """Dict input raises ValueError."""
+        with pytest.raises(ValueError, match="not a dict"):
+            _coerce_reduced_array({"key": "value"})
+
+    def test_non_convertible_raises(self):
+        """Non-convertible input raises ValueError."""
+
+        class Unconvertible:
+            """Object that cannot be converted to array."""
+
+            def __array__(self, *args, **kwargs):
+                raise TypeError("cannot convert")
+
+        with pytest.raises(ValueError, match="array-like"):
+            _coerce_reduced_array(Unconvertible())
+
+    def test_list_converted(self):
+        """List is converted to numpy array."""
+        result = _coerce_reduced_array([1, 2, 3])
+        assert isinstance(result, np.ndarray)
+
+
+class TestAggregateTemporalCoverage:
+    """Additional tests for coverage of edge cases."""
+
+    def test_tz_aware_intervals(self):
+        """Tz-aware interval bounds work with naive timestamps."""
+        data = _make_raster_stack([(datetime(2020, 6, 15), 10.0)])
+        result = aggregate_temporal(
+            data=data,
+            intervals=[["2020-01-01T00:00:00Z", "2021-01-01T00:00:00Z"]],
+            reducer=mean_reducer,
+        )
+        assert len(result) == 1
+        np.testing.assert_array_almost_equal(result.first.array.data, 10.0)
+
+    def test_context_forwarded_to_reducer(self):
+        """Context parameter is forwarded to the reducer."""
+        data = _make_raster_stack([(datetime(2020, 6, 15), 10.0)])
+        ctx = {"multiplier": 2}
+
+        def context_reducer(data, context=None):
+            """Reducer that uses context."""
+            arrays = [data[k].array for k in data.keys()]
+            stacked = np.ma.stack(arrays, axis=0)
+            result = np.ma.mean(stacked, axis=0)
+            if context and "multiplier" in context:
+                result = result * context["multiplier"]
+            return result
+
+        result = aggregate_temporal(
+            data=data,
+            intervals=[["2020-01-01", "2021-01-01"]],
+            reducer=context_reducer,
+            context=ctx,
+        )
+        assert len(result) == 1
+        np.testing.assert_array_almost_equal(result.first.array.data, 20.0)
+
+    def test_numeric_labels(self):
+        """Numeric labels produce synthetic datetime keys."""
+        data = _make_raster_stack(
+            [
+                (datetime(2020, 6, 1), 10.0),
+                (datetime(2021, 6, 1), 20.0),
+            ]
+        )
+        result = aggregate_temporal(
+            data=data,
+            intervals=[
+                ["2020-01-01", "2021-01-01"],
+                ["2021-01-01", "2022-01-01"],
+            ],
+            labels=[1.0, 2.0],
+            reducer=mean_reducer,
+        )
+        assert len(result) == 2
+
+    def test_unsupported_label_type_raises(self):
+        """Unsupported label type raises ValueError."""
+        data = _make_raster_stack([(datetime(2020, 6, 1), 10.0)])
+        with pytest.raises(ValueError, match="Unsupported label type"):
+            aggregate_temporal(
+                data=data,
+                intervals=[["2020-01-01", "2021-01-01"]],
+                labels=[None],
+                reducer=mean_reducer,
+            )
+
+    def test_duplicate_label_keys_raises(self):
+        """Labels that resolve to the same key raise DistinctDimensionLabelsRequired."""
+        data = _make_raster_stack([(datetime(2020, 6, 1), 10.0)])
+        with pytest.raises(DistinctDimensionLabelsRequired):
+            aggregate_temporal(
+                data=data,
+                intervals=[
+                    ["2020-01-01", "2020-06-01"],
+                    ["2020-06-01", "2021-01-01"],
+                ],
+                labels=["2020-01-01", "2020-01-01"],
+                reducer=mean_reducer,
+            )
+
+    def test_mixed_time_datetime_interval_raises(self):
+        """Mixing time-only and datetime in one interval raises ValueError."""
+        data = _make_raster_stack([(datetime(2020, 6, 1), 10.0)])
+        with pytest.raises(ValueError, match="Cannot mix"):
+            aggregate_temporal(
+                data=data,
+                intervals=[["06:00:00", "2021-01-01"]],
+                reducer=mean_reducer,
+                labels=["mixed"],
+            )
+
+    def test_reducer_returns_dict_raises(self):
+        """Reducer returning a dict raises ValueError."""
+        data = _make_raster_stack([(datetime(2020, 6, 1), 10.0)])
+
+        def dict_reducer(data):
+            """Bad reducer that returns a dict."""
+            return {"bad": "result"}
+
+        with pytest.raises(ValueError, match="not a dict"):
+            aggregate_temporal(
+                data=data,
+                intervals=[["2020-01-01", "2021-01-01"]],
+                reducer=dict_reducer,
+            )
+
+    def test_single_open_start_interval_without_labels(self):
+        """A single open-start interval works without labels."""
+        data = _make_raster_stack(
+            [
+                (datetime(2019, 1, 1), 5.0),
+                (datetime(2020, 6, 1), 15.0),
+            ]
+        )
+        result = aggregate_temporal(
+            data=data,
+            intervals=[[None, "2021-01-01"]],
+            reducer=mean_reducer,
+        )
+        assert len(result) == 1
+        np.testing.assert_array_almost_equal(result.first.array.data, 10.0)
