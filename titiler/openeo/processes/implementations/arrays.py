@@ -354,14 +354,6 @@ def merge_cubes(
         OverlapResolverMissing: When overlapping data exists but no resolver
             was provided.
     """
-    # Handle empty cubes
-    if not cube1 and not cube2:
-        return {}  # type: ignore[return-value]
-    if not cube1:
-        return cube2
-    if not cube2:
-        return cube1
-
     # Get reference spatial dimensions from cube1 metadata (avoids loading pixel data)
     target_height = cube1.height
     target_width = cube1.width
