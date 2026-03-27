@@ -723,7 +723,7 @@ def aggregate_temporal(
     intervals: List[List[Optional[str]]],
     reducer: Callable,
     labels: Optional[List[Union[float, str]]] = None,
-    dimension: Optional[str] = None,
+    dimension: Optional[Literal["t", "temporal", "time"]] = None,
     context: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Computes a temporal aggregation based on an array of temporal intervals.
