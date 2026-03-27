@@ -313,8 +313,8 @@ class TestAggregateTemporalIntervalSemantics:
         """Time-only interval selects by time-of-day (non wrap-around)."""
         data = _make_raster_stack(
             [
-                (datetime(2020, 1, 1, 5, 0, 0), 1.0),   # before window
-                (datetime(2020, 1, 1, 9, 0, 0), 3.0),   # inside window
+                (datetime(2020, 1, 1, 5, 0, 0), 1.0),  # before window
+                (datetime(2020, 1, 1, 9, 0, 0), 3.0),  # inside window
                 (datetime(2020, 1, 1, 15, 0, 0), 5.0),  # inside window
                 (datetime(2020, 1, 1, 21, 0, 0), 7.0),  # after window
             ]
@@ -333,10 +333,16 @@ class TestAggregateTemporalIntervalSemantics:
         """Wrap-around time-only interval splits midnight."""
         data = _make_raster_stack(
             [
-                (datetime(2020, 1, 1, 5, 0, 0), 1.0),   # inside wrap window (before 06:00)
-                (datetime(2020, 1, 1, 9, 0, 0), 3.0),   # outside window
+                (
+                    datetime(2020, 1, 1, 5, 0, 0),
+                    1.0,
+                ),  # inside wrap window (before 06:00)
+                (datetime(2020, 1, 1, 9, 0, 0), 3.0),  # outside window
                 (datetime(2020, 1, 1, 15, 0, 0), 5.0),  # outside window
-                (datetime(2020, 1, 1, 21, 0, 0), 7.0),  # inside wrap window (after 18:00)
+                (
+                    datetime(2020, 1, 1, 21, 0, 0),
+                    7.0,
+                ),  # inside wrap window (after 18:00)
             ]
         )
         result = aggregate_temporal(
@@ -348,6 +354,8 @@ class TestAggregateTemporalIntervalSemantics:
         assert len(result) == 1
         # Only 1.0 (05:00) and 7.0 (21:00) should be included: mean = 4.0
         np.testing.assert_array_almost_equal(result.first.array.data, 4.0)
+
+
 class TestAggregateTemporalReducers:
     """Test with different reducer functions."""
 
@@ -545,8 +553,8 @@ class TestAggregateTemporalErrors:
                 reducer=mean_reducer,
             )
 
-    def test_no_matching_data_raises(self):
-        """All intervals empty with no fallback metadata raises ValueError."""
+    def test_no_matching_data_produces_nodata(self):
+        """All intervals with no matching data produce fully-masked nodata images."""
         data = _make_raster_stack([(datetime(2020, 6, 1), 10.0)])
         # This should still return results (nodata images) since we have image refs
         result = aggregate_temporal(
