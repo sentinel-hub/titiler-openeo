@@ -309,7 +309,45 @@ class TestAggregateTemporalIntervalSemantics:
         assert len(result) == 1
         np.testing.assert_array_almost_equal(result.first.array.data, 10.0)
 
+    def test_time_only_interval_daytime(self):
+        """Time-only interval selects by time-of-day (non wrap-around)."""
+        data = _make_raster_stack(
+            [
+                (datetime(2020, 1, 1, 5, 0, 0), 1.0),   # before window
+                (datetime(2020, 1, 1, 9, 0, 0), 3.0),   # inside window
+                (datetime(2020, 1, 1, 15, 0, 0), 5.0),  # inside window
+                (datetime(2020, 1, 1, 21, 0, 0), 7.0),  # after window
+            ]
+        )
+        result = aggregate_temporal(
+            data=data,
+            intervals=[["06:00:00", "18:00:00"]],
+            reducer=mean_reducer,
+            labels=["daytime"],
+        )
+        assert len(result) == 1
+        # Only 3.0 and 5.0 should be included: mean = 4.0
+        np.testing.assert_array_almost_equal(result.first.array.data, 4.0)
 
+    def test_time_only_wrap_around_interval(self):
+        """Wrap-around time-only interval splits midnight."""
+        data = _make_raster_stack(
+            [
+                (datetime(2020, 1, 1, 5, 0, 0), 1.0),   # inside wrap window (before 06:00)
+                (datetime(2020, 1, 1, 9, 0, 0), 3.0),   # outside window
+                (datetime(2020, 1, 1, 15, 0, 0), 5.0),  # outside window
+                (datetime(2020, 1, 1, 21, 0, 0), 7.0),  # inside wrap window (after 18:00)
+            ]
+        )
+        result = aggregate_temporal(
+            data=data,
+            intervals=[["18:00:00", "06:00:00"]],
+            reducer=mean_reducer,
+            labels=["night"],
+        )
+        assert len(result) == 1
+        # Only 1.0 (05:00) and 7.0 (21:00) should be included: mean = 4.0
+        np.testing.assert_array_almost_equal(result.first.array.data, 4.0)
 class TestAggregateTemporalReducers:
     """Test with different reducer functions."""
 
