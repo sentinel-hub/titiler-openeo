@@ -7,8 +7,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import numpy
 from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
-from rio_tiler.utils import resize_array
 
+from ...errors import OpenEOException
 from .core import process
 from .data_model import RasterStack
 
@@ -217,58 +217,15 @@ def add_dimension(
     return RasterStack.from_images(new_data)
 
 
-class OverlapResolverMissing(Exception):
+class OverlapResolverMissing(OpenEOException):
     """Raised when overlapping data cubes have no overlap resolver specified."""
 
     def __init__(self) -> None:
         super().__init__(
-            "Overlapping data cubes, but no overlap resolver has been specified."
+            message="Overlapping data cubes, but no overlap resolver has been specified.",
+            code="OverlapResolverMissing",
+            status_code=400,
         )
-
-
-def _resize_image_to_match(
-    img: ImageData,
-    target_height: int,
-    target_width: int,
-) -> ImageData:
-    """Resize an ImageData to match target spatial dimensions.
-
-    Args:
-        img: Source image to resize
-        target_height: Target height in pixels
-        target_width: Target width in pixels
-
-    Returns:
-        Resized ImageData (or original if already matching)
-    """
-    if img.height == target_height and img.width == target_width:
-        return img
-
-    logging.warning(
-        "Resizing cube2 image from %dx%d to %dx%d to match cube1 spatial dimensions",
-        img.width,
-        img.height,
-        target_width,
-        target_height,
-    )
-
-    resized_data = resize_array(img.array.data, target_height, target_width)
-    resized_mask = resize_array(
-        img.array.mask.astype("uint8")
-        if isinstance(img.array.mask, numpy.ndarray)
-        else numpy.zeros_like(img.array.data, dtype="uint8"),
-        target_height,
-        target_width,
-    ).astype("bool")
-
-    return ImageData(
-        numpy.ma.MaskedArray(resized_data, mask=resized_mask),
-        assets=img.assets,
-        crs=img.crs,
-        bounds=img.bounds,
-        band_descriptions=img.band_descriptions or [],
-        metadata=img.metadata or {},
-    )
 
 
 def _merge_images_bands(
@@ -296,8 +253,8 @@ def _merge_images_bands(
     Raises:
         OverlapResolverMissing: When overlap exists but no resolver was provided
     """
-    bands1 = list(img1.band_descriptions) if img1.band_descriptions else []
-    bands2 = list(img2.band_descriptions) if img2.band_descriptions else []
+    bands1 = list(img1.band_descriptions)
+    bands2 = list(img2.band_descriptions)
 
     # If neither image has band names, all data overlaps
     if not bands1 and not bands2:
@@ -405,10 +362,11 @@ def merge_cubes(
     if not cube2:
         return cube1
 
-    # Get reference spatial dimensions from cube1 (cube1 is the target for resampling)
-    ref_img = cube1.first
-    target_height = ref_img.height
-    target_width = ref_img.width
+    # Get reference spatial dimensions from cube1 metadata (avoids loading pixel data)
+    target_height = cube1.height
+    target_width = cube1.width
+    if target_height is None or target_width is None:
+        raise ValueError("cube1 has no spatial dimensions")
 
     keys1 = set(cube1.keys())
     keys2 = set(cube2.keys())
@@ -427,14 +385,30 @@ def merge_cubes(
         elif in_cube2 and not in_cube1:
             # Timestamp only in cube2 - resize to match cube1 spatial dims
             img2 = cube2[key]
-            merged_images[key] = _resize_image_to_match(
-                img2, target_height, target_width
-            )
+            if img2.height != target_height or img2.width != target_width:
+                logging.warning(
+                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
+                    img2.width,
+                    img2.height,
+                    target_width,
+                    target_height,
+                )
+                img2 = img2.resize(target_height, target_width)
+            merged_images[key] = img2
 
         else:
             # Timestamp in both cubes - merge bands
             img1 = cube1[key]
-            img2 = _resize_image_to_match(cube2[key], target_height, target_width)
+            img2 = cube2[key]
+            if img2.height != target_height or img2.width != target_width:
+                logging.warning(
+                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
+                    img2.width,
+                    img2.height,
+                    target_width,
+                    target_height,
+                )
+                img2 = img2.resize(target_height, target_width)
             merged_images[key] = _merge_images_bands(
                 img1, img2, overlap_resolver, context
             )

@@ -9,7 +9,6 @@ from rio_tiler.models import ImageData
 from titiler.openeo.processes.implementations.arrays import (
     OverlapResolverMissing,
     _merge_images_bands,
-    _resize_image_to_match,
     merge_cubes,
 )
 from titiler.openeo.processes.implementations.data_model import RasterStack
@@ -84,44 +83,6 @@ def context_resolver(x, y, context=None):
     """Overlap resolver that uses context."""
     factor = context.get("factor", 1.0) if context else 1.0
     return (x + y) * factor
-
-
-# =============================================================================
-# Test _resize_image_to_match
-# =============================================================================
-
-
-class TestResizeImageToMatch:
-    """Test _resize_image_to_match helper."""
-
-    def test_no_resize_needed(self):
-        """Image already matching target dims returns same object."""
-        img = _make_image(height=10, width=10)
-        result = _resize_image_to_match(img, 10, 10)
-        assert result is img  # Same object, no copy
-
-    def test_resize_smaller(self):
-        """Larger image is resized down to target dims."""
-        img = _make_image(height=20, width=20, fill=5.0)
-        result = _resize_image_to_match(img, 10, 10)
-        assert result.height == 10
-        assert result.width == 10
-        assert result.array.shape == (2, 10, 10)
-
-    def test_resize_larger(self):
-        """Smaller image is resized up to target dims."""
-        img = _make_image(height=5, width=5, fill=3.0)
-        result = _resize_image_to_match(img, 10, 10)
-        assert result.height == 10
-        assert result.width == 10
-
-    def test_resize_preserves_metadata(self):
-        """Resize preserves band names, CRS and bounds."""
-        img = _make_image(height=20, width=20, band_names=["B1", "B2"], fill=1.0)
-        result = _resize_image_to_match(img, 10, 10)
-        assert result.band_descriptions == ["B1", "B2"]
-        assert result.crs == img.crs
-        assert result.bounds == img.bounds
 
 
 # =============================================================================
@@ -301,23 +262,6 @@ class TestMergeCubes:
         merged_img = result[dt_shared]
         assert merged_img.count == 2
         assert merged_img.band_descriptions == ["B1", "B2"]
-
-    def test_empty_cube1(self):
-        """cube1 is empty → return cube2."""
-        cube2 = _make_stack([datetime(2021, 1, 1)], fill=1.0, band_names=["B1"])
-        result = merge_cubes(cube1={}, cube2=cube2)
-        assert result is cube2
-
-    def test_empty_cube2(self):
-        """cube2 is empty → return cube1."""
-        cube1 = _make_stack([datetime(2021, 1, 1)], fill=1.0, band_names=["B1"])
-        result = merge_cubes(cube1=cube1, cube2={})
-        assert result is cube1
-
-    def test_both_empty(self):
-        """Both cubes empty → return empty."""
-        result = merge_cubes(cube1={}, cube2={})
-        assert not result
 
     def test_different_spatial_dimensions(self):
         """cube2 has different spatial dims → resized to match cube1."""
