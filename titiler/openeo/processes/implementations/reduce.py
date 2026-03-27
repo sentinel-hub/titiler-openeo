@@ -38,8 +38,9 @@ READ THIS ENTIRE WARNING CAREFULLY before making changes.
 """
 
 import logging
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import re
+from datetime import datetime, time, timedelta, timezone
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy
 from rasterio.crs import CRS
@@ -50,7 +51,9 @@ from rio_tiler.utils import resize_array
 
 from .data_model import ImageRef, RasterStack
 
-__all__ = ["apply_pixel_selection", "reduce_dimension"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["aggregate_temporal", "apply_pixel_selection", "reduce_dimension"]
 
 # Mapping of reducer function names to their corresponding PixelSelectionMethod names
 # This enables _reduce_temporal_dimension to use the efficient streaming approach
@@ -552,6 +555,343 @@ def _reduce_spectral_dimension_stack(
         )
 
     return RasterStack.from_images(result)
+
+
+class DistinctDimensionLabelsRequired(Exception):
+    """Exception raised when dimension labels are not distinct."""
+
+    def __init__(self):
+        super().__init__(
+            "The dimension labels have duplicate values. "
+            "Distinct labels must be specified."
+        )
+
+
+class TemporalExtentEmpty(Exception):
+    """Exception raised when a temporal interval is empty."""
+
+    def __init__(self):
+        super().__init__(
+            "At least one of the intervals is empty. "
+            "The second instant in time must always be greater/later than the first instant."
+        )
+
+
+def _parse_temporal_value(
+    value: Optional[str],
+) -> Optional[Union[datetime, time]]:
+    """Parse a temporal string value into a datetime or time object.
+
+    Handles RFC 3339 date-time strings, date-only strings, time-only strings
+    (HH:MM:SS), and null values. Timezone-aware values are normalized to UTC
+    and returned as naive datetimes.
+
+    Args:
+        value: An ISO 8601/RFC 3339 string, time-only string, or None.
+
+    Returns:
+        A datetime object, a time object (for HH:MM:SS), or None if value is None.
+    """
+    if value is None:
+        return None
+    # Try time-only format (HH:MM:SS) first
+    if re.match(r"^\d{2}:\d{2}:\d{2}$", value):
+        return time.fromisoformat(value)
+    # Handle Z suffix
+    if isinstance(value, str) and value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            try:
+                dt = datetime.strptime(value, "%Y")
+            except ValueError as e:
+                raise ValueError(f"Invalid temporal value: {value}") from e
+    # Normalize tz-aware datetimes to naive UTC
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _parse_intervals(
+    intervals: List[List[Optional[str]]],
+) -> List[Tuple[Optional[Union[datetime, time]], Optional[Union[datetime, time]]]]:
+    """Parse and validate temporal intervals.
+
+    Args:
+        intervals: Raw interval pairs as strings.
+
+    Returns:
+        List of parsed (start, end) tuples (datetime or time objects).
+
+    Raises:
+        TemporalExtentEmpty: If any non-time interval has end <= start.
+        ValueError: If interval format is invalid or mixes types.
+    """
+    parsed: List[
+        Tuple[Optional[Union[datetime, time]], Optional[Union[datetime, time]]]
+    ] = []
+    for interval in intervals:
+        if len(interval) != 2:
+            raise ValueError(
+                f"Each temporal interval must have exactly two elements, got {len(interval)}"
+            )
+        start = _parse_temporal_value(interval[0])
+        end = _parse_temporal_value(interval[1])
+        # Validate: both must be same type (time-only or datetime)
+        if isinstance(start, time) != isinstance(end, time):
+            if start is not None and end is not None:
+                raise ValueError(
+                    "Cannot mix time-only and date/datetime in the same interval"
+                )
+        # For datetime intervals, end must be > start (except time-only wrap-around)
+        if (
+            start is not None
+            and end is not None
+            and isinstance(start, datetime)
+            and isinstance(end, datetime)
+            and end <= start
+        ):
+            raise TemporalExtentEmpty()
+        parsed.append((start, end))
+    return parsed
+
+
+def _resolve_output_keys(
+    labels: Optional[List[Union[float, str]]],
+    intervals: List[
+        Tuple[Optional[Union[datetime, time]], Optional[Union[datetime, time]]]
+    ],
+) -> List[datetime]:
+    """Resolve output datetime keys from labels or interval starts.
+
+    Args:
+        labels: User-provided labels, or None.
+        intervals: Parsed interval tuples.
+
+    Returns:
+        List of datetime keys for the output RasterStack.
+
+    Raises:
+        DistinctDimensionLabelsRequired: If resolved keys are not distinct.
+        ValueError: If labels count doesn't match intervals.
+    """
+    num_intervals = len(intervals)
+    if labels is not None and len(labels) > 0:
+        if len(labels) != num_intervals:
+            raise ValueError(
+                f"Number of labels ({len(labels)}) must match "
+                f"number of intervals ({num_intervals})"
+            )
+        output_keys: List[datetime] = []
+        for idx, label in enumerate(labels):
+            if isinstance(label, str):
+                try:
+                    parsed = _parse_temporal_value(label)
+                    if isinstance(parsed, time):
+                        # Time-only label: use synthetic key
+                        output_keys.append(
+                            datetime(1970, 1, 1) + timedelta(seconds=idx)
+                        )
+                    else:
+                        output_keys.append(parsed or datetime.min)
+                except ValueError:
+                    # Non-temporal string label: use unique synthetic key per index
+                    output_keys.append(datetime(1970, 1, 1) + timedelta(days=idx))
+            elif isinstance(label, (int, float)):
+                output_keys.append(datetime(1970, 1, 1) + timedelta(days=float(label)))
+            else:
+                raise ValueError(f"Unsupported label type: {type(label)}")
+        # Validate uniqueness of resolved keys
+        if len(set(output_keys)) < len(output_keys):
+            raise DistinctDimensionLabelsRequired()
+        return output_keys
+
+    starts = [iv[0] if isinstance(iv[0], datetime) else None for iv in intervals]
+    # Check distinctness across all start values, including None.
+    # This allows a single open-start interval (start=None) but still
+    # rejects any duplicated start value (including multiple None).
+    if len(set(starts)) < len(starts):
+        raise DistinctDimensionLabelsRequired()
+    return [s if s is not None else datetime.min for s in starts]
+
+
+def _normalize_to_naive_utc(dt: datetime) -> datetime:
+    """Convert a datetime to naive UTC.
+
+    If the datetime is tz-aware, convert to UTC and strip tzinfo.
+    If naive, treat as UTC (return as-is).
+    """
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _timestamp_in_interval(
+    ts: datetime,
+    start: Optional[Union[datetime, time]],
+    end: Optional[Union[datetime, time]],
+) -> bool:
+    """Check if a timestamp falls within [start, end).
+
+    Handles datetime intervals, time-only intervals (with wrap-around),
+    and open-ended intervals.
+
+    Args:
+        ts: The timestamp to check.
+        start: Interval start (inclusive), or None for open.
+        end: Interval end (exclusive), or None for open.
+
+    Returns:
+        True if the timestamp is within the interval.
+    """
+    # Time-only interval: compare by time-of-day
+    if isinstance(start, time) and isinstance(end, time):
+        ts_time = ts.time()
+        if start <= end:
+            # Normal interval: [start, end)
+            return start <= ts_time < end
+        else:
+            # Wrap-around interval: [start, 24:00) or [00:00, end)
+            return ts_time >= start or ts_time < end
+
+    # Datetime interval: normalize all to naive UTC
+    ts_utc = _normalize_to_naive_utc(ts)
+    if start is not None and isinstance(start, datetime):
+        s_utc = _normalize_to_naive_utc(start)
+        if ts_utc < s_utc:
+            return False
+    if end is not None and isinstance(end, datetime):
+        e_utc = _normalize_to_naive_utc(end)
+        if ts_utc >= e_utc:
+            return False
+    return True
+
+
+def _make_nodata_image(data: RasterStack) -> Optional[ImageData]:
+    """Create a fully-masked nodata ImageData from the first image ref in the stack."""
+    first_ref_list = data.get_image_refs()
+    if not first_ref_list:
+        return None
+    _, first_ref = first_ref_list[0]
+    nodata_array = numpy.ma.masked_all(
+        (first_ref.count, first_ref.height, first_ref.width)
+    )
+    return ImageData(
+        nodata_array,
+        crs=first_ref.crs,
+        bounds=first_ref.bounds,
+        band_descriptions=first_ref.band_names,
+    )
+
+
+def _coerce_reduced_array(reduced_array: Any) -> numpy.ndarray:
+    """Validate and coerce a reducer result to a numpy array."""
+    if isinstance(reduced_array, dict):
+        raise ValueError("The reducer must return an array-like object, not a dict.")
+    if not isinstance(reduced_array, (numpy.ndarray, numpy.ma.MaskedArray)):
+        try:
+            reduced_array = numpy.asarray(reduced_array)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"The reducer must return an array-like object, "
+                f"but returned {type(reduced_array).__name__}."
+            ) from e
+    return reduced_array
+
+
+def aggregate_temporal(
+    data: RasterStack,
+    intervals: List[List[Optional[str]]],
+    reducer: Callable,
+    labels: Optional[List[Union[float, str]]] = None,
+    dimension: Optional[Literal["t", "temporal", "time"]] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> RasterStack:
+    """Computes a temporal aggregation based on an array of temporal intervals.
+
+    For each interval, all data along the temporal dimension will be passed through
+    the reducer. Intervals are left-closed, right-open: [start, end).
+
+    Args:
+        data: A data cube with at least one temporal dimension.
+        intervals: Left-closed temporal intervals. Each interval is [start, end]
+            where start is included and end is excluded. Values are RFC 3339 strings
+            or None for open-ended intervals.
+        reducer: A reducer to be applied for the values contained in each interval.
+        labels: Distinct labels for the intervals. Required if interval start values
+            are not distinct.
+        dimension: The name of the temporal dimension for aggregation. If None, the
+            data cube is expected to have only one temporal dimension.
+        context: Additional data to be passed to the reducer.
+
+    Returns:
+        A new data cube with the same dimensions but aggregated temporal values.
+
+    Raises:
+        TemporalExtentEmpty: If any interval has end <= start.
+        DistinctDimensionLabelsRequired: If interval starts are not distinct and
+            no labels are provided.
+        DimensionNotAvailable: If the specified dimension does not exist.
+    """
+    if not data:
+        raise ValueError("Expected a non-empty data cube")
+    if not intervals:
+        raise ValueError("At least one temporal interval must be provided")
+
+    if dimension is not None:
+        if dimension.lower() not in ["t", "temporal", "time"]:
+            raise DimensionNotAvailable(dimension)
+
+    parsed_intervals = _parse_intervals(intervals)
+    output_keys = _resolve_output_keys(labels, parsed_intervals)
+    timestamps = data.timestamps()
+
+    result_images: Dict[datetime, ImageData] = {}
+
+    for idx, (start, end) in enumerate(parsed_intervals):
+        matching_keys = [
+            ts for ts in timestamps if _timestamp_in_interval(ts, start, end)
+        ]
+        output_key = output_keys[idx]
+
+        if not matching_keys:
+            nodata_img = _make_nodata_image(data)
+            if nodata_img is not None:
+                result_images[output_key] = nodata_img
+            continue
+
+        sub_images: Dict[datetime, ImageData] = {}
+        for key in matching_keys:
+            try:
+                sub_images[key] = data[key]
+            except KeyError:
+                logger.warning("Failed to load image for timestamp %s, skipping", key)
+                continue
+        if not sub_images:
+            continue
+
+        sub_stack = RasterStack.from_images(sub_images)
+        reducer_kwargs: Dict[str, Any] = {"data": sub_stack}
+        if context is not None:
+            reducer_kwargs["context"] = context
+        reduced_array = _coerce_reduced_array(reducer(**reducer_kwargs))
+
+        first_img = next(iter(sub_images.values()))
+        result_images[output_key] = ImageData(
+            reduced_array,
+            crs=first_img.crs,
+            bounds=first_img.bounds,
+            band_descriptions=first_img.band_descriptions or [],
+        )
+
+    if not result_images:
+        raise ValueError("No data matched any of the specified intervals")
+
+    return RasterStack.from_images(result_images)
 
 
 def reduce_dimension(
