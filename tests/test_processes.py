@@ -157,9 +157,9 @@ def test_apply(sample_raster_stack):
         assert isinstance(img_data, ImageData)
         assert img_data.count == 3  # Same band count
         # Check if values are approximately doubled
-        original = sample_raster_stack[key].array.data
-        doubled = img_data.array.data
-        assert np.allclose(doubled, original * 2)
+        original = sample_raster_stack[key].array.data.astype("float")
+        doubled = img_data.array.data.astype("float")
+        np.testing.assert_array_equal(doubled, original * 2)
 
 
 def test_array_element(sample_raster_stack):
@@ -313,9 +313,9 @@ def test_apply_dimension_temporal(sample_raster_stack):
     for key, img_data in result.items():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 3  # Same band count
-        original = sample_raster_stack[key].array.data
-        doubled = img_data.array.data
-        assert np.allclose(doubled, original * 2)
+        original = sample_raster_stack[key].array.data.astype("float")
+        doubled = img_data.array.data.astype("float")
+        np.testing.assert_array_equal(doubled, original * 2)
 
 
 def test_apply_dimension_temporal_with_target(sample_raster_stack):
@@ -392,9 +392,9 @@ def test_apply_dimension_spectral_stack(sample_raster_stack):
     for key, img_data in result.items():
         assert isinstance(img_data, ImageData)
         assert img_data.count == 3  # Same band count
-        original = sample_raster_stack[key].array.data
-        added = img_data.array.data
-        assert np.allclose(added, original + 10)
+        original = sample_raster_stack[key].array.data.astype("float")
+        added = img_data.array.data.astype("float")
+        np.testing.assert_array_equal(added, original + 10)
 
 
 def test_apply_dimension_single_temporal_image(sample_image_data):
@@ -438,9 +438,9 @@ def test_apply_dimension_with_context(sample_raster_stack):
     # Each result should have values tripled
     for key, img_data in result.items():
         assert isinstance(img_data, ImageData)
-        original = sample_raster_stack[key].array.data
-        tripled = img_data.array.data
-        assert np.allclose(tripled, original * 3)
+        original = sample_raster_stack[key].array.data.astype("float")
+        tripled = img_data.array.data.astype("float")
+        np.testing.assert_array_equal(tripled, original * 3)
 
 
 def test_apply_dimension_unsupported_dimension(sample_raster_stack):
