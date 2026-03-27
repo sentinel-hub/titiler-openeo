@@ -38,7 +38,8 @@ READ THIS ENTIRE WARNING CAREFULLY before making changes.
 """
 
 import logging
-from datetime import datetime, time, timedelta
+import re
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy
@@ -594,8 +595,6 @@ def _parse_temporal_value(
     if value is None:
         return None
     # Try time-only format (HH:MM:SS) first
-    import re
-
     if re.match(r"^\d{2}:\d{2}:\d{2}$", value):
         return time.fromisoformat(value)
     # Handle Z suffix
@@ -613,8 +612,6 @@ def _parse_temporal_value(
                 raise ValueError(f"Invalid temporal value: {value}") from e
     # Normalize tz-aware datetimes to naive UTC
     if dt.tzinfo is not None:
-        from datetime import timezone
-
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
@@ -729,8 +726,6 @@ def _normalize_to_naive_utc(dt: datetime) -> datetime:
     If naive, treat as UTC (return as-is).
     """
     if dt.tzinfo is not None:
-        from datetime import timezone
-
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
