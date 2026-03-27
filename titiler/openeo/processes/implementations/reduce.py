@@ -758,8 +758,7 @@ def aggregate_temporal(
         raise ValueError("At least one temporal interval must be provided")
 
     if dimension is not None:
-        dim_lower = dimension.lower()
-        if dim_lower not in ["t", "temporal", "time"]:
+        if dimension.lower() not in ["t", "temporal", "time"]:
             raise DimensionNotAvailable(dimension)
 
     parsed_intervals = _parse_intervals(intervals)
