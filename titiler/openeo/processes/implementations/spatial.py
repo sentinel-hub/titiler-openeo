@@ -5,10 +5,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from pyproj import CRS
+from rasterio.features import rasterize
+from rasterio.transform import from_bounds
+from rasterio.warp import transform_geom
+from rio_tiler.constants import WGS84_CRS
 
 from .data_model import ImageData, RasterStack
 
-__all__ = ["resample_spatial", "aggregate_spatial"]
+__all__ = ["resample_spatial", "aggregate_spatial", "mask_polygon"]
 
 
 class TargetDimensionExists(Exception):
@@ -327,3 +331,159 @@ def resample_spatial(
     return RasterStack.from_images(
         {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
     )
+
+
+def _extract_geometries_from_mask(
+    mask: Union[Dict, Any],
+) -> List[Dict[str, Any]]:
+    """Extract a list of GeoJSON geometry dicts from a mask parameter.
+
+    Supports Polygon, MultiPolygon, Feature, and FeatureCollection inputs.
+
+    Args:
+        mask: GeoJSON object (Geometry, Feature, or FeatureCollection).
+
+    Returns:
+        List of GeoJSON geometry dicts.
+    """
+    if not isinstance(mask, dict) or "type" not in mask:
+        raise ValueError("Invalid GeoJSON: must be a dict with a 'type' field.")
+
+    geom_type = mask["type"]
+
+    if geom_type == "FeatureCollection":
+        geometries = []
+        for feature in mask.get("features", []):
+            geom = feature.get("geometry")
+            if geom and geom.get("coordinates"):
+                geometries.append(geom)
+        return geometries
+    elif geom_type == "Feature":
+        geom = mask.get("geometry")
+        if geom and geom.get("coordinates"):
+            return [geom]
+        return []
+    elif geom_type in ("Polygon", "MultiPolygon"):
+        if mask.get("coordinates"):
+            return [mask]
+        return []
+    else:
+        raise ValueError(
+            f"Unsupported GeoJSON type '{geom_type}'. "
+            "Expected Polygon, MultiPolygon, Feature, or FeatureCollection."
+        )
+
+
+def _rasterize_geometries(
+    geometries: List[Dict[str, Any]],
+    width: int,
+    height: int,
+    bounds: Tuple[float, float, float, float],
+    src_crs: CRS = WGS84_CRS,
+    dst_crs: Optional[CRS] = None,
+) -> numpy.ndarray:
+    """Rasterize geometries into a boolean mask.
+
+    Args:
+        geometries: List of GeoJSON geometry dicts.
+        width: Output width in pixels.
+        height: Output height in pixels.
+        bounds: Output bounds as (west, south, east, north).
+        src_crs: Source CRS of the geometries.
+        dst_crs: Target CRS for reprojection.
+
+    Returns:
+        Boolean array where True = pixel center intersects with a geometry.
+    """
+    if dst_crs is not None and dst_crs != src_crs:
+        geometries = [transform_geom(src_crs, dst_crs, g) for g in geometries]
+
+    west, south, east, north = bounds
+    transform = from_bounds(west, south, east, north, width, height)
+
+    # Rasterize: 1 inside geometries, 0 outside
+    rasterized = rasterize(
+        geometries,
+        out_shape=(height, width),
+        transform=transform,
+        default_value=1,
+        fill=0,
+        dtype="uint8",
+    )
+    return rasterized.astype(bool)
+
+
+def mask_polygon(
+    data: RasterStack,
+    mask: Union[Dict, Any],
+    replacement: Optional[Union[int, float, bool, str]] = None,
+    inside: bool = False,
+) -> RasterStack:
+    """Apply a polygon mask to a raster data cube.
+
+    All pixels for which the point at the pixel center does not intersect
+    with any polygon are replaced. This behavior can be inverted by setting
+    ``inside`` to ``True``.
+
+    Args:
+        data: A raster data cube.
+        mask: A GeoJSON object containing polygon geometries.
+        replacement: Value to replace masked pixels with. None uses no-data.
+        inside: If True, pixels inside the polygon are replaced instead.
+
+    Returns:
+        A masked raster data cube with the same dimensions.
+    """
+    geometries = _extract_geometries_from_mask(mask)
+
+    if not geometries:
+        return data
+
+    result_images = {}
+
+    for key, img in data.items():
+        # Rasterize geometries into a boolean mask for this image's grid
+        intersects = _rasterize_geometries(
+            geometries,
+            width=img.width,
+            height=img.height,
+            bounds=img.bounds,
+            dst_crs=img.crs,
+        )
+
+        # Determine which pixels to replace:
+        # Default (inside=False): replace pixels OUTSIDE the polygon (not intersecting)
+        # inside=True: replace pixels INSIDE the polygon (intersecting)
+        if inside:
+            pixels_to_replace = intersects  # 2D (height, width)
+        else:
+            pixels_to_replace = ~intersects  # 2D (height, width)
+
+        # Work on a copy of the data
+        new_data = img.array.copy()
+        new_mask = numpy.ma.getmaskarray(img.array).copy()
+
+        if replacement is None:
+            # Set to no-data by updating the mask
+            for band_idx in range(new_data.shape[0]):
+                # Preserve existing no-data: only apply to currently valid pixels
+                valid = ~new_mask[band_idx]
+                new_mask[band_idx] |= pixels_to_replace & valid
+        else:
+            # Replace with the specified value
+            for band_idx in range(new_data.shape[0]):
+                valid = ~new_mask[band_idx]
+                apply_here = pixels_to_replace & valid
+                new_data[band_idx][apply_here] = replacement
+
+        masked_array = numpy.ma.MaskedArray(new_data, mask=new_mask)
+
+        result_images[key] = ImageData(
+            masked_array,
+            assets=img.assets,
+            crs=img.crs,
+            bounds=img.bounds,
+            band_names=img.band_names,
+        )
+
+    return RasterStack.from_images(result_images)
