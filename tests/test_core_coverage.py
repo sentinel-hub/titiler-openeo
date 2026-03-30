@@ -351,16 +351,16 @@ class TestTypeNameConversions:
         assert _type_to_openeo_name(type(None)) == "null"
 
     def test_type_to_openeo_name_dict(self):
-        """Test dict type converts to 'datacube'.
+        """Test dict type converts to 'object'.
 
-        Validates: dict → "datacube" (OpenEO terminology).
+        Validates: dict → "object" (generic dict, not datacube).
 
-        Why important: In OpenEO, dicts represent datacubes (raster stacks).
-        Error messages should reflect this domain concept.
+        Why important: Plain dict annotations should not be assumed
+        to represent datacubes. Only RasterStack is a datacube.
         """
         from titiler.openeo.processes.implementations.core import _type_to_openeo_name
 
-        assert _type_to_openeo_name(dict) == "datacube"
+        assert _type_to_openeo_name(dict) == "object"
 
     def test_type_to_openeo_name_custom_types(self):
         """Test custom type names are detected.
@@ -403,11 +403,14 @@ class TestTypeNameConversions:
         - 3.14 → "number"
         - "text" → "string"
         - True → "boolean"
-        - {} → "datacube"
+        - {} → "object"
+        - {"type": "Polygon"} (incomplete) → "object"
+        - valid GeoJSON Polygon → "geojson"
         - np.array → "array"
 
         Why important: Error messages show both expected and actual types.
         Actual type comes from the value, not the annotation.
+        GeoJSON detection uses geojson-pydantic for proper validation.
         """
         from titiler.openeo.processes.implementations.core import _value_to_openeo_name
 
@@ -416,7 +419,34 @@ class TestTypeNameConversions:
         assert _value_to_openeo_name(3.14) == "number"
         assert _value_to_openeo_name("text") == "string"
         assert _value_to_openeo_name(True) == "boolean"
-        assert _value_to_openeo_name({}) == "datacube"
+        assert _value_to_openeo_name({}) == "object"
+        assert _value_to_openeo_name({"key": "value"}) == "object"
+        # Incomplete GeoJSON (missing coordinates) → "object"
+        assert _value_to_openeo_name({"type": "Polygon"}) == "object"
+        # Valid GeoJSON → "geojson"
+        assert (
+            _value_to_openeo_name(
+                {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                }
+            )
+            == "geojson"
+        )
+        assert (
+            _value_to_openeo_name(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [0, 0]},
+                    "properties": {},
+                }
+            )
+            == "geojson"
+        )
+        assert (
+            _value_to_openeo_name({"type": "FeatureCollection", "features": []})
+            == "geojson"
+        )
         assert _value_to_openeo_name(np.array([1, 2, 3])) == "array"
 
     def test_value_to_openeo_name_special_types(self):
@@ -534,20 +564,20 @@ class TestTypeValidation:
             requires_int(x=None)
 
     def test_validation_dict_to_array_mismatch(self):
-        """Test dict/datacube to array type mismatch detection.
+        """Test dict to array type mismatch detection via Pydantic.
 
         Validates: Passing a dict when List[int] expected raises clear TypeError.
 
-        Why important: Common mistake is passing a datacube (dict) to a function
-        expecting an array. Early detection prevents confusing errors like
-        "dict object has no attribute shape".
+        Why important: Plain dicts are no longer pre-rejected as datacubes.
+        Instead, Pydantic validation catches the type mismatch and reports
+        the dict as 'object' rather than 'datacube'.
         """
 
         @process
         def requires_array(data: List[int]) -> int:
             return len(data)
 
-        with pytest.raises(TypeError, match="expected.*List.*got.*datacube"):
+        with pytest.raises(TypeError, match="expected.*got.*object"):
             requires_array(data={"a": 1})
 
     def test_validation_lazy_raster_stack_to_array_mismatch(self):
