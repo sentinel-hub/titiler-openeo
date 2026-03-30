@@ -21,6 +21,17 @@ import logging
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
+from geojson_pydantic import (
+    Feature,
+    FeatureCollection,
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPoint,
+    MultiPolygon,
+    Point,
+    Polygon,
+)
 from openeo_pg_parser_networkx.pg_schema import (
     BoundingBox,
     ParameterReference,
@@ -30,6 +41,20 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
 from .data_model import RasterStack
+
+# Union of all GeoJSON types for validation
+_GeoJSON = Union[
+    Point,
+    MultiPoint,
+    LineString,
+    MultiLineString,
+    Polygon,
+    MultiPolygon,
+    GeometryCollection,
+    Feature,
+    FeatureCollection,
+]
+_geojson_adapter: TypeAdapter[_GeoJSON] = TypeAdapter(_GeoJSON)
 
 logger = logging.getLogger(__name__)
 
@@ -264,21 +289,6 @@ def _handle_union_types(args: tuple) -> str:
     return " or ".join(unique)
 
 
-# Known GeoJSON type values for detection
-_GEOJSON_TYPES = frozenset(
-    {
-        "Point",
-        "MultiPoint",
-        "LineString",
-        "MultiLineString",
-        "Polygon",
-        "MultiPolygon",
-        "GeometryCollection",
-        "Feature",
-        "FeatureCollection",
-    }
-)
-
 # Mapping of Python types to OpenEO type names
 _TYPE_TO_OPENEO = {
     int: "integer",
@@ -339,34 +349,32 @@ def _value_to_openeo_name(value: Any) -> str:
     if isinstance(value, RasterStack):
         return "datacube"
     if isinstance(value, dict):
-        # Detect GeoJSON dicts by their "type" field
-        if isinstance(value.get("type"), str) and value["type"] in _GEOJSON_TYPES:
+        # Validate as GeoJSON using geojson-pydantic
+        try:
+            _geojson_adapter.validate_python(value)
             return "geojson"
-        return "object"
+        except ValidationError:
+            return "object"
     if hasattr(value, "__array__"):
         return "array"
 
     return _TYPE_TO_OPENEO.get(type(value), type(value).__name__)
 
 
-def _is_dict_type_expected(param_type: Any) -> bool:
-    """Check if the parameter type expects a dict/datacube/RasterStack."""
+def _is_rasterstack_type_expected(param_type: Any) -> bool:
+    """Check if the parameter type explicitly expects a RasterStack.
+
+    Only matches RasterStack directly or as part of a Union.
+    Plain dict annotations do not qualify — RasterStack is a specialized
+    datacube type that should be explicitly declared.
+    """
     origin = get_origin(param_type)
 
     if origin is Union:
         actual_types = [a for a in get_args(param_type) if a is not type(None)]
-        return any(
-            t is dict
-            or t is RasterStack
-            or (hasattr(t, "__origin__") and t.__origin__ is dict)
-            for t in actual_types
-        )
+        return any(t is RasterStack for t in actual_types)
 
-    return (
-        param_type is dict
-        or param_type is RasterStack
-        or (hasattr(param_type, "__origin__") and param_type.__origin__ is dict)
-    )
+    return param_type is RasterStack
 
 
 def _validate_datacube_param(
@@ -380,7 +388,7 @@ def _validate_datacube_param(
     if not isinstance(param_value, RasterStack):
         return
 
-    if not _is_dict_type_expected(param_type):
+    if not _is_rasterstack_type_expected(param_type):
         raise TypeError(
             f"Parameter '{param_name}' in process '{func_name}': "
             f"expected '{_type_to_openeo_name(param_type)}' but got '{_value_to_openeo_name(param_value)}'"

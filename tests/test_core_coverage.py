@@ -404,11 +404,13 @@ class TestTypeNameConversions:
         - "text" → "string"
         - True → "boolean"
         - {} → "object"
-        - {"type": "Polygon"} → "geojson"
+        - {"type": "Polygon"} (incomplete) → "object"
+        - valid GeoJSON Polygon → "geojson"
         - np.array → "array"
 
         Why important: Error messages show both expected and actual types.
         Actual type comes from the value, not the annotation.
+        GeoJSON detection uses geojson-pydantic for proper validation.
         """
         from titiler.openeo.processes.implementations.core import _value_to_openeo_name
 
@@ -419,9 +421,32 @@ class TestTypeNameConversions:
         assert _value_to_openeo_name(True) == "boolean"
         assert _value_to_openeo_name({}) == "object"
         assert _value_to_openeo_name({"key": "value"}) == "object"
-        assert _value_to_openeo_name({"type": "Polygon"}) == "geojson"
-        assert _value_to_openeo_name({"type": "Feature"}) == "geojson"
-        assert _value_to_openeo_name({"type": "FeatureCollection"}) == "geojson"
+        # Incomplete GeoJSON (missing coordinates) → "object"
+        assert _value_to_openeo_name({"type": "Polygon"}) == "object"
+        # Valid GeoJSON → "geojson"
+        assert (
+            _value_to_openeo_name(
+                {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                }
+            )
+            == "geojson"
+        )
+        assert (
+            _value_to_openeo_name(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [0, 0]},
+                    "properties": {},
+                }
+            )
+            == "geojson"
+        )
+        assert (
+            _value_to_openeo_name({"type": "FeatureCollection", "features": []})
+            == "geojson"
+        )
         assert _value_to_openeo_name(np.array([1, 2, 3])) == "array"
 
     def test_value_to_openeo_name_special_types(self):
