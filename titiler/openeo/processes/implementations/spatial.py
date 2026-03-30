@@ -330,11 +330,12 @@ def resample_spatial(
 
 
 def _extract_geometries_from_mask(
-    mask: Union[Dict, Any],
+    mask: Dict,
 ) -> List[Dict[str, Any]]:
     """Extract a list of GeoJSON geometry dicts from a mask parameter.
 
     Supports Polygon, MultiPolygon, Feature, and FeatureCollection inputs.
+    Feature and raw geometries are normalized to FeatureCollection internally.
 
     Args:
         mask: GeoJSON object (Geometry, Feature, or FeatureCollection).
@@ -347,45 +348,39 @@ def _extract_geometries_from_mask(
 
     geom_type = mask["type"]
 
-    if geom_type == "FeatureCollection":
-        geometries = []
-        for feature in mask.get("features", []):
-            geom = feature.get("geometry")
-            if not geom or not geom.get("coordinates"):
-                continue
-            geom_geom_type = geom.get("type")
-            if geom_geom_type not in ("Polygon", "MultiPolygon"):
-                raise ValueError(
-                    f"Unsupported geometry type '{geom_geom_type}' in FeatureCollection. "
-                    "Only Polygon and MultiPolygon geometries are allowed in mask."
-                )
-            geometries.append(geom)
-        return geometries
+    # Normalize to FeatureCollection
+    if geom_type in ("Polygon", "MultiPolygon"):
+        mask = {
+            "type": "FeatureCollection",
+            "features": [{"type": "Feature", "geometry": mask, "properties": {}}],
+        }
     elif geom_type == "Feature":
-        geom = mask.get("geometry")
-        if not geom or not geom.get("coordinates"):
-            return []
-        geom_geom_type = geom.get("type")
-        if geom_geom_type not in ("Polygon", "MultiPolygon"):
-            raise ValueError(
-                f"Unsupported geometry type '{geom_geom_type}' in Feature. "
-                "Only Polygon and MultiPolygon geometries are allowed in mask."
-            )
-        return [geom]
-    elif geom_type in ("Polygon", "MultiPolygon"):
-        if mask.get("coordinates"):
-            return [mask]
-        return []
-    else:
+        mask = {"type": "FeatureCollection", "features": [mask]}
+    elif geom_type != "FeatureCollection":
         raise ValueError(
             f"Unsupported GeoJSON type '{geom_type}'. "
             "Expected Polygon, MultiPolygon, Feature, or FeatureCollection."
         )
 
+    geometries = []
+    for feature in mask.get("features", []):
+        geom = feature.get("geometry")
+        if not geom:
+            continue
+        geom_geom_type = geom.get("type")
+        if geom_geom_type not in ("Polygon", "MultiPolygon"):
+            raise ValueError(
+                f"Unsupported geometry type '{geom_geom_type}'. "
+                "Only Polygon and MultiPolygon geometries are allowed in mask."
+            )
+        geometries.append(geom)
+
+    return geometries
+
 
 def mask_polygon(
     data: RasterStack,
-    mask: Union[Dict, Any],
+    mask: Dict,
     replacement: Optional[Union[int, float, bool, str]] = None,
     inside: bool = False,
 ) -> RasterStack:
@@ -458,6 +453,7 @@ def mask_polygon(
             crs=img.crs,
             bounds=img.bounds,
             band_names=img.band_names,
+            band_descriptions=img.band_descriptions,
         )
 
     return RasterStack.from_images(result_images)

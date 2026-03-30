@@ -133,14 +133,15 @@ class TestExtractGeometriesFromMask:
         assert result == []
 
     def test_feature_with_empty_geometry(self):
-        """Feature with empty coordinates returns empty list."""
+        """Feature with empty coordinates still extracts the geometry."""
         feature = {
             "type": "Feature",
             "geometry": {"type": "Polygon", "coordinates": []},
             "properties": {},
         }
         result = _extract_geometries_from_mask(feature)
-        assert result == []
+        assert len(result) == 1
+        assert result[0]["type"] == "Polygon"
 
     def test_feature_with_none_geometry(self):
         """Feature with None geometry returns empty list."""
@@ -170,9 +171,7 @@ class TestExtractGeometriesFromMask:
             "geometry": {"type": "Point", "coordinates": [0, 0]},
             "properties": {},
         }
-        with pytest.raises(
-            ValueError, match="Unsupported geometry type.*Point.*Feature"
-        ):
+        with pytest.raises(ValueError, match="Unsupported geometry type.*Point"):
             _extract_geometries_from_mask(feature)
 
     def test_feature_collection_with_linestring_raises(self):
@@ -190,9 +189,7 @@ class TestExtractGeometriesFromMask:
                 },
             ],
         }
-        with pytest.raises(
-            ValueError, match="Unsupported geometry type.*LineString.*FeatureCollection"
-        ):
+        with pytest.raises(ValueError, match="Unsupported geometry type.*LineString"):
             _extract_geometries_from_mask(fc)
 
 
