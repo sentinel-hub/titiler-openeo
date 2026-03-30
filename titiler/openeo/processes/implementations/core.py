@@ -324,6 +324,20 @@ def _value_to_openeo_name(value: Any) -> str:
     if isinstance(value, RasterStack):
         return "datacube"
     if isinstance(value, dict):
+        # GeoJSON geometries / features are not datacubes
+        geojson_types = {
+            "Polygon",
+            "MultiPolygon",
+            "Point",
+            "MultiPoint",
+            "LineString",
+            "MultiLineString",
+            "GeometryCollection",
+            "Feature",
+            "FeatureCollection",
+        }
+        if value.get("type") in geojson_types:
+            return "geojson"
         return "datacube"
     if hasattr(value, "__array__"):
         return "array"

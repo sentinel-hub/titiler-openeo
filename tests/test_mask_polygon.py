@@ -7,6 +7,7 @@ import pytest
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 
+from titiler.openeo.processes.implementations.core import process
 from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.spatial import (
     _extract_geometries_from_mask,
@@ -448,3 +449,73 @@ class TestMaskPolygon:
         assert not img.array.mask.any()
         # All values should be 42
         np.testing.assert_array_equal(img.array[0], 42)
+
+
+# ---------------------------------------------------------------------------
+# Tests for mask_polygon through @process decorator (graph execution path)
+# ---------------------------------------------------------------------------
+
+
+class TestMaskPolygonProcessDecorator:
+    """Tests for mask_polygon called through the @process decorator.
+
+    In a real OpenEO process graph, functions are wrapped with the @process
+    decorator by the ProcessRegistry. These tests verify the GeoJSON dict
+    parameter is not incorrectly rejected as a "datacube" type mismatch.
+    """
+
+    def test_geojson_dict_through_decorator(self):
+        """GeoJSON dict mask parameter passes @process type validation."""
+        data = np.full((1, 4, 4), 10, dtype=np.float64)
+        stack = _make_stack(data, bounds=(0.0, 0.0, 2.0, 2.0))
+
+        poly = {
+            "type": "Polygon",
+            "coordinates": [
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+            ],
+        }
+
+        wrapped = process(mask_polygon)
+        result = wrapped(
+            positional_parameters={"data": 0, "mask": 1},
+            named_parameters={"data": stack, "mask": poly},
+        )
+
+        assert isinstance(result, RasterStack)
+        img = list(result.values())[0]
+        # Pixels outside polygon should be masked
+        assert img.array.mask[0, 0, 3]
+
+    def test_feature_collection_through_decorator(self):
+        """FeatureCollection dict passes @process type validation."""
+        data = np.full((1, 4, 4), 10, dtype=np.float64)
+        stack = _make_stack(data, bounds=(0.0, 0.0, 2.0, 2.0))
+
+        wrapped = process(mask_polygon)
+        result = wrapped(
+            positional_parameters={"data": 0, "mask": 1},
+            named_parameters={"data": stack, "mask": FEATURE_COLLECTION},
+        )
+
+        assert isinstance(result, RasterStack)
+
+    def test_kwargs_through_decorator(self):
+        """Named kwargs style also works through @process."""
+        data = np.full((1, 4, 4), 10, dtype=np.float64)
+        stack = _make_stack(data, bounds=(0.0, 0.0, 2.0, 2.0))
+
+        wrapped = process(mask_polygon)
+        result = wrapped(
+            named_parameters={
+                "data": stack,
+                "mask": POLYGON,
+                "inside": True,
+                "replacement": -999,
+            },
+        )
+
+        assert isinstance(result, RasterStack)
+        img = list(result.values())[0]
+        # With inside=True, pixels inside the polygon get replacement value
+        assert img.array[0, 2, 0] == -999 or img.array[0, 3, 0] == -999
