@@ -264,13 +264,28 @@ def _handle_union_types(args: tuple) -> str:
     return " or ".join(unique)
 
 
+# Known GeoJSON type values for detection
+_GEOJSON_TYPES = frozenset(
+    {
+        "Point",
+        "MultiPoint",
+        "LineString",
+        "MultiLineString",
+        "Polygon",
+        "MultiPolygon",
+        "GeometryCollection",
+        "Feature",
+        "FeatureCollection",
+    }
+)
+
 # Mapping of Python types to OpenEO type names
 _TYPE_TO_OPENEO = {
     int: "integer",
     float: "number",
     str: "string",
     bool: "boolean",
-    dict: "datacube",
+    dict: "object",
     type(None): "null",
 }
 
@@ -294,7 +309,7 @@ def _type_to_openeo_name(param_type: Any) -> str:
     if param_type is dict or (
         hasattr(param_type, "__origin__") and param_type.__origin__ is dict
     ):
-        return "datacube"
+        return "object"
 
     # Handle basic types
     if param_type in _TYPE_TO_OPENEO:
@@ -324,7 +339,10 @@ def _value_to_openeo_name(value: Any) -> str:
     if isinstance(value, RasterStack):
         return "datacube"
     if isinstance(value, dict):
-        return "datacube"
+        # Detect GeoJSON dicts by their "type" field
+        if isinstance(value.get("type"), str) and value["type"] in _GEOJSON_TYPES:
+            return "geojson"
+        return "object"
     if hasattr(value, "__array__"):
         return "array"
 
@@ -354,9 +372,12 @@ def _is_dict_type_expected(param_type: Any) -> bool:
 def _validate_datacube_param(
     param_name: str, param_value: Any, param_type: Any, func_name: str
 ) -> None:
-    """Validate that datacube values are expected by the parameter type."""
-    # RasterStack is a dict subclass, so isinstance(value, dict) covers both
-    if not isinstance(param_value, dict):
+    """Validate that datacube (RasterStack) values are expected by the parameter type.
+
+    Only RasterStack instances are treated as datacubes. Plain dicts are not
+    pre-rejected here; they fall through to Pydantic validation instead.
+    """
+    if not isinstance(param_value, RasterStack):
         return
 
     if not _is_dict_type_expected(param_type):
