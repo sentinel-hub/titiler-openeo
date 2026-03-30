@@ -24,7 +24,7 @@ jobs:
           config-file: "release-please-config.json"
           manifest-file: ".release-please-manifest.json"
 
-  publish-pypi:
+  build_package:
     needs: release-please
     runs-on: ubuntu-latest
     if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
@@ -46,11 +46,28 @@ jobs:
       - name: Build package
         run: uv build
 
-      - name: Publish to PyPI
-        env:
-          UV_PUBLISH_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-        run: uv publish dist/*
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          path: ./dist/
+
+  upload_pypi:
+    name: Upload release to PyPI
+    needs: [build_package]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-release
+      url: https://pypi.org/p/titiler-openeo
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: artifact
+          path: dist
+          merge-multiple: true
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
 
   publish-docker:
     needs: release-please
