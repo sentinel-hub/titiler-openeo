@@ -11,7 +11,6 @@ from titiler.openeo.processes.implementations.core import process
 from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.spatial import (
     _extract_geometries_from_mask,
-    _rasterize_geometries,
     mask_polygon,
 )
 
@@ -164,51 +163,37 @@ class TestExtractGeometriesFromMask:
         with pytest.raises(ValueError, match="Invalid GeoJSON"):
             _extract_geometries_from_mask("not a dict")
 
+    def test_feature_with_point_geometry_raises(self):
+        """Feature with Point geometry raises ValueError."""
+        feature = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0, 0]},
+            "properties": {},
+        }
+        with pytest.raises(
+            ValueError, match="Unsupported geometry type.*Point.*Feature"
+        ):
+            _extract_geometries_from_mask(feature)
 
-# ---------------------------------------------------------------------------
-# Tests for _rasterize_geometries
-# ---------------------------------------------------------------------------
-
-
-class TestRasterizeGeometries:
-    """Tests for _rasterize_geometries helper."""
-
-    def test_basic_rasterization(self):
-        """Polygon covering lower-left quadrant produces True in that area."""
-        geom = {
-            "type": "Polygon",
-            "coordinates": [
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+    def test_feature_collection_with_linestring_raises(self):
+        """FeatureCollection containing LineString geometry raises ValueError."""
+        fc = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[0, 0], [1, 1]],
+                    },
+                    "properties": {},
+                },
             ],
         }
-        result = _rasterize_geometries(
-            [geom], width=4, height=4, bounds=(0.0, 0.0, 2.0, 2.0)
-        )
-        assert result.shape == (4, 4)
-        assert result.dtype == bool
-        # Lower-left quadrant (rows 2-3, cols 0-1) should be True
-        assert result[2, 0]  # inside
-        assert not result[0, 3]  # outside (upper-right)
-
-    def test_empty_geometry_list(self):
-        """No geometries produces all-False mask."""
-        result = _rasterize_geometries(
-            [], width=4, height=4, bounds=(0.0, 0.0, 2.0, 2.0)
-        )
-        assert not result.any()
-
-    def test_full_coverage(self):
-        """Polygon covering entire extent produces all-True."""
-        geom = {
-            "type": "Polygon",
-            "coordinates": [
-                [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]
-            ],
-        }
-        result = _rasterize_geometries(
-            [geom], width=4, height=4, bounds=(0.0, 0.0, 2.0, 2.0)
-        )
-        assert result.all()
+        with pytest.raises(
+            ValueError, match="Unsupported geometry type.*LineString.*FeatureCollection"
+        ):
+            _extract_geometries_from_mask(fc)
 
 
 # ---------------------------------------------------------------------------
