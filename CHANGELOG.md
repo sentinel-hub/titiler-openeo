@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 (2026-03-31)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 1.1.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/197
+* ci: gitHub Actions to commit SHAs (coordination#239) by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/235
+* style: remove trailing white space by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/237
+* chore(deps): bump the all group across 1 directory with 6 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/236
+* feat: update openeo dependencies and add python3.13 by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/239
+* feat: add aggregate_temporal openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/240
+* feat: add `merge_cubes` openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/241
+* ci: use python trusted publishing by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/242
+* fix: refactor _value_to_openeo_name — dict should not default to 'datacube' by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/247
+* feat: implement mask_polygon openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/246
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.13.0...v0.14.0
+
 ## 0.13.0 (2026-03-24)
 
 ## What's Changed
