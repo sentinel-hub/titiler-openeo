@@ -457,8 +457,8 @@ def _calculate_dimensions(
 
     # Calculate native dimensions from resolution
     if x_resolution and y_resolution:
-        native_width = int(round((bbox[2] - bbox[0]) / x_resolution))
-        native_height = int(round((bbox[3] - bbox[1]) / y_resolution))
+        native_width = max(1, int(round((bbox[2] - bbox[0]) / x_resolution)))
+        native_height = max(1, int(round((bbox[3] - bbox[1]) / y_resolution)))
         aspect_ratio = native_width / native_height
 
         # Only width provided - calculate height to maintain proportions
@@ -721,8 +721,16 @@ def _estimate_output_dimensions(
         items, spatial_extent, target_crs
     )
 
+    # Reproject bbox to output CRS for resolution/dimension calculations
+    if bounds_crs != output_crs:
+        output_bbox = list(
+            transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+        )
+    else:
+        output_bbox = target_bbox
+
     # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(items, output_crs, target_bbox, bands)
+    cube_resolutions = _get_cube_resolutions(items, output_crs, output_bbox, bands)
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -735,9 +743,9 @@ def _estimate_output_dimensions(
                 if y_resolution is None or y_res < y_resolution:
                     y_resolution = y_res
 
-    # Calculate dimensions maintaining aspect ratio
+    # Calculate dimensions using bbox in output CRS (same CRS as resolution)
     width, height = _calculate_dimensions(
-        target_bbox, x_resolution, y_resolution, width, height
+        output_bbox, x_resolution, y_resolution, width, height
     )
 
     # Check pixel limit if requested
