@@ -271,6 +271,12 @@ def test_calculate_dimensions():
     assert width == 1024
     assert height == 1024
 
+    # Test with very small bbox relative to resolution (should not cause ZeroDivisionError)
+    tiny_bbox = [0, 0, 0.001, 0.001]
+    width, height = _calculate_dimensions(tiny_bbox, 10.0, 10.0)
+    assert width >= 1
+    assert height >= 1
+
 
 def test_check_pixel_limit():
     """Test pixel count limit check."""
@@ -566,6 +572,31 @@ def test_target_crs_with_resolution(complex_stac_items):
     # 10km / 10m resolution = ~1000 pixels
     assert 500 <= result["width"] <= 2000
     assert 500 <= result["height"] <= 2000
+    assert result["crs"].to_epsg() == 32631
+
+    # Test with WGS84 extent and native UTM CRS (no explicit dimensions)
+    # This was causing ZeroDivisionError when bbox in degrees was divided by
+    # resolution in meters without reprojecting the bbox first
+    wgs84_extent = BoundingBox(
+        crs="EPSG:4326",
+        west=0,
+        south=40,
+        east=6,
+        north=46,
+    )
+    result = _estimate_output_dimensions(
+        [complex_stac_items[0]],
+        wgs84_extent,
+        ["B02"],
+        width=None,
+        height=None,
+        check_max_pixels=False,
+        target_crs=None,  # Uses native UTM CRS
+    )
+    # Native CRS is UTM, bbox reprojected from WGS84 to UTM should yield
+    # reasonable dimensions (not 0 or 1)
+    assert result["width"] > 100
+    assert result["height"] > 100
     assert result["crs"].to_epsg() == 32631
 
 
