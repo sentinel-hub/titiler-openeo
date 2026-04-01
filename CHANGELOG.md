@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.1 (2026-04-01)
+
+## What's Changed
+* fix: reproject bbox to output CRS before calculating dimensions by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/248
+* fix: update openeo-pg-parser-networkx dep by @vincentsarago in https://github.com/sentinel-hub/titiler-openeo/pull/249
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.14.0...v0.14.1
+
 ## 0.14.0 (2026-03-31)
 
 ## What's Changed
