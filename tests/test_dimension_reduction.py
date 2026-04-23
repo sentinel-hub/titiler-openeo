@@ -16,7 +16,7 @@ from titiler.openeo.processes.implementations.reduce import (
 
 
 # Mock reducers for testing
-def mock_temporal_reducer(data, **kwargs):
+def mock_temporal_reducer(data):
     """Mock temporal reducer that returns mean across time."""
     arrays = []
     for key in data.keys():
@@ -34,7 +34,7 @@ def mock_temporal_reducer(data, **kwargs):
     return np.ma.mean(stacked, axis=0)
 
 
-def mock_spectral_reducer(data, **kwargs):
+def mock_spectral_reducer(data):
     """Mock spectral reducer that returns mean across bands.
 
     This reducer works with the stacked format from _reduce_spectral_dimension_stack:
@@ -68,7 +68,7 @@ class StatefulCachingReducer:
         self.call_count = 0
         self.cached_result = None
 
-    def __call__(self, data, **kwargs):
+    def __call__(self, data):
         """Reduce by computing mean, but use cached result if available."""
         self.call_count += 1
 
@@ -89,12 +89,12 @@ class StatefulCachingReducer:
         return result
 
 
-def mock_invalid_reducer_returns_dict(data, **kwargs):
+def mock_invalid_reducer_returns_dict(data):
     """Invalid reducer that returns a dict instead of array."""
     return {"invalid": "result"}
 
 
-def mock_invalid_reducer_returns_string(data, **kwargs):
+def mock_invalid_reducer_returns_string(data):
     """Invalid reducer that returns an object that can't be converted to array."""
 
     # Return an object that will definitely fail numpy.asarray conversion
@@ -649,75 +649,3 @@ class TestReduceDimensionIntegration:
 
         assert exc_info.value.dimension == "xyz"
         assert "does not exist" in str(exc_info.value)
-
-
-class TestNamedParametersPropagation:
-    """Tests that top-level named_parameters are propagated into reducer callbacks."""
-
-    def _make_stack(self, n=2, bands=2, size=4):
-        images = {}
-        for i in range(n):
-            array = np.ma.ones((bands, size, size), dtype=float) * (i + 1)
-            images[datetime(2021, 1, i + 1)] = ImageData(
-                array,
-                assets=[f"asset_{i}"],
-                crs="EPSG:4326",
-                bounds=(-180, -90, 180, 90),
-            )
-        return RasterStack.from_images(images)
-
-    def test_temporal_reducer_receives_named_parameters(self):
-        """Reducer called by reduce_dimension(temporal) receives outer named_parameters."""
-        received = {}
-
-        def capturing_reducer(data, **kwargs):
-            received.update(kwargs.get("named_parameters", {}))
-            arrays = [data[k].array for k in data.keys()]
-            return np.ma.mean(np.ma.stack(arrays, axis=0), axis=0)
-
-        data = self._make_stack()
-        reduce_dimension(
-            data,
-            capturing_reducer,
-            "temporal",
-            named_parameters={"indicator": 3, "threshold": 0.5},
-        )
-
-        assert received["indicator"] == 3
-        assert received["threshold"] == 0.5
-
-    def test_spectral_reducer_receives_named_parameters(self):
-        """Reducer called by reduce_dimension(spectral) receives outer named_parameters."""
-        received = {}
-
-        def capturing_reducer(data, **kwargs):
-            received.update(kwargs.get("named_parameters", {}))
-            return np.ma.mean(np.ma.asarray(data), axis=0)
-
-        data = self._make_stack()
-        reduce_dimension(
-            data,
-            capturing_reducer,
-            "bands",
-            named_parameters={"indicator": 7},
-        )
-
-        assert received["indicator"] == 7
-
-    def test_no_named_parameters_still_works(self):
-        """Passing no named_parameters doesn't break existing reducers."""
-        data = self._make_stack()
-        result = reduce_dimension(data, mock_temporal_reducer, "temporal")
-        assert len(result) == 1
-
-    def test_named_parameters_not_passed_when_empty(self):
-        """When named_parameters is None, reducers that don't accept it still work."""
-
-        def strict_reducer(data):  # no **kwargs — rejects unknown args
-            arrays = [data[k].array for k in data.keys()]
-            return np.ma.mean(np.ma.stack(arrays, axis=0), axis=0)
-
-        data = self._make_stack()
-        # Should not raise, because named_parameters=None → kwarg not forwarded
-        result = reduce_dimension(data, strict_reducer, "temporal")
-        assert len(result) == 1

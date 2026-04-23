@@ -148,5 +148,60 @@ def test_parameter_reference_with_positional_and_named_conflict():
     assert call_log[0]["data"] != 0
 
 
+def test_parameter_references_nested_in_context_list():
+    """ParameterReferences inside a context list must be resolved before the callback sees them.
+
+    This is the spec-correct pattern for passing UDP-level parameters into a callback:
+        context=[{"from_parameter": "indicator"}, {"from_parameter": "min_value"}]
+    The parser produces context=[ParameterReference("indicator"), ParameterReference("min_value")].
+    _resolve_kwargs must resolve those nested refs, not pass them through raw.
+    See: https://github.com/Open-EO/openeo-processes/blob/master/apply_dimension.json
+    """
+    received_context = []
+
+    @process
+    def callback_process(data, context=None):
+        received_context.append(context)
+        return data
+
+    named_params = {"indicator": 3, "min_value": 0.1}
+    context_with_refs = [
+        ParameterReference(from_parameter="indicator"),
+        ParameterReference(from_parameter="min_value"),
+    ]
+
+    callback_process(
+        data=[1, 2, 3],
+        context=context_with_refs,
+        named_parameters=named_params,
+    )
+
+    assert len(received_context) == 1
+    ctx = received_context[0]
+    assert ctx == [3, 0.1], f"Expected resolved values [3, 0.1], got {ctx!r}"
+    assert not any(isinstance(v, ParameterReference) for v in ctx)
+
+
+def test_parameter_references_nested_in_context_dict():
+    """ParameterReferences inside a context dict must also be resolved."""
+    received_context = []
+
+    @process
+    def callback_process(data, context=None):
+        received_context.append(context)
+        return data
+
+    named_params = {"scale": 2.5}
+    context_with_refs = {"multiplier": ParameterReference(from_parameter="scale")}
+
+    callback_process(
+        data=[1, 2, 3],
+        context=context_with_refs,
+        named_parameters=named_params,
+    )
+
+    assert received_context[0] == {"multiplier": 2.5}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

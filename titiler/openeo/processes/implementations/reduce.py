@@ -277,7 +277,6 @@ def apply_pixel_selection(
 def _reduce_temporal_dimension(
     data: RasterStack,
     reducer: Callable,
-    named_parameters: Optional[dict] = None,
 ) -> RasterStack:
     """Reduce the temporal dimension of a RasterStack.
 
@@ -304,8 +303,7 @@ def _reduce_temporal_dimension(
 
     # Note: The reducer will determine how much data it actually needs
     # Some reducers might be able to work with partial data
-    extra_kwargs = {"named_parameters": named_parameters} if named_parameters else {}
-    reduced_array = reducer(data=data, **extra_kwargs)
+    reduced_array = reducer(data=data)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_array, dict):
@@ -421,7 +419,6 @@ def _determine_output_band_count(final_data: numpy.ndarray) -> int:
 def _reduce_spectral_dimension_stack(
     data: RasterStack,
     reducer: Callable,
-    named_parameters: Optional[dict] = None,
 ) -> RasterStack:
     """Reduce the spectral dimension of a RasterStack.
 
@@ -496,8 +493,7 @@ def _reduce_spectral_dimension_stack(
     # Input shape: (bands, time, height, width)
     # Expected output shape: (time, height, width) for full reduction
     #                    or: (reduced_bands, time, height, width) for partial reduction
-    extra_kwargs = {"named_parameters": named_parameters} if named_parameters else {}
-    reduced_data = reducer(data=transposed_data, **extra_kwargs)
+    reduced_data = reducer(data=transposed_data)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_data, dict):
@@ -903,7 +899,6 @@ def reduce_dimension(
     reducer: Callable,
     dimension: str,
     context: Optional[Dict[str, Any]] = None,
-    named_parameters: Optional[dict] = None,
 ) -> Union[RasterStack, ImageData]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
@@ -929,16 +924,12 @@ def reduce_dimension(
         if len(data) <= 1:
             return data
 
-        return _reduce_temporal_dimension(
-            data, reducer, named_parameters=named_parameters
-        )
+        return _reduce_temporal_dimension(data, reducer)
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
         # Use unified stack reduction for both single and multi-image cases
-        return _reduce_spectral_dimension_stack(
-            data, reducer, named_parameters=named_parameters
-        )
+        return _reduce_spectral_dimension_stack(data, reducer)
 
     # Unsupported dimension
     else:

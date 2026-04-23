@@ -338,69 +338,39 @@ Complex parameters with validation and user context:
 
 ## Parameter Scope in Callbacks
 
-Top-level process parameters are available **everywhere** in the process graph, including inside callback processes such as `apply`, `apply_dimension`, and `reduce_dimension`.
+Callback processes (`reducer` in `reduce_dimension`, `process` in `apply` / `apply_dimension`, etc.) have their **own parameter scope**. Per the [openEO spec](https://github.com/Open-EO/openeo-processes), a callback receives only the parameters it declares (`data`, `context`, etc.) — top-level UDP parameters are **not** automatically visible inside a callback.
 
-### How it works
-
-When a process like `reduce_dimension` accepts a `reducer` callback, it forwards the outer `named_parameters` into the callback's execution context. The callback-specific parameters (`data`, `context`, etc.) are merged on top, so they always take precedence.
-
-This means a `{"from_parameter": "my_param"}` reference inside a reducer or apply callback resolves the same way it would at the top level — from query parameters, then from `default` values.
-
-### Example: parameter used inside a reducer
+The correct way to pass UDP-level parameters into a callback is through the `context` argument, which is designed exactly for this purpose:
 
 ```json
 {
-  "process_graph": {
-    "load1": {
-      "process_id": "load_collection",
-      "arguments": { "id": "S2" }
-    },
-    "reduce1": {
-      "process_id": "reduce_dimension",
-      "arguments": {
-        "data": { "from_node": "load1" },
-        "dimension": "bands",
-        "reducer": {
-          "process_graph": {
-            "eq1": {
-              "process_id": "eq",
-              "arguments": {
-                "x": { "from_parameter": "data" },
-                "y": { "from_parameter": "indicator" }
-              },
-              "result": true
-            }
+  "process_id": "apply_dimension",
+  "arguments": {
+    "data": { "from_node": "load1" },
+    "dimension": "bands",
+    "context": [
+      { "from_parameter": "indicator" },
+      { "from_parameter": "min_value" },
+      { "from_parameter": "max_value" }
+    ],
+    "process": {
+      "process_graph": {
+        "eq1": {
+          "process_id": "eq",
+          "arguments": {
+            "x": { "from_parameter": "data" },
+            "y": { "from_parameter": "context" }
           }
         }
-      },
-      "result": true
+      }
     }
-  },
-  "parameters": [
-    {
-      "name": "indicator",
-      "description": "Band index to select",
-      "schema": { "type": "integer" },
-      "default": 0
-    }
-  ]
+  }
 }
 ```
 
-Here `indicator` is defined at the top level with `default: 0`. The `eq1` node inside the reducer's process graph can reference it directly via `{"from_parameter": "indicator"}`. Callers can override it:
+The `from_parameter` references inside `context` are resolved against the UDP's `named_parameters` before the callback is invoked, so the callback receives actual values (integers, strings, etc.) — not unresolved references.
 
-```bash
-POST /result?indicator=2
-```
-
-### Priority inside a callback
-
-| Source | Priority |
-|---|---|
-| Callback-specific parameters (`data`, `context`) | Highest — always win |
-| Outer `named_parameters` (query params + defaults) | Base scope |
-
-This means there is no risk of a top-level parameter accidentally overriding `data` or `context` inside a callback.
+> **Note**: If you used a Python closure to capture `Parameter` objects from the openeo-python-client and referenced them directly inside a callback without passing through `context`, those references would not resolve correctly. Always use `context` to thread outer parameters into callbacks.
 
 ## Troubleshooting
 

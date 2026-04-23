@@ -25,11 +25,10 @@ def apply(
     data: RasterStack,
     process: Callable,
     context: Optional[Dict] = None,
-    named_parameters: Optional[dict] = None,
 ) -> RasterStack:
     """Apply process on RasterStack."""
     positional_parameters = {"x": 0}
-    named_parameters = {**(named_parameters or {}), "context": context}
+    named_parameters = {"context": context}
 
     def _process_img(img: ImageData):
         return ImageData(
@@ -54,7 +53,6 @@ def apply_dimension(
     dimension: str,
     target_dimension: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
-    named_parameters: Optional[dict] = None,
 ) -> RasterStack:
     """Apply a process to all values along a dimension of a data cube.
 
@@ -78,7 +76,7 @@ def apply_dimension(
 
     # Parameters to pass to the process
     positional_parameters = {"data": 0}
-    named_parameters = {**(named_parameters or {}), "context": context}
+    named_parameters = {"context": context}
 
     # Handle temporal dimension
     if dim_lower in ["t", "temporal", "time"]:

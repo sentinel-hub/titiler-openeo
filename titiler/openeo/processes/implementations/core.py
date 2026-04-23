@@ -197,6 +197,36 @@ def _resolve_special_parameter(
     return param_value
 
 
+def _resolve_nested(
+    value: Any,
+    named_parameters: Dict[str, Any],
+    func_name: str,
+) -> Any:
+    """Recursively resolve ParameterReference objects nested inside lists or dicts.
+
+    This is needed for the ``context`` argument of callbacks (apply, apply_dimension,
+    reduce_dimension, etc.), which the openEO spec designates as the mechanism for
+    passing outer UDP parameters into a child process graph. When a caller writes
+    ``context=[indicator, min_value]``, the parser produces
+    ``context=[ParameterReference("indicator"), ParameterReference("min_value")]``;
+    those refs must be resolved before the callback receives the value.
+    """
+    if isinstance(value, ParameterReference):
+        ref_name = value.from_parameter
+        if ref_name not in named_parameters:
+            raise ProcessParameterMissing(
+                f"Parameter '{ref_name}' missing for process '{func_name}'"
+            )
+        return named_parameters[ref_name]
+    if type(value) is list:
+        return [_resolve_nested(item, named_parameters, func_name) for item in value]
+    if type(value) is dict:
+        return {
+            k: _resolve_nested(v, named_parameters, func_name) for k, v in value.items()
+        }
+    return value
+
+
 def _resolve_kwargs(
     kwargs: Dict[str, Any],
     named_parameters: Dict[str, Any],
@@ -216,7 +246,7 @@ def _resolve_kwargs(
     resolved = {}
     for key, value in kwargs.items():
         if not isinstance(value, ParameterReference):
-            resolved[key] = value
+            resolved[key] = _resolve_nested(value, named_parameters, func_name)
             continue
 
         ref_name = value.from_parameter
