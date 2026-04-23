@@ -203,5 +203,31 @@ def test_parameter_references_nested_in_context_dict():
     assert received_context[0] == {"multiplier": 2.5}
 
 
+def test_parameter_reference_as_context_scalar():
+    """context itself may be a bare ParameterReference (Option A: single-value context).
+
+    This corresponds to the pattern:
+        "context": {"from_parameter": "indicator"}
+    where the callback receives the resolved scalar directly as context.
+    """
+    received_context = []
+
+    @process
+    def callback_process(data, context=None):
+        received_context.append(context)
+        return data
+
+    named_params = {"indicator": 3}
+
+    callback_process(
+        data=[1, 2, 3],
+        context=ParameterReference(from_parameter="indicator"),
+        named_parameters=named_params,
+    )
+
+    assert received_context[0] == 3
+    assert not isinstance(received_context[0], ParameterReference)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
