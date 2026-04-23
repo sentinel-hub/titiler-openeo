@@ -336,6 +336,72 @@ Complex parameters with validation and user context:
 }
 ```
 
+## Parameter Scope in Callbacks
+
+Top-level process parameters are available **everywhere** in the process graph, including inside callback processes such as `apply`, `apply_dimension`, and `reduce_dimension`.
+
+### How it works
+
+When a process like `reduce_dimension` accepts a `reducer` callback, it forwards the outer `named_parameters` into the callback's execution context. The callback-specific parameters (`data`, `context`, etc.) are merged on top, so they always take precedence.
+
+This means a `{"from_parameter": "my_param"}` reference inside a reducer or apply callback resolves the same way it would at the top level — from query parameters, then from `default` values.
+
+### Example: parameter used inside a reducer
+
+```json
+{
+  "process_graph": {
+    "load1": {
+      "process_id": "load_collection",
+      "arguments": { "id": "S2" }
+    },
+    "reduce1": {
+      "process_id": "reduce_dimension",
+      "arguments": {
+        "data": { "from_node": "load1" },
+        "dimension": "bands",
+        "reducer": {
+          "process_graph": {
+            "eq1": {
+              "process_id": "eq",
+              "arguments": {
+                "x": { "from_parameter": "data" },
+                "y": { "from_parameter": "indicator" }
+              },
+              "result": true
+            }
+          }
+        }
+      },
+      "result": true
+    }
+  },
+  "parameters": [
+    {
+      "name": "indicator",
+      "description": "Band index to select",
+      "schema": { "type": "integer" },
+      "default": 0
+    }
+  ]
+}
+```
+
+Here `indicator` is defined at the top level with `default: 0`. The `eq1` node inside the reducer's process graph can reference it directly via `{"from_parameter": "indicator"}`. Callers can override it:
+
+```bash
+POST /result?indicator=2
+```
+
+### Priority inside a callback
+
+| Source | Priority |
+|---|---|
+| Callback-specific parameters (`data`, `context`) | Highest — always win |
+| Outer `named_parameters` (query params + defaults) | Base scope |
+
+This means there is no risk of a top-level parameter accidentally overriding `data` or `context` inside a callback.
+
 ## Troubleshooting
 
 ### Common Issues
