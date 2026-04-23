@@ -456,6 +456,79 @@ def test_apply_dimension_unsupported_dimension(sample_raster_stack):
     assert "xyz" in str(excinfo.value)
 
 
+def test_apply_propagates_named_parameters(sample_raster_stack):
+    """Test that apply() forwards outer named_parameters to the callback."""
+    received = {}
+
+    def capturing_process(x, **kwargs):
+        received.update(kwargs.get("named_parameters", {}))
+        return x
+
+    apply(
+        sample_raster_stack,
+        capturing_process,
+        named_parameters={"indicator": 3, "threshold": 0.5},
+    )
+
+    assert received["indicator"] == 3
+    assert received["threshold"] == 0.5
+
+
+def test_apply_named_parameters_do_not_override_context(sample_raster_stack):
+    """context kwarg always wins over a same-key entry in named_parameters."""
+    received = {}
+
+    def capturing_process(x, **kwargs):
+        received["context"] = kwargs.get("named_parameters", {}).get("context")
+        return x
+
+    apply(
+        sample_raster_stack,
+        capturing_process,
+        context={"my_ctx": True},
+        named_parameters={"context": {"my_ctx": False}},
+    )
+
+    assert received["context"] == {"my_ctx": True}
+
+
+def test_apply_dimension_propagates_named_parameters(sample_raster_stack):
+    """Test that apply_dimension() forwards outer named_parameters into callback."""
+    received = {}
+
+    def capturing_process(data, **kwargs):
+        received.update(kwargs.get("named_parameters", {}))
+        arrays = [img.array for img in data.values()]
+        return np.array(arrays)
+
+    apply_dimension(
+        sample_raster_stack,
+        capturing_process,
+        "temporal",
+        named_parameters={"indicator": 5},
+    )
+
+    assert received["indicator"] == 5
+
+
+def test_apply_dimension_named_parameters_spectral(sample_raster_stack):
+    """Test named_parameters propagation for spectral apply_dimension."""
+    received = {}
+
+    def capturing_process(data, **kwargs):
+        received.update(kwargs.get("named_parameters", {}))
+        return data
+
+    apply_dimension(
+        sample_raster_stack,
+        capturing_process,
+        "bands",
+        named_parameters={"scale": 2.0},
+    )
+
+    assert received["scale"] == 2.0
+
+
 def test_if_basic():
     """Test basic if function behavior."""
     # Test true condition
