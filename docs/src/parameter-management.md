@@ -336,6 +336,93 @@ Complex parameters with validation and user context:
 }
 ```
 
+## Parameter Scope in Callbacks
+
+Callback processes (`reducer` in `reduce_dimension`, `process` in `apply` / `apply_dimension`, etc.) have their **own parameter scope**. Per the [openEO spec](https://github.com/Open-EO/openeo-processes), a callback receives only the parameters it declares (`data`, `context`, etc.) — top-level UDP parameters are **not** automatically visible inside a callback.
+
+The correct way to pass UDP-level parameters into a callback is through the `context` argument, which is designed exactly for this purpose.
+
+**Option A — single value** (when the callback only needs one parameter):
+
+```json
+{
+  "process_id": "apply_dimension",
+  "arguments": {
+    "data": { "from_node": "load1" },
+    "dimension": "bands",
+    "context": { "from_parameter": "indicator" },
+    "process": {
+      "process_graph": {
+        "eq1": {
+          "process_id": "eq",
+          "arguments": {
+            "x": { "from_parameter": "data" },
+            "y": { "from_parameter": "context" }
+          },
+          "result": true
+        }
+      }
+    }
+  }
+}
+```
+
+Here `context` is the resolved value of `indicator` directly, so `{"from_parameter": "context"}` inside the callback equals e.g. `3`.
+
+**Option B — dict** (when the callback needs multiple parameters by name):
+
+```json
+{
+  "process_id": "apply_dimension",
+  "arguments": {
+    "data": { "from_node": "load1" },
+    "dimension": "bands",
+    "context": {
+      "indicator": { "from_parameter": "indicator" },
+      "min_value": { "from_parameter": "min_value" },
+      "max_value": { "from_parameter": "max_value" }
+    },
+    "process": {
+      "process_graph": {
+        "get_indicator": {
+          "process_id": "array_element",
+          "arguments": {
+            "data": { "from_parameter": "context" },
+            "label": "indicator"
+          }
+        },
+        "eq1": {
+          "process_id": "eq",
+          "arguments": {
+            "x": { "from_parameter": "data" },
+            "y": { "from_node": "get_indicator" }
+          },
+          "result": true
+        }
+      }
+    }
+  }
+}
+```
+
+`context` becomes a dict; use `array_element` with `label` to extract individual values by name inside the callback.
+
+**Option C — array by position** (less readable, avoid unless needed):
+
+```json
+"context": [
+  { "from_parameter": "indicator" },
+  { "from_parameter": "min_value" },
+  { "from_parameter": "max_value" }
+]
+```
+
+Inside the callback, extract by index: `array_element({"from_parameter": "context"}, 0)` gives `indicator`.
+
+The `from_parameter` references inside `context` are resolved against the UDP's `named_parameters` before the callback is invoked, so the callback receives actual values (integers, strings, etc.) — not unresolved references.
+
+> **Note**: If you used a Python closure to capture `Parameter` objects from the openeo-python-client and referenced them directly inside a callback without passing through `context`, those references would not resolve correctly. Always use `context` to thread outer parameters into callbacks.
+
 ## Troubleshooting
 
 ### Common Issues
