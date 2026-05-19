@@ -229,5 +229,36 @@ def test_parameter_reference_as_context_scalar():
     assert not isinstance(received_context[0], ParameterReference)
 
 
+def test_callback_scoped_parameter_reference_not_resolved():
+    """ParameterReferences for callback-scoped parameters (e.g. 'value' inside a
+    properties filter sub-graph) must NOT be resolved by the outer _resolve_nested
+    call — they are not outer-scope parameters and will be resolved when the callback
+    itself executes.
+
+    Regression test for: load_collection with a properties filter containing
+    {"from_parameter": "value"} raised ProcessParameterMissing because _resolve_nested
+    tried to look up "value" in the outer named_parameters.
+    """
+    received = {}
+
+    @process
+    def outer_process(data, properties=None):
+        received["properties"] = properties
+        return data
+
+    # Simulate: properties = {"eo:cloud_cover": ParameterReference("value")}
+    # 'value' is a callback-scoped parameter — NOT in the outer named_parameters.
+    outer_process(
+        data=[1, 2, 3],
+        properties={"eo:cloud_cover": ParameterReference(from_parameter="value")},
+        named_parameters={"indicator": 0},  # 'value' is intentionally absent
+    )
+
+    # The ParameterReference must be left intact, not raise ProcessParameterMissing
+    assert isinstance(
+        received["properties"]["eo:cloud_cover"], ParameterReference
+    ), "Callback-scoped ParameterReference should be passed through unchanged"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

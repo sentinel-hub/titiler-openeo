@@ -210,13 +210,17 @@ def _resolve_nested(
     ``context=[indicator, min_value]``, the parser produces
     ``context=[ParameterReference("indicator"), ParameterReference("min_value")]``;
     those refs must be resolved before the callback receives the value.
+
+    References that are NOT in ``named_parameters`` are left unchanged — they belong
+    to a nested callback scope (e.g. a ``properties`` filter sub-graph) and will be
+    resolved when that callback executes.
     """
     if isinstance(value, ParameterReference):
         ref_name = value.from_parameter
         if ref_name not in named_parameters:
-            raise ProcessParameterMissing(
-                f"Parameter '{ref_name}' missing for process '{func_name}'"
-            )
+            # Leave callback-scoped refs (e.g. {"from_parameter": "value"} inside a
+            # properties filter) intact; they are not outer-scope parameters.
+            return value
         return named_parameters[ref_name]
     if type(value) is list:
         return [_resolve_nested(item, named_parameters, func_name) for item in value]
