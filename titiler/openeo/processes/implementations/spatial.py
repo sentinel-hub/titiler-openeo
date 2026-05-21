@@ -202,7 +202,7 @@ def aggregate_spatial(
     geometries: Union[Dict, Any],
     reducer: Callable,
     target_dimension: Optional[str] = None,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Aggregates statistics for one or more geometries over the spatial dimensions.
 

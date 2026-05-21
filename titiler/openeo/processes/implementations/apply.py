@@ -24,7 +24,7 @@ class DimensionNotAvailable(Exception):
 def apply(
     data: RasterStack,
     process: Callable,
-    context: Optional[Dict] = None,
+    context: Optional[Any] = None,
 ) -> RasterStack:
     """Apply process on RasterStack."""
     positional_parameters = {"x": 0}
@@ -52,7 +52,7 @@ def apply_dimension(
     process: Callable,
     dimension: str,
     target_dimension: Optional[str] = None,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> RasterStack:
     """Apply a process to all values along a dimension of a data cube.
 
@@ -330,7 +330,7 @@ def _apply_spectral_dimension_stack(
 
 def xyz_to_bbox(
     data: Dict[str, Any],
-    context: Optional[Dict] = None,
+    context: Optional[Any] = None,
 ) -> BoundingBox:
     """Apply process on ArrayLike."""
 
@@ -361,7 +361,7 @@ def xyz_to_tileinfo(
     y: int,
     z: int,
     stage: str = "test",
-    context: Optional[Dict] = None,
+    context: Optional[Any] = None,
 ) -> Dict:
     """Convert XYZ coordinates to tile information."""
 

@@ -13,6 +13,7 @@ The tests are organized into logical groups covering:
 Each test is documented to explain what it validates and why it's important.
 """
 
+import inspect
 from datetime import datetime
 from typing import List, Optional, Union
 
@@ -26,8 +27,18 @@ from openeo_pg_parser_networkx.pg_schema import (
 
 from titiler.openeo.auth import User
 from titiler.openeo.errors import ProcessParameterMissing
-from titiler.openeo.processes.implementations.core import process
+from titiler.openeo.processes.implementations.apply import apply, apply_dimension
+from titiler.openeo.processes.implementations.arrays import merge_cubes
+from titiler.openeo.processes.implementations.core import (
+    _validate_with_pydantic,
+    process,
+)
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from titiler.openeo.processes.implementations.reduce import (
+    aggregate_temporal,
+    reduce_dimension,
+)
+from titiler.openeo.processes.implementations.spatial import aggregate_spatial
 
 
 class TestResolvePositionalArgs:
@@ -686,6 +697,35 @@ class TestTypeValidation:
         # This should work and log debug message if TypeAdapter fails
         result = complex_param(x=[1.0, 2.0, 3.0])
         assert result == "[1.0, 2.0, 3.0]"
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            apply,
+            apply_dimension,
+            aggregate_temporal,
+            reduce_dimension,
+            aggregate_spatial,
+            merge_cubes,
+        ],
+    )
+    @pytest.mark.parametrize("context_value", [[0.1, 0.2, 0.03], {"a": 1}, 42, None])
+    def test_context_param_accepts_any_type(self, func, context_value):
+        """Test that real process implementations accept any ``context`` value.
+
+        Validates: The ``context`` annotation of each process implementation
+        is wide enough that ``_validate_with_pydantic`` (the function in the
+        original traceback) accepts a list, dict, scalar, or None.
+
+        Why important: This reads the *actual* signature of the shipped
+        implementations, so reverting ``context`` to ``Optional[Dict]`` in
+        apply.py/reduce.py/spatial.py/arrays.py fails this test. The earlier
+        version only tested a locally-defined function and would not catch
+        such a regression.
+        """
+        annotation = inspect.signature(func).parameters["context"].annotation
+        # Must not raise — TypeError here is exactly the original bug.
+        _validate_with_pydantic("context", context_value, annotation, func.__name__)
 
 
 class TestProcessDecoratorEdgeCases:

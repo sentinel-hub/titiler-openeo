@@ -232,7 +232,7 @@ def _merge_images_bands(
     img1: ImageData,
     img2: ImageData,
     overlap_resolver: Optional[Callable],
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> ImageData:
     """Merge two ImageData objects along the band dimension.
 
@@ -327,7 +327,7 @@ def merge_cubes(
     cube1: RasterStack,
     cube2: RasterStack,
     overlap_resolver: Optional[Callable] = None,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> RasterStack:
     """Merge two compatible data cubes.
 
