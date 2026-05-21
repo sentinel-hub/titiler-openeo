@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 import numpy
 
-__all__ = ["if_", "and_", "lt", "lte", "gt", "gte", "eq", "neq"]
+__all__ = ["if_", "and_", "or_", "lt", "lte", "gt", "gte", "eq", "neq"]
 
 
 def if_(
@@ -91,6 +91,40 @@ def and_(x: Any, y: Any) -> Any:
 
 
 and_.__name__ = "and"
+
+
+def or_(x: Any, y: Any) -> Any:
+    """Logical OR operation.
+
+    Args:
+        x: First boolean value or array
+        y: Second boolean value or array
+
+    Returns:
+        True if at least one of x and y is true, False otherwise
+
+    Examples:
+        >>> or_(True, True)
+        True
+        >>> or_(True, False)
+        True
+        >>> or_(False, True)
+        True
+        >>> or_(False, False)
+        False
+        >>> import numpy as np
+        >>> or_(np.array([True, False]), np.array([False, False]))
+        array([ True, False])
+    """
+    # Handle numpy arrays - use element-wise logical OR
+    if isinstance(x, numpy.ndarray) or isinstance(y, numpy.ndarray):
+        return numpy.logical_or(x, y)
+
+    # Handle scalar boolean values
+    return bool(x) or bool(y)
+
+
+or_.__name__ = "or"
 
 
 def lt(x: Any, y: Any) -> bool:
