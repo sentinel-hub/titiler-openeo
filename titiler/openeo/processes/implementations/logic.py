@@ -1,10 +1,39 @@
 """titiler.openeo.processes Logic and Comparison operations."""
 
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import numpy
 
 __all__ = ["if_", "and_", "or_", "lt", "lte", "gt", "gte", "eq", "neq"]
+
+
+def _shapes_align(a: Tuple[int, ...], b: Tuple[int, ...]) -> bool:
+    """Return True if same-length shapes ``a`` and ``b`` broadcast element-wise."""
+    return all(x == y or x == 1 or y == 1 for x, y in zip(a, b))
+
+
+def _align_to_reference(
+    arr: numpy.ndarray, reference: Tuple[int, ...]
+) -> numpy.ndarray:
+    """Reshape ``arr`` so it broadcasts against the ``reference`` shape.
+
+    numpy broadcasting aligns shapes on their *trailing* axes. In the datacube
+    layout used here the spectral/band dimension is the *leading* axis while
+    spatial dimensions are trailing, so a spectral-only vector such as ``(3,)``
+    does not broadcast against a spectral cube such as ``(3, H, W)``. When an
+    array's shape matches a leading slice of the reference rather than a
+    trailing one, trailing singleton axes are inserted to line them up.
+    """
+    if arr.ndim == 0 or arr.ndim >= len(reference):
+        return arr
+    shape = arr.shape
+    # Standard numpy alignment: the shape is a trailing slice of the reference.
+    if _shapes_align(shape, reference[-arr.ndim :]):
+        return arr
+    # Leading alignment: the shape is a leading slice of the reference.
+    if _shapes_align(shape, reference[: arr.ndim]):
+        return arr.reshape(shape + (1,) * (len(reference) - arr.ndim))
+    return arr
 
 
 def if_(
@@ -35,8 +64,8 @@ def if_(
         'B'
         >>> if_(True, 123)
         123
-        >>> if_(False, 1)
-        None
+        >>> if_(False, 1) is None
+        True
         >>> import numpy as np
         >>> if_(np.array([True, False, True]), 1, 0)
         array([1, 0, 1])
@@ -45,7 +74,18 @@ def if_(
     if isinstance(value, numpy.ndarray):
         # Use numpy.where for element-wise if-then-else
         reject_val = reject if reject is not None else 0
-        return numpy.where(value, accept, reject_val)
+        accept_arr = numpy.asanyarray(accept)
+        reject_arr = numpy.asanyarray(reject_val)
+        # numpy.where aligns operands on their trailing axes. Operands may
+        # instead carry a leading spectral/band dimension (e.g. a constant
+        # ``(bands,)`` vector selected against a ``(bands, H, W)`` cube), so
+        # align every operand against the highest-rank one before selecting.
+        reference = max((value, accept_arr, reject_arr), key=lambda a: a.ndim).shape
+        return numpy.where(
+            _align_to_reference(value, reference),
+            _align_to_reference(accept_arr, reference),
+            _align_to_reference(reject_arr, reference),
+        )
 
     # Handle scalar boolean values
     # Return accept if value is exactly True, otherwise return reject

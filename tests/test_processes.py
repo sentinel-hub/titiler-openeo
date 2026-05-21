@@ -478,6 +478,36 @@ def test_if_with_arrays():
     assert result == [1, 2, 3]
 
 
+def test_if_with_numpy_arrays():
+    """Test if function with a numpy boolean mask (element-wise)."""
+    result = if_(np.array([True, False, True]), 1, 0)
+    np.testing.assert_array_equal(result, np.array([1, 0, 1]))
+
+
+def test_if_aligns_leading_spectral_dimension():
+    """if_ should broadcast a spatial mask against spectral-leading operands.
+
+    Inside an ``apply_dimension`` callback over the spectral dimension the
+    band axis is leading: a constant band vector is ``(bands,)`` and a band
+    cube is ``(bands, H, W)``, while the condition is a spatial ``(H, W)``
+    mask. numpy.where aligns trailing axes, so these must be re-aligned.
+    """
+    value = np.zeros((4, 5), dtype=bool)
+    value[1, 2] = True
+    accept = np.array([0, 0, 1])  # constant band vector -> (3,)
+    reject = np.arange(3 * 4 * 5).reshape(3, 4, 5)  # band cube -> (3, 4, 5)
+
+    result = if_(value, accept, reject)
+
+    assert result.shape == (3, 4, 5)
+    # The single True pixel takes the accept band vector...
+    np.testing.assert_array_equal(result[:, 1, 2], accept)
+    # ...every other pixel keeps the reject cube value.
+    mask = np.ones((4, 5), dtype=bool)
+    mask[1, 2] = False
+    np.testing.assert_array_equal(result[:, mask], reject[:, mask])
+
+
 def test_if_with_numeric_values():
     """Test if function with numeric values."""
     # Test with integers
