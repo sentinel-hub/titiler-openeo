@@ -14,7 +14,7 @@ Each test is documented to explain what it validates and why it's important.
 """
 
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import numpy as np
 import pytest
@@ -686,6 +686,25 @@ class TestTypeValidation:
         # This should work and log debug message if TypeAdapter fails
         result = complex_param(x=[1.0, 2.0, 3.0])
         assert result == "[1.0, 2.0, 3.0]"
+
+    def test_validation_context_accepts_any_type(self):
+        """Test that an Optional[Any] context parameter accepts any data type.
+
+        Validates: The OpenEO ``context`` argument is specified as "Any data
+        type", so a list (or any other value) must pass validation.
+
+        Why important: Process graphs may pass a list, scalar, or dict as
+        ``context``. Restricting it to dict raised a spurious TypeError.
+        """
+
+        @process
+        def accepts_context(context: Optional[Any] = None) -> Any:
+            return context
+
+        assert accepts_context(context=[0.1, 0.2, 0.03]) == [0.1, 0.2, 0.03]
+        assert accepts_context(context={"a": 1}) == {"a": 1}
+        assert accepts_context(context=42) == 42
+        assert accepts_context(context=None) is None
 
 
 class TestProcessDecoratorEdgeCases:

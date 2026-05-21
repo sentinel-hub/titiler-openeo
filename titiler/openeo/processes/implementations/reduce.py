@@ -809,7 +809,7 @@ def aggregate_temporal(
     reducer: Callable,
     labels: Optional[List[Union[float, str]]] = None,
     dimension: Optional[Literal["t", "temporal", "time"]] = None,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> RasterStack:
     """Computes a temporal aggregation based on an array of temporal intervals.
 
@@ -898,7 +898,7 @@ def reduce_dimension(
     data: RasterStack,
     reducer: Callable,
     dimension: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[Any] = None,
 ) -> Union[RasterStack, ImageData]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
