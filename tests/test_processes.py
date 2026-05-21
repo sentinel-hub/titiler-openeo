@@ -25,7 +25,7 @@ from titiler.openeo.processes.implementations.image import (
     to_array,
 )
 from titiler.openeo.processes.implementations.indices import ndvi, ndwi
-from titiler.openeo.processes.implementations.logic import if_
+from titiler.openeo.processes.implementations.logic import and_, if_, or_
 from titiler.openeo.processes.implementations.reduce import reduce_dimension
 
 
@@ -530,6 +530,41 @@ def test_if_with_image_data(sample_image_data):
 
     result = if_(False, data1, data2)
     assert result is data2
+
+
+def test_or_scalar():
+    """Test logical OR with scalar boolean values."""
+    assert or_(True, True) is True
+    assert or_(True, False) is True
+    assert or_(False, True) is True
+    assert or_(False, False) is False
+
+    # Non-boolean values are coerced (null/None treated as false)
+    assert or_(1, 0) is True
+    assert or_(0, None) is False
+
+
+def test_or_with_arrays():
+    """Test logical OR with numpy arrays (element-wise)."""
+    result = or_(np.array([True, False, True]), np.array([False, False, True]))
+    np.testing.assert_array_equal(result, np.array([True, False, True]))
+
+    # Mixed array / scalar operand
+    result = or_(np.array([True, False]), False)
+    np.testing.assert_array_equal(result, np.array([True, False]))
+
+
+def test_and_scalar():
+    """Test logical AND with scalar boolean values."""
+    assert and_(True, True) is True
+    assert and_(True, False) is False
+    assert and_(False, False) is False
+
+
+def test_and_with_arrays():
+    """Test logical AND with numpy arrays (element-wise)."""
+    result = and_(np.array([True, False]), np.array([True, True]))
+    np.testing.assert_array_equal(result, np.array([True, False]))
 
 
 def test_apply_dimension_water_mask_preserves_dimensions(sample_raster_stack):
