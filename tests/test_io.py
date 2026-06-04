@@ -155,6 +155,25 @@ def test_save_result_single_image():
     assert len(result.data) > 0  # Should contain PNG bytes
 
 
+def test_save_result_multi_slice_single_frame_format_raises():
+    """A multi-slice RasterStack cannot be saved to a single-frame format.
+
+    This is the failure mode behind merge_cubes of two cubes with non-matching
+    time labels: the overlap_resolver is never applied and both slices are
+    carried through, leaving a 2-key stack that PNG/JPEG cannot represent.
+    """
+    array = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[None, ...]
+    data = RasterStack.from_images(
+        {
+            datetime(2021, 6, 1): ImageData(array),
+            datetime(2021, 8, 1): ImageData(array),
+        }
+    )
+
+    with pytest.raises(ValueError, match="2 temporal slices"):
+        save_result(data, "png")
+
+
 def test_save_result_feature_collection():
     """Test save_result with FeatureCollection."""
     data = {
