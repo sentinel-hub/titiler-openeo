@@ -13,6 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     select,
+    text,
 )
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -60,6 +61,11 @@ class SQLAlchemyTileStore(TileAssignmentStore):
         self._session_factory = sessionmaker(bind=self._engine)
         # Ensure tile_assignments table exists
         Base.metadata.create_all(self._engine)
+
+    def ping(self) -> None:
+        """Verify the tile store is reachable. Raises on failure."""
+        with self._engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
 
     def get_user_tile(self, service_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get a user's currently assigned tile."""

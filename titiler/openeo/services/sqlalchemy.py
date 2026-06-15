@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     select,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -112,6 +113,11 @@ class SQLAlchemyStore(ServicesStore):
         # Create tables if they don't exist
 
         Base.metadata.create_all(self._engine)
+
+    def ping(self) -> None:
+        """Verify the SQLAlchemy store is reachable. Raises on failure."""
+        with self._engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
 
     def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""

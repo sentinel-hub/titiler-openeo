@@ -45,6 +45,11 @@ class DuckDBStore(ServicesStore):
                 """
             )
 
+    def ping(self) -> None:
+        """Verify the DuckDB store is reachable. Raises on failure."""
+        with duckdb.connect(self.store) as con:
+            con.execute("SELECT 1").fetchone()
+
     def get_service(self, service_id: str) -> Optional[Dict]:
         """Return a specific Service."""
         with duckdb.connect(self.store) as con:

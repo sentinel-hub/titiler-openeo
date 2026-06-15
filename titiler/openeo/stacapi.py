@@ -73,6 +73,14 @@ class stacApiBackend:
             self._client_cache = Client.open(self.url, stac_io=stac_api_io)
         return self._client_cache
 
+    def ping(self, timeout: float = 2.0) -> None:
+        """Verify the STAC API root is reachable. Raises on failure."""
+        # Use the pystac_client StacApiIO underlying session for a cheap GET
+        # against the API root.
+        session = self.client._stac_io.session  # type: ignore[attr-defined]
+        response = session.get(self.url, timeout=timeout)
+        response.raise_for_status()
+
     @cached(  # type: ignore
         collections_cache,
         key=lambda self, **kwargs: hashkey(self.url, **kwargs),

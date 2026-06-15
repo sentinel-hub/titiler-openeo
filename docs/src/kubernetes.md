@@ -58,6 +58,26 @@ When deploying to production:
 
 For specific configuration values and examples, refer to the [configuration section](https://github.com/sentinel-hub/titiler-openeo/blob/main/deployment/k8s/charts/README.md#configuration) in the Helm chart documentation.
 
+## Health Endpoints
+
+The application exposes two Kubernetes-friendly health endpoints. The bundled
+Helm chart wires them to the pod's probes by default.
+
+- `GET /healthz` — **liveness**. Dependency-free; returns `200 {"status":"ok"}`
+  as long as the FastAPI process is responsive. Used as `livenessProbe.httpGet.path`
+  so a transient backend outage never triggers an infinite restart loop.
+- `GET /readyz` — **readiness**. Runs a bounded (≤2 s) check against every
+  configured backend: services store, optional tile store, STAC API, and the
+  OIDC well-known endpoint when OIDC auth is enabled. Returns `200` only when
+  every check passes; otherwise `503` with a structured body listing which
+  check failed. Used as `readinessProbe.httpGet.path` so an unhealthy pod is
+  removed from the Service's endpoints until it recovers. Results are cached
+  for 5 s by default; append `?fresh=1` to bypass the cache for manual
+  debugging.
+
+Per-check timeout and cache TTL can be tuned via
+`TITILER_OPENEO_HEALTH_CHECK_TIMEOUT` and `TITILER_OPENEO_HEALTH_CACHE_TTL`.
+
 ## Troubleshooting
 
 ### Common Issues

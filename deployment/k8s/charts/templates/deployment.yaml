@@ -138,13 +138,13 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /api
+              path: /healthz
               port: http
             initialDelaySeconds: 30
             timeoutSeconds: 10
           readinessProbe:
             httpGet:
-              path: /api
+              path: /readyz
               port: http
             initialDelaySeconds: 30
             timeoutSeconds: 30

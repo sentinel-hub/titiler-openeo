@@ -40,7 +40,8 @@ STAC Configuration:
 Available Endpoints:
 - API Documentation: /api
 - OpenAPI Specification: /api.html
-- Health Check: /healthz
+- Liveness Check: /healthz
+- Readiness Check: /readyz
 
 For more information, visit:
 https://github.com/sentinel-hub/titiler-openeo
