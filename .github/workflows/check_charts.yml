@@ -195,19 +195,26 @@ jobs:
           run_curl() {
             # `-i` (stdin) + `--restart=Never` + `--rm` runs curl in a
             # one-shot pod, streams its stdout to us, and cleans up. No TTY
-            # required.
+            # required. We intentionally do NOT pass `-f` — that swallows
+            # the body on >=400 and makes diagnosis painful. Instead we
+            # print "<http_code>|<body>" and parse it.
             kubectl run "curl-$(date +%s%N)" \
               --namespace "${NAMESPACE}" \
               --image=curlimages/curl:8.10.1 \
               --restart=Never --rm -i --quiet \
-              --command -- curl -fsS -o /dev/null \
-              -w '%{http_code}' "${SVC_URL}$1"
+              --command -- curl -sS \
+              -w '\n---HTTP_CODE---%{http_code}\n' \
+              "${SVC_URL}$1"
           }
 
-          for endpoint in /healthz /api.html; do
-            code=$(run_curl "${endpoint}")
+          for endpoint in /api /api.html /.well-known/openeo; do
+            output=$(run_curl "${endpoint}" || true)
+            code=$(echo "${output}" | awk -F'---HTTP_CODE---' '/---HTTP_CODE---/ {print $2}' | tr -d '\n[:space:]')
             if [[ "${code}" != "200" ]]; then
-              echo "::error::GET ${endpoint} returned ${code} (expected 200)"
+              echo "::error::GET ${endpoint} returned ${code:-<no-response>} (expected 200)"
+              echo "--- response body ---"
+              echo "${output}"
+              echo "--- end response ---"
               exit 1
             fi
             echo "  GET ${endpoint} -> ${code}"
