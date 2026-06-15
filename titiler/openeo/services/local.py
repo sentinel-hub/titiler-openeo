@@ -142,6 +142,14 @@ class LocalServiceStore(ServicesStore):
         with open(self.path, "w") as f:
             json.dump(data, f, default=_json_default)
 
+    def ping(self) -> None:
+        """Verify the backing JSON file is readable. Raises on failure."""
+        if not self.path:
+            return
+        # Open and parse to detect both missing-file and corruption.
+        with open(self.path, "r") as f:
+            json.load(f)
+
 
 @define
 class LocalUdpStore(UdpStore):

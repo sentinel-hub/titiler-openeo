@@ -88,3 +88,36 @@ jobs:
       - name: Run chart-testing (install)
         run: ct install --chart-dirs deployment/k8s
         if: steps.list-changed.outputs.changed == 'true'
+
+      - name: Smoke test health endpoints
+        if: steps.list-changed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          # Pick the first titiler pod the chart-testing install left behind.
+          POD=$(kubectl get pods -A -l app.kubernetes.io/name=titiler \
+            -o jsonpath='{.items[0].metadata.name}')
+          NS=$(kubectl get pods -A -l app.kubernetes.io/name=titiler \
+            -o jsonpath='{.items[0].metadata.namespace}')
+          if [[ -z "$POD" ]]; then
+            echo "No titiler pod found; skipping smoke test."
+            exit 0
+          fi
+          echo "Smoke-testing pod $NS/$POD"
+          kubectl -n "$NS" wait --for=condition=Ready pod/"$POD" --timeout=120s
+          kubectl -n "$NS" port-forward "pod/$POD" 18080:80 &
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+          # Give kubectl port-forward a moment to establish the tunnel
+          for i in $(seq 1 20); do
+            curl -fsS -o /dev/null http://127.0.0.1:18080/healthz && break || sleep 1
+          done
+          echo "GET /healthz"
+          curl -fsS http://127.0.0.1:18080/healthz | tee /tmp/healthz.json
+          echo "GET /readyz"
+          curl -fsS http://127.0.0.1:18080/readyz | tee /tmp/readyz.json
+          echo "GET /api"
+          curl -fsS -o /dev/null http://127.0.0.1:18080/api
+          echo "GET /api.html"
+          curl -fsS -o /dev/null http://127.0.0.1:18080/api.html
+          echo "GET /.well-known/openeo"
+          curl -fsS -o /dev/null http://127.0.0.1:18080/.well-known/openeo

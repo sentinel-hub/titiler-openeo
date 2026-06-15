@@ -219,6 +219,22 @@ class ProcessingSettings(BaseSettings):
     )
 
 
+class HealthSettings(BaseSettings):
+    """Settings for the /healthz and /readyz health endpoints."""
+
+    # Per-check timeout in seconds for the /readyz probe
+    check_timeout: Annotated[float, Field(gt=0.0)] = 2.0
+
+    # TTL of the cached /readyz result in seconds (0 disables caching)
+    cache_ttl: Annotated[float, Field(ge=0.0)] = 5.0
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_HEALTH_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class CacheSettings(BaseSettings):
     """Cache settings"""
 

@@ -117,6 +117,13 @@ class OIDCAuth(Auth):
                 self._config_cache = response.json()
         return self._config_cache
 
+    def ping(self, timeout: float = 2.0) -> None:
+        """Verify the OIDC well-known endpoint is reachable. Raises on failure."""
+        assert httpx, "`httpx` module must be installed to use OIDC Auth method"
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(str(self._oidc_config.wk_url))
+            response.raise_for_status()
+
     def get_jwks(self) -> Dict:
         """Get JSON Web Key Set."""
         if self._jwks_cache is None:

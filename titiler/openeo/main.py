@@ -14,6 +14,7 @@ from . import __version__ as titiler_version
 from .auth import get_auth
 from .errors import ExceptionHandler, OpenEOException
 from .factory import EndpointsFactory
+from .health import register_health_endpoints
 from .middleware import DynamicCacheControlMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
@@ -135,6 +136,17 @@ def create_app():
     endpoints = EndpointsFactory(**factory_args)
     app.include_router(endpoints.router)
     app.endpoints = endpoints
+
+    # Kubernetes-style health endpoints. Registered after the OpenEO router
+    # so the explicit /healthz and /readyz paths take precedence and are
+    # excluded from the OpenAPI schema.
+    register_health_endpoints(
+        app,
+        service_store=service_store,
+        tile_store=tile_store,
+        stac_client=stac_client,
+        auth=auth,
+    )
 
     # Create exception handler instance
     exception_handler = ExceptionHandler(logger=logging.getLogger(__name__))
