@@ -207,7 +207,7 @@ jobs:
               "${SVC_URL}$1"
           }
 
-          for endpoint in /api /api.html /.well-known/openeo; do
+          for endpoint in /healthz /readyz /api /api.html /.well-known/openeo; do
             output=$(run_curl "${endpoint}" || true)
             code=$(echo "${output}" | awk -F'---HTTP_CODE---' '/---HTTP_CODE---/ {print $2}' | tr -d '\n[:space:]')
             if [[ "${code}" != "200" ]]; then
