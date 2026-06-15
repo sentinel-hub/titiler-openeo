@@ -52,7 +52,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Database URL construction helper
+Name of the optional bundled postgresql StatefulSet / Service / Secret.
+Keeping the suffix as `-postgresql` preserves DSN compatibility with
+prior chart versions that used the bitnami subchart (which generated
+the same Service name).
+*/}}
+{{- define "titiler.postgresql.fullname" -}}
+{{ include "titiler.fullname" . }}-postgresql
+{{- end -}}
+
+{{/*
+Database URL construction helper.
+
+For postgresql backends the password MUST be supplied at render time
+(via values) or the full TITILER_OPENEO_STORE_URL must be injected from
+a Secret using `.Values.envVars.fromSecret`. Relying on Helm `lookup` is
+not GitOps-compatible: ArgoCD renders manifests with `helm template`
+which has no live cluster access, so `lookup` returns empty and any
+fallback (e.g. `randAlphaNum`) would produce a different password on
+every sync.
 */}}
 {{- define "database.url" -}}
 {{- if eq .Values.database.type "json" -}}
@@ -62,25 +80,28 @@ Database URL construction helper
 {{- else if eq .Values.database.type "postgresql" -}}
 {{- if .Values.database.external.enabled -}}
 {{- $externalPassword := .Values.database.external.password -}}
-{{- if .Values.database.external.existingSecret -}}
-{{- $secret := (lookup "v1" "Secret" .Release.Namespace .Values.database.external.existingSecret) -}}
-{{- if and $secret $secret.data (hasKey $secret.data .Values.database.external.existingSecretKey) -}}
-{{- $externalPassword = index $secret.data .Values.database.external.existingSecretKey | b64dec -}}
-{{- end -}}
+{{- if not $externalPassword -}}
+{{- fail "database.external.password is required when database.type=postgresql and database.external.enabled=true. Either set it in values, or inject the full DSN via envVars.fromSecret with name TITILER_OPENEO_STORE_URL (which will bypass this helper)." -}}
 {{- end -}}
 postgresql://{{ .Values.database.external.user }}:{{ $externalPassword }}@{{ .Values.database.external.host }}:{{ .Values.database.external.port }}/{{ .Values.database.external.database }}
 {{- else -}}
-{{- $postgresqlPassword := (randAlphaNum 32) -}}
-{{- if .Values.postgresql.auth.password -}}
-{{- $postgresqlPassword = .Values.postgresql.auth.password -}}
-{{- else -}}
-{{- $postgresqlSecret := (lookup "v1" "Secret" .Release.Namespace (printf "%s-postgresql" (include "titiler.fullname" .))) -}}
-{{- $passwordKey := printf "password" -}}
-{{- if and $postgresqlSecret $postgresqlSecret.data (hasKey $postgresqlSecret.data $passwordKey) -}}
-{{- $postgresqlPassword = index $postgresqlSecret.data $passwordKey | b64dec -}}
+{{- $postgresqlPassword := .Values.postgresql.auth.password -}}
+{{- if not $postgresqlPassword -}}
+{{- fail "postgresql.auth.password is required when database.type=postgresql and the bundled postgresql subchart is used. Either set it in values, or inject the full DSN via envVars.fromSecret with name TITILER_OPENEO_STORE_URL (which will bypass this helper)." -}}
+{{- end -}}
+postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{ include "titiler.postgresql.fullname" . }}:5432/{{ .Values.postgresql.auth.database }}
 {{- end -}}
 {{- end -}}
-postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{ include "titiler.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}
 {{- end -}}
+
+{{/*
+Returns "true" when the user supplies TITILER_OPENEO_STORE_URL via
+.Values.envVars.fromSecret. In that case the deployment skips the
+helper-emitted value: env var so the runtime value comes from the
+secretKeyRef instead. Returns an empty string otherwise.
+*/}}
+{{- define "database.urlFromSecret" -}}
+{{- range .Values.envVars.fromSecret -}}
+{{- if eq .name "TITILER_OPENEO_STORE_URL" -}}true{{- end -}}
 {{- end -}}
 {{- end -}}

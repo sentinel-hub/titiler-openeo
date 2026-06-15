@@ -48,6 +48,7 @@ nav:
   - Deployment:
     - Local Setup: "local-setup.md"
     - Kubernetes Guide: "kubernetes.md"
+    - Production PostgreSQL (CloudNativePG): "kubernetes-cloudnativepg.md"
   - Examples:
     - Overview: "examples/index.md"
     - Parameter Management: "examples/parameter-management.md"

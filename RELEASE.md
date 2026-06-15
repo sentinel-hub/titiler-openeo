@@ -140,6 +140,35 @@ The Helm chart version is managed separately and should be incremented manually 
 - Chart version increments by 0.0.1 for each release
 - `appVersion` is updated automatically by release-please to match the package version
 
+## Helm Chart Publishing
+
+When a chart release PR (`chore(main): release titiler-openeo-chart …`) is merged,
+the chart is published to **two** locations in parallel:
+
+1. **GitHub Pages (chart-releaser)** — kept for backward compatibility with
+   existing consumers using `helm repo add`.
+2. **OCI registry** at `oci://ghcr.io/developmentseed/charts/titiler-openeo`,
+   so downstream GitOps repos (e.g. ArgoCD) can pin a specific version:
+
+   ```bash
+   helm pull oci://ghcr.io/developmentseed/charts/titiler-openeo --version <chart-version>
+   ```
+
+### Required repository secret
+
+The OCI publish job (`publish-helm-chart-oci` in
+[.github/workflows/release-please.yml](.github/workflows/release-please.yml))
+pushes to the `developmentseed` org, which is **not** the org that hosts this
+repository. The default `GITHUB_TOKEN` only has `packages: write` scope on the
+current repo's org (`sentinel-hub`), so a dedicated PAT is required:
+
+- **Secret name**: `GHCR_DEVSEED_TOKEN`
+- **Scopes**: `write:packages`, `read:packages`
+- **Owner**: a user/bot with package write access on the `developmentseed` org
+
+After the first successful push, set the package visibility to **public** in
+the GHCR UI so ArgoCD can pull anonymously.
+
 ## Emergency Releases
 
 For urgent fixes outside the normal process:

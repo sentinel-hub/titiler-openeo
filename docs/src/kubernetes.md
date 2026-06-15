@@ -55,6 +55,11 @@ When deploying to production:
 4. Configure authentication
 5. Tune environment variables for performance
 6. Enable monitoring and logging
+7. **Run PostgreSQL via a production-grade operator** — the bundled
+   `postgresql.*` StatefulSet is a single-replica convenience install and is
+   not suitable for production. See [Production PostgreSQL with
+   CloudNativePG](kubernetes-cloudnativepg.md) for the recommended HA setup
+   with backups and point-in-time recovery.
 
 For specific configuration values and examples, refer to the [configuration section](https://github.com/sentinel-hub/titiler-openeo/blob/main/deployment/k8s/charts/README.md#configuration) in the Helm chart documentation.
 

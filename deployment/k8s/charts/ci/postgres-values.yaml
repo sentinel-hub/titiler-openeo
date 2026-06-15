@@ -1,0 +1,38 @@
+# CI scenario: internal postgres subchart with plaintext password in values.
+# Exercises the most common production setup and proves the breaking change
+# in this chart (removal of the `lookup`-based password fallback) did not
+# break the documented "set the password in values" path.
+replicaCount: 1
+
+image:
+  repository: titiler-openeo
+  tag: dev
+
+# Keep the kind cluster happy — drop request/limit pressure and disable
+# postgres persistence so the install fits the GitHub Actions runner.
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+database:
+  type: postgresql
+
+postgresql:
+  enabled: true
+  auth:
+    database: openeo
+    username: openeo
+    password: "ci-test-password"
+  persistence:
+    enabled: false
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi

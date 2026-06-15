@@ -108,6 +108,16 @@ envVars:
   # - name: REDIS_HOST
   #   secretName: redis-credentials
   #   secretKey: host
+  #
+  # GitOps / sealed-secret pattern for the postgres DSN:
+  # Inject the full TITILER_OPENEO_STORE_URL connection string from a Secret
+  # (e.g. one managed by Sealed Secrets / External Secrets). When this entry
+  # is present, the chart skips emitting the helper-built value: env var so
+  # the password never ends up in rendered manifests and Helm `lookup` is
+  # not required.
+  # - name: TITILER_OPENEO_STORE_URL
+  #   secretName: titiler-openeo-db
+  #   secretKey: dsn
   fromConfigMap: []
   # - name: REDIS_PORT              # Environment variable name
   #   configMapName: redis-config   # ConfigMap name
@@ -134,16 +144,61 @@ logging:
   configFile: "files/log_config.yaml"
 
 enableTileStore: false
-# PostgreSQL subchart configuration
+# Bundled single-tenant PostgreSQL (StatefulSet + Service + Secret).
+# This is a development / single-tenant convenience. For production with
+# multiple replicas or HA, point the chart at an externally-managed
+# database via `database.external.*` or by injecting the full DSN via
+# `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` (GitOps pattern).
 postgresql:
   enabled: false
+
+  image:
+    # Official postgres image from the postgres community. Replaces the
+    # previous bitnami subchart, whose images moved behind a paid
+    # subscription in 2025.
+    repository: postgres
+    tag: "17-alpine"
+    pullPolicy: IfNotPresent
+
   auth:
     database: openeo
     username: openeo
+    # The chart no longer resolves the password from a live Secret via
+    # Helm `lookup` (it broke under `helm template` / ArgoCD and produced
+    # a fresh random password on every sync). For production, either:
+    #  * set this value to a plaintext password (it will appear in
+    #    rendered manifests — fine for non-GitOps installs), OR
+    #  * leave it empty and point `existingSecret` below at a Secret
+    #    containing the password under key `password`. The same Secret
+    #    can also hold the full DSN under another key, referenced from
+    #    `envVars.fromSecret[TITILER_OPENEO_STORE_URL]`.
     password: "8472387r4_$78-b9"
-  primary:
-    persistence:
-      size: 8Gi
+    # Name of an existing Secret to read the postgres password from.
+    # When set, the chart will NOT create its own Secret.
+    existingSecret: ""
+    # Key inside `existingSecret` that holds the password.
+    existingSecretPasswordKey: "password"
+
+  persistence:
+    enabled: true
+    size: 8Gi
+    # Leave empty to use the cluster default StorageClass.
+    storageClassName: ""
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Run as the postgres user (uid/gid 70 in the alpine image).
+  podSecurityContext:
+    fsGroup: 70
+  securityContext:
+    runAsUser: 70
+    runAsNonRoot: true
 
 # Database configuration
 database:
@@ -175,16 +230,22 @@ database:
     enabled: false
     path: "/mnt/data/store.db"
 
-  # PostgreSQL connection configuration (when not using subchart)
+  # PostgreSQL connection configuration for an externally-managed database
+  # (i.e. not the bundled `postgresql.*` StatefulSet above). Use this when
+  # the database lives outside the chart's release — typically a managed
+  # service or a shared in-cluster postgres.
   external:
     enabled: false
     host: ""
     port: 5432
     user: openeo
     database: openeo
+    # Plaintext password. The chart no longer reads the password from a
+    # Secret via Helm `lookup` (incompatible with `helm template` /
+    # ArgoCD). For GitOps deployments, leave this empty and inject the
+    # full DSN via `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` above,
+    # which bypasses this helper entirely.
     password: ""
-    existingSecret: ""   # Name of existing secret containing password
-    existingSecretKey: "password"   # Key in the existing secret
 
 securityContext:
   {}

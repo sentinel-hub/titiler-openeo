@@ -138,3 +138,41 @@ jobs:
           charts_dir: deployment/k8s
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+  publish-helm-chart-oci:
+    needs: release-please
+    runs-on: ubuntu-latest
+    if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), 'deployment/k8s/charts') }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+        with:
+          version: v3.15.2
+
+      # Pushing to ghcr.io/developmentseed/charts (a different org than the one
+      # hosting this repo) requires a PAT with `write:packages` on the
+      # developmentseed org — the default GITHUB_TOKEN only grants package
+      # scope on the current repo's org.
+      - name: Log in to GHCR (developmentseed)
+        run: |
+          echo "${{ secrets.GHCR_DEVSEED_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Package chart
+        run: |
+          mkdir -p dist
+          helm package deployment/k8s/charts -d dist/
+
+      - name: Push chart to OCI registry
+        run: |
+          for pkg in dist/titiler-openeo-*.tgz; do
+            echo "Pushing $pkg ..."
+            helm push "$pkg" oci://ghcr.io/developmentseed/charts
+          done

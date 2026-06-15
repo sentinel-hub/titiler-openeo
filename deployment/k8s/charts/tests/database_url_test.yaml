@@ -1,0 +1,136 @@
+suite: test database URL / TITILER_OPENEO_STORE_URL resolution
+templates:
+  - deployment.yaml
+tests:
+  - it: should emit TITILER_OPENEO_STORE_URL from helper when using internal postgres with plaintext password
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      postgresql.auth.username: "openeo"
+      postgresql.auth.database: "openeo"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+
+  - it: should emit TITILER_OPENEO_STORE_URL from helper when using external postgres with plaintext password
+    set:
+      database.type: "postgresql"
+      database.external.enabled: true
+      database.external.host: "pg.example.com"
+      database.external.port: 5432
+      database.external.user: "openeo"
+      database.external.database: "openeo"
+      database.external.password: "extpass"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: postgresql://openeo:extpass@pg.example.com:5432/openeo
+
+  - it: should fail rendering when internal postgres has no password and no secret override
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "postgresql.auth.password is required when database.type=postgresql and the bundled postgresql subchart is used. Either set it in values, or inject the full DSN via envVars.fromSecret with name TITILER_OPENEO_STORE_URL (which will bypass this helper)."
+
+  - it: should fail rendering when external postgres has no password and no secret override
+    set:
+      database.type: "postgresql"
+      database.external.enabled: true
+      database.external.host: "pg.example.com"
+      database.external.password: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "database.external.password is required when database.type=postgresql and database.external.enabled=true. Either set it in values, or inject the full DSN via envVars.fromSecret with name TITILER_OPENEO_STORE_URL (which will bypass this helper)."
+
+  - it: should source TITILER_OPENEO_STORE_URL from Secret when supplied via envVars.fromSecret, and not emit a helper value
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      # Intentionally omit a password — the helper must not be invoked.
+      postgresql.auth.password: ""
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            valueFrom:
+              secretKeyRef:
+                name: titiler-openeo-db
+                key: dsn
+          count: 1
+      - notMatchRegexRaw:
+          pattern: "postgresql://"
+
+  - it: should also skip TITILER_OPENEO_TILE_STORE_URL helper value when secret override is present
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: ""
+      enableTileStore: true
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+        - name: TITILER_OPENEO_TILE_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            valueFrom:
+              secretKeyRef:
+                name: titiler-openeo-db
+                key: dsn
+          count: 1
+      - notMatchRegexRaw:
+          pattern: "postgresql://"
+
+  - it: should emit TITILER_OPENEO_TILE_STORE_URL from helper when enableTileStore is true and no secret override
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      enableTileStore: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+
+  - it: should use json path when database.type is json
+    set:
+      database.type: "json"
+      database.json.path: "/mnt/data/store.json"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: /mnt/data/store.json
+
+  - it: should use duckdb path when database.type is duckdb
+    set:
+      database.type: "duckdb"
+      database.duckdb.path: "/mnt/data/store.db"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: /mnt/data/store.db
