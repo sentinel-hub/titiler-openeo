@@ -130,3 +130,74 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:18080/api.html
           echo "GET /.well-known/openeo"
           curl -fsS -o /dev/null http://127.0.0.1:18080/.well-known/openeo
+
+      # End-to-end test for the GitOps sealed-secret pattern.
+      # ct install can't natively pre-create a Secret in the test namespace,
+      # so this path is driven by a direct `helm install`. See
+      # deployment/k8s/charts/tests/sealed-secret-install-values.yaml.
+      - name: Sealed-secret postgres install (E2E)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+
+          NAMESPACE=sealed-secret-test
+          RELEASE=sealed
+          # The bitnami subchart creates a Service named "<fullname>-postgresql".
+          # With release "sealed" and chart "titiler-openeo" the fullname is
+          # "sealed-titiler-openeo" so the service is:
+          PG_HOST="${RELEASE}-titiler-openeo-postgresql"
+          PG_PASSWORD="seal3d-s3cr3t-p@ss"
+          PG_DSN="postgresql://openeo:${PG_PASSWORD}@${PG_HOST}:5432/openeo"
+
+          kubectl create namespace "${NAMESPACE}"
+
+          # Seed the Secret BEFORE install. Both keys live on the same Secret
+          # so the bitnami pod (via postgresql.auth.existingSecret) and the
+          # app (via envVars.fromSecret) read the same credential.
+          kubectl create secret generic pg-creds \
+            --namespace "${NAMESPACE}" \
+            --from-literal=password="${PG_PASSWORD}" \
+            --from-literal=dsn="${PG_DSN}"
+
+          helm dependency build deployment/k8s/charts
+          helm install "${RELEASE}" deployment/k8s/charts \
+            --namespace "${NAMESPACE}" \
+            --values deployment/k8s/charts/tests/sealed-secret-install-values.yaml \
+            --wait --timeout 5m
+
+          # Assertion 1: TITILER_OPENEO_STORE_URL must be sourced from a
+          # secretKeyRef, not a literal `value:`.
+          DEPLOY_YAML=$(kubectl get deployment -n "${NAMESPACE}" "${RELEASE}-titiler-openeo" -o yaml)
+          if ! echo "${DEPLOY_YAML}" | grep -B1 -A4 "name: TITILER_OPENEO_STORE_URL" | grep -q "secretKeyRef"; then
+            echo "::error::TITILER_OPENEO_STORE_URL is not sourced from a secretKeyRef"
+            echo "${DEPLOY_YAML}" | grep -B1 -A4 "name: TITILER_OPENEO_STORE_URL"
+            exit 1
+          fi
+
+          # Assertion 2: the plaintext password must not appear anywhere in
+          # the rendered Deployment manifest.
+          if echo "${DEPLOY_YAML}" | grep -q "${PG_PASSWORD}"; then
+            echo "::error::Plaintext postgres password leaked into rendered Deployment"
+            exit 1
+          fi
+
+          # Assertion 3: the app must actually become Ready, which proves the
+          # secretKeyRef resolved at runtime and the DSN was valid.
+          kubectl wait --namespace "${NAMESPACE}" \
+            --for=condition=Available deployment/"${RELEASE}-titiler-openeo" \
+            --timeout=2m
+
+          echo "✅ Sealed-secret install passed all assertions."
+
+      - name: Dump diagnostics on sealed-secret install failure
+        if: failure() && steps.list-changed.outputs.changed == 'true'
+        run: |
+          NAMESPACE=sealed-secret-test
+          echo "=== Pods ==="
+          kubectl get pods -n "${NAMESPACE}" -o wide || true
+          echo "=== Events ==="
+          kubectl get events -n "${NAMESPACE}" --sort-by=.lastTimestamp || true
+          echo "=== App logs ==="
+          kubectl logs -n "${NAMESPACE}" -l app.kubernetes.io/name=titiler-openeo --tail=200 || true
+          echo "=== Postgres logs ==="
+          kubectl logs -n "${NAMESPACE}" -l app.kubernetes.io/name=postgresql --tail=200 || true
