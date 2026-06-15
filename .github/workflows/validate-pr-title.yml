@@ -43,8 +43,12 @@ jobs:
           # Disable validation of merge commits
           validateSingleCommit: false
           # Allow additional subjects like "Merge branch..."
+          # `autorelease: pending` is set by release-please on its release PRs,
+          # whose titles (e.g. `chore(main): release 0.15.0`) use the release
+          # branch name as scope and therefore fail scope validation.
           ignoreLabels: |
             skip-changelog
+            autorelease: pending
           # Custom error message
           subjectPattern: ^(?![A-Z]).+$
           subjectPatternError: |
