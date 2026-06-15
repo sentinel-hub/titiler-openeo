@@ -343,5 +343,19 @@ def save_result(
             combined_img = _handle_raster_geotiff(data)
             return _save_single_result(combined_img, format, options)
 
+        # A multi-slice RasterStack cannot be written to a single-frame format
+        # (PNG/JPEG and friends). This usually means an upstream operation kept a
+        # temporal dimension that the caller expected to be collapsed — e.g.
+        # merge_cubes received two cubes with non-matching time labels, so the
+        # overlap_resolver was never applied and both slices were carried through.
+        raise ValueError(
+            f"Cannot save a RasterStack with {len(data)} temporal slices "
+            f"(keys: {list(data.keys())}) to single-frame format "
+            f"'{format}'. Use 'tiff'/'gtiff' to write all slices as a "
+            "multi-band GeoTIFF, or collapse the temporal dimension first "
+            "(e.g. reduce_dimension over 't', or align the time labels so "
+            "merge_cubes can apply the overlap_resolver)."
+        )
+
     # Otherwise, save as a single result
     return _save_single_result(data, format, options)
