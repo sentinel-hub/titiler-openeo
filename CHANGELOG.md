@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.0 (2026-06-15)
+
+## What's Changed
+* fix: resolve ParameterReference objects in context for callbacks by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/257
+* fix: nested resolution by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/259
+* feat: add logical OR operation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/260
+* fix: update context parameter type to Optional[Any] as per spec by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/261
+* fix: align if_ operands with leading spectral dimension by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/262
+* chore(deps): bump the all group across 1 directory with 9 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/263
+* feat: add validation for saving multi-slice RasterStack to single-frame formats by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/264
+* feat: add /healthz and /readyz endpoints with backend health checks by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/269
+* feat(helm)!: publish chart to ghcr OCI and make postgres DSN GitOps-compatible by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/267
+* ci: ignore release-please PRs in title validation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/270
+* refactor: remove /readyz response cache by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/271
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.14.1...v0.15.0
+
 ## 0.14.1 (2026-04-01)
 
 ## What's Changed
