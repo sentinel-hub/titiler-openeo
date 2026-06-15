@@ -27,9 +27,8 @@ postgresql:
     database: openeo
     username: openeo
     password: "ci-test-password"
-  primary:
-    persistence:
-      enabled: false
+  persistence:
+    enabled: false
   resources:
     limits:
       cpu: 500m

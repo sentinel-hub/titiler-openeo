@@ -37,10 +37,6 @@ jobs:
         with:
           version: v3.15.2
 
-      # add bitnami repo to get the postgresql chart
-      - name: Add Bitnami repo
-        run: helm repo add bitnami https://charts.bitnami.com/bitnami
-
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.x'
@@ -159,7 +155,6 @@ jobs:
             --from-literal=password="${PG_PASSWORD}" \
             --from-literal=dsn="${PG_DSN}"
 
-          helm dependency build deployment/k8s/charts
           helm install "${RELEASE}" deployment/k8s/charts \
             --namespace "${NAMESPACE}" \
             --values deployment/k8s/charts/tests/sealed-secret-install-values.yaml \

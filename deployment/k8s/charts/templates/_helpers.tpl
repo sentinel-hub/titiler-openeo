@@ -52,6 +52,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Name of the optional bundled postgresql StatefulSet / Service / Secret.
+Keeping the suffix as `-postgresql` preserves DSN compatibility with
+prior chart versions that used the bitnami subchart (which generated
+the same Service name).
+*/}}
+{{- define "titiler.postgresql.fullname" -}}
+{{ include "titiler.fullname" . }}-postgresql
+{{- end -}}
+
+{{/*
 Database URL construction helper.
 
 For postgresql backends the password MUST be supplied at render time
@@ -79,7 +89,7 @@ postgresql://{{ .Values.database.external.user }}:{{ $externalPassword }}@{{ .Va
 {{- if not $postgresqlPassword -}}
 {{- fail "postgresql.auth.password is required when database.type=postgresql and the bundled postgresql subchart is used. Either set it in values, or inject the full DSN via envVars.fromSecret with name TITILER_OPENEO_STORE_URL (which will bypass this helper)." -}}
 {{- end -}}
-postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{ include "titiler.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}
+postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{ include "titiler.postgresql.fullname" . }}:5432/{{ .Values.postgresql.auth.database }}
 {{- end -}}
 {{- end -}}
 {{- end -}}

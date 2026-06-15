@@ -8,9 +8,3 @@ icon: >-
 maintainers:
   - name: DevelopmentSeed
     url: https://github.com/developmentseed
-dependencies:
-  - name: postgresql
-    alias: postgresql
-    version: 16.6.6
-    repository: https://charts.bitnami.com/bitnami
-    condition: postgresql.enabled

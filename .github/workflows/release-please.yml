@@ -155,11 +155,6 @@ jobs:
         with:
           version: v3.15.2
 
-      # The chart depends on the bitnami postgresql subchart; the repo must be
-      # registered before `helm dependency build` can resolve it.
-      - name: Add Bitnami repo
-        run: helm repo add bitnami https://charts.bitnami.com/bitnami
-
       # Pushing to ghcr.io/developmentseed/charts (a different org than the one
       # hosting this repo) requires a PAT with `write:packages` on the
       # developmentseed org — the default GITHUB_TOKEN only grants package
@@ -169,9 +164,6 @@ jobs:
           echo "${{ secrets.GHCR_DEVSEED_TOKEN }}" | helm registry login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin
-
-      - name: Build chart dependencies
-        run: helm dependency build deployment/k8s/charts
 
       - name: Package chart
         run: |
