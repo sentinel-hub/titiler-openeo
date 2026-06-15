@@ -138,11 +138,14 @@ jobs:
 
           NAMESPACE=sealed-secret-test
           RELEASE=sealed
-          # The bitnami subchart creates a Service named "<fullname>-postgresql".
+          # The bundled postgres Service is named "<fullname>-postgresql".
           # With release "sealed" and chart "titiler-openeo" the fullname is
           # "sealed-titiler-openeo" so the service is:
           PG_HOST="${RELEASE}-titiler-openeo-postgresql"
-          PG_PASSWORD="seal3d-s3cr3t-p@ss"
+          # MUST be URL-safe: characters like '@', ':', '/', '?', '#' would
+          # break DSN parsing when inlined into postgresql://user:pwd@host/db.
+          # Keep this purely alphanumeric.
+          PG_PASSWORD="sealedSecretTestP4ss"
           PG_DSN="postgresql://openeo:${PG_PASSWORD}@${PG_HOST}:5432/openeo"
 
           kubectl create namespace "${NAMESPACE}"
