@@ -185,6 +185,34 @@ jobs:
             --for=condition=Available deployment/"${RELEASE}-titiler-openeo" \
             --timeout=2m
 
+          # Assertion 4: smoke-test the HTTP surface end-to-end through the
+          # ClusterIP Service. Catches regressions where the pod becomes
+          # Ready but the app fails to mount its routers (e.g. broken
+          # OpenAPI spec, missing static assets, store init silently
+          # returning an empty router).
+          SVC_URL="http://${RELEASE}-titiler-openeo.${NAMESPACE}.svc.cluster.local"
+
+          run_curl() {
+            # `-i` (stdin) + `--restart=Never` + `--rm` runs curl in a
+            # one-shot pod, streams its stdout to us, and cleans up. No TTY
+            # required.
+            kubectl run "curl-$(date +%s%N)" \
+              --namespace "${NAMESPACE}" \
+              --image=curlimages/curl:8.10.1 \
+              --restart=Never --rm -i --quiet \
+              --command -- curl -fsS -o /dev/null \
+              -w '%{http_code}' "${SVC_URL}$1"
+          }
+
+          for endpoint in /healthz /api.html; do
+            code=$(run_curl "${endpoint}")
+            if [[ "${code}" != "200" ]]; then
+              echo "::error::GET ${endpoint} returned ${code} (expected 200)"
+              exit 1
+            fi
+            echo "  GET ${endpoint} -> ${code}"
+          done
+
           echo "✅ Sealed-secret install passed all assertions."
 
       - name: Dump diagnostics on sealed-secret install failure
