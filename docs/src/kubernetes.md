@@ -76,12 +76,11 @@ Helm chart wires them to the pod's probes by default.
   OIDC well-known endpoint when OIDC auth is enabled. Returns `200` only when
   every check passes; otherwise `503` with a structured body listing which
   check failed. Used as `readinessProbe.httpGet.path` so an unhealthy pod is
-  removed from the Service's endpoints until it recovers. Results are cached
-  for 5 s by default; append `?fresh=1` to bypass the cache for manual
-  debugging.
+  removed from the Service's endpoints until it recovers.
 
-Per-check timeout and cache TTL can be tuned via
-`TITILER_OPENEO_HEALTH_CHECK_TIMEOUT` and `TITILER_OPENEO_HEALTH_CACHE_TTL`.
+To avoid hammering backends, the chart's `readinessProbe` uses
+`periodSeconds: 60`. The per-check timeout can be tuned with
+`TITILER_OPENEO_HEALTH_CHECK_TIMEOUT` (default `2.0`).
 
 ## Troubleshooting
 

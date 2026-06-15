@@ -26,7 +26,7 @@ def test_readyz_ok(app_no_auth, monkeypatch):
 
     monkeypatch.setattr(stacApiBackend, "ping", lambda self, *a, **kw: None)
 
-    response = app_no_auth.get("/readyz?fresh=1")
+    response = app_no_auth.get("/readyz")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
@@ -50,7 +50,7 @@ def test_readyz_reports_failed_check(app_no_auth, monkeypatch):
 
     monkeypatch.setattr(stacApiBackend, "ping", boom)
 
-    response = app_no_auth.get("/readyz?fresh=1")
+    response = app_no_auth.get("/readyz")
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "degraded"
@@ -79,30 +79,6 @@ def test_run_check_success():
     assert "latency_ms" in result
 
 
-def test_readyz_cached(app_no_auth, monkeypatch):
-    """Repeated /readyz calls without ?fresh hit the cached result."""
-    from titiler.openeo.stacapi import stacApiBackend
-
-    counter = {"n": 0}
-
-    def counting_ping(self) -> None:
-        counter["n"] += 1
-
-    monkeypatch.setattr(stacApiBackend, "ping", counting_ping)
-
-    # First call populates the cache; second call must reuse it.
-    r1 = app_no_auth.get("/readyz")
-    r2 = app_no_auth.get("/readyz")
-    assert r1.status_code == 200
-    assert r2.status_code == 200
-    assert counter["n"] == 1
-
-    # ?fresh=1 bypasses the cache.
-    r3 = app_no_auth.get("/readyz?fresh=1")
-    assert r3.status_code == 200
-    assert counter["n"] == 2
-
-
 def test_readyz_includes_tile_store_when_configured(app_no_auth, monkeypatch):
     """When a tile store is configured, the tile_store check is included."""
     from titiler.openeo import main as main_module
@@ -121,7 +97,7 @@ def test_readyz_includes_tile_store_when_configured(app_no_auth, monkeypatch):
     from starlette.testclient import TestClient
 
     client = TestClient(main_module.create_app())
-    response = client.get("/readyz?fresh=1")
+    response = client.get("/readyz")
     assert response.status_code == 200
     body = response.json()
     assert body["checks"]["tile_store"]["status"] == "ok"
