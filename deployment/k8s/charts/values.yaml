@@ -108,6 +108,16 @@ envVars:
   # - name: REDIS_HOST
   #   secretName: redis-credentials
   #   secretKey: host
+  #
+  # GitOps / sealed-secret pattern for the postgres DSN:
+  # Inject the full TITILER_OPENEO_STORE_URL connection string from a Secret
+  # (e.g. one managed by Sealed Secrets / External Secrets). When this entry
+  # is present, the chart skips emitting the helper-built value: env var so
+  # the password never ends up in rendered manifests and Helm `lookup` is
+  # not required.
+  # - name: TITILER_OPENEO_STORE_URL
+  #   secretName: titiler-openeo-db
+  #   secretKey: dsn
   fromConfigMap: []
   # - name: REDIS_PORT              # Environment variable name
   #   configMapName: redis-config   # ConfigMap name
@@ -140,6 +150,15 @@ postgresql:
   auth:
     database: openeo
     username: openeo
+    # The chart no longer resolves the password from a live Secret via Helm
+    # `lookup` (it broke under `helm template` / ArgoCD and produced a fresh
+    # `randAlphaNum` password on every sync). For production, either:
+    #  * set this value to a plaintext password (it will appear in rendered
+    #    manifests — fine for non-GitOps installs), OR
+    #  * leave it empty and supply the full DSN via
+    #    `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` above; pair with
+    #    `postgresql.auth.existingSecret` so the postgres pod reads the same
+    #    sealed credential.
     password: "8472387r4_$78-b9"
   primary:
     persistence:
@@ -182,9 +201,13 @@ database:
     port: 5432
     user: openeo
     database: openeo
+    # Plaintext password. The chart no longer reads it from
+    # `existingSecret` via Helm `lookup` (incompatible with `helm template`
+    # / ArgoCD). For GitOps deployments, leave this empty and supply the
+    # full DSN via `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` above.
     password: ""
-    existingSecret: ""   # Name of existing secret containing password
-    existingSecretKey: "password"   # Key in the existing secret
+    existingSecret: ""   # Deprecated: no longer consulted by the chart; pair the sealed DSN with the postgres subchart's `postgresql.auth.existingSecret` instead.
+    existingSecretKey: "password"   # Deprecated; see above.
 
 securityContext:
   {}
