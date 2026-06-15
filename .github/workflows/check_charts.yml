@@ -86,29 +86,38 @@ jobs:
         if: steps.list-changed.outputs.changed == 'true'
 
       - name: Run chart-testing (install)
-        run: ct install --chart-dirs deployment/k8s
+        run: ct install --chart-dirs deployment/k8s --helm-extra-args "--timeout=300s" --skip-clean-up
         if: steps.list-changed.outputs.changed == 'true'
 
       - name: Smoke test health endpoints
         if: steps.list-changed.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          # Pick the first titiler pod the chart-testing install left behind.
-          POD=$(kubectl get pods -A -l app.kubernetes.io/name=titiler \
-            -o jsonpath='{.items[0].metadata.name}')
-          NS=$(kubectl get pods -A -l app.kubernetes.io/name=titiler \
-            -o jsonpath='{.items[0].metadata.namespace}')
-          if [[ -z "$POD" ]]; then
-            echo "No titiler pod found; skipping smoke test."
-            exit 0
+          # ct install --skip-clean-up leaves the release in place. Find the
+          # pod by the standard helm label (app.kubernetes.io/instance is the
+          # release name, name is the chart name).
+          for i in $(seq 1 30); do
+            POD=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            NS=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+              -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
+            if [[ -n "$POD" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          if [[ -z "${POD:-}" ]]; then
+            echo "No titiler-openeo pod found in cluster:"
+            kubectl get pods -A
+            exit 1
           fi
           echo "Smoke-testing pod $NS/$POD"
-          kubectl -n "$NS" wait --for=condition=Ready pod/"$POD" --timeout=120s
+          kubectl -n "$NS" wait --for=condition=Ready pod/"$POD" --timeout=180s
           kubectl -n "$NS" port-forward "pod/$POD" 18080:80 &
           PF_PID=$!
           trap 'kill $PF_PID 2>/dev/null || true' EXIT
           # Give kubectl port-forward a moment to establish the tunnel
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             curl -fsS -o /dev/null http://127.0.0.1:18080/healthz && break || sleep 1
           done
           echo "GET /healthz"
