@@ -12,10 +12,8 @@ Implements two distinct probes following Kubernetes semantics:
   when every check passes; otherwise 503 with a structured body listing
   which check failed. Suitable for a ``readinessProbe``.
 
-The ``/readyz`` result is cached for a short TTL (default 5 s, configurable
-via ``TITILER_OPENEO_HEALTH_CACHE_TTL``) so that a high-frequency probe
-does not hammer the STAC API. The cache can be bypassed for manual
-debugging with ``?fresh=1``.
+To avoid hammering backends, configure the Kubernetes probe with a
+suitable ``periodSeconds`` (the bundled Helm chart uses 30 s).
 """
 
 from __future__ import annotations
@@ -23,10 +21,9 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
-from threading import Lock
 from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 
 from . import __version__ as titiler_version
@@ -39,35 +36,6 @@ logger = logging.getLogger(__name__)
 _executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="readyz-check"
 )
-
-
-class _ReadinessCache:
-    """Thread-safe cache for the /readyz response body and status code."""
-
-    def __init__(self, ttl: float) -> None:
-        self._ttl = ttl
-        self._expires_at: float = 0.0
-        self._payload: Optional[Dict[str, Any]] = None
-        self._status: int = 200
-        self._lock = Lock()
-
-    def get(self) -> Optional[tuple]:
-        """Return (status, payload) if cached value is still fresh."""
-        if self._ttl <= 0:
-            return None
-        with self._lock:
-            if self._payload is not None and time.monotonic() < self._expires_at:
-                return self._status, self._payload
-        return None
-
-    def set(self, status: int, payload: Dict[str, Any]) -> None:
-        """Store a result with the configured TTL."""
-        if self._ttl <= 0:
-            return
-        with self._lock:
-            self._status = status
-            self._payload = payload
-            self._expires_at = time.monotonic() + self._ttl
 
 
 def _run_check(name: str, fn: Callable[[], Any], timeout: float) -> Dict[str, Any]:
@@ -139,7 +107,6 @@ def register_health_endpoints(
     they don't clutter the generated docs.
     """
     settings = settings or HealthSettings()
-    cache = _ReadinessCache(ttl=settings.cache_ttl)
 
     router = APIRouter(tags=["health"], include_in_schema=False)
 
@@ -149,19 +116,8 @@ def register_health_endpoints(
         return {"status": "ok"}
 
     @router.get("/readyz")
-    def readyz(
-        fresh: int = Query(
-            0,
-            description="Set to 1 to bypass the cached result.",
-        ),
-    ) -> JSONResponse:
+    def readyz() -> JSONResponse:
         """Readiness probe. 200 when every configured dependency is healthy."""
-        if not fresh:
-            cached = cache.get()
-            if cached is not None:
-                cached_status, cached_payload = cached
-                return JSONResponse(status_code=cached_status, content=cached_payload)
-
         checks = _build_checks(
             service_store=service_store,
             tile_store=tile_store,
@@ -183,7 +139,6 @@ def register_health_endpoints(
             "checks": results,
         }
         status_code = 200 if all_ok else 503
-        cache.set(status_code, payload)
         return JSONResponse(status_code=status_code, content=payload)
 
     app.include_router(router)
