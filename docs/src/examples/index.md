@@ -71,8 +71,6 @@ loadcol = load_collection(
 reduced = reduce_dimension(loadcol, dimension="time", reducer="first")
 ```
 
-> **Note**: The `load_collection_and_reduce` process is deprecated. Use `load_collection` followed by `reduce_dimension` as shown above.
-
 ## Running the Notebooks
 
 To run the notebooks locally:

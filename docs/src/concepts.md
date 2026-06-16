@@ -145,8 +145,6 @@ The ImageData object is obtained by reducing as early as possible the data from 
 4. Maintains proper proportions throughout the process
 5. Provides more flexibility for custom reducers and dimension handling
 
-**Note**: The `load_collection_and_reduce` process is deprecated and maintained only for backward compatibility.
-
 ![alt text](img/rasterstack.png)
 
 The reduce process includes a parameter to choose the [pixel selection method](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/processes/data/apply_pixel_selection.json#L24):
