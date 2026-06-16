@@ -104,15 +104,9 @@ def create_app():
 
     # Register backend specific load_collection methods
     loaders = LoadCollection(stac_client)  # type: ignore
-    process_registry["load_collection"] = process_registry["load_collection"] = Process(
+    process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
         implementation=loaders.load_collection,
-    )
-    process_registry["load_collection_and_reduce"] = process_registry[
-        "load_collection_and_reduce"
-    ] = Process(
-        spec=PROCESS_SPECIFICATIONS["load_collection_and_reduce"],
-        implementation=loaders.load_collection_and_reduce,
     )
     loaders = LoadStac()  # type: ignore
     process_registry["load_stac"] = Process(

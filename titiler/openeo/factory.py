@@ -41,9 +41,7 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
-    load_nodes_ids: List[str] = field(
-        factory=lambda: ["load_collection", "load_collection_and_reduce"]
-    )
+    load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
 
     def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
         for _, node in process_graph.items():
@@ -69,7 +67,7 @@ class EndpointsFactory(BaseFactory):
         raise ValueError("Couldn't find a `save_result` process in the process graph")
 
     def get_load_nodes(self, process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Find all `load_collection/load_collection_and_reduce` processes"""
+        """Find all `load_collection` processes"""
         return [
             node
             for _, node in process_graph.items()

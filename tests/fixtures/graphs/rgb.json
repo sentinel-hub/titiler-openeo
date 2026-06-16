@@ -87,7 +87,29 @@
                     "2024-07-30T23:59:59Z"
                 ]
             },
-            "process_id": "load_collection_and_reduce"
+            "process_id": "load_collection"
+        },
+        "1_reduce": {
+            "arguments": {
+                "data": {
+                    "from_node": "1"
+                },
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "f": {
+                            "process_id": "first",
+                            "arguments": {
+                                "data": {
+                                    "from_parameter": "data"
+                                }
+                            },
+                            "result": true
+                        }
+                    }
+                }
+            },
+            "process_id": "reduce_dimension"
         },
         "2": {
             "arguments": {
@@ -114,7 +136,7 @@
         "3": {
             "arguments": {
                 "data": {
-                    "from_node": "1"
+                    "from_node": "1_reduce"
                 },
                 "process": {
                     "process_graph": {
