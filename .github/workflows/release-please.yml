@@ -91,14 +91,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Parse semver from tag
+        id: semver
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          MAJOR="${VERSION%%.*}"
+          MINOR="${VERSION%.*}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "minor=${MINOR}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
+            type=raw,value=${{ steps.semver.outputs.version }}
             type=raw,value=${{ needs.release-please.outputs.tag_name }}
-            type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}}
+            type=raw,value=${{ steps.semver.outputs.minor }}
+            type=raw,value=${{ steps.semver.outputs.major }}
             type=raw,value=latest
 
       - name: Build and push
