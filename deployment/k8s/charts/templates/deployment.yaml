@@ -73,6 +73,10 @@ spec:
             # STAC configuration
             - name: TITILER_OPENEO_STAC_API_URL
               value: {{ .Values.stac.apiUrl | quote }}
+            {{- if .Values.stac.virtualBandsConfig }}
+            - name: TITILER_OPENEO_VIRTUAL_BANDS_CONFIG
+              value: "/config/virtual_bands.json"
+            {{- end }}
             # Authentication configuration
             - name: TITILER_OPENEO_AUTH_METHOD
               value: {{ .Values.auth.method | quote }}

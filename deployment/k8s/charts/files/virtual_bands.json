@@ -1,0 +1,12 @@
+{
+  "sentinel-2-l2a": [
+    {
+      "plugin": "normalized_difference",
+      "options": {"name": "NDVI", "a": "B08_10m", "b": "B04_10m"}
+    },
+    {
+      "plugin": "constant_from_property",
+      "options": {"name": "viewZenithMean", "property": "view:incidence_angle"}
+    }
+  ]
+}

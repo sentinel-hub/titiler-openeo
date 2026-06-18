@@ -42,6 +42,7 @@ nav:
       - Parameter Management: "parameter-management.md"
       - Service Authorization: "authorization.md"
       - Tile Assignment: "tile-assignment.md"
+      - Virtual Bands: "virtual-bands.md"
   - Administrator Guide:
     - Overview: "admin-guide.md"
     - OpenID Connect: "openid-connect.md"
