@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.0 (2026-06-19)
+
+## What's Changed
+* ci: exclude nested CHANGELOG.md files from markdownlint by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/272
+* chore(main): release titiler-openeo-chart 2.0.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/238
+* fix: correct default image tag format in deployment.yaml by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/276
+* fix: remove deprecated load_collection_and_reduce process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/277
+* fix: add semver Docker tags on release (0.x.y, 0.x, 0, latest) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/278
+* feat: add filter_temporal openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/282
+* feat: add mask openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/283
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.15.0...v0.16.0
+
 ## 0.15.0 (2026-06-15)
 
 ## What's Changed
