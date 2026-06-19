@@ -564,9 +564,13 @@ def mask(
                 f"The mask has no temporal label matching '{key}' in the data cube."
             )
 
+        if mask_img.crs != img.crs or mask_img.bounds != img.bounds:
+            raise IncompatibleDataCubes(
+                "The mask and data cube must have the same CRS and bounds (spatial extent) for masking."
+            )
+
         new_data = img.array.data.copy()
         new_mask = numpy.ma.getmaskarray(img.array).copy()
-
         active = _mask_active_array(mask_img, new_data.shape[0], img.height, img.width)
         # Only replace pixels that are currently valid, preserving existing
         # no-data, consistent with mask_polygon.
