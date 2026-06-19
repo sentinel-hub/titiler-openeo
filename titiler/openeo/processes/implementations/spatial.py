@@ -5,10 +5,24 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from pyproj import CRS
+from rio_tiler.utils import resize_array
 
 from .data_model import ImageData, RasterStack, compute_cutline_mask
 
-__all__ = ["resample_spatial", "aggregate_spatial", "mask_polygon"]
+__all__ = ["resample_spatial", "aggregate_spatial", "mask_polygon", "mask"]
+
+
+class IncompatibleDataCubes(Exception):
+    """Exception raised when the data and mask data cubes are incompatible."""
+
+    def __init__(
+        self,
+        message: str = (
+            "The data cube and the mask are incompatible, e.g. because of "
+            "different dimensions or labels."
+        ),
+    ):
+        super().__init__(message)
 
 
 class TargetDimensionExists(Exception):
@@ -447,6 +461,129 @@ def mask_polygon(
 
         masked_array = numpy.ma.MaskedArray(new_data, mask=new_mask)
 
+        result_images[key] = ImageData(
+            masked_array,
+            assets=img.assets,
+            crs=img.crs,
+            bounds=img.bounds,
+            band_names=img.band_names,
+            band_descriptions=img.band_descriptions,
+        )
+
+    return RasterStack.from_images(result_images)
+
+
+def _mask_active_array(
+    mask_img: ImageData,
+    data_bands: int,
+    height: int,
+    width: int,
+) -> numpy.ndarray:
+    """Compute a boolean (bands, height, width) array of pixels to replace.
+
+    A mask pixel is "active" (True, i.e. its counterpart in ``data`` must be
+    replaced) where the mask value is non-zero (for numbers) or ``True`` (for
+    booleans) and the mask pixel itself is valid (not no-data).
+
+    The mask is aligned to the ``data`` grid:
+    - Spatially resized (nearest-neighbour) when the mask resolution differs.
+    - Broadcast across bands when the mask has a single band; otherwise the
+      mask must have exactly the same number of bands as ``data``.
+
+    Raises:
+        IncompatibleDataCubes: If the mask band count is neither 1 nor equal to
+            the data band count.
+    """
+    marr = mask_img.array
+    # Active where the mask value is non-zero/true and the pixel is valid.
+    active = (marr.data != 0) & (~numpy.ma.getmaskarray(marr))
+
+    # Resize spatially (per band, nearest-neighbour) when grids differ.
+    if active.shape[-2:] != (height, width):
+        active = numpy.stack(
+            [
+                resize_array(active[b].astype("uint8"), height, width).astype(bool)
+                for b in range(active.shape[0])
+            ],
+            axis=0,
+        )
+
+    mask_bands = active.shape[0]
+    if mask_bands == data_bands:
+        return active
+    if mask_bands == 1:
+        return numpy.repeat(active, data_bands, axis=0)
+
+    raise IncompatibleDataCubes(
+        f"The mask has {mask_bands} bands which is incompatible with the "
+        f"{data_bands} bands of the data cube. The mask must have either a "
+        f"single band or the same number of bands as the data."
+    )
+
+
+def mask(
+    data: RasterStack,
+    mask: RasterStack,
+    replacement: Optional[Union[int, float, bool, str]] = None,
+) -> RasterStack:
+    """Apply a raster mask to a raster data cube.
+
+    Pixels in ``data`` are replaced where the corresponding pixel in ``mask`` is
+    non-zero (for numbers) or ``True`` (for booleans). The replacement value
+    defaults to the no-data value of ``data`` (i.e. the pixel is masked out).
+
+    The mask is aligned to ``data``: spatial dimensions are resampled implicitly
+    when resolutions differ, and a mask with a single temporal label (or a
+    single band) is broadcast across the matching dimension of ``data``. When
+    the mask has a temporal dimension, its labels must match those of ``data``.
+
+    Args:
+        data: A raster data cube.
+        mask: A raster data cube used as the mask.
+        replacement: The value used to replace masked pixels. ``None`` replaces
+            them with the no-data value of ``data``.
+
+    Returns:
+        A masked raster data cube with the same dimensions as ``data``.
+
+    Raises:
+        IncompatibleDataCubes: If ``data`` and ``mask`` cannot be aligned, e.g.
+            because of mismatched temporal labels or band counts.
+    """
+    if not data:
+        return data
+    if not mask:
+        raise IncompatibleDataCubes("The mask data cube is empty.")
+
+    mask_keys = list(mask.keys())
+    # A mask with a single temporal label is broadcast across all data labels.
+    broadcast = len(mask_keys) == 1
+
+    result_images = {}
+    for key, img in data.items():
+        if broadcast:
+            mask_img = mask[mask_keys[0]]
+        elif key in mask:
+            mask_img = mask[key]
+        else:
+            raise IncompatibleDataCubes(
+                f"The mask has no temporal label matching '{key}' in the data cube."
+            )
+
+        new_data = img.array.data.copy()
+        new_mask = numpy.ma.getmaskarray(img.array).copy()
+
+        active = _mask_active_array(mask_img, new_data.shape[0], img.height, img.width)
+        # Only replace pixels that are currently valid, preserving existing
+        # no-data, consistent with mask_polygon.
+        apply_here = active & (~new_mask)
+
+        if replacement is None:
+            new_mask |= apply_here
+        else:
+            new_data[apply_here] = replacement
+
+        masked_array = numpy.ma.MaskedArray(new_data, mask=new_mask)
         result_images[key] = ImageData(
             masked_array,
             assets=img.assets,
