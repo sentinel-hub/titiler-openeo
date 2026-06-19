@@ -66,8 +66,9 @@ class VirtualBandRegistry:
                 empty mapping yields an empty registry.
 
         Raises:
-            ValueError: If a referenced plugin name is not registered as an
-                entry point.
+            ValueError: If the config is malformed, references an unregistered
+                plugin, or binds two plugins that provide the same band name to
+                one collection.
         """
         if not config:
             return cls.empty()
@@ -75,8 +76,20 @@ class VirtualBandRegistry:
         available = _load_plugin_classes()
         plugins: Dict[str, List[VirtualBandPlugin]] = {}
         for collection_id, entries in config.items():
+            if not isinstance(entries, list):
+                raise ValueError(
+                    f"Virtual bands config for collection '{collection_id}' must "
+                    f"be a list of plugin entries, got {type(entries).__name__}"
+                )
+
             instances: List[VirtualBandPlugin] = []
             for entry in entries:
+                if not isinstance(entry, dict) or "plugin" not in entry:
+                    raise ValueError(
+                        f"Invalid virtual band entry for collection "
+                        f"'{collection_id}': each entry must be an object with a "
+                        f"'plugin' key, got {entry!r}"
+                    )
                 name = entry["plugin"]
                 if name not in available:
                     raise ValueError(
@@ -85,9 +98,32 @@ class VirtualBandRegistry:
                         f"{sorted(available)}"
                     )
                 options = entry.get("options", {})
+                if not isinstance(options, dict):
+                    raise ValueError(
+                        f"'options' for plugin '{name}' (collection "
+                        f"'{collection_id}') must be an object, got "
+                        f"{type(options).__name__}"
+                    )
                 instances.append(available[name](**options))
+
+            cls._check_unique_band_names(collection_id, instances)
             plugins[collection_id] = instances
         return cls(plugins)
+
+    @staticmethod
+    def _check_unique_band_names(
+        collection_id: str, plugins: List[VirtualBandPlugin]
+    ) -> None:
+        """Ensure no two plugins advertise the same band name for a collection."""
+        seen: set = set()
+        for plugin in plugins:
+            for band in plugin.provided_bands():
+                if band.name in seen:
+                    raise ValueError(
+                        f"Duplicate virtual band name '{band.name}' for "
+                        f"collection '{collection_id}'; band names must be unique"
+                    )
+                seen.add(band.name)
 
     def has_plugins(self, collection_id: str) -> bool:
         """Whether any plugin is bound to the collection."""

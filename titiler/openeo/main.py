@@ -32,8 +32,14 @@ def _load_virtual_bands_registry(config_path: str | None) -> VirtualBandRegistry
 
     import json
 
-    with open(config_path) as f:
-        config = json.load(f)
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (OSError, json.JSONDecodeError) as err:
+        raise ValueError(
+            f"Failed to load virtual bands config from "
+            f"TITILER_OPENEO_VIRTUAL_BANDS_CONFIG='{config_path}': {err}"
+        ) from err
     return VirtualBandRegistry.from_config(config)
 
 

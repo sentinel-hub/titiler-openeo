@@ -110,6 +110,41 @@ def test_registry_empty():
     assert reg.virtual_band_names("col") == []
 
 
+def test_registry_malformed_entry_raises():
+    with pytest.raises(ValueError, match="must be an object with a 'plugin' key"):
+        VirtualBandRegistry.from_config({"col": ["not-a-dict"]})
+
+
+def test_registry_entries_must_be_a_list():
+    with pytest.raises(ValueError, match="must be a list of plugin entries"):
+        VirtualBandRegistry.from_config({"col": {"plugin": "normalized_difference"}})
+
+
+def test_registry_options_must_be_object():
+    with pytest.raises(ValueError, match="'options' for plugin"):
+        VirtualBandRegistry.from_config(
+            {"col": [{"plugin": "normalized_difference", "options": ["a", "b"]}]}
+        )
+
+
+def test_registry_rejects_duplicate_band_names():
+    with pytest.raises(ValueError, match="Duplicate virtual band name 'NDVI'"):
+        VirtualBandRegistry.from_config(
+            {
+                "col": [
+                    {
+                        "plugin": "normalized_difference",
+                        "options": {"name": "NDVI", "a": "B08", "b": "B04"},
+                    },
+                    {
+                        "plugin": "normalized_difference",
+                        "options": {"name": "NDVI", "a": "B05", "b": "B04"},
+                    },
+                ]
+            }
+        )
+
+
 def test_registry_split_preserves_order_and_collects_support():
     reg = VirtualBandRegistry.from_config(
         {
@@ -326,6 +361,39 @@ def test_virtual_band_not_computed_until_slice_materialized(monkeypatch):
     # Computed once the slice is realized.
     next(iter(result.values()))
     assert plugin.calls == 1
+
+
+class _BadShapePlugin(VirtualBandPlugin):
+    def provided_bands(self) -> List[BandMetadata]:
+        return [BandMetadata(name="BAD")]
+
+    def required_bands(self) -> List[str]:
+        return ["B04"]
+
+    def compute(self, name, items, image):
+        # Wrong shape: extra leading dimension.
+        return numpy.ma.zeros((2, *image.array.shape[-2:]), dtype="float32")
+
+
+def test_virtual_band_bad_shape_raises(monkeypatch):
+    reg = VirtualBandRegistry({"col": [_BadShapePlugin()]})
+    item = _item(["B04"])
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", _MockReader)
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda *a, **k: [item])
+    monkeypatch.setattr(
+        "titiler.openeo.stacapi.mosaic_reader", _mosaic_mock({"B04": 0.2})
+    )
+
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://x", virtual_bands=reg))
+    result = loader.load_collection(
+        id="col",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        bands=["B04", "BAD"],
+        width=4,
+        height=4,
+    )
+    with pytest.raises(ValueError, match="returned an array of shape"):
+        next(iter(result.values()))
 
 
 def test_purely_virtual_without_grid_anchor_raises(monkeypatch):

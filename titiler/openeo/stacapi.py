@@ -192,12 +192,14 @@ class stacApiBackend:
             # Preserve item_assets declaration order (and stay JSON-serializable);
             # an unordered set here led to non-deterministic band order (#280).
             bands_name: List[str] = []
+            seen_bands: set = set()
             for key, asset in collection.ext.item_assets.items():
                 if (
                     "data" in asset.properties.get("roles", [])
-                    and key not in bands_name
+                    and key not in seen_bands
                 ):
                     bands_name.append(key)
+                    seen_bands.add(key)
             if bands_name:
                 dims["spectral"] = dc.Dimension.from_dict(
                     {
@@ -339,8 +341,15 @@ def _assemble_virtual_bands(
             if plugin is None:  # pragma: no cover - guarded by virtual_names
                 raise ValueError(f"No plugin provides virtual band '{name}'")
             arr = plugin.compute(name, items, img)
-            if arr.ndim == 2:
+            expected_hw = img.array.shape[-2:]
+            if arr.ndim == 2 and arr.shape == expected_hw:
                 arr = arr[numpy.newaxis, ...]
+            elif not (arr.ndim == 3 and arr.shape == (1, *expected_hw)):
+                raise ValueError(
+                    f"Virtual band '{name}' plugin "
+                    f"{type(plugin).__name__} returned an array of shape "
+                    f"{arr.shape}; expected {expected_hw} or (1, *{expected_hw})"
+                )
             out_arrays.append(arr)
         else:
             i = real_index[name]
