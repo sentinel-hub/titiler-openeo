@@ -38,6 +38,20 @@ from rio_tiler.types import BBox
 T = TypeVar("T")
 
 
+def _cached_image_task(image: ImageData) -> Callable[[], ImageData]:
+    """Build a task function that returns an already-loaded ImageData.
+
+    Used to back a lazy ImageRef with cached data: ``realize()`` returns the
+    cached image without re-executing work, while the ImageRef keeps its
+    geometry so ``cutline_mask()`` is still computed from the footprint.
+    """
+
+    def _task() -> ImageData:
+        return image
+
+    return _task
+
+
 def compute_cutline_mask(
     geometry: Union[Dict[str, Any], List[Dict[str, Any]]],
     width: int,
@@ -706,7 +720,7 @@ class RasterStack(Dict[datetime, ImageData]):
             for k, img in preserved.items():
                 ref = instance._image_refs.get(k)
                 if ref is not None:
-                    ref._task_fn = (lambda _img=img: _img)
+                    ref._task_fn = _cached_image_task(img)
                 else:
                     instance._image_refs[k] = ImageRef.from_image(image=img)
 

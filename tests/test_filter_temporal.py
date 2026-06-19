@@ -195,3 +195,60 @@ class TestFilterKeys:
         data = _make_raster_stack([(datetime(2020, 1, 1), 1.0)])
         subset = data.filter_keys([datetime(1999, 1, 1)])
         assert len(subset) == 0
+
+    def test_preserves_geometry_cutline_for_cached_items(self):
+        """Cached items keep their footprint geometry so cutline_mask is computed.
+
+        Regression test: replacing refs with ImageRef.from_image would drop the
+        asset geometry and make cutline_mask() return None. The subset must keep
+        the geometry-aware ref while avoiding task re-execution.
+        """
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]],
+        }
+        calls = {"n": 0}
+
+        def make_task():
+            def task():
+                calls["n"] += 1
+                arr = np.ma.ones((2, 8, 8))
+                return ImageData(
+                    arr,
+                    crs="EPSG:4326",
+                    bounds=(-180, -90, 180, 90),
+                    band_descriptions=["red", "green"],
+                )
+
+            return task
+
+        key = datetime(2020, 6, 15)
+        tasks = [(make_task(), {"datetime": key, "geometry": geometry})]
+        stack = RasterStack(
+            tasks=tasks,
+            timestamp_fn=lambda asset: asset["datetime"],
+            width=8,
+            height=8,
+            bounds=(-180, -90, 180, 90),
+            dst_crs="EPSG:4326",
+            band_names=["red", "green"],
+        )
+
+        # Realize so the data is cached, then subset.
+        _ = stack[key]
+        assert calls["n"] == 1
+
+        subset = stack.filter_keys([key])
+        ref = subset.get_image_ref(key)
+        assert ref is not None
+
+        # Geometry-based cutline mask is still available (not None) ...
+        cutline = ref.cutline_mask()
+        assert cutline is not None
+        assert cutline.shape == (8, 8)
+        # ... and computing it did NOT re-execute the underlying task.
+        assert calls["n"] == 1
+
+        # Realizing returns the cached image without re-running the task.
+        assert subset[key] is not None
+        assert calls["n"] == 1
