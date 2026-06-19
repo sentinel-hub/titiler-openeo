@@ -498,15 +498,9 @@ def _mask_active_array(
     # Active where the mask value is non-zero/true and the pixel is valid.
     active = (marr.data != 0) & (~numpy.ma.getmaskarray(marr))
 
-    # Resize spatially (per band, nearest-neighbour) when grids differ.
+    # Resize spatially (nearest-neighbour) when grids differ.
     if active.shape[-2:] != (height, width):
-        active = numpy.stack(
-            [
-                resize_array(active[b].astype("uint8"), height, width).astype(bool)
-                for b in range(active.shape[0])
-            ],
-            axis=0,
-        )
+        active = resize_array(active.astype("uint8"), height, width).astype(bool)
 
     mask_bands = active.shape[0]
     if mask_bands == data_bands:
