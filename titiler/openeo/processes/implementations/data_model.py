@@ -699,9 +699,16 @@ class RasterStack(Dict[datetime, ImageData]):
             }
         if preserved:
             instance._data_cache.update(preserved)
-            instance._image_refs.update(
-                {k: ImageRef.from_image(image=v) for k, v in preserved.items()}
-            )
+
+            # Keep geometry-based cutline masks (ImageRefs built from tasks/assets) but
+            # avoid re-executing work by overriding the task function to return the
+            # already-cached ImageData.
+            for k, img in preserved.items():
+                ref = instance._image_refs.get(k)
+                if ref is not None:
+                    ref._task_fn = (lambda _img=img: _img)
+                else:
+                    instance._image_refs[k] = ImageRef.from_image(image=img)
 
         return instance
 
