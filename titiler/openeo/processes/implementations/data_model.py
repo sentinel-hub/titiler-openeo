@@ -38,6 +38,20 @@ from rio_tiler.types import BBox
 T = TypeVar("T")
 
 
+def _cached_image_task(image: ImageData) -> Callable[[], ImageData]:
+    """Build a task function that returns an already-loaded ImageData.
+
+    Used to back a lazy ImageRef with cached data: ``realize()`` returns the
+    cached image without re-executing work, while the ImageRef keeps its
+    geometry so ``cutline_mask()`` is still computed from the footprint.
+    """
+
+    def _task() -> ImageData:
+        return image
+
+    return _task
+
+
 def compute_cutline_mask(
     geometry: Union[Dict[str, Any], List[Dict[str, Any]]],
     width: int,
@@ -657,6 +671,60 @@ class RasterStack(Dict[datetime, ImageData]):
             except KeyError:
                 continue
         raise KeyError("No successful tasks found in RasterStack")
+
+    def filter_keys(self, keys: List[datetime]) -> "RasterStack":
+        """Return a new RasterStack restricted to the given keys.
+
+        The subset preserves lazy loading: tasks for the selected timestamps are
+        reused (not executed) and any already-cached data is carried over. The
+        resulting stack keeps the same spatial metadata (size, bounds, CRS,
+        band names) as the source.
+
+        Args:
+            keys: The datetime keys to keep. Keys not present in this stack are
+                ignored. Temporal ordering of the source is preserved.
+
+        Returns:
+            RasterStack: A new stack containing only the matching timestamps.
+        """
+        selected = set(keys)
+        ordered_keys = [k for k in self._keys if k in selected]
+
+        new_tasks = [self._tasks[self._key_to_task_index[k]] for k in ordered_keys]
+
+        instance = RasterStack(
+            tasks=new_tasks,
+            timestamp_fn=self._timestamp_fn,
+            allowed_exceptions=self._allowed_exceptions,
+            max_workers=self._max_workers,
+            width=self._width,
+            height=self._height,
+            bounds=self._bounds,
+            dst_crs=self._dst_crs,
+            band_names=self._band_names,
+        )
+
+        # Carry over any already-computed data so we don't recompute it and
+        # so that stacks built via `from_images` (whose tasks are no-ops)
+        # remain usable.
+        with self._cache_lock:
+            preserved = {
+                k: self._data_cache[k] for k in ordered_keys if k in self._data_cache
+            }
+        if preserved:
+            instance._data_cache.update(preserved)
+
+            # Keep geometry-based cutline masks (ImageRefs built from tasks/assets) but
+            # avoid re-executing work by overriding the task function to return the
+            # already-cached ImageData.
+            for k, img in preserved.items():
+                ref = instance._image_refs.get(k)
+                if ref is not None:
+                    ref._task_fn = _cached_image_task(img)
+                else:
+                    instance._image_refs[k] = ImageRef.from_image(image=img)
+
+        return instance
 
     @classmethod
     def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
