@@ -108,6 +108,44 @@ def _make_raster_stack(dates_values):
     return RasterStack.from_images(images)
 
 
+def _make_lazy_raster_stack(dates_values, executed):
+    """Helper: create a *lazy* RasterStack whose per-slice tasks record execution.
+
+    Unlike ``_make_raster_stack`` (which uses ``from_images`` and pre-populates the
+    cache), this builds genuine lazy tasks via the ``RasterStack`` constructor. Each
+    task adds its datetime to the ``executed`` set when (and only when) it is run,
+    so a test can assert exactly which time slices were actually fetched/decoded.
+    """
+    tasks = []
+    for dt, val in dates_values:
+
+        def make_task(dt=dt, val=val):
+            def task():
+                executed.add(dt)
+                array = np.ma.ones((2, 4, 4)) * val
+                return ImageData(
+                    array,
+                    assets=[f"asset_{dt.isoformat()}"],
+                    crs="EPSG:4326",
+                    bounds=(-180, -90, 180, 90),
+                    band_descriptions=["red", "green"],
+                )
+
+            return task
+
+        tasks.append((make_task(), {"datetime": dt}))
+
+    return RasterStack(
+        tasks=tasks,
+        timestamp_fn=lambda asset: asset["datetime"],
+        width=4,
+        height=4,
+        bounds=(-180, -90, 180, 90),
+        dst_crs="EPSG:4326",
+        band_names=["red", "green"],
+    )
+
+
 class TestAggregateTemporalBasic:
     """Basic aggregate_temporal tests."""
 
@@ -620,6 +658,178 @@ class TestAggregateTemporalPreservesMetadata:
         )
         img = result.first
         assert img.array.shape == (2, 4, 4)
+
+
+class TestAggregateTemporalNonContiguousIntervals:
+    """Scenario: explicit, non-contiguous single-month intervals across years.
+
+    The cube is loaded over a CONTINUOUS extent spanning several months across
+    four years; most slices fall OUTSIDE every interval. These tests assert both
+    correctness (only in-interval slices contribute) and performance (only
+    in-interval slices are actually read).
+    """
+
+    # One month per year is requested, in reverse chronological order to also
+    # exercise output ordering. Single-month, non-contiguous intervals.
+    INTERVALS = [
+        ["2021-07-01", "2021-08-01"],
+        ["2020-07-01", "2020-08-01"],
+        ["2019-07-01", "2019-08-01"],
+    ]
+
+    # Continuous monthly-ish coverage across 2019..2022.
+    #   In-interval slices (July of 2019/2020/2021):
+    IN_INTERVAL = [
+        (datetime(2019, 7, 15), 10.0),  # -> 2019 bucket
+        (datetime(2020, 7, 15), 20.0),  # -> 2020 bucket
+        (datetime(2021, 7, 10), 30.0),  # -> 2021 bucket (mean with next)
+        (datetime(2021, 7, 20), 40.0),  # -> 2021 bucket (mean -> 35)
+    ]
+    #   Out-of-interval slices that must NOT affect any bucket:
+    OUT_OF_INTERVAL = [
+        (datetime(2019, 1, 1), 444.0),
+        (datetime(2019, 8, 15), 111.0),  # Aug 2019 (just after interval)
+        (datetime(2020, 6, 15), 222.0),  # Jun 2020 (just before interval)
+        (datetime(2021, 6, 30), 555.0),
+        (datetime(2022, 7, 15), 333.0),  # 2022 has no interval at all
+        (datetime(2022, 8, 1), 666.0),
+    ]
+    #   Boundary slice exactly on an interval END must be EXCLUDED ([start, end)):
+    BOUNDARY = [
+        (datetime(2021, 8, 1), 999.0),  # == end of the 2021 interval -> excluded
+    ]
+
+    def _all_slices(self):
+        return self.IN_INTERVAL + self.OUT_OF_INTERVAL + self.BOUNDARY
+
+    def test_only_in_interval_slices_contribute(self):
+        """Exactly 3 buckets, each the mean of ONLY its in-interval slices."""
+        data = _make_raster_stack(self._all_slices())
+        result = aggregate_temporal(
+            data=data,
+            intervals=self.INTERVALS,
+            reducer=mean_reducer,
+        )
+
+        # Exactly three output buckets (one per interval).
+        assert len(result) == 3
+
+        # Default labels = interval starts; output is temporally sorted regardless
+        # of the (reverse-chronological) interval input order.
+        keys = sorted(result.keys())
+        assert keys == [
+            datetime(2019, 7, 1),
+            datetime(2020, 7, 1),
+            datetime(2021, 7, 1),
+        ]
+
+        # Each bucket equals the mean of ONLY the in-interval slices.
+        np.testing.assert_array_almost_equal(result[keys[0]].array.data, 10.0)
+        np.testing.assert_array_almost_equal(result[keys[1]].array.data, 20.0)
+        np.testing.assert_array_almost_equal(result[keys[2]].array.data, 35.0)
+
+    def test_boundary_slice_on_interval_end_excluded(self):
+        """A slice exactly on an interval end (2021-08-01) is excluded."""
+        data = _make_raster_stack(self._all_slices())
+        result = aggregate_temporal(
+            data=data,
+            intervals=self.INTERVALS,
+            reducer=mean_reducer,
+        )
+        key_2021 = datetime(2021, 7, 1)
+        # If 2021-08-01 (value 999) had leaked in, the mean would be far from 35.
+        np.testing.assert_array_almost_equal(result[key_2021].array.data, 35.0)
+
+    def test_out_of_interval_slices_are_not_read(self):
+        """Performance: only in-interval slices are fetched/decoded.
+
+        Uses a lazy RasterStack so each slice records when its task runs. After
+        aggregate_temporal, the set of executed slices must equal exactly the
+        in-interval slices -- proving out-of-interval (and boundary) slices are
+        never materialized.
+        """
+        executed: set = set()
+        data = _make_lazy_raster_stack(self._all_slices(), executed)
+
+        # Sanity: nothing read yet just from constructing the stack / reading keys.
+        assert executed == set()
+        _ = data.timestamps()
+        assert executed == set()
+
+        result = aggregate_temporal(
+            data=data,
+            intervals=self.INTERVALS,
+            reducer=mean_reducer,
+        )
+
+        # Only the four in-interval slices were ever realized.
+        expected_read = {dt for dt, _ in self.IN_INTERVAL}
+        assert executed == expected_read
+
+        # And the boundary / out-of-interval slices were definitely not read.
+        assert datetime(2021, 8, 1) not in executed  # boundary
+        assert datetime(2022, 7, 15) not in executed  # year with no interval
+
+        # Correctness still holds on the lazy path.
+        keys = sorted(result.keys())
+        np.testing.assert_array_almost_equal(result[keys[2]].array.data, 35.0)
+
+    def test_in_interval_slices_are_read_concurrently(self):
+        """The in-interval slices are pre-loaded in parallel, not serially.
+
+        Each task sleeps briefly; if reads were serial the call would take at
+        least N * delay. Concurrent prefetch brings it well under that bound.
+        """
+        import time as _time
+
+        executed: set = set()
+        delay = 0.2
+        n_in_interval = len(self.IN_INTERVAL)
+
+        def _make_slow_stack(dates_values):
+            tasks = []
+            for dt, val in dates_values:
+
+                def make_task(dt=dt, val=val):
+                    def task():
+                        _time.sleep(delay)
+                        executed.add(dt)
+                        array = np.ma.ones((2, 4, 4)) * val
+                        return ImageData(
+                            array,
+                            assets=[f"asset_{dt.isoformat()}"],
+                            crs="EPSG:4326",
+                            bounds=(-180, -90, 180, 90),
+                            band_descriptions=["red", "green"],
+                        )
+
+                    return task
+
+                tasks.append((make_task(), {"datetime": dt}))
+            return RasterStack(
+                tasks=tasks,
+                timestamp_fn=lambda asset: asset["datetime"],
+                width=4,
+                height=4,
+                bounds=(-180, -90, 180, 90),
+                dst_crs="EPSG:4326",
+                band_names=["red", "green"],
+            )
+
+        data = _make_slow_stack(self._all_slices())
+
+        start = _time.monotonic()
+        aggregate_temporal(
+            data=data,
+            intervals=self.INTERVALS,
+            reducer=mean_reducer,
+        )
+        elapsed = _time.monotonic() - start
+
+        # Only the in-interval slices were read.
+        assert executed == {dt for dt, _ in self.IN_INTERVAL}
+        # Concurrent: far below the serial lower bound (n * delay).
+        assert elapsed < n_in_interval * delay
 
 
 class TestParseTemporalValue:
