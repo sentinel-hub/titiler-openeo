@@ -809,6 +809,7 @@ class TestAggregateTemporalNonContiguousIntervals:
             return RasterStack(
                 tasks=tasks,
                 timestamp_fn=lambda asset: asset["datetime"],
+                max_workers=n_in_interval,
                 width=4,
                 height=4,
                 bounds=(-180, -90, 180, 90),
