@@ -850,26 +850,27 @@ def aggregate_temporal(
     output_keys = _resolve_output_keys(labels, parsed_intervals)
     timestamps = data.timestamps()
 
+    # Resolve in-interval timestamps once per interval (each runs the
+    # _timestamp_in_interval comparison, incl. UTC normalization), then reuse
+    # the lists below instead of re-scanning the stack inside the loop.
+    matching_keys_per_interval = [
+        [ts for ts in timestamps if _timestamp_in_interval(ts, start, end)]
+        for (start, end) in parsed_intervals
+    ]
+
     # Concurrently pre-load ONLY the slices inside the union of all intervals.
     # Out-of-interval slices are still never read; in-interval slices are read
     # in parallel instead of one-at-a-time, so the per-interval loop below (and
     # any reducer that pulls slices, e.g. mean -> apply_pixel_selection) hits the
     # cache rather than blocking on serial I/O.
-    union_keys = {
-        ts
-        for (start, end) in parsed_intervals
-        for ts in timestamps
-        if _timestamp_in_interval(ts, start, end)
-    }
+    union_keys = {ts for keys in matching_keys_per_interval for ts in keys}
     if union_keys:
         data.prefetch(union_keys)
 
     result_images: Dict[datetime, ImageData] = {}
 
-    for idx, (start, end) in enumerate(parsed_intervals):
-        matching_keys = [
-            ts for ts in timestamps if _timestamp_in_interval(ts, start, end)
-        ]
+    for idx in range(len(parsed_intervals)):
+        matching_keys = matching_keys_per_interval[idx]
         output_key = output_keys[idx]
 
         if not matching_keys:
