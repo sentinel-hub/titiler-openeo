@@ -11,6 +11,7 @@ from rio_tiler.models import ImageData
 from ...errors import OpenEOException
 from .core import process
 from .data_model import RasterStack
+from .reduce import _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
@@ -360,8 +361,20 @@ def merge_cubes(
     if target_height is None or target_width is None:
         raise ValueError("cube1 has no spatial dimensions")
 
-    keys1 = set(cube1.keys())
-    keys2 = set(cube2.keys())
+    # The two cubes may carry datetime keys with inconsistent tz-awareness:
+    # raw load_collection keeps STAC tz-aware datetimes, while processes such as
+    # aggregate_temporal/filter_temporal normalize to naive UTC. Comparing the two
+    # directly raises "can't compare offset-naive and offset-aware datetimes" and
+    # would also fail to match the same instant across cubes. Normalize every key
+    # to naive UTC for union/sort/membership, keeping a map back to each cube's
+    # original key for lookups, and emit the merged cube with normalized keys.
+    def _norm(key: datetime) -> datetime:
+        return _normalize_to_naive_utc(key) if isinstance(key, datetime) else key
+
+    norm_to_key1 = {_norm(k): k for k in cube1.keys()}
+    norm_to_key2 = {_norm(k): k for k in cube2.keys()}
+    keys1 = set(norm_to_key1)
+    keys2 = set(norm_to_key2)
     all_keys = sorted(keys1 | keys2)
 
     merged_images: Dict[datetime, ImageData] = {}
@@ -372,11 +385,11 @@ def merge_cubes(
 
         if in_cube1 and not in_cube2:
             # Timestamp only in cube1
-            merged_images[key] = cube1[key]
+            merged_images[key] = cube1[norm_to_key1[key]]
 
         elif in_cube2 and not in_cube1:
             # Timestamp only in cube2 - resize to match cube1 spatial dims
-            img2 = cube2[key]
+            img2 = cube2[norm_to_key2[key]]
             if img2.height != target_height or img2.width != target_width:
                 logging.warning(
                     "Resizing cube2 image from %dx%d to %dx%d to match cube1",
@@ -390,8 +403,8 @@ def merge_cubes(
 
         else:
             # Timestamp in both cubes - merge bands
-            img1 = cube1[key]
-            img2 = cube2[key]
+            img1 = cube1[norm_to_key1[key]]
+            img2 = cube2[norm_to_key2[key]]
             if img2.height != target_height or img2.width != target_width:
                 logging.warning(
                     "Resizing cube2 image from %dx%d to %dx%d to match cube1",
