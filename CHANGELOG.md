@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.3 (2026-06-21)
+
+## What's Changed
+* fix: seed pixel-selection band count from the realized image by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/290
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.16.2...v0.16.3
+
 ## 0.16.2 (2026-06-21)
 
 ## What's Changed
