@@ -1,6 +1,8 @@
 """titiler.openeo filter processes."""
 
-from typing import List, Optional
+from typing import Any, List, Optional, Union
+
+from openeo_pg_parser_networkx.pg_schema import TemporalInterval
 
 from .data_model import RasterStack
 from .reduce import DimensionNotAvailable, _parse_intervals, _timestamp_in_interval
@@ -8,9 +10,35 @@ from .reduce import DimensionNotAvailable, _parse_intervals, _timestamp_in_inter
 __all__ = ["filter_temporal"]
 
 
+def _extent_to_pair(extent: Any) -> List[Optional[str]]:
+    """Normalize a temporal extent to a ``[start, end]`` list of RFC 3339 strings.
+
+    The openEO graph parser passes ``extent`` as a ``TemporalInterval`` whose
+    bounds are already parsed into pendulum datetimes, while direct Python/test
+    callers pass a two-element list/tuple of strings (or ``None``). Both are
+    reduced here to the string-pair form understood by ``_parse_intervals``.
+    """
+    if isinstance(extent, TemporalInterval):
+
+        def _bound(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            # Year/Date/DateTime/Time wrappers expose the parsed value as .root
+            # (a pendulum datetime/date/time), which serializes to RFC 3339.
+            root = getattr(value, "root", value)
+            return root.isoformat() if hasattr(root, "isoformat") else str(root)
+
+        return [_bound(extent.start), _bound(extent.end)]
+
+    if isinstance(extent, (list, tuple)):
+        return list(extent)
+
+    raise ValueError("The temporal extent must be an array with exactly two elements.")
+
+
 def filter_temporal(
     data: RasterStack,
-    extent: List[Optional[str]],
+    extent: Union[TemporalInterval, List[Optional[str]]],
     dimension: Optional[str] = None,
 ) -> RasterStack:
     """Limits the data cube to the specified interval of dates and/or times.
@@ -39,12 +67,13 @@ def filter_temporal(
         ValueError: If the extent is not a two-element interval or both
             boundaries are ``None``.
     """
-    if not isinstance(extent, (list, tuple)) or len(extent) != 2:
+    pair = _extent_to_pair(extent)
+    if len(pair) != 2:
         raise ValueError(
             "The temporal extent must be an array with exactly two elements."
         )
 
-    if extent[0] is None and extent[1] is None:
+    if pair[0] is None and pair[1] is None:
         raise ValueError(
             "The temporal extent must not have both boundaries set to null."
         )
@@ -57,7 +86,7 @@ def filter_temporal(
 
     # Reuse the shared interval parsing/validation (raises TemporalExtentEmpty
     # when end <= start). filter_temporal only ever has a single interval.
-    (start, end) = _parse_intervals([list(extent)])[0]
+    (start, end) = _parse_intervals([pair])[0]
 
     matching_keys = [
         ts for ts in data.timestamps() if _timestamp_in_interval(ts, start, end)
