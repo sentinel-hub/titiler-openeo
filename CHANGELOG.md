@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 (2026-06-21)
+
+## What's Changed
+* perf: concurrently prefetch in-interval slices by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/286
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.16.0...v0.16.1
+
 ## 0.16.0 (2026-06-19)
 
 ## What's Changed
