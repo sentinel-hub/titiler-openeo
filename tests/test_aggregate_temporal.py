@@ -233,6 +233,75 @@ class TestAggregateTemporalBasic:
         assert len(result) == 5
 
 
+class TestAggregateTemporalIntervalsInput:
+    """Graph path: intervals arrive as a TemporalIntervals (parsed datetimes).
+
+    The openEO process-graph parser converts temporal-intervals into a
+    ``TemporalIntervals`` whose bounds are pendulum datetimes, not strings.
+    """
+
+    def test_temporal_intervals_object(self):
+        """A TemporalIntervals argument aggregates the same as a list of lists."""
+        from openeo_pg_parser_networkx.pg_schema import TemporalIntervals
+
+        data = _make_raster_stack(
+            [
+                (datetime(2021, 6, 15), 10.0),
+                (datetime(2022, 6, 15), 20.0),
+                (datetime(2023, 6, 15), 30.0),
+                (datetime(2024, 1, 1), 99.0),  # outside all intervals
+            ]
+        )
+        intervals = TemporalIntervals(
+            [
+                ["2023-06-01", "2023-07-01"],
+                ["2022-06-01", "2022-07-01"],
+                ["2021-06-01", "2021-07-01"],
+            ]
+        )
+        result = aggregate_temporal(
+            data=data, intervals=intervals, reducer=mean_reducer
+        )
+        assert len(result) == 3
+        keys = sorted(result.keys())
+        assert keys == [
+            datetime(2021, 6, 1),
+            datetime(2022, 6, 1),
+            datetime(2023, 6, 1),
+        ]
+        np.testing.assert_array_almost_equal(result[keys[0]].array.data, 10.0)
+        np.testing.assert_array_almost_equal(result[keys[1]].array.data, 20.0)
+        np.testing.assert_array_almost_equal(result[keys[2]].array.data, 30.0)
+
+    def test_temporal_intervals_passes_type_validation(self):
+        """Regression: the @process validation layer must accept a TemporalIntervals.
+
+        Previously ``intervals: List[List[Optional[str]]]`` made
+        _validate_parameter_types reject the parser-supplied TemporalIntervals
+        (DateTime elements), raising
+        ``TypeError: expected 'List' but got 'TemporalIntervals'``.
+        """
+        from openeo_pg_parser_networkx.pg_schema import TemporalIntervals
+
+        from titiler.openeo.processes.implementations.core import process
+
+        data = _make_raster_stack(
+            [
+                (datetime(2021, 6, 15), 10.0),
+                (datetime(2022, 6, 15), 20.0),
+            ]
+        )
+        intervals = TemporalIntervals(
+            [
+                ["2021-06-01", "2021-07-01"],
+                ["2022-06-01", "2022-07-01"],
+            ]
+        )
+        wrapped = process(aggregate_temporal)
+        result = wrapped(data=data, intervals=intervals, reducer=mean_reducer)
+        assert len(result) == 2
+
+
 class TestAggregateTemporalIntervalSemantics:
     """Test left-closed, right-open interval semantics."""
 

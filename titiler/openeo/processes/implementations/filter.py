@@ -5,7 +5,12 @@ from typing import Any, List, Optional, Union
 from openeo_pg_parser_networkx.pg_schema import TemporalInterval
 
 from .data_model import RasterStack
-from .reduce import DimensionNotAvailable, _parse_intervals, _timestamp_in_interval
+from .reduce import (
+    DimensionNotAvailable,
+    _interval_to_pair,
+    _parse_intervals,
+    _timestamp_in_interval,
+)
 
 __all__ = ["filter_temporal"]
 
@@ -16,22 +21,11 @@ def _extent_to_pair(extent: Any) -> List[Optional[str]]:
     The openEO graph parser passes ``extent`` as a ``TemporalInterval`` whose
     bounds are already parsed into pendulum datetimes, while direct Python/test
     callers pass a two-element list/tuple of strings (or ``None``). Both are
-    reduced here to the string-pair form understood by ``_parse_intervals``.
+    reduced here (via the shared ``_interval_to_pair``) to the string-pair form
+    understood by ``_parse_intervals``.
     """
-    if isinstance(extent, TemporalInterval):
-
-        def _bound(value: Any) -> Optional[str]:
-            if value is None:
-                return None
-            # Year/Date/DateTime/Time wrappers expose the parsed value as .root
-            # (a pendulum datetime/date/time), which serializes to RFC 3339.
-            root = getattr(value, "root", value)
-            return root.isoformat() if hasattr(root, "isoformat") else str(root)
-
-        return [_bound(extent.start), _bound(extent.end)]
-
-    if isinstance(extent, (list, tuple)):
-        return list(extent)
+    if isinstance(extent, (TemporalInterval, list, tuple)):
+        return _interval_to_pair(extent)
 
     raise ValueError("The temporal extent must be an array with exactly two elements.")
 

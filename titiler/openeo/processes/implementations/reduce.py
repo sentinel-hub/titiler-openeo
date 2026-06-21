@@ -43,6 +43,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy
+from openeo_pg_parser_networkx.pg_schema import TemporalInterval, TemporalIntervals
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
@@ -816,9 +817,58 @@ def _coerce_reduced_array(reduced_array: Any) -> numpy.ndarray:
     return reduced_array
 
 
+def _temporal_bound_to_str(value: Any) -> Optional[str]:
+    """Serialize a single temporal-interval bound to an RFC 3339 string.
+
+    Handles the raw strings/None passed by direct callers as well as the parsed
+    wrapper objects (Year/Date/DateTime/Time) the openEO graph parser produces,
+    whose parsed value lives in ``.root`` (a pendulum datetime/date/time).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    root = getattr(value, "root", value)
+    return root.isoformat() if hasattr(root, "isoformat") else str(root)
+
+
+def _interval_to_pair(interval: Any) -> List[Optional[str]]:
+    """Normalize a single interval to a ``[start, end]`` list of RFC 3339 strings.
+
+    Accepts a parser-produced ``TemporalInterval`` or a two-element list/tuple of
+    strings/None. The length is preserved so downstream validation can still
+    reject malformed intervals.
+    """
+    if isinstance(interval, TemporalInterval):
+        return [
+            _temporal_bound_to_str(interval.start),
+            _temporal_bound_to_str(interval.end),
+        ]
+    if isinstance(interval, (list, tuple)):
+        return [_temporal_bound_to_str(v) for v in interval]
+    raise ValueError("Each temporal interval must be a two-element array.")
+
+
+def _normalize_intervals(intervals: Any) -> List[List[Optional[str]]]:
+    """Normalize the ``intervals`` argument to a list of string pairs.
+
+    The openEO graph parser passes ``intervals`` as a ``TemporalIntervals`` whose
+    bounds are already parsed into pendulum datetimes, while direct Python/test
+    callers pass a list of two-element string lists. Both are reduced here to the
+    string-pair form understood by :func:`_parse_intervals`.
+    """
+    if isinstance(intervals, TemporalIntervals):
+        items: List[Any] = list(intervals)
+    elif isinstance(intervals, (list, tuple)):
+        items = list(intervals)
+    else:
+        raise ValueError("At least one temporal interval must be provided")
+    return [_interval_to_pair(iv) for iv in items]
+
+
 def aggregate_temporal(
     data: RasterStack,
-    intervals: List[List[Optional[str]]],
+    intervals: Union[TemporalIntervals, List[List[Optional[str]]]],
     reducer: Callable,
     labels: Optional[List[Union[float, str]]] = None,
     dimension: Optional[Literal["t", "temporal", "time"]] = None,
@@ -852,14 +902,16 @@ def aggregate_temporal(
     """
     if not data:
         raise ValueError("Expected a non-empty data cube")
-    if not intervals:
+
+    normalized_intervals = _normalize_intervals(intervals)
+    if not normalized_intervals:
         raise ValueError("At least one temporal interval must be provided")
 
     if dimension is not None:
         if dimension.lower() not in ["t", "temporal", "time"]:
             raise DimensionNotAvailable(dimension)
 
-    parsed_intervals = _parse_intervals(intervals)
+    parsed_intervals = _parse_intervals(normalized_intervals)
     output_keys = _resolve_output_keys(labels, parsed_intervals)
     timestamps = data.timestamps()
 
