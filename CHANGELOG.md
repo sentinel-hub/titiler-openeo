@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.5 (2026-06-21)
+
+## What's Changed
+* fix: merge_cubes handles mixed tz-aware/naive datetime keys by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/294
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.16.4...v0.16.5
+
 ## 0.16.4 (2026-06-21)
 
 ## What's Changed
