@@ -142,6 +142,91 @@ def test_save_result_geotiff():
     assert len(result.data) > 0  # Should contain TIFF bytes
 
 
+def _read_geotiff(result):
+    """Open a SaveResultData GeoTIFF payload with rasterio."""
+    import io as _io
+
+    import rasterio
+
+    return rasterio.open(_io.BytesIO(result.data))
+
+
+def test_save_result_geotiff_preserves_float_single_band():
+    """GTiff must preserve float dtype/values (not cast to uint8/RGB). Issue #296."""
+    arr = numpy.ma.array(
+        (numpy.linspace(-0.7, 0.7, 64, dtype="float32")).reshape(1, 8, 8),
+        mask=numpy.zeros((1, 8, 8), dtype=bool),
+    )
+    data = RasterStack.from_images(
+        {
+            datetime(2021, 7, 1): ImageData(
+                arr,
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+                band_descriptions=["ndvi"],
+            )
+        }
+    )
+
+    result = save_result(data, "GTiff")
+    assert result.media_type == "image/tiff"
+    with _read_geotiff(result) as ds:
+        assert ds.count == 1  # single band, no RGB render / alpha band
+        assert ds.dtypes[0] == "float32"  # native dtype preserved (not uint8)
+        assert ds.crs is not None  # georeferenced
+        band = ds.read(1)
+        numpy.testing.assert_allclose(band.min(), -0.7, atol=1e-3)
+        numpy.testing.assert_allclose(band.max(), 0.7, atol=1e-3)
+
+
+def test_save_result_geotiff_float_masked_uses_nodata():
+    """Masked float pixels are encoded as NaN nodata, real values preserved."""
+    a = numpy.ones((1, 4, 4), dtype="float32") * 0.42
+    mask = numpy.zeros((1, 4, 4), dtype=bool)
+    mask[0, 0, 0] = True
+    data = RasterStack.from_images(
+        {
+            datetime(2021, 7, 1): ImageData(
+                numpy.ma.array(a, mask=mask),
+                crs="EPSG:4326",
+                bounds=(-180, -90, 180, 90),
+                band_descriptions=["ndvi"],
+            )
+        }
+    )
+
+    result = save_result(data, "gtiff")
+    with _read_geotiff(result) as ds:
+        assert ds.dtypes[0] == "float32"
+        assert numpy.isnan(ds.nodata)
+        band = ds.read(1)
+        assert numpy.isnan(band[0, 0])  # masked pixel -> nodata
+        assert numpy.nanmax(band) == numpy.float32(0.42)  # values preserved
+
+
+def test_save_result_geotiff_multi_slice_preserves_float():
+    """Multi-slice float cube -> multi-band float GeoTIFF (was uint8 RGB). Issue #296."""
+
+    def _img(v):
+        a = numpy.ones((1, 4, 4), dtype="float32") * v
+        return ImageData(
+            numpy.ma.array(a, mask=numpy.zeros_like(a, dtype=bool)),
+            crs="EPSG:4326",
+            bounds=(-180, -90, 180, 90),
+            band_descriptions=["ndvi"],
+        )
+
+    data = RasterStack.from_images(
+        {datetime(2021, 7, 1): _img(-0.5), datetime(2022, 7, 1): _img(0.3)}
+    )
+    result = save_result(data, "gtiff")
+    with _read_geotiff(result) as ds:
+        assert ds.count == 2  # one band per slice
+        assert ds.dtypes[0] == "float32"
+        numpy.testing.assert_allclose(ds.read(1).min(), -0.5, atol=1e-6)
+        numpy.testing.assert_allclose(ds.read(2).max(), 0.3, atol=1e-6)
+
+
 def test_save_result_single_image():
     """Test save_result with single image."""
     array = numpy.array([[1, 2], [3, 4]], dtype=numpy.uint8)[
