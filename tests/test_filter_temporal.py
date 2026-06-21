@@ -123,6 +123,73 @@ class TestFilterTemporalBasic:
         assert img.band_descriptions == ["red", "green"]
 
 
+class TestFilterTemporalTemporalIntervalInput:
+    """Graph path: extent arrives as a TemporalInterval (parsed datetimes).
+
+    The openEO process-graph parser converts a temporal-interval into a
+    ``TemporalInterval`` whose bounds are pendulum datetimes, not strings.
+    """
+
+    def test_temporal_interval_extent(self):
+        """A TemporalInterval extent filters the same as a string list."""
+        from openeo_pg_parser_networkx.pg_schema import TemporalInterval
+
+        data = _make_raster_stack(
+            [
+                (datetime(2020, 1, 15), 1.0),
+                (datetime(2020, 6, 15), 2.0),
+                (datetime(2021, 3, 1), 3.0),
+            ]
+        )
+        result = filter_temporal(
+            data, extent=TemporalInterval(["2020-01-01", "2021-01-01"])
+        )
+        assert sorted(result.keys()) == [
+            datetime(2020, 1, 15),
+            datetime(2020, 6, 15),
+        ]
+
+    def test_temporal_interval_open_start(self):
+        """A TemporalInterval with a null lower bound is supported."""
+        from openeo_pg_parser_networkx.pg_schema import TemporalInterval
+
+        data = _make_raster_stack(
+            [
+                (datetime(2019, 1, 1), 1.0),
+                (datetime(2020, 6, 15), 2.0),
+                (datetime(2021, 3, 1), 3.0),
+            ]
+        )
+        result = filter_temporal(data, extent=TemporalInterval([None, "2021-01-01"]))
+        assert sorted(result.keys()) == [
+            datetime(2019, 1, 1),
+            datetime(2020, 6, 15),
+        ]
+
+    def test_temporal_interval_passes_type_validation(self):
+        """Regression: the @process validation layer must accept a TemporalInterval.
+
+        Previously ``extent: List[Optional[str]]`` made _validate_parameter_types
+        reject the parser-supplied TemporalInterval (DateTime elements), raising
+        ``TypeError: expected 'List' but got 'temporal-interval'``.
+        """
+        from openeo_pg_parser_networkx.pg_schema import TemporalInterval
+
+        from titiler.openeo.processes.implementations.core import process
+
+        data = _make_raster_stack(
+            [
+                (datetime(2020, 6, 15), 2.0),
+                (datetime(2022, 7, 15), 4.0),
+            ]
+        )
+        wrapped = process(filter_temporal)
+        result = wrapped(
+            data=data, extent=TemporalInterval(["2022-07-01", "2022-08-01"])
+        )
+        assert list(result.keys()) == [datetime(2022, 7, 15)]
+
+
 class TestFilterTemporalDimension:
     """Tests for the optional dimension parameter."""
 
