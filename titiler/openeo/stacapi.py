@@ -737,17 +737,24 @@ class LoadCollection:
             named_parameters: Named parameters for process graph evaluation
             target_crs: Target CRS for output. If None, uses native CRS from source images.
         """
+        # Retrieve up to one item beyond the configured processing limit so the
+        # guard below can detect genuine overflow. Without an explicit max_items
+        # the STAC search silently caps at the first page (100, newest-first),
+        # which drops whole months/years from wide temporal extents and yields
+        # empty aggregate_temporal buckets (all-no-data). See issue #300.
         items = self._get_items(
             id,
             spatial_extent=spatial_extent,
             temporal_extent=temporal_extent,
             properties=properties,
+            max_items=processing_settings.max_items + 1,
             named_parameters=named_parameters,
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
-        # Check the items limit
+        # Check the items limit. Fail loudly when the extent genuinely contains
+        # more items than allowed rather than silently truncating the result.
         if len(items) > processing_settings.max_items:
             raise ItemsLimitExceeded(len(items), processing_settings.max_items)
 

@@ -191,3 +191,95 @@ def test_resolution_based_dimension_calculation(monkeypatch):
     height = result.height or 0
     assert 950 <= width <= 1050, f"Width {width} is not within expected range"
     assert 950 <= height <= 1050, f"Height {height} is not within expected range"
+
+
+def _stac_item_dict(dt: str) -> dict:
+    """Minimal valid STAC item dict for the given datetime string."""
+    return {
+        "type": "Feature",
+        "id": f"item-{dt}",
+        "stac_version": "1.0.0",
+        "stac_extensions": [
+            "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+        ],
+        "bbox": [0, 0, 1, 1],
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        "properties": {
+            "datetime": dt,
+            "proj:crs": "EPSG:4326",
+            "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+        },
+        "assets": {
+            "B01": {
+                "href": "https://example.com/B01.tif",
+                "type": "image/tiff; application=geotiff",
+            }
+        },
+        "links": [],
+    }
+
+
+def test_load_collection_requests_items_beyond_limit(monkeypatch):
+    """load_collection must request max_items + 1 so overflow is detectable.
+
+    Regression for #300: the STAC search silently capped at the first page
+    (100, newest-first), dropping whole months/years from wide temporal extents.
+    """
+    from titiler.openeo.settings import ProcessingSettings
+
+    settings = ProcessingSettings(max_items=20)
+    monkeypatch.setattr("titiler.openeo.stacapi.processing_settings", settings)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    captured = {}
+
+    def mock_get_items(self, *args, max_items=None, **kwargs):
+        captured["max_items"] = max_items
+        return [Item.from_dict(_stac_item_dict("2021-01-01T00:00:00Z"))]
+
+    monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+
+    loader.load_collection(
+        id="test",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        width=64,
+        height=64,
+    )
+    # +1 lets the item-limit guard detect genuine overflow instead of truncating.
+    assert captured["max_items"] == settings.max_items + 1
+
+
+def test_load_collection_raises_when_items_exceed_limit(monkeypatch):
+    """Too many items in the extent fails loudly instead of silently truncating."""
+    from titiler.openeo.errors import ItemsLimitExceeded
+    from titiler.openeo.settings import ProcessingSettings
+
+    settings = ProcessingSettings(max_items=2)
+    monkeypatch.setattr("titiler.openeo.stacapi.processing_settings", settings)
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    # Backend reports 3 items (> max_items=2); previously this was hidden by the
+    # hardcoded 100-item cap and produced silent partial/empty results.
+    items = [
+        Item.from_dict(_stac_item_dict(f"2021-0{i + 1}-01T00:00:00Z")) for i in range(3)
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+
+    with pytest.raises(ItemsLimitExceeded):
+        loader.load_collection(
+            id="test",
+            spatial_extent=BoundingBox(
+                west=0, south=0, east=1, north=1, crs="EPSG:4326"
+            ),
+            width=64,
+            height=64,
+        )
