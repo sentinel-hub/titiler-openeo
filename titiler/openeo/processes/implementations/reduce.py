@@ -236,14 +236,27 @@ def apply_pixel_selection(
     cutline_masks = [ref.cutline_mask() for _, ref in all_items]
     aggregated_cutline = _compute_aggregated_cutline_mask(cutline_masks)
 
-    # Initialize pixsel_method from first ref's metadata
+    # Initialize pixsel_method from the first image.
+    #
+    # The band COUNT must come from the first *realized* image, not from declared
+    # metadata: a band-name list (e.g. a single asset name produced by
+    # load_collection's default) can map to a different number of decoded bands
+    # when the asset is multi-band. Seeding the count from declared metadata makes
+    # the per-slice assertion below fail on the very first slice even when every
+    # slice is perfectly consistent. Width/height/cutline stay metadata-derived so
+    # they remain aligned with the precomputed cutline mask.
     first_key, first_ref = all_items[0]
+    first_img = first_ref.realize()
     pixsel_method.width = first_ref.width
     pixsel_method.height = first_ref.height
-    pixsel_method.count = first_ref.count
+    pixsel_method.count = first_img.count
     crs = first_ref.crs
     bounds = first_ref.bounds
-    band_names = first_ref.band_names
+    band_names = (
+        list(first_img.band_descriptions)
+        if first_img.band_descriptions
+        else first_ref.band_names
+    )
 
     # Set the aggregated cutline mask
     if aggregated_cutline is not None:

@@ -360,3 +360,47 @@ class TestApplyPixelSelectionMethods:
         result = apply_pixel_selection(stack, pixel_selection="lastbandhight")
         assert isinstance(result, RasterStack)
         assert result.first is not None
+
+    def test_multiband_asset_with_single_declared_band_name(self):
+        """Regression: a lazy stack whose decoded images have more bands than the
+        declared band_names must not raise 'Assets HAVE TO have the same number of
+        bands'.
+
+        load_collection declares band_names from asset names (e.g. one entry) but
+        a multi-band asset decodes to several bands. The pixel-selection count must
+        be seeded from the realized image, not the declared metadata. Regression
+        introduced in #215 (count seeded from LazyImageRef.count == len(band_names)).
+        """
+
+        def make_task(val):
+            def task():
+                return ImageData(
+                    np.ma.ones((3, 4, 4), dtype="float32") * val,
+                    crs="EPSG:4326",
+                    bounds=(-180, -90, 180, 90),
+                    band_descriptions=["b1", "b2", "b3"],
+                )
+
+            return task
+
+        # band_names declares a SINGLE asset name; the decoded images have 3 bands.
+        tasks = [
+            (make_task(1.0), {"datetime": datetime(2020, 1, 1)}),
+            (make_task(3.0), {"datetime": datetime(2020, 2, 1)}),
+        ]
+        stack = RasterStack(
+            tasks=tasks,
+            timestamp_fn=lambda asset: asset["datetime"],
+            width=4,
+            height=4,
+            bounds=(-180, -90, 180, 90),
+            dst_crs="EPSG:4326",
+            band_names=["visual"],
+        )
+
+        result = apply_pixel_selection(stack, pixel_selection="mean")
+        assert isinstance(result, RasterStack)
+        img = result.first
+        # All 3 decoded bands are preserved and averaged (mean of 1.0 and 3.0).
+        assert img.array.shape == (3, 4, 4)
+        np.testing.assert_array_almost_equal(img.array.data, 2.0)
