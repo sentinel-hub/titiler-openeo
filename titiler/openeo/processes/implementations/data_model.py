@@ -9,6 +9,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Optional,
     Set,
@@ -447,6 +448,20 @@ class RasterStack(Dict[datetime, ImageData]):
                     band_names=self._band_names,
                     geometry=geometry,
                 )
+
+    def prefetch(self, keys: Iterable[datetime]) -> None:
+        """Eagerly load the given timestamps concurrently into the cache.
+
+        Reads run in parallel via the thread pool; keys already cached or not
+        present in the stack are skipped. Subsequent ``__getitem__`` calls for
+        these keys return the cached result without further I/O. This lets
+        callers that otherwise read slice-by-slice (e.g. aggregate_temporal,
+        apply_pixel_selection) benefit from concurrency.
+
+        Args:
+            keys: The datetime keys to pre-load.
+        """
+        self._execute_selected_tasks(set(keys))
 
     def _execute_task(self, key: datetime, task_func: Any) -> ImageData:
         """Execute a single task and return the result.
