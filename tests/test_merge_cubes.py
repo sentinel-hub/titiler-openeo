@@ -193,6 +193,53 @@ class TestMergeCubes:
         result_keys = list(result.keys())
         assert result_keys == sorted(dates1 + dates2)
 
+    def test_mixed_timezone_awareness_keys(self):
+        """Cubes with tz-aware vs naive datetime keys merge without crashing.
+
+        Regression: raw load_collection keeps tz-aware STAC datetimes while
+        aggregate_temporal/filter_temporal normalize to naive UTC. Merging the
+        two raised "can't compare offset-naive and offset-aware datetimes" and
+        also failed to match the same instant across cubes. Keys are normalized
+        to naive UTC for union/sort/membership and in the output.
+        """
+        from datetime import timezone
+
+        # cube1: tz-aware keys; cube2: naive keys, one of which is the SAME instant.
+        cube1 = RasterStack.from_images(
+            {
+                datetime(2021, 6, 1, tzinfo=timezone.utc): _make_image(
+                    bands=1, fill=10.0, band_names=["B1"]
+                ),
+                datetime(2022, 6, 1, tzinfo=timezone.utc): _make_image(
+                    bands=1, fill=20.0, band_names=["B1"]
+                ),
+            }
+        )
+        cube2 = RasterStack.from_images(
+            {
+                datetime(2022, 6, 1): _make_image(
+                    bands=1, fill=5.0, band_names=["B1"]
+                ),  # same instant as cube1's tz-aware 2022-06-01
+                datetime(2023, 6, 1): _make_image(
+                    bands=1, fill=30.0, band_names=["B1"]
+                ),
+            }
+        )
+
+        result = merge_cubes(cube1=cube1, cube2=cube2, overlap_resolver=add_resolver)
+
+        # Output keys are naive UTC and sorted; the shared instant merged once.
+        assert list(result.keys()) == [
+            datetime(2021, 6, 1),
+            datetime(2022, 6, 1),
+            datetime(2023, 6, 1),
+        ]
+        np.testing.assert_array_equal(result[datetime(2021, 6, 1)].array[0], 10.0)
+        np.testing.assert_array_equal(
+            result[datetime(2022, 6, 1)].array[0], 25.0
+        )  # 20 + 5
+        np.testing.assert_array_equal(result[datetime(2023, 6, 1)].array[0], 30.0)
+
     def test_disjoint_bands_same_timestamps(self):
         """Same timestamps, disjoint bands → concatenate bands."""
         dates = [datetime(2021, 1, 1), datetime(2021, 1, 2)]
