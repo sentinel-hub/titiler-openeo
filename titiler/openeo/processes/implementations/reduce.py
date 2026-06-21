@@ -939,33 +939,47 @@ def aggregate_temporal(
         output_key = output_keys[idx]
 
         if not matching_keys:
+            logger.warning(
+                "aggregate_temporal: interval %s matched no time slices; "
+                "emitting a no-data composite.",
+                normalized_intervals[idx],
+            )
             nodata_img = _make_nodata_image(data)
             if nodata_img is not None:
                 result_images[output_key] = nodata_img
             continue
 
-        sub_images: Dict[datetime, ImageData] = {}
-        for key in matching_keys:
-            try:
-                sub_images[key] = data[key]
-            except KeyError:
-                logger.warning("Failed to load image for timestamp %s, skipping", key)
-                continue
-        if not sub_images:
+        # Build the per-interval sub-cube with filter_keys (NOT from_images) so the
+        # per-scene footprint geometry and lazy refs are preserved. This makes the
+        # reduction identical to `filter_temporal(interval) -> reduce_dimension`:
+        # reducers such as mean -> apply_pixel_selection rely on that geometry to
+        # compute the footprint-union cutline. from_images discards the geometry
+        # (eager refs), which can mask the whole AOI and yield an all-no-data
+        # composite even when every interval has scenes. See issue #300.
+        sub_stack = data.filter_keys(matching_keys)
+        if len(sub_stack) == 0:
+            logger.warning(
+                "aggregate_temporal: interval %s matched %d slice(s) but none "
+                "could be loaded; skipping.",
+                normalized_intervals[idx],
+                len(matching_keys),
+            )
             continue
 
-        sub_stack = RasterStack.from_images(sub_images)
         reducer_kwargs: Dict[str, Any] = {"data": sub_stack}
         if context is not None:
             reducer_kwargs["context"] = context
         reduced_array = _coerce_reduced_array(reducer(**reducer_kwargs))
 
-        first_img = next(iter(sub_images.values()))
+        # Spatial metadata from the first ref (no pixel load needed).
+        refs = sub_stack.get_image_refs()
+        first_ref = refs[0][1] if refs else None
         result_images[output_key] = ImageData(
             reduced_array,
-            crs=first_img.crs,
-            bounds=first_img.bounds,
-            band_descriptions=first_img.band_descriptions or [],
+            crs=first_ref.crs if first_ref is not None else None,
+            bounds=first_ref.bounds if first_ref is not None else None,
+            band_descriptions=(first_ref.band_names if first_ref is not None else [])
+            or [],
         )
 
     if not result_images:

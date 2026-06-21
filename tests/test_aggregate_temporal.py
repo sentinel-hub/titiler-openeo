@@ -233,6 +233,115 @@ class TestAggregateTemporalBasic:
         assert len(result) == 5
 
 
+def _make_lazy_geometry_stack(dates_values, geometry):
+    """Lazy RasterStack whose refs carry per-scene footprint geometry."""
+    tasks = []
+    for dt, val in dates_values:
+
+        def make_task(val=val):
+            def task():
+                array = np.ma.ones((1, 4, 4)) * val
+                return ImageData(
+                    array,
+                    crs="EPSG:4326",
+                    bounds=(-180, -90, 180, 90),
+                    band_descriptions=["ndvi"],
+                )
+
+            return task
+
+        tasks.append((make_task(), {"datetime": dt, "geometry": geometry}))
+
+    return RasterStack(
+        tasks=tasks,
+        timestamp_fn=lambda asset: asset["datetime"],
+        width=4,
+        height=4,
+        bounds=(-180, -90, 180, 90),
+        dst_crs="EPSG:4326",
+        band_names=["ndvi"],
+    )
+
+
+class TestAggregateTemporalPreservesGeometry:
+    """Regression for #300: the per-interval sub-cube must keep scene geometry.
+
+    aggregate_temporal previously rebuilt each interval with RasterStack.from_images,
+    which drops the footprint geometry reducers (mean -> apply_pixel_selection)
+    need for the cutline. That produced all-no-data composites on real data even
+    though every interval had scenes.
+    """
+
+    def test_geometry_passed_through_to_reducer(self):
+        """The sub-stack handed to the reducer still exposes scene geometry."""
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]],
+        }
+        data = _make_lazy_geometry_stack(
+            [
+                (datetime(2017, 8, 12, 10, 0, 0), 0.3),
+                (datetime(2016, 8, 12, 10, 0, 0), 0.2),
+                (datetime(2015, 8, 12, 10, 0, 0), 0.1),
+            ],
+            geometry,
+        )
+
+        seen_geometries = []
+
+        def geometry_probe_reducer(data):
+            # Record whether the sub-stack refs still carry footprint geometry.
+            refs = data.get_image_refs()
+            seen_geometries.append(all(r.geometry is not None for _, r in refs))
+            arrays = [data[k].array for k in data.keys()]
+            return np.ma.mean(np.ma.stack(arrays, axis=0), axis=0)
+
+        result = aggregate_temporal(
+            data=data,
+            intervals=[
+                ["2017-08-01", "2017-09-01"],
+                ["2016-08-01", "2016-09-01"],
+                ["2015-08-01", "2015-09-01"],
+            ],
+            reducer=geometry_probe_reducer,
+        )
+
+        assert len(result) == 3
+        # Every interval's reducer saw geometry-bearing refs (the bug dropped them).
+        assert seen_geometries and all(seen_geometries)
+
+    def test_tz_aware_keys_descending_intervals_full_data(self):
+        """tz-aware scenes + descending, non-contiguous intervals -> valid composites."""
+        from datetime import timezone
+
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]],
+        }
+        data = _make_lazy_geometry_stack(
+            [
+                (datetime(2015, 8, 10, 10, 0, 0, tzinfo=timezone.utc), 0.1),
+                (datetime(2016, 8, 10, 10, 0, 0, tzinfo=timezone.utc), 0.2),
+                (datetime(2017, 8, 12, 10, 25, 31, tzinfo=timezone.utc), 0.3),
+            ],
+            geometry,
+        )
+        result = aggregate_temporal(
+            data=data,
+            intervals=[
+                ["2017-08-01", "2017-09-01"],
+                ["2016-08-01", "2016-09-01"],
+                ["2015-08-01", "2015-09-01"],
+            ],
+            reducer=mean_reducer,
+        )
+        assert len(result) == 3
+        for key in result.keys():
+            arr = result[key].array
+            # Not an all-no-data composite.
+            assert not np.all(arr.mask)
+
+
 class TestAggregateTemporalIntervalsInput:
     """Graph path: intervals arrive as a TemporalIntervals (parsed datetimes).
 
