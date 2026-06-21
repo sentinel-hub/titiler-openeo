@@ -92,6 +92,77 @@ class SaveResultData:
         return self.data
 
 
+def _render_geotiff_result(
+    image_data: ImageData, options: Optional[Dict] = None
+) -> SaveResultData:
+    """Render an ImageData to a data GeoTIFF, preserving dtype, bands and nodata.
+
+    Unlike PNG/JPEG, GTiff is a data output format: no uint8 cast, no
+    colormap/RGB rendering and no alpha band. Masked pixels are encoded with a
+    nodata value (NaN for floats, the array fill value otherwise) so the result
+    round-trips as analysis-ready raster data. See issue #296.
+    """
+    opts = dict(options or {})
+    arr = image_data.array
+    nodata = opts.pop("nodata", None)
+
+    # Only encode nodata when there are actually masked pixels. For floats NaN is
+    # the natural nodata; for integers use the array fill value, clamped to the
+    # dtype range (the default masked fill of 999999 overflows e.g. uint8).
+    has_mask = isinstance(arr, numpy.ma.MaskedArray) and bool(numpy.ma.is_masked(arr))
+    if nodata is None and has_mask:
+        if numpy.issubdtype(arr.dtype, numpy.floating):
+            nodata = float(numpy.nan)
+        else:
+            info = numpy.iinfo(arr.dtype)
+            fill = int(arr.fill_value)
+            nodata = fill if info.min <= fill <= info.max else int(info.max)
+
+    if has_mask and nodata is not None:
+        # Bake the mask into the data band as nodata (rendered with add_mask=False
+        # below), so masked pixels are written as nodata rather than raw values.
+        image_data = ImageData(
+            numpy.ma.array(arr.filled(nodata), mask=False),
+            crs=image_data.crs,
+            bounds=image_data.bounds,
+            band_descriptions=image_data.band_descriptions,
+            metadata=image_data.metadata,
+        )
+
+    render_kwargs: Dict[str, Any] = {"add_mask": False}
+    if nodata is not None:
+        render_kwargs["nodata"] = nodata
+    render_kwargs.update(opts)
+
+    rendered = image_data.render(img_format="GTIFF", **render_kwargs)
+    return SaveResultData(data=rendered, media_type="image/tiff")
+
+
+def _save_feature_collection(data: Dict, format: str) -> SaveResultData:
+    """Serialize a GeoJSON FeatureCollection to JSON or CSV."""
+    if format.lower() == "json":
+        return SaveResultData(
+            data=json.dumps(data).encode("utf-8"), media_type="application/json"
+        )
+
+    if format.lower() == "csv":
+        # CSV output with date, feature_index, and value columns
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["date", "feature_index", "value"])
+        for idx, feature in enumerate(data.get("features", [])):
+            values_dict = feature.get("properties", {}).get("values", {})
+            for date, value in values_dict.items():
+                writer.writerow([date, idx, value])
+        return SaveResultData(
+            data=output.getvalue().encode("utf-8"), media_type="text/csv"
+        )
+
+    raise ValueError(
+        "Only GeoJSON and CSV formats are supported for FeatureCollection data"
+    )
+
+
 def _save_single_result(
     data: Union[ImageData, numpy.ndarray, numpy.ma.MaskedArray, dict],
     format: str,
@@ -107,37 +178,7 @@ def _save_single_result(
         return SaveResultData(data=bytes, media_type="application/json")
 
     if isinstance(data, dict) and data.get("type") == "FeatureCollection":
-        if format.lower() == "json":
-            # convert json to bytes
-            bytes = json.dumps(data).encode("utf-8")
-            return SaveResultData(data=bytes, media_type="application/json")
-        elif format.lower() == "csv":
-            # Extract features from the FeatureCollection
-            features = data.get("features", [])
-
-            # Create CSV output with date, feature_index, and value columns
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # Write header
-            writer.writerow(["date", "feature_index", "value"])
-
-            # Write data rows
-            for idx, feature in enumerate(features):
-                properties = feature.get("properties", {})
-                values_dict = properties.get("values", {})
-
-                # For each date-value pair in the values dictionary
-                for date, value in values_dict.items():
-                    writer.writerow([date, idx, value])
-
-            # Convert to bytes
-            csv_bytes = output.getvalue().encode("utf-8")
-            return SaveResultData(data=csv_bytes, media_type="text/csv")
-
-        raise ValueError(
-            "Only GeoJSON and CSV formats are supported for FeatureCollection data"
-        )
+        return _save_feature_collection(data, format)
 
     if isinstance(data, (numpy.ma.MaskedArray, numpy.ndarray)):
         data = ImageData(data)
@@ -149,6 +190,11 @@ def _save_single_result(
 
     image_data: ImageData = data
     options = options or {}
+
+    # GTiff is a DATA format: preserve dtype, bands and nodata; never apply the
+    # uint8/RGB image rendering used for PNG/JPEG. See issue #296.
+    if format.lower() in ["tiff", "gtiff"]:
+        return _render_geotiff_result(image_data, options)
 
     if format.lower() in ["jpeg", "jpg", "png"] and image_data.array.dtype != "uint8":
         # Convert to uint8 while preserving the mask if it's a masked array
@@ -255,8 +301,10 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     # Each input array should be (1, height, width), and we want (bands, height, width)
     arrays = []
     for img in image_data_list:
-        # Get the array and ensure it's uint8
-        arr = img.array.astype(numpy.uint8)
+        # Preserve the native dtype and mask: GTiff is a DATA format. Casting to
+        # uint8 here collapses float index/reflectance values (e.g. NDVI in
+        # [-1, 1] -> all zeros). See issue #296.
+        arr = img.array
         # If array is 2D (height, width), add band dimension
         if arr.ndim == 2:
             arr = arr[numpy.newaxis, ...]
