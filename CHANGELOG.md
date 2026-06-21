@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.2 (2026-06-21)
+
+## What's Changed
+* fix: accept TemporalInterval extent from the graph parser by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/288
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.16.1...v0.16.2
+
 ## 0.16.1 (2026-06-21)
 
 ## What's Changed
