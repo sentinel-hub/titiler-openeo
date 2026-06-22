@@ -13,6 +13,7 @@ from titiler.openeo.processes.implementations.apply import (
 )
 from titiler.openeo.processes.implementations.arrays import (
     add_dimension,
+    array_apply,
     array_create,
     array_element,
     create_data_cube,
@@ -236,6 +237,94 @@ def test_array_create():
     result = array_create(data=data)
     assert isinstance(result, np.ndarray)
     assert np.array_equal(result, np.array(data))
+
+
+def test_array_apply_with_simple_process():
+    """Test array_apply with a simple doubling process."""
+
+    # Define a process that doubles values
+    def double_process(x, positional_parameters=None, named_parameters=None):
+        """Simple process that doubles the input value."""
+        return x * 2
+
+    # Test with 1D array
+    data = np.array([1, 2, 3, 4, 5])
+    result = array_apply(data, double_process)
+
+    assert isinstance(result, np.ndarray)
+    assert np.array_equal(result, np.array([2, 4, 6, 8, 10]))
+
+
+def test_array_apply_with_index_parameter():
+    """Test array_apply with process that uses index parameter."""
+
+    # Define a process that multiplies value by index
+    def multiply_by_index(x, positional_parameters=None, named_parameters=None):
+        """Process that multiplies value by its index."""
+        index = named_parameters.get("index", 0)
+        return x * index
+
+    # Test with 1D array
+    data = np.array([10, 20, 30, 40])
+    result = array_apply(data, multiply_by_index)
+
+    # Expected: [10*0, 20*1, 30*2, 40*3] = [0, 20, 60, 120]
+    assert isinstance(result, np.ndarray)
+    assert np.array_equal(result, np.array([0, 20, 60, 120]))
+
+
+def test_array_apply_with_2d_array():
+    """Test array_apply with 2D array."""
+
+    # Define a process that adds 10 to each value
+    def add_ten(x, positional_parameters=None, named_parameters=None):
+        """Process that adds 10 to the input."""
+        return x + 10
+
+    # Test with 2D array
+    data = np.array([[1, 2, 3], [4, 5, 6]])
+    result = array_apply(data, add_ten)
+
+    assert isinstance(result, np.ndarray)
+    assert result.shape == data.shape
+    expected = np.array([[11, 12, 13], [14, 15, 16]])
+    assert np.array_equal(result, expected)
+
+
+def test_array_apply_with_context():
+    """Test array_apply with context parameter."""
+
+    # Define a process that uses context
+    def add_context_value(x, positional_parameters=None, named_parameters=None):
+        """Process that adds context value to input."""
+        context = named_parameters.get("context", 0)
+        context_val = context if context is not None else 0
+        return x + context_val
+
+    # Test with context
+    data = np.array([1, 2, 3, 4])
+    result = array_apply(data, add_context_value, context=100)
+
+    assert isinstance(result, np.ndarray)
+    expected = np.array([101, 102, 103, 104])
+    assert np.array_equal(result, expected)
+
+
+def test_array_apply_with_float_array():
+    """Test array_apply with floating point array."""
+
+    # Define a process that computes square root
+    def sqrt_process(x, positional_parameters=None, named_parameters=None):
+        """Process that computes square root."""
+        return np.sqrt(x) if x >= 0 else np.nan
+
+    # Test with float array
+    data = np.array([1.0, 4.0, 9.0, 16.0, 25.0])
+    result = array_apply(data, sqrt_process)
+
+    assert isinstance(result, np.ndarray)
+    expected = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_array_almost_equal(result, expected)
 
 
 def test_create_data_cube():

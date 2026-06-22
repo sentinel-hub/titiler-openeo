@@ -15,6 +15,7 @@ from .reduce import _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
+    "array_apply",
     "to_image",
     "array_create",
     "create_data_cube",
@@ -419,3 +420,92 @@ def merge_cubes(
             )
 
     return RasterStack.from_images(merged_images)
+
+
+@process
+def array_apply(
+    data: ArrayLike,
+    process: Callable,
+    context: Optional[Any] = None,
+) -> ArrayLike:
+    """Apply a process to each element in an array.
+
+    Applies a process to each individual value in the array. This is basically
+    what other languages call either a `for each` loop or a `map` function.
+
+    Args:
+        data: An array to process
+        process: A process that accepts and returns a single value. The process
+                 receives the following parameters:
+                 - x: The value of the current element (any data type)
+                 - index: The zero-based index of the element (integer)
+                 - label: The label of the element (only for labeled arrays, optional)
+                 - context: Additional data passed by the user (optional)
+        context: Additional data to be passed to the process
+
+    Returns:
+        An array with the newly computed values. The number of elements is the
+        same as for the original array.
+    """
+    # Convert input to numpy array if needed
+    arr = numpy.asarray(data)
+
+    # Get array dimensions
+    if arr.ndim == 0:
+        # Handle scalar case - convert to 1D array with single element
+        arr = numpy.array([arr.item()])
+
+    # Flatten the array to process each element individually
+    original_shape = arr.shape
+    flat_arr = arr.flatten()
+
+    # Process each element
+    result_list: List[Any] = []
+
+    for index, value in enumerate(flat_arr):
+        # Set up parameters for the process
+        positional_parameters = {
+            "x": 0,
+            "index": 1,
+        }
+        named_parameters = {
+            "x": value,
+            "index": index,
+            "context": context,
+        }
+
+        # Check if the array has labels (for labeled arrays)
+        # Note: In the current implementation, labeled arrays would be dicts,
+        # but when passed through numpy operations they may not preserve labels
+        # This is a limitation of the current architecture
+        label = None
+        if hasattr(data, "get") and isinstance(data, dict):
+            # If data is a dict (labeled array), find the label for this index
+            items = list(data.items())
+            if index < len(items):
+                label = items[index][0]
+                named_parameters["label"] = label
+        else:
+            # For regular arrays, label is None
+            named_parameters["label"] = None
+
+        # Call the process with the current value
+        processed_value = process(
+            value,
+            positional_parameters=positional_parameters,
+            named_parameters=named_parameters,
+        )
+        result_list.append(processed_value)
+
+    # Convert result back to array
+    result_arr = numpy.array(result_list)
+
+    # Reshape result to match original shape if it wasn't a 1D array
+    if len(original_shape) > 1 and result_arr.size > 0:
+        try:
+            result_arr = result_arr.reshape(original_shape)
+        except ValueError:
+            # If reshape fails, keep the flattened result
+            pass
+
+    return result_arr
