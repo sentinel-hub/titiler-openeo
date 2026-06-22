@@ -63,10 +63,10 @@ The chart (`deployment/k8s/charts/values.yaml`) ships safe defaults:
 
 ```yaml
 env:
-  GDAL_CACHEMAX: 200                  # 200 MB, process-global
+  GDAL_CACHEMAX: "200"                # 200 MB, process-global
   VSI_CACHE: "TRUE"
-  VSI_CACHE_SIZE: 5000000             # 5 MB PER HANDLE
-  CPL_VSIL_CURL_CACHE_SIZE: 67108864  # 64 MB, pinned
+  VSI_CACHE_SIZE: "5000000"           # 5 MB PER HANDLE
+  CPL_VSIL_CURL_CACHE_SIZE: "67108864"  # 64 MB, pinned
 ```
 
 Rules of thumb:
