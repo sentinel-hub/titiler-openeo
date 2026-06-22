@@ -1,0 +1,39 @@
+suite: native cache budget guard
+# Tripwire for EPIC #305 subtask 6: the GDAL/VSI native (off-heap) caches must
+# stay at their bounded defaults. If someone bumps one (e.g. pastes a dev
+# VSI_CACHE_SIZE of 512 MB), these assertions fail and force a conscious review
+# against the memory budget. See docs/src/memory-tuning.md.
+templates:
+  - deployment.yaml
+tests:
+  - it: VSI_CACHE_SIZE stays small (per-file-handle; never the dev 512 MB)
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: VSI_CACHE_SIZE
+            value: "5000000"
+
+  - it: GDAL_CACHEMAX stays bounded (process-global, × WEB_CONCURRENCY)
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GDAL_CACHEMAX
+            value: "200"
+
+  - it: CPL_VSIL_CURL_CACHE_SIZE is pinned (not left to drift)
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CPL_VSIL_CURL_CACHE_SIZE
+            value: "67108864"
+
+  - it: VSI cache is enabled
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: VSI_CACHE
+            value: "TRUE"

@@ -87,11 +87,31 @@ auth:
 stac:
   apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
 
+# GDAL/VSI native (off-heap) caches. These live OUTSIDE the Python heap and are
+# NOT freed by gc, so they add on top of per-request working memory and must fit
+# under resources.limits.memory. Keep them small and explicit. See the sizing
+# guide: docs/src/memory-tuning.md (and the audit in docs/audits/).
+#
+# Rough native budget per pod:
+#   WEB_CONCURRENCY * (GDAL_CACHEMAX + CPL_VSIL_CURL_CACHE_SIZE)   # process-global
+#   + (concurrently open file handles) * VSI_CACHE_SIZE           # PER-handle!
+# Keep this comfortably below resources.limits.memory, leaving room for the
+# Python heap (the process-graph cubes).
 env:
   CPL_TMPDIR: /tmp
-  GDAL_CACHEMAX: 200   # 200 mb
-  VSI_CACHE: "TRUE"   # Enable VSI cache
-  VSI_CACHE_SIZE: 5000000   # 5 MB (per file-handle)
+  # Process-global block cache. Values <100000 are MB, else bytes -> 200 MB here.
+  # Multiplies by WEB_CONCURRENCY (one cache per worker process).
+  GDAL_CACHEMAX: "200"
+  VSI_CACHE: "TRUE"
+  # PER FILE-HANDLE in-memory cache: total ≈ this × number of concurrently open
+  # files (≈ items × bands × read threads). Keep it small. The dev .env profiles
+  # use 512 MB here for single-user local runs — NEVER ship that to a pod.
+  # NOTE: quote large numbers — unquoted, Helm renders 5000000 as "5e+06", which
+  # GDAL parses as 5 (stops at 'e'), silently disabling the VSI cache.
+  VSI_CACHE_SIZE: "5000000"   # 5 MB per handle
+  # Process-global LRU for /vsicurl chunk reads. Pinned (GDAL defaults to 16 MB)
+  # so it can't drift; raise for read-heavy workloads only if the budget allows.
+  CPL_VSIL_CURL_CACHE_SIZE: "67108864"   # 64 MB
   GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"   # Disable directory listing
   GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"   # Merge consecutive ranges
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
