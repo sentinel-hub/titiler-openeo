@@ -6,6 +6,8 @@ compares end-of-graph retained bytes with eviction off vs on. This is the
 regression guard for EPIC #305 subtask 4 (results_cache eviction).
 """
 
+import gc
+import weakref
 from datetime import datetime
 
 import numpy
@@ -134,3 +136,95 @@ def test_eviction_frees_intermediates(registered_load, monkeypatch):
     # be well under that (only the small final result may linger).
     one_cube = N * 2 * H * W * 3
     assert on_bytes < one_cube
+
+
+_PG_LINEAR = {
+    "process_graph": {
+        "load": {"process_id": "load_collection", "arguments": {"id": "x"}},
+        "ndvi": {
+            "process_id": "ndvi",
+            "arguments": {"data": {"from_node": "load"}, "nir": 2, "red": 1},
+        },
+        "save": {
+            "process_id": "save_result",
+            "arguments": {"data": {"from_node": "ndvi"}, "format": "GTIFF"},
+            "result": True,
+        },
+    }
+}
+
+
+def _run_tracking_workflow(evict: bool, monkeypatch):
+    """Run load -> ndvi -> save tracking weakrefs to the source ImageData.
+
+    Returns the count still alive after the run while the graph (and thus
+    ``graph.workflow``, which holds the engine's *second* reference to every
+    result) is kept alive but the results_cache is dropped.
+    """
+    refs = []
+
+    def tracking_load(id=None, named_parameters=None, **kwargs):
+        def make(_i):
+            def task():
+                arr = numpy.ma.MaskedArray(
+                    numpy.random.randint(1, 10000, (2, H, W)).astype("uint16"),
+                    mask=numpy.zeros((2, H, W), dtype=bool),
+                )
+                img = ImageData(arr, bounds=(0, 0, 1, 1))
+                refs.append(weakref.ref(img))
+                return img
+
+            return task
+
+        tasks = [(make(i), {"datetime": datetime(2020, 1, 1 + i)}) for i in range(N)]
+        return RasterStack(
+            tasks=tasks,
+            timestamp_fn=lambda a: a["datetime"],
+            allowed_exceptions=(),
+            width=W,
+            height=H,
+            bounds=(0, 0, 1, 1),
+            band_names=["b1", "b2"],
+        )
+
+    sentinel = object()
+    try:
+        previous = process_registry["load_collection"]
+    except Exception:
+        previous = sentinel
+    process_registry["load_collection"] = Process(
+        spec=PROCESS_SPECIFICATIONS["load_collection"], implementation=tracking_load
+    )
+    try:
+        monkeypatch.setenv(
+            "TITILER_OPENEO_PROCESSING_EVICT_INTERMEDIATE_RESULTS",
+            "true" if evict else "false",
+        )
+        graph = OpenEOProcessGraph(pg_data=_PG_LINEAR)
+        cache = rc.make_results_cache(graph)
+        fn = graph.to_callable(process_registry=process_registry, results_cache=cache)
+        fn(named_parameters={})
+        # Drop the cache/callable but KEEP `graph` alive: graph.workflow still
+        # holds the second reference to each result (audit finding #2).
+        del cache, fn
+        gc.collect()
+        alive = sum(1 for r in refs if r() is not None)
+        del graph
+        return alive
+    finally:
+        if previous is sentinel:
+            del process_registry["load_collection"]
+        else:
+            process_registry["load_collection"] = previous
+
+
+def test_eviction_defeats_workflow_double_retention(monkeypatch):
+    """finding #2: the engine also stores each result on ``self.workflow``.
+
+    Eviction must still free the cube, because release() empties the RasterStack
+    in place rather than just dropping the results_cache reference.
+    """
+    # Without eviction, workflow alone keeps every source cube alive.
+    assert _run_tracking_workflow(False, monkeypatch) == N
+    # With eviction, the cubes are freed despite workflow holding the shells.
+    assert _run_tracking_workflow(True, monkeypatch) == 0

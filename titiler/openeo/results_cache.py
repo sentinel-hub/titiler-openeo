@@ -10,6 +10,14 @@ except it drops a node's heavy data as soon as the graph topology proves every
 consumer of that node has run. Because we only free *after* the last consumer,
 nothing ever re-reads an evicted result — there are no re-fetches.
 
+Note we free by calling ``RasterStack.release()``, which empties the stack's
+cache *in place*, rather than by dropping the ``results_cache`` reference. That
+also defeats the engine's *second* retention path (finding #2): it keeps a copy
+of every result on ``self.workflow`` (``results_cache_node._info = result``), so
+merely deleting our ``results_cache`` entry would not free anything. Mutating the
+shared object frees the cube no matter how many references point at the shell.
+This is why subtask 5 (results_cache/workflow pruning) needs no separate fix.
+
 Safety rules baked in:
 
 * **Free only when fully consumed.** We count, per node, how many distinct
