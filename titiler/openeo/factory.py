@@ -24,6 +24,7 @@ from .errors import InvalidProcessGraph
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
+from .profiling import new_results_cache, profile_graph, report_retention
 from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
 
@@ -1312,11 +1313,15 @@ class EndpointsFactory(BaseFactory):
                         parameters[param_name] = default_value
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
+            results_cache = new_results_cache()
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
                 parameters=process.get("parameters"),
+                results_cache=results_cache,
             )
-            result = pg_callable(named_parameters=parameters)
+            with profile_graph("POST /result"):
+                result = pg_callable(named_parameters=parameters)
+            report_retention(results_cache, "POST /result")
 
             media_type = result.media_type if hasattr(result, "media_type") else None
             if not media_type and isinstance(result, str):
@@ -1458,11 +1463,15 @@ class EndpointsFactory(BaseFactory):
             media_type = self._get_media_type(process["process_graph"])
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
+            results_cache = new_results_cache()
             pg_callable = parsed_graph.to_callable(
                 process_registry=self.process_registry,
                 parameters=process.get("parameters"),
+                results_cache=results_cache,
                 # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
-            img = pg_callable(named_parameters=parameters)
+            with profile_graph(f"GET tiles/{z}/{x}/{y}"):
+                img = pg_callable(named_parameters=parameters)
+            report_retention(results_cache, f"GET tiles/{z}/{x}/{y}")
             return Response(img.data, media_type=media_type)

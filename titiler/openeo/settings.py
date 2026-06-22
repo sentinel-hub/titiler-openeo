@@ -258,3 +258,30 @@ class CacheSettings(BaseSettings):
             self.maxsize = 0
 
         return self
+
+
+class ProfilingSettings(BaseSettings):
+    """Optional memory-profiling harness settings.
+
+    Everything here is OFF by default and is meant for local/debug runs only —
+    NEVER enable it in production. ``tracemalloc`` roughly doubles allocation
+    cost, and the per-node hooks plus the process-global RSS/heap sampling are
+    not concurrency-safe (they assume one graph evaluating at a time). See
+    ``docs/audits/memory-profiling.md`` and EPIC #305 (subtask 1).
+    """
+
+    # Master switch: per-node tracemalloc heap deltas + RSS/heap split logging
+    # around process-graph evaluation.
+    memory: bool = False
+
+    # Also dump objgraph back-references for a sample retained array at the end
+    # of a graph. Requires the optional ``objgraph`` package; output is written
+    # under ``memory_backrefs_dir``.
+    memory_backrefs: bool = False
+    memory_backrefs_dir: str = "/tmp"  # noqa: S108
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_PROFILING_",
+        env_file=".env",
+        extra="ignore",
+    )

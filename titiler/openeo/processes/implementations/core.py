@@ -40,6 +40,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterMissing
+from ...profiling import profile_node
 from .data_model import RasterStack
 
 # Union of all GeoJSON types for validation
@@ -637,6 +638,9 @@ def process(f):
 
         logger.debug(f"Running {f.__name__} with: {list(resolved_kwargs.keys())}")
 
-        return f(**resolved_kwargs)
+        # Per-node memory profiling (no-op unless TITILER_OPENEO_PROFILING_MEMORY
+        # is set). Lets us attribute heap growth to individual graph nodes.
+        with profile_node(f.__name__):
+            return f(**resolved_kwargs)
 
     return wrapper
