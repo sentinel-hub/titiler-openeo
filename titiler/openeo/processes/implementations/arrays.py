@@ -15,6 +15,7 @@ from .reduce import _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
+    "array_apply",
     "to_image",
     "array_create",
     "create_data_cube",
@@ -419,3 +420,63 @@ def merge_cubes(
             )
 
     return RasterStack.from_images(merged_images)
+
+
+@process
+def array_apply(
+    data: ArrayLike,
+    process: Callable,
+    context: Optional[Any] = None,
+) -> ArrayLike:
+    """Apply a process to each element in an array.
+
+    Applies a process to each individual value in the array. This is basically
+    what other languages call either a `for each` loop or a `map` function.
+
+    Args:
+        data: An array to process
+        process: A process that accepts and returns a single value. The process
+                 receives the following parameters:
+                 - x: The value of the current element (any data type)
+                 - index: The zero-based index of the element (integer)
+                 - label: The label of the element (only for labeled arrays, optional)
+                 - context: Additional data passed by the user (optional)
+        context: Additional data to be passed to the process
+
+    Returns:
+        An array with the newly computed values. The number of elements is the
+        same as for the original array.
+    """
+    # Convert input to numpy array if needed
+    arr = numpy.asarray(data)
+
+    # Handle scalar case
+    if arr.ndim == 0:
+        arr = numpy.array([arr.item()])
+
+    # Process each element along the first dimension
+    result_list: List[Any] = []
+
+    for index, value in enumerate(arr):
+        # Set up parameters for the process
+        # Only 'x' is passed as positional parameter (position 0)
+        positional_parameters = {"x": 0}
+        named_parameters = {
+            "x": value,
+            "index": index,
+            "label": None,
+            "context": context,
+        }
+
+        # Call the process with the current value
+        processed_value = process(
+            value,
+            positional_parameters=positional_parameters,
+            named_parameters=named_parameters,
+        )
+        result_list.append(processed_value)
+
+    # Convert result back to array
+    result_arr = numpy.array(result_list)
+
+    return result_arr
