@@ -27,6 +27,7 @@ from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
+from .profiling import profile_graph, report_retention
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
@@ -1586,7 +1587,9 @@ class EndpointsFactory(BaseFactory):
                 parameters=process.get("parameters"),
                 results_cache=results_cache,
             )
-            result = pg_callable(named_parameters=parameters)
+            with profile_graph("POST /result"):
+                result = pg_callable(named_parameters=parameters)
+            report_retention(results_cache, "POST /result")
 
             media_type = result.media_type if hasattr(result, "media_type") else None
             if not media_type and isinstance(result, str):
@@ -1761,10 +1764,12 @@ class EndpointsFactory(BaseFactory):
             )
 
             try:
-                img = pg_callable(named_parameters=parameters)
+                with profile_graph(f"GET tiles/{z}/{x}/{y}"):
+                    img = pg_callable(named_parameters=parameters)
             except NoDataAvailable as e:
                 if error_headers:
                     e.headers = error_headers  # type: ignore[attr-defined]
                 raise
+            report_retention(results_cache, f"GET tiles/{z}/{x}/{y}")
 
             return Response(img.data, media_type=media_type, headers=tile_headers)
