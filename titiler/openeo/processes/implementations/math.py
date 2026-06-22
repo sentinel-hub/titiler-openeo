@@ -10,17 +10,30 @@ from .reduce import apply_pixel_selection
 
 
 def _promote(a):
-    """Promote an integer/bool array to float32; leave floats and scalars as-is.
+    """Promote integer/boolean inputs to float32; leave everything else as-is.
 
     numpy resolves integer inputs to float64 for division and transcendental
     functions. For raster math that produces an index/derived cube, float32 is
     ample and halves the result. Source rasters stay at their compact integer
     dtype (we only convert at the point of a float-producing op), and existing
     floating inputs keep their precision. Masks are preserved by ``astype``.
+
+    Only integer/boolean dtypes are converted — other dtypes (float, complex,
+    datetime, object) are left untouched. Python ``int``/``bool`` scalars are
+    promoted too, so a scalar operand (e.g. ``log(x, base=10)``) doesn't pull the
+    result back to float64.
     """
     dtype = getattr(a, "dtype", None)
-    if dtype is not None and not numpy.issubdtype(dtype, numpy.floating):
-        return a.astype("float32")
+    if dtype is not None:
+        if numpy.issubdtype(dtype, numpy.integer) or numpy.issubdtype(
+            dtype, numpy.bool_
+        ):
+            return a.astype("float32")
+        return a
+    # Python scalars: promote int (incl. bool); leave float/other untouched so
+    # they don't upcast a float32 array.
+    if isinstance(a, int):
+        return numpy.float32(a)
     return a
 
 

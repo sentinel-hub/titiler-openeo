@@ -7,6 +7,7 @@ from titiler.openeo.processes.implementations.math import (
     divide,
     linear_scale_range,
     ln,
+    log,
     normalized_difference,
     sqrt,
 )
@@ -54,6 +55,24 @@ def test_linear_scale_range_integer_input_returns_float32():
 def test_transcendental_integer_input_returns_float32():
     assert sqrt(numpy.array([4, 9], dtype="uint16")).dtype == numpy.float32
     assert ln(numpy.array([1, 2], dtype="int32")).dtype == numpy.float32
+
+
+def test_log_with_integer_base_scalar_stays_float32():
+    """A Python int `base` must not pull the result back to float64."""
+    out = log(numpy.array([100, 1000], dtype="uint16"), base=10)
+    assert out.dtype == numpy.float32
+    assert numpy.allclose(out, [2.0, 3.0])
+
+
+def test_non_numeric_dtypes_are_left_untouched():
+    """Only integer/bool arrays are promoted; other dtypes pass through."""
+    dt = numpy.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
+    from titiler.openeo.processes.implementations.math import _promote
+
+    assert _promote(dt).dtype == dt.dtype  # datetime64 untouched
+    f64 = numpy.array([1.0, 2.0], dtype="float64")
+    assert _promote(f64).dtype == numpy.float64  # float64 not downcast
+    assert _promote(numpy.array([1, 2], dtype="uint16")).dtype == numpy.float32
 
 
 def test_float64_inputs_are_not_downcast():
