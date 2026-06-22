@@ -5,6 +5,8 @@ it is safe to call them is the job of the reference-counted results cache (see
 tests/test_results_cache.py).
 """
 
+import gc
+import weakref
 from datetime import datetime
 
 import numpy
@@ -85,3 +87,24 @@ def test_clear_evicts_all():
     assert stack._data_cache == {}
     # The underlying ImageData object survives if referenced elsewhere.
     assert img is not None
+
+
+def test_filter_keys_release_frees_underlying_image():
+    """A filter_keys subset must not pin its slices via a task closure.
+
+    filter_keys caches preserved images on the ImageRef (`_image`), not in a
+    closure, so releasing the subset (and its source) lets the array be collected.
+    """
+    stack, _ = _regenerable_stack(n=1)
+    key = stack.timestamps()[0]
+    img = stack[key]  # realize into the source cache
+    ref = weakref.ref(img)
+
+    child = stack.filter_keys([key])  # carries the image into the subset
+    assert child.first is img  # served without recompute
+    del img
+
+    stack.release()
+    child.release()
+    gc.collect()
+    assert ref() is None  # no lingering closure keeps the array alive

@@ -39,20 +39,6 @@ from rio_tiler.types import BBox
 T = TypeVar("T")
 
 
-def _cached_image_task(image: ImageData) -> Callable[[], ImageData]:
-    """Build a task function that returns an already-loaded ImageData.
-
-    Used to back a lazy ImageRef with cached data: ``realize()`` returns the
-    cached image without re-executing work, while the ImageRef keeps its
-    geometry so ``cutline_mask()`` is still computed from the footprint.
-    """
-
-    def _task() -> ImageData:
-        return image
-
-    return _task
-
-
 def compute_cutline_mask(
     geometry: Union[Dict[str, Any], List[Dict[str, Any]]],
     width: int,
@@ -178,17 +164,13 @@ class ImageRef:
     def cutline_mask(self) -> Optional[np.ndarray]:
         """Compute or return the cutline mask.
 
-        For unrealized refs with geometry: computes from geometry (no data load).
-        For realized refs: returns the image's cutline_mask attribute.
-        For refs without geometry and unrealized: returns None.
-
-        The result is cached for subsequent calls.
+        Prefers the footprint geometry (the source of truth) when available, so a
+        ref that caches a realized image (e.g. a ``filter_keys`` subset) still
+        reports the geometry-based cutline rather than the image's own mask. Falls
+        back to the realized image's ``cutline_mask`` when there is no geometry,
+        and to None otherwise. The geometry result is cached.
         """
-        # If already realized, use the image's cutline mask
-        if self._image is not None:
-            return self._image.cutline_mask
-
-        # If we have geometry, compute from it (lazy path)
+        # Prefer geometry (no data load, independent of whether the image is cached)
         if self._geometry is not None:
             if self._cutline_mask_cache is None:
                 self._cutline_mask_cache = compute_cutline_mask(
@@ -199,6 +181,10 @@ class ImageRef:
                     dst_crs=self._crs,
                 )
             return self._cutline_mask_cache
+
+        # No geometry: fall back to the realized image's cutline mask
+        if self._image is not None:
+            return self._image.cutline_mask
 
         return None
 
@@ -757,13 +743,14 @@ class RasterStack(Dict[datetime, ImageData]):
         if preserved:
             instance._data_cache.update(preserved)
 
-            # Keep geometry-based cutline masks (ImageRefs built from tasks/assets) but
-            # avoid re-executing work by overriding the task function to return the
-            # already-cached ImageData.
+            # Cache the already-computed image directly on each ImageRef (same as
+            # from_images), instead of wrapping it in a task closure. Storing it on
+            # `_image` keeps the ref's geometry/task while letting `release()` free
+            # the array — a closure over `img` would pin it past eviction.
             for k, img in preserved.items():
                 ref = instance._image_refs.get(k)
                 if ref is not None:
-                    ref._task_fn = _cached_image_task(img)
+                    ref._image = img
                 else:
                     instance._image_refs[k] = ImageRef.from_image(image=img)
 

@@ -5,8 +5,8 @@ When titiler-openeo evaluates a process graph it materializes raster cubes
 memory is kept close to the *working set* rather than the sum of every
 intermediate, and the knob that controls it.
 
-For the off-heap GDAL/VSI caches (a separate concern), see
-**Deployment → Memory Tuning & Native Caches**.
+This page is about the Python heap (the cubes). The off-heap GDAL/VSI caches are
+a separate concern, tuned via deployment configuration.
 
 ## The problem
 
