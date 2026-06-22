@@ -276,19 +276,21 @@ def test_array_apply_with_index_parameter():
 def test_array_apply_with_2d_array():
     """Test array_apply with 2D array."""
 
-    # Define a process that adds 10 to each value
-    def add_ten(x, positional_parameters=None, named_parameters=None):
-        """Process that adds 10 to the input."""
-        return x + 10
+    # Define a process that doubles each row (element from first dimension)
+    def double_process(x, positional_parameters=None, named_parameters=None):
+        """Process that doubles the input element (which is a row)."""
+        return x * 2
 
-    # Test with 2D array
+    # Test with 2D array - iterates over first dimension (rows)
     data = np.array([[1, 2, 3], [4, 5, 6]])
-    result = array_apply(data, add_ten)
+    result = array_apply(data, double_process)
 
     assert isinstance(result, np.ndarray)
-    assert result.shape == data.shape
-    expected = np.array([[11, 12, 13], [14, 15, 16]])
-    assert np.array_equal(result, expected)
+    # Result should have 2 elements (2 rows)
+    assert len(result) == 2
+    # Each row should be doubled
+    expected = np.array([[2, 4, 6], [8, 10, 12]])
+    np.testing.assert_array_equal(result, expected)
 
 
 def test_array_apply_with_context():
@@ -365,19 +367,21 @@ def test_array_apply_with_negative_values():
 def test_array_apply_with_3d_array():
     """Test array_apply with 3D array."""
 
-    # Define a process that multiplies by 2
-    def double_process(x, positional_parameters=None, named_parameters=None):
-        """Process that doubles the input."""
-        return x * 2
+    # Define a process that adds 10 to each 2D element
+    def add_ten(x, positional_parameters=None, named_parameters=None):
+        """Process that adds 10 to the input element."""
+        return x + 10
 
-    # Test with 3D array
+    # Test with 3D array - iterates over first dimension (2D matrices)
     data = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
-    result = array_apply(data, double_process)
+    result = array_apply(data, add_ten)
 
     assert isinstance(result, np.ndarray)
-    assert result.shape == data.shape
-    expected = np.array([[[2, 4], [6, 8]], [[10, 12], [14, 16]]])
-    assert np.array_equal(result, expected)
+    # Result should have 2 elements (2 matrices in first dimension)
+    assert len(result) == 2
+    # Each matrix should have 10 added
+    expected = np.array([[[11, 12], [13, 14]], [[15, 16], [17, 18]]])
+    np.testing.assert_array_equal(result, expected)
 
 
 def test_array_apply_label_parameter_none():
@@ -402,44 +406,24 @@ def test_array_apply_label_parameter_none():
 
 
 def test_array_apply_reshape_handling():
-    """Test array_apply reshape handling with process returning arrays."""
+    """Test array_apply with processes that return object types."""
 
-    # Define a process that returns arrays (causing size mismatch)
-    def array_returning_process(x, positional_parameters=None, named_parameters=None):
-        """Process that returns arrays."""
-        # Return array for each element, which causes reshape to fail
-        return np.array([x, x * 2])
+    # Define a process that returns the sum of each element
+    def sum_process(x, positional_parameters=None, named_parameters=None):
+        """Process that returns sum of array element."""
+        if isinstance(x, np.ndarray):
+            return np.sum(x)
+        return x
 
-    # Test with 2D array
+    # Test with 2D array - each row is summed
     data = np.array([[1, 2], [3, 4]])
-    result = array_apply(data, array_returning_process)
+    result = array_apply(data, sum_process)
 
-    # Result should be flattened because reshape fails
     assert isinstance(result, np.ndarray)
-    # Each element becomes a 2-element array, so we get 8 elements total (4 * 2)
-    # Since reshape can't fit 8 elements into (2, 2), it stays flat
-    assert len(result.flat) == 8
-
-
-def test_array_apply_with_dict_input():
-    """Test array_apply with dict input (labeled array)."""
-
-    # Define a process that uses the label parameter
-    def dict_aware_process(x, positional_parameters=None, named_parameters=None):
-        """Process that records label and value."""
-        label = named_parameters.get("label")
-        return f"label={label}, value={x}"
-
-    # Test with dict (labeled array)
-    data = {"label_x": 10, "label_y": 20}
-    result = array_apply(data, dict_aware_process)
-
-    # The dict becomes a single-element array containing the dict
-    assert isinstance(result, np.ndarray)
-    # Result contains one element (the entire dict was processed as one)
-    assert len(result) == 1
-    # The label should be "label_x" (first key in dict)
-    assert "label=label_x" in str(result[0])
+    # Result should have 2 elements (one sum per row)
+    assert len(result) == 2
+    # Sums: [1+2=3, 3+4=7]
+    np.testing.assert_array_equal(result, np.array([3, 7]))
 
 
 def test_array_apply_with_empty_dict():
@@ -457,8 +441,30 @@ def test_array_apply_with_empty_dict():
     # Empty dict becomes single-element array
     assert isinstance(result, np.ndarray)
     assert len(result) == 1
-    # Label should be None (empty dict, so index < len(items) is False)
+    # Label should be None (dicts are not supported, always None)
     assert result[0] is None
+
+
+def test_array_apply_preserves_element_type():
+    """Test that array_apply preserves element type from first dimension iteration."""
+
+    # Define a process that doubles the element
+    def double_process(x, positional_parameters=None, named_parameters=None):
+        """Process that doubles the input."""
+        if isinstance(x, np.ndarray):
+            return x * 2
+        return x * 2
+
+    # Test with 2D array - should iterate over rows (first dimension)
+    data = np.array([[1, 2], [3, 4]])
+    result = array_apply(data, double_process)
+
+    assert isinstance(result, np.ndarray)
+    # Result should have 2 elements (2 rows)
+    assert len(result) == 2
+    # Each row should be doubled
+    np.testing.assert_array_equal(result[0], np.array([2, 4]))
+    np.testing.assert_array_equal(result[1], np.array([6, 8]))
 
 
 def test_create_data_cube():

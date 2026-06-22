@@ -450,44 +450,23 @@ def array_apply(
     # Convert input to numpy array if needed
     arr = numpy.asarray(data)
 
-    # Get array dimensions
+    # Handle scalar case
     if arr.ndim == 0:
-        # Handle scalar case - convert to 1D array with single element
         arr = numpy.array([arr.item()])
 
-    # Flatten the array to process each element individually
-    original_shape = arr.shape
-    flat_arr = arr.flatten()
-
-    # Process each element
+    # Process each element along the first dimension
     result_list: List[Any] = []
 
-    for index, value in enumerate(flat_arr):
+    for index, value in enumerate(arr):
         # Set up parameters for the process
-        positional_parameters = {
-            "x": 0,
-            "index": 1,
-        }
+        # Only 'x' is passed as positional parameter (position 0)
+        positional_parameters = {"x": 0}
         named_parameters = {
             "x": value,
             "index": index,
+            "label": None,
             "context": context,
         }
-
-        # Check if the array has labels (for labeled arrays)
-        # Note: In the current implementation, labeled arrays would be dicts,
-        # but when passed through numpy operations they may not preserve labels
-        # This is a limitation of the current architecture
-        label = None
-        if hasattr(data, "get") and isinstance(data, dict):
-            # If data is a dict (labeled array), find the label for this index
-            items = list(data.items())
-            if index < len(items):
-                label = items[index][0]
-                named_parameters["label"] = label
-        else:
-            # For regular arrays, label is None
-            named_parameters["label"] = None
 
         # Call the process with the current value
         processed_value = process(
@@ -499,13 +478,5 @@ def array_apply(
 
     # Convert result back to array
     result_arr = numpy.array(result_list)
-
-    # Reshape result to match original shape if it wasn't a 1D array
-    if len(original_shape) > 1 and result_arr.size > 0:
-        try:
-            result_arr = result_arr.reshape(original_shape)
-        except ValueError:
-            # If reshape fails, keep the flattened result
-            pass
 
     return result_arr
