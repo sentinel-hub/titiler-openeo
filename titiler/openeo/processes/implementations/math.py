@@ -311,6 +311,30 @@ def count(data, condition=None):
 
 
 def normalized_difference(x, y):
+    """Normalized difference ``(x - y) / (x + y)``.
+
+    Integer inputs are promoted to float32 *before* the arithmetic. This serves
+    two purposes (see ``docs/audits/memory-oom-audit.md`` finding #4):
+
+    * Correctness: with the common uint16 reflectance inputs, evaluating
+      ``x - y`` and ``x + y`` in integer space underflows/overflows (uint16
+      wraps around) before the division. Promoting first makes both safe.
+    * Memory: the result drives a per-slice index cube retained for the whole
+      process graph. float32 — ample for an index bounded in [-1, 1] — halves
+      that cube versus numpy's default float64 promotion of integer division.
+
+    Floating-point inputs keep their own dtype (we never downcast float64 ->
+    float32). Masked arrays keep their mask through ``astype``.
+    """
+
+    def _promote(a):
+        dtype = getattr(a, "dtype", None)
+        if dtype is not None and not numpy.issubdtype(dtype, numpy.floating):
+            return a.astype("float32")
+        return a
+
+    x = _promote(x)
+    y = _promote(y)
     return (x - y) / (x + y)
 
 
