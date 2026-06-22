@@ -34,4 +34,4 @@ repos:
       - id: markdownlint
         files: \.(md|mkd|markdown)$
         args: ["--fix"]
-        exclude: (^|/)(CHANGES|RELEASE|CHANGELOG)\.md$
+        exclude: (^|/)(CHANGES|RELEASE|CHANGELOG)\.md$|^docs/audits/
