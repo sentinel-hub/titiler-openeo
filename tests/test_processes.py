@@ -327,6 +327,140 @@ def test_array_apply_with_float_array():
     np.testing.assert_array_almost_equal(result, expected)
 
 
+def test_array_apply_with_scalar():
+    """Test array_apply with scalar input (ndim == 0)."""
+
+    # Define a process that squares the value
+    def square_process(x, positional_parameters=None, named_parameters=None):
+        """Process that squares the input."""
+        return x * x
+
+    # Test with scalar (numpy scalar, ndim=0)
+    data = np.array(5)
+    result = array_apply(data, square_process)
+
+    assert isinstance(result, np.ndarray)
+    # Scalar converted to 1D array with single element
+    assert result.shape == (1,)
+    assert result[0] == 25
+
+
+def test_array_apply_with_negative_values():
+    """Test array_apply with negative values."""
+
+    # Define a process that computes absolute value
+    def abs_process(x, positional_parameters=None, named_parameters=None):
+        """Process that computes absolute value."""
+        return abs(x)
+
+    # Test with array containing negative values
+    data = np.array([-5, -3, 0, 3, 5])
+    result = array_apply(data, abs_process)
+
+    assert isinstance(result, np.ndarray)
+    expected = np.array([5, 3, 0, 3, 5])
+    assert np.array_equal(result, expected)
+
+
+def test_array_apply_with_3d_array():
+    """Test array_apply with 3D array."""
+
+    # Define a process that multiplies by 2
+    def double_process(x, positional_parameters=None, named_parameters=None):
+        """Process that doubles the input."""
+        return x * 2
+
+    # Test with 3D array
+    data = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    result = array_apply(data, double_process)
+
+    assert isinstance(result, np.ndarray)
+    assert result.shape == data.shape
+    expected = np.array([[[2, 4], [6, 8]], [[10, 12], [14, 16]]])
+    assert np.array_equal(result, expected)
+
+
+def test_array_apply_label_parameter_none():
+    """Test that label parameter is None for non-dict arrays."""
+    # Define a process that checks if label is None
+    labels_received = []
+
+    def label_check_process(x, positional_parameters=None, named_parameters=None):
+        """Process that records the label parameter."""
+        label = named_parameters.get("label")
+        labels_received.append(label)
+        return x
+
+    # Test with regular array (non-dict)
+    data = np.array([1, 2, 3])
+    result = array_apply(data, label_check_process)
+
+    assert isinstance(result, np.ndarray)
+    # All labels should be None for regular arrays
+    assert all(label is None for label in labels_received)
+    assert len(labels_received) == 3
+
+
+def test_array_apply_reshape_handling():
+    """Test array_apply reshape handling with process returning arrays."""
+
+    # Define a process that returns arrays (causing size mismatch)
+    def array_returning_process(x, positional_parameters=None, named_parameters=None):
+        """Process that returns arrays."""
+        # Return array for each element, which causes reshape to fail
+        return np.array([x, x * 2])
+
+    # Test with 2D array
+    data = np.array([[1, 2], [3, 4]])
+    result = array_apply(data, array_returning_process)
+
+    # Result should be flattened because reshape fails
+    assert isinstance(result, np.ndarray)
+    # Each element becomes a 2-element array, so we get 8 elements total (4 * 2)
+    # Since reshape can't fit 8 elements into (2, 2), it stays flat
+    assert len(result.flat) == 8
+
+
+def test_array_apply_with_dict_input():
+    """Test array_apply with dict input (labeled array)."""
+
+    # Define a process that uses the label parameter
+    def dict_aware_process(x, positional_parameters=None, named_parameters=None):
+        """Process that records label and value."""
+        label = named_parameters.get("label")
+        return f"label={label}, value={x}"
+
+    # Test with dict (labeled array)
+    data = {"label_x": 10, "label_y": 20}
+    result = array_apply(data, dict_aware_process)
+
+    # The dict becomes a single-element array containing the dict
+    assert isinstance(result, np.ndarray)
+    # Result contains one element (the entire dict was processed as one)
+    assert len(result) == 1
+    # The label should be "label_x" (first key in dict)
+    assert "label=label_x" in str(result[0])
+
+
+def test_array_apply_with_empty_dict():
+    """Test array_apply with empty dict (edge case for branch coverage)."""
+
+    # Define a process that records label
+    def record_label_process(x, positional_parameters=None, named_parameters=None):
+        """Process that records label."""
+        return named_parameters.get("label")
+
+    # Test with empty dict
+    data = {}
+    result = array_apply(data, record_label_process)
+
+    # Empty dict becomes single-element array
+    assert isinstance(result, np.ndarray)
+    assert len(result) == 1
+    # Label should be None (empty dict, so index < len(items) is False)
+    assert result[0] is None
+
+
 def test_create_data_cube():
     """Test create_data_cube function."""
     result = create_data_cube()
