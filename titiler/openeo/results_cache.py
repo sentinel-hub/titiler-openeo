@@ -23,6 +23,14 @@ Safety rules baked in:
   force-recomputes nodes that feed ``aggregate_spatial`` /
   ``aggregate_temporal_period``, which re-reads their inputs. If a graph contains
   any such node we disable eviction entirely and behave as a plain dict.
+
+  Note this is keyed on the *upstream library's* hardcoded list, not on titiler's
+  registered processes. ``aggregate_temporal_period`` isn't even a titiler
+  process, so in practice only ``aggregate_spatial`` ever trips the fallback. In
+  particular, plain ``aggregate_temporal`` (e.g. issue #300) is NOT a trigger and
+  stays eligible for eviction: it loops over its intervals internally within a
+  single node execution, so the engine reads its input once and we only free that
+  input after the node returns.
 """
 
 import logging
@@ -33,8 +41,12 @@ from openeo_pg_parser_networkx.graph import OpenEOProcessGraph, PGEdgeType
 logger = logging.getLogger(__name__)
 
 # Processes whose presence makes the engine re-execute (and thus re-read) upstream
-# nodes. Kept in sync with openeo_pg_parser_networkx's internal special-case; if
-# the library changes this list, the worst case is that we keep more in memory
+# nodes. This mirrors openeo_pg_parser_networkx's internal special-case verbatim
+# (matched by process_id), NOT titiler's registered processes — `aggregate_temporal_period`
+# is kept only to stay in lockstep with the library and never appears in a real
+# titiler graph, so `aggregate_spatial` is the only practical trigger. Plain
+# `aggregate_temporal` is intentionally absent (safe to evict; see module docstring).
+# If the library changes this list, the worst case is that we keep more in memory
 # (when we should disable) — never that we free something still needed, because
 # the per-object reachability guard in `_maybe_release` is independent of it.
 _RECOMPUTE_PROCESSES = frozenset({"aggregate_spatial", "aggregate_temporal_period"})
