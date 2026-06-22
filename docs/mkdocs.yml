@@ -38,6 +38,7 @@ nav:
   - Architecture:
     - Concepts: "concepts.md"
     - RasterStack Data Model: "raster-stack.md"
+    - Memory Management: "memory-management.md"
     - Special Features:
       - Parameter Management: "parameter-management.md"
       - Service Authorization: "authorization.md"
