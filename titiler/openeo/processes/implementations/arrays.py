@@ -1,11 +1,13 @@
 """titiler.processes.implementations arrays."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy
 from numpy.typing import ArrayLike
+from rio_tiler.constants import MAX_THREADS
 from rio_tiler.models import ImageData
 
 from ...errors import OpenEOException
@@ -427,11 +429,19 @@ def array_apply(
     data: ArrayLike,
     process: Callable,
     context: Optional[Any] = None,
+    max_workers: int = MAX_THREADS,
 ) -> ArrayLike:
     """Apply a process to each element in an array.
 
     Applies a process to each individual value in the array. This is basically
     what other languages call either a `for each` loop or a `map` function.
+
+    Elements are processed concurrently with a thread pool: the per-element calls
+    are independent and numpy releases the GIL during array operations, so the
+    per-element work can overlap. Note that ``data`` is materialized up front via
+    ``numpy.asarray`` (a lazy view such as ``_LazyTemporalArray`` is realized at
+    that point), so the speedup comes from the concurrent ``process`` calls, not
+    from the realization. Result order is preserved.
 
     Args:
         data: An array to process
@@ -442,6 +452,7 @@ def array_apply(
                  - label: The label of the element (only for labeled arrays, optional)
                  - context: Additional data passed by the user (optional)
         context: Additional data to be passed to the process
+        max_workers: Maximum number of threads used to process elements concurrently
 
     Returns:
         An array with the newly computed values. The number of elements is the
@@ -454,10 +465,7 @@ def array_apply(
     if arr.ndim == 0:
         arr = numpy.array([arr.item()])
 
-    # Process each element along the first dimension
-    result_list: List[Any] = []
-
-    for index, value in enumerate(arr):
+    def _apply_one(index: int, value: Any) -> Any:
         # Set up parameters for the process
         # Only 'x' is passed as positional parameter (position 0)
         positional_parameters = {"x": 0}
@@ -467,14 +475,22 @@ def array_apply(
             "label": None,
             "context": context,
         }
-
-        # Call the process with the current value
-        processed_value = process(
+        return process(
             value,
             positional_parameters=positional_parameters,
             named_parameters=named_parameters,
         )
-        result_list.append(processed_value)
+
+    # Process each element along the first dimension
+    n = len(arr)
+    if n <= 1 or max_workers <= 1:
+        # Avoid thread-pool overhead for trivial cases
+        result_list: List[Any] = [_apply_one(i, v) for i, v in enumerate(arr)]
+    else:
+        # ``executor.map`` preserves input order, so results stay aligned with
+        # the original elements.
+        with ThreadPoolExecutor(max_workers=min(max_workers, n)) as executor:
+            result_list = list(executor.map(_apply_one, range(n), arr))
 
     # Convert result back to array
     result_arr = numpy.array(result_list)

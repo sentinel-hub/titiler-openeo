@@ -11,6 +11,38 @@ from .data_model import ImageData, RasterStack
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
 
+class _LazyTemporalArray:
+    """Lazy array view over the temporal dimension of a :class:`RasterStack`.
+
+    Presents an ``array`` interface so that array processes such as ``array_apply``
+    accept it (per the openEO ``apply_dimension`` spec the callback receives a
+    labeled array, not a datacube), while deferring pixel realization until a
+    consumer actually accesses the values. Iterating yields one timestamp's array
+    at a time; ``numpy.asarray`` stacks them into ``(n_times, bands, height, width)``
+    on demand.
+
+    This keeps ``_apply_temporal_dimension`` itself lazy — it never forces the whole
+    stack into memory; the consumer decides what to realize, mirroring how
+    ``reduce_dimension`` hands the RasterStack to its reducer.
+    """
+
+    def __init__(self, data: RasterStack):
+        self._data = data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __iter__(self) -> Any:
+        # Realize one timestamp at a time, in temporal order, instead of
+        # ``values()`` which executes every task up front.
+        for key in self._data.keys():
+            yield self._data[key].array
+
+    def __array__(self, dtype: Optional[Any] = None) -> numpy.ndarray:
+        stacked = numpy.ma.stack(list(self))
+        return stacked.astype(dtype) if dtype is not None else stacked
+
+
 class DimensionNotAvailable(Exception):
     """Exception raised when a dimension is not available."""
 
@@ -117,6 +149,10 @@ def _apply_temporal_dimension(
 ) -> RasterStack:
     """Apply a process to the temporal dimension of a RasterStack.
 
+    The callback receives the temporal series as a lazy array view of shape
+    ``(n_times, bands, height, width)`` (realized on access via ``numpy.asarray``)
+    and must return a numpy array.
+
     Args:
         data: A RasterStack with temporal dimension
         process: A process function to apply on the temporal dimension
@@ -135,10 +171,16 @@ def _apply_temporal_dimension(
             "Expected a non-empty RasterStack for temporal dimension processing"
         )
 
+    # Per the openEO ``apply_dimension`` spec the callback receives the values
+    # along the dimension as an array (a labeled array), not the datacube itself.
+    # Pass a lazy array view so this function does not realize the whole stack;
+    # the consumer (e.g. ``array_apply`` via ``numpy.asarray``) drives realization,
+    # keeping the temporal path as lazy as the spectral path and ``reduce_dimension``.
+    stacked = _LazyTemporalArray(data)
+
     # Apply the process to the temporal dimension
-    # The process receives the entire stack and should return modified data
     result_array = process(
-        data,  # Pass as positional argument
+        stacked,  # Pass as positional argument (a lazy (n_times, ...) array view)
         positional_parameters=positional_parameters,
         named_parameters=named_parameters,
     )

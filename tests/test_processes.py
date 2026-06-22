@@ -255,6 +255,49 @@ def test_array_apply_with_simple_process():
     assert np.array_equal(result, np.array([2, 4, 6, 8, 10]))
 
 
+def test_array_apply_runs_concurrently_and_preserves_order():
+    """array_apply processes elements on a thread pool while keeping order."""
+    import threading
+
+    n = 4
+    barrier = threading.Barrier(n, timeout=30)
+    seen_threads: set = set()
+
+    def proc(x, positional_parameters=None, named_parameters=None):
+        seen_threads.add(threading.current_thread().name)
+        # If elements ran serially this would block until the timeout and raise
+        # BrokenBarrierError, so reaching past it proves concurrent execution.
+        barrier.wait()
+        return x + named_parameters["index"]
+
+    data = np.zeros((n, 2), dtype=float)
+    result = array_apply(data, proc, max_workers=n)
+
+    # Order preserved: element i is incremented by its own index.
+    for i in range(n):
+        np.testing.assert_array_equal(result[i], np.full((2,), i, dtype=float))
+    # Actually ran on more than one thread.
+    assert len(seen_threads) > 1
+
+
+def test_array_apply_serial_when_single_worker():
+    """max_workers=1 falls back to serial execution (no thread pool)."""
+    import threading
+
+    main_thread = threading.current_thread().name
+    used_threads: set = set()
+
+    def proc(x, positional_parameters=None, named_parameters=None):
+        used_threads.add(threading.current_thread().name)
+        return x * 2
+
+    data = np.array([1, 2, 3, 4])
+    result = array_apply(data, proc, max_workers=1)
+
+    assert np.array_equal(result, np.array([2, 4, 6, 8]))
+    assert used_threads == {main_thread}
+
+
 def test_array_apply_with_index_parameter():
     """Test array_apply with process that uses index parameter."""
 
@@ -521,17 +564,60 @@ def test_add_dimension():
         add_dimension(data=result, name="x", label="1", type="spatial")
 
 
+def test_lazy_temporal_array_defers_realization():
+    """The temporal callback receives a lazy array view that does not realize
+    pixels until it is actually consumed, and then yields one timestamp at a time.
+    """
+    from titiler.openeo.processes.implementations.apply import _LazyTemporalArray
+
+    realized = []
+
+    class _Img:
+        def __init__(self, key):
+            self._key = key
+
+        @property
+        def array(self):
+            realized.append(self._key)
+            return np.ma.array(np.full((1, 2, 2), self._key, np.uint8))
+
+    class _Stack(dict):
+        def keys(self):  # temporal order
+            return ["a", "b", "c"]
+
+        def __getitem__(self, k):
+            return _Img({"a": 1, "b": 2, "c": 3}[k])
+
+        def __len__(self):
+            return 3
+
+    lazy = _LazyTemporalArray(_Stack())
+
+    # Construction and len must not realize anything.
+    assert len(lazy) == 3
+    assert realized == []
+
+    # Iteration realizes lazily, one timestamp at a time, in order.
+    first = next(iter(lazy))
+    assert realized == [1]
+    assert first.shape == (1, 2, 2)
+
+    # numpy.asarray realizes the whole stack via the __array__ protocol.
+    realized.clear()
+    arr = np.asarray(lazy)
+    assert arr.shape == (3, 1, 2, 2)
+    assert realized == [1, 2, 3]
+
+
 def test_apply_dimension_temporal(sample_raster_stack):
     """Test apply_dimension on temporal dimension."""
 
     # Define a process that doubles values
     def double_process(data, **kwargs):
         """Process that doubles all values in the temporal series."""
-        # data is a RasterStack
-        result = []
-        for img in data.values():
-            result.append(img.array * 2)
-        return np.array(result)
+        # data is a lazy array view (n_times, bands, height, width); realize it
+        # like a real consumer (e.g. array_apply) would.
+        return np.asarray(data).astype(float) * 2
 
     result = apply_dimension(sample_raster_stack, double_process, "temporal")
 
@@ -547,14 +633,41 @@ def test_apply_dimension_temporal(sample_raster_stack):
         np.testing.assert_array_equal(doubled, original * 2)
 
 
+def test_apply_dimension_temporal_with_array_apply(sample_raster_stack):
+    """Regression: array_apply works as the apply_dimension temporal callback.
+
+    Previously apply_dimension passed the whole RasterStack to the temporal
+    callback, so array_apply (array-only per its spec) rejected it with
+    ``TypeError: Parameter 'data' in process 'array_apply': expected 'array'
+    but got 'datacube'``. apply_dimension now passes an array-like lazy view, so
+    array_apply works as the callback without needing to accept a RasterStack.
+    """
+
+    def double(x, **kwargs):
+        return x * 2.0
+
+    def temporal_callback(data, **kwargs):
+        # data is the lazy array view; array_apply maps over the temporal dimension
+        return array_apply(data, double)
+
+    result = apply_dimension(sample_raster_stack, temporal_callback, "temporal")
+
+    assert isinstance(result, dict)
+    assert len(result) == len(sample_raster_stack)
+    for key, img_data in result.items():
+        original = sample_raster_stack[key].array.data.astype("float")
+        doubled = img_data.array.data.astype("float")
+        np.testing.assert_array_equal(doubled, original * 2)
+
+
 def test_apply_dimension_temporal_with_target(sample_raster_stack):
     """Test apply_dimension on temporal dimension with target_dimension."""
 
     # Define a process that returns mean across time
     def mean_process(data, **kwargs):
         """Process that computes mean across temporal dimension."""
-        arrays = [img.array for img in data.values()]
-        return np.array([np.mean(arrays, axis=0)])
+        # data is a lazy array view (n_times, bands, height, width)
+        return np.array([np.mean(np.asarray(data), axis=0)])
 
     result = apply_dimension(
         sample_raster_stack, mean_process, "temporal", target_dimension="mean_time"
@@ -633,9 +746,9 @@ def test_apply_dimension_single_temporal_image(sample_image_data):
     dt = datetime.now()
     stack = RasterStack.from_images({dt: sample_image_data})
 
-    # Define a process
+    # Define a process (never invoked for a single-image stack)
     def some_process(data, **kwargs):
-        return np.array([img.array for img in data.values()])
+        return data
 
     # Should return unchanged when only one temporal image
     result = apply_dimension(stack, some_process, "temporal")
@@ -653,8 +766,8 @@ def test_apply_dimension_with_context(sample_raster_stack):
         """Process that uses context value."""
         context = kwargs.get("named_parameters", {}).get("context", {})
         multiplier = context.get("multiplier", 1)
-        arrays = [img.array * multiplier for img in data.values()]
-        return np.array(arrays)
+        # data is a lazy array view (n_times, bands, height, width)
+        return np.asarray(data).astype(float) * multiplier
 
     context = {"multiplier": 3}
     result = apply_dimension(
@@ -866,9 +979,9 @@ def test_apply_dimension_dimension_name_normalization(sample_raster_stack):
     """Test that dimension names are normalized correctly."""
 
     def temporal_process(data, **kwargs):
-        """Process for temporal dimension - receives RasterStack."""
-        arrays = [img.array * 2 for img in data.values()]
-        return np.array(arrays)
+        """Process for temporal dimension - receives a lazy array view."""
+        # data is a lazy array view (n_times, bands, height, width)
+        return np.asarray(data).astype(float) * 2
 
     def spectral_process(data, **kwargs):
         """Process for spectral dimension - receives numpy array."""
