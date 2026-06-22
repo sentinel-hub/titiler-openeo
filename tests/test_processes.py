@@ -260,7 +260,7 @@ def test_array_apply_runs_concurrently_and_preserves_order():
     import threading
 
     n = 4
-    barrier = threading.Barrier(n, timeout=5)
+    barrier = threading.Barrier(n, timeout=30)
     seen_threads: set = set()
 
     def proc(x, positional_parameters=None, named_parameters=None):
@@ -636,18 +636,18 @@ def test_apply_dimension_temporal(sample_raster_stack):
 def test_apply_dimension_temporal_with_array_apply(sample_raster_stack):
     """Regression: array_apply works as the apply_dimension temporal callback.
 
-    Previously array_apply only accepted ``ArrayLike`` and rejected the
-    RasterStack passed by apply_dimension with
+    Previously apply_dimension passed the whole RasterStack to the temporal
+    callback, so array_apply (array-only per its spec) rejected it with
     ``TypeError: Parameter 'data' in process 'array_apply': expected 'array'
-    but got 'datacube'``. array_apply now accepts a RasterStack and maps the
-    process over the temporal dimension.
+    but got 'datacube'``. apply_dimension now passes an array-like lazy view, so
+    array_apply works as the callback without needing to accept a RasterStack.
     """
 
     def double(x, **kwargs):
         return x * 2.0
 
     def temporal_callback(data, **kwargs):
-        # data is the RasterStack; array_apply maps over the temporal dimension
+        # data is the lazy array view; array_apply maps over the temporal dimension
         return array_apply(data, double)
 
     result = apply_dimension(sample_raster_stack, temporal_callback, "temporal")

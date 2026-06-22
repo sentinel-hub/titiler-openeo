@@ -437,9 +437,11 @@ def array_apply(
     what other languages call either a `for each` loop or a `map` function.
 
     Elements are processed concurrently with a thread pool: the per-element calls
-    are independent, numpy releases the GIL during array operations, and any lazy
-    data realization (e.g. a temporal array view backed by a RasterStack) is
-    I/O-bound, so threading gives real speedups. Result order is preserved.
+    are independent and numpy releases the GIL during array operations, so the
+    per-element work can overlap. Note that ``data`` is materialized up front via
+    ``numpy.asarray`` (a lazy view such as ``_LazyTemporalArray`` is realized at
+    that point), so the speedup comes from the concurrent ``process`` calls, not
+    from the realization. Result order is preserved.
 
     Args:
         data: An array to process
