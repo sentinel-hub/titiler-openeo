@@ -134,6 +134,45 @@ def test_make_results_cache_respects_setting(monkeypatch):
     assert isinstance(evicting, EvictingResultsCache)
 
 
+def test_tags_single_consumer():
+    """A result with exactly one consumer is tagged so it can be streamed."""
+    g, nodes = _graph(_LINEAR)
+    cache = EvictingResultsCache(g)
+    load_val, ndvi_val = _stack(1), _stack(2)
+    cache[nodes["load"]] = load_val  # consumed only by ndvi
+    cache[nodes["ndvi"]] = ndvi_val  # consumed only by save (root)
+    assert load_val._single_consumer is True
+    assert ndvi_val._single_consumer is True
+
+
+def test_fan_out_not_tagged_single_consumer():
+    """A result consumed by two nodes must NOT be tagged single-consumer."""
+    pg = {
+        "load": {"process_id": "load_collection", "arguments": {"id": "x"}},
+        "ndvi": {
+            "process_id": "ndvi",
+            "arguments": {"data": {"from_node": "load"}, "nir": 2, "red": 1},
+        },
+        "ndwi": {
+            "process_id": "ndwi",
+            "arguments": {"data": {"from_node": "load"}, "nir": 2, "swir": 1},
+        },
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_node": "ndvi"},
+                "cube2": {"from_node": "ndwi"},
+            },
+            "result": True,
+        },
+    }
+    g, nodes = _graph(pg)
+    cache = EvictingResultsCache(g)
+    load_val = _stack(1)
+    cache[nodes["load"]] = load_val  # consumed by BOTH ndvi and ndwi
+    assert load_val._single_consumer is False
+
+
 def test_eviction_is_robust_to_restore():
     """Re-storing a node (engine recompute) must not double-decrement parents."""
     g, nodes = _graph(_LINEAR)
