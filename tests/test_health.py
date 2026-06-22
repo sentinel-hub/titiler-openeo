@@ -10,6 +10,24 @@ def test_healthz(app_no_auth):
     assert response.json() == {"status": "ok"}
 
 
+def test_healthz_handler_is_async(app_no_auth):
+    """Regression: /healthz must be an async handler.
+
+    A sync handler is dispatched to the shared anyio threadpool, which the sync
+    compute endpoints saturate under load, starving the liveness probe and
+    causing needless pod restarts. Keeping it async runs it on the event loop,
+    decoupled from threadpool/compute load.
+    """
+    import inspect
+
+    endpoint = next(
+        r.endpoint
+        for r in app_no_auth.app.routes
+        if getattr(r, "path", None) == "/healthz"
+    )
+    assert inspect.iscoroutinefunction(endpoint), "/healthz must be async def"
+
+
 def test_healthz_not_in_openapi(app_no_auth):
     """Health endpoints must not pollute the OpenAPI document."""
     openapi = app_no_auth.get("/api").json()

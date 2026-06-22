@@ -111,8 +111,15 @@ def register_health_endpoints(
     router = APIRouter(tags=["health"], include_in_schema=False)
 
     @router.get("/healthz")
-    def healthz() -> Dict[str, str]:
-        """Liveness probe. Always returns 200 if the process is alive."""
+    async def healthz() -> Dict[str, str]:
+        """Liveness probe. Always returns 200 if the event loop is responsive.
+
+        Declared ``async`` on purpose: a sync handler is dispatched to the shared
+        anyio threadpool, which the (sync) compute endpoints saturate under load,
+        starving the probe and triggering needless liveness restarts. As an async
+        no-op this runs directly on the event loop and stays responsive
+        regardless of threadpool/compute load.
+        """
         return {"status": "ok"}
 
     @router.get("/readyz")
