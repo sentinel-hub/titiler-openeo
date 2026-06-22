@@ -34,13 +34,11 @@ def _image(value: int = 1, bands: int = 1, size: int = 8) -> ImageData:
 def test_disabled_by_default():
     """Profiling is off unless explicitly enabled."""
     assert profiling.memory_profiling_enabled() is False
-    assert profiling.new_results_cache() is None
 
 
 def test_enabled_via_env(monkeypatch):
     _enable(monkeypatch)
     assert profiling.memory_profiling_enabled() is True
-    assert profiling.new_results_cache() == {}
 
 
 def test_profile_node_is_noop_when_disabled(caplog):

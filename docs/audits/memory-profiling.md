@@ -55,6 +55,12 @@ Reading it:
 - **retention line** — `nodes_pinned` is `len(results_cache)`;
   `retained_bytes` sums unique array buffers (shared `ImageData` counted once).
 
+> Intermediate eviction is **on by default** (subtask 4): the reference-counted
+> `results_cache` frees each node's data once all its consumers have run, so the
+> retention line should report a small `retained_bytes` (≈ the final result).
+> To measure the *un-evicted baseline* (the original keep-everything behavior),
+> set `TITILER_OPENEO_PROCESSING_EVICT_INTERMEDIATE_RESULTS=false`.
+
 The same lines are emitted in-app for `POST /result` and the XYZ tile endpoint
 when the env var is set, so you can profile against a running dev server too.
 

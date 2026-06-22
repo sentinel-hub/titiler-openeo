@@ -687,6 +687,35 @@ class RasterStack(Dict[datetime, ImageData]):
                 continue
         raise KeyError("No successful tasks found in RasterStack")
 
+    def release(self, *keys: datetime) -> None:
+        """Drop realized slices from this stack so their arrays can be collected.
+
+        Removes the given keys from the per-key cache and clears any realized
+        ImageRef image. This only drops *this stack's* references — arrays still
+        referenced elsewhere survive — so the underlying ImageData becomes
+        collectable once nothing else holds it.
+
+        Eviction timing/safety is decided by the caller. The reference-counted
+        results cache (:mod:`titiler.openeo.results_cache`) only calls this once
+        the graph topology guarantees every consumer of the result has run, so
+        nothing re-reads the stack afterwards. See the memory audit (finding #3)
+        and EPIC #305 subtask 4.
+
+        Args:
+            keys: Keys to evict. If none are given, all cached slices are evicted.
+        """
+        target = keys if keys else tuple(self._keys)
+        with self._cache_lock:
+            for key in target:
+                self._data_cache.pop(key, None)
+                ref = self._image_refs.get(key)
+                if ref is not None:
+                    ref._image = None
+
+    def clear(self) -> None:
+        """Evict all realized slices. See :meth:`release`."""
+        self.release()
+
     def filter_keys(self, keys: List[datetime]) -> "RasterStack":
         """Return a new RasterStack restricted to the given keys.
 

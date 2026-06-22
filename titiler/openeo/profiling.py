@@ -63,15 +63,6 @@ def memory_profiling_enabled() -> bool:
     return bool(_get_settings().memory)
 
 
-def new_results_cache() -> Optional[dict]:
-    """A fresh ``results_cache`` dict to pass to ``to_callable`` when profiling.
-
-    Returns ``None`` when disabled so the graph engine uses its own internal
-    cache and nothing changes in production.
-    """
-    return {} if memory_profiling_enabled() else None
-
-
 def _ensure_started() -> None:
     if not tracemalloc.is_tracing():
         tracemalloc.start()

@@ -36,10 +36,10 @@ from openeo_pg_parser_networkx.process_registry import Process
 from titiler.openeo.processes import PROCESS_SPECIFICATIONS, process_registry
 from titiler.openeo.profiling import (
     memory_profiling_enabled,
-    new_results_cache,
     profile_graph,
     report_retention,
 )
+from titiler.openeo.results_cache import make_results_cache
 from titiler.openeo.settings import BackendSettings
 from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
@@ -104,7 +104,7 @@ def main() -> int:
 
     parameters = _resolve_parameters(process)
     parsed_graph = OpenEOProcessGraph(pg_data=process)
-    results_cache = new_results_cache()
+    results_cache = make_results_cache(parsed_graph)
     pg_callable = parsed_graph.to_callable(
         process_registry=process_registry,
         parameters=process.get("parameters"),
