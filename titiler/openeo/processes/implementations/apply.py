@@ -1,4 +1,35 @@
-"""titiler.openeo.processes Apply."""
+"""titiler.openeo.processes Apply.
+
+CRITICAL DEVELOPER WARNING - CALLBACK INVOCATION PATTERN
+========================================================
+
+The ``process``/callback passed to ``apply``, ``apply_dimension`` and ``array_apply``
+is an openEO process graph compiled by openeo_pg_parser_networkx. Its ``node_callable``
+memoizes each node's result in a **shared** ``results_cache`` (and mutates the graph's
+``resolved_kwargs`` on every call). Therefore you MUST call each callback EXACTLY ONCE
+per operation.
+
+KEY REQUIREMENTS:
+-----------------
+1. **NEVER iterate and call the callback per element/image**
+   ❌ BAD:  results = [process(x=item) for item in data]
+   ✅ GOOD: stacked = stack_all(data); result = process(x=stacked)
+
+   Calling the callback more than once returns the FIRST call's cached result for
+   every subsequent call (and, run concurrently, corrupts argument resolution —
+   e.g. a child ``max`` ends up with no ``data``). Rely on numpy broadcasting to map
+   a vectorized callback over every element in a single call instead.
+
+2. **Why this matters:** this is the same caching pitfall documented in reduce.py;
+   it has caused production issues (silent wrong results) more than once.
+
+3. **Testing requirements:** cover these processes with *process-graph* integration
+   tests (build an ``OpenEOProcessGraph`` and run it via ``to_callable``), not only
+   plain-Python callbacks — the latter have no shared cache and hide the bug.
+
+NOTE: ``_apply_spectral_dimension_stack`` still iterates per image; it is only correct
+for single-image stacks and must be reworked to a single stacked call (see issue).
+"""
 
 from typing import Any, Callable, Dict, Optional
 
@@ -11,19 +42,18 @@ from .data_model import ImageData, RasterStack
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
 
-class _LazyTemporalArray:
-    """Lazy array view over the temporal dimension of a :class:`RasterStack`.
+class _LazyStackedArray(numpy.lib.mixins.NDArrayOperatorsMixin):
+    """Lazy ``(n, bands, height, width)`` array view over a :class:`RasterStack`.
 
-    Presents an ``array`` interface so that array processes such as ``array_apply``
-    accept it (per the openEO ``apply_dimension`` spec the callback receives a
-    labeled array, not a datacube), while deferring pixel realization until a
-    consumer actually accesses the values. Iterating yields one timestamp's array
-    at a time; ``numpy.asarray`` stacks them into ``(n_times, bands, height, width)``
-    on demand.
+    Behaves like a numpy array (via :class:`~numpy.lib.mixins.NDArrayOperatorsMixin`
+    and ``__array_ufunc__``) so it can be passed straight into an openEO callback —
+    including leaf processes that operate on it directly (e.g. ``multiply`` does
+    ``x * y``) and ``array_apply`` (which calls ``numpy.asarray``) — while deferring
+    pixel realization until the first operation/access.
 
-    This keeps ``_apply_temporal_dimension`` itself lazy — it never forces the whole
-    stack into memory; the consumer decides what to realize, mirroring how
-    ``reduce_dimension`` hands the RasterStack to its reducer.
+    This lets callers stack-and-call-the-callback-once (see module warning) without
+    eagerly forcing the whole stack into memory: realization is driven by the
+    consumer, mirroring how ``reduce_dimension`` hands the RasterStack to its reducer.
     """
 
     def __init__(self, data: RasterStack):
@@ -33,14 +63,30 @@ class _LazyTemporalArray:
         return len(self._data)
 
     def __iter__(self) -> Any:
-        # Realize one timestamp at a time, in temporal order, instead of
-        # ``values()`` which executes every task up front.
+        # Realize one image at a time, in key order, instead of ``values()`` which
+        # executes every task up front.
         for key in self._data.keys():
             yield self._data[key].array
 
     def __array__(self, dtype: Optional[Any] = None) -> numpy.ndarray:
         stacked = numpy.ma.stack(list(self))
         return stacked.astype(dtype) if dtype is not None else stacked
+
+    def __array_ufunc__(self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any):
+        # Realize any lazy operands, then delegate to numpy. This makes the view
+        # usable directly by leaf processes (``x * y``) while deferring realization
+        # until the first ufunc is applied.
+        resolved = tuple(
+            numpy.asanyarray(i) if isinstance(i, _LazyStackedArray) else i
+            for i in inputs
+        )
+        out = kwargs.get("out")
+        if out:
+            kwargs["out"] = tuple(
+                numpy.asanyarray(o) if isinstance(o, _LazyStackedArray) else o
+                for o in out
+            )
+        return getattr(ufunc, method)(*resolved, **kwargs)
 
 
 class DimensionNotAvailable(Exception):
@@ -58,25 +104,42 @@ def apply(
     process: Callable,
     context: Optional[Any] = None,
 ) -> RasterStack:
-    """Apply process on RasterStack."""
-    positional_parameters = {"x": 0}
-    named_parameters = {"context": context}
+    """Apply a unary process to every value in a RasterStack.
 
-    def _process_img(img: ImageData):
-        return ImageData(
-            process(
-                img.array,
-                positional_parameters=positional_parameters,
-                named_parameters=named_parameters,
-            ),
-            assets=img.assets,
-            crs=img.crs,
-            bounds=img.bounds,
+    The callback is evaluated ONCE on the stacked array (see the module-level
+    warning): images are stacked to ``(n, bands, height, width)``, the vectorized
+    callback maps over every value, then the result is split back per timestamp.
+    Calling the callback per image (the previous design) returned the first image's
+    cached result for every subsequent image.
+    """
+    keys = list(data.keys())
+    if not keys:
+        return data
+
+    # Realize per-image metadata without loading pixels (lazy refs).
+    refs = dict(data.get_image_refs())
+
+    # Lazy (n, bands, h, w) view; the callback realizes it once via numpy.asarray.
+    stacked = _LazyStackedArray(data)
+    result = numpy.asanyarray(
+        process(
+            stacked,
+            positional_parameters={"x": 0},
+            named_parameters={"x": stacked, "context": context},
         )
+    )
 
-    # Apply process to each item in the stack
-    result = {k: _process_img(img) for k, img in data.items()}
-    return RasterStack.from_images(result)
+    out: Dict[Any, ImageData] = {}
+    for i, key in enumerate(keys):
+        ref = refs.get(key)
+        out[key] = ImageData(
+            result[i],
+            assets=[key],
+            crs=ref.crs if ref else None,
+            bounds=ref.bounds if ref else None,
+            band_descriptions=ref.band_names if ref and ref.band_names else [],
+        )
+    return RasterStack.from_images(out)
 
 
 def apply_dimension(
@@ -176,7 +239,7 @@ def _apply_temporal_dimension(
     # Pass a lazy array view so this function does not realize the whole stack;
     # the consumer (e.g. ``array_apply`` via ``numpy.asarray``) drives realization,
     # keeping the temporal path as lazy as the spectral path and ``reduce_dimension``.
-    stacked = _LazyTemporalArray(data)
+    stacked = _LazyStackedArray(data)
 
     # Apply the process to the temporal dimension
     result_array = process(

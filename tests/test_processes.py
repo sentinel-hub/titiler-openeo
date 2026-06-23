@@ -144,9 +144,10 @@ def test_ndwi(sample_raster_stack):
 def test_apply(sample_raster_stack):
     """Test the apply function."""
 
-    # Apply a simple function that doubles values
+    # Apply a simple function that doubles values. The callback receives a lazy
+    # array view, so realize it like a real openEO callback would.
     def double(x, **kwargs):
-        return x * 2
+        return np.asarray(x).astype(float) * 2
 
     result = apply(sample_raster_stack, double)
 
@@ -255,49 +256,6 @@ def test_array_apply_with_simple_process():
     assert np.array_equal(result, np.array([2, 4, 6, 8, 10]))
 
 
-def test_array_apply_runs_concurrently_and_preserves_order():
-    """array_apply processes elements on a thread pool while keeping order."""
-    import threading
-
-    n = 4
-    barrier = threading.Barrier(n, timeout=30)
-    seen_threads: set = set()
-
-    def proc(x, positional_parameters=None, named_parameters=None):
-        seen_threads.add(threading.current_thread().name)
-        # If elements ran serially this would block until the timeout and raise
-        # BrokenBarrierError, so reaching past it proves concurrent execution.
-        barrier.wait()
-        return x + named_parameters["index"]
-
-    data = np.zeros((n, 2), dtype=float)
-    result = array_apply(data, proc, max_workers=n)
-
-    # Order preserved: element i is incremented by its own index.
-    for i in range(n):
-        np.testing.assert_array_equal(result[i], np.full((2,), i, dtype=float))
-    # Actually ran on more than one thread.
-    assert len(seen_threads) > 1
-
-
-def test_array_apply_serial_when_single_worker():
-    """max_workers=1 falls back to serial execution (no thread pool)."""
-    import threading
-
-    main_thread = threading.current_thread().name
-    used_threads: set = set()
-
-    def proc(x, positional_parameters=None, named_parameters=None):
-        used_threads.add(threading.current_thread().name)
-        return x * 2
-
-    data = np.array([1, 2, 3, 4])
-    result = array_apply(data, proc, max_workers=1)
-
-    assert np.array_equal(result, np.array([2, 4, 6, 8]))
-    assert used_threads == {main_thread}
-
-
 def test_array_apply_with_index_parameter():
     """Test array_apply with process that uses index parameter."""
 
@@ -358,10 +316,10 @@ def test_array_apply_with_context():
 def test_array_apply_with_float_array():
     """Test array_apply with floating point array."""
 
-    # Define a process that computes square root
+    # Define a vectorized process that computes square root (nan for negatives)
     def sqrt_process(x, positional_parameters=None, named_parameters=None):
         """Process that computes square root."""
-        return np.sqrt(x) if x >= 0 else np.nan
+        return np.sqrt(np.where(x >= 0, x, np.nan))
 
     # Test with float array
     data = np.array([1.0, 4.0, 9.0, 16.0, 25.0])
@@ -443,30 +401,25 @@ def test_array_apply_label_parameter_none():
     result = array_apply(data, label_check_process)
 
     assert isinstance(result, np.ndarray)
-    # All labels should be None for regular arrays
-    assert all(label is None for label in labels_received)
-    assert len(labels_received) == 3
+    # The callback is evaluated once (vectorized) and label is None for plain arrays
+    assert labels_received == [None]
 
 
-def test_array_apply_reshape_handling():
-    """Test array_apply with processes that return object types."""
+def test_array_apply_index_broadcasts_over_leading_axis():
+    """index is the position along the leading axis, broadcast over each element."""
 
-    # Define a process that returns the sum of each element
-    def sum_process(x, positional_parameters=None, named_parameters=None):
-        """Process that returns sum of array element."""
-        if isinstance(x, np.ndarray):
-            return np.sum(x)
-        return x
+    # Add each element's index to the element (element = a row here)
+    def add_index(x, positional_parameters=None, named_parameters=None):
+        return x + named_parameters["index"]
 
-    # Test with 2D array - each row is summed
+    # 2D array: 2 elements along axis 0
     data = np.array([[1, 2], [3, 4]])
-    result = array_apply(data, sum_process)
+    result = array_apply(data, add_index)
 
     assert isinstance(result, np.ndarray)
-    # Result should have 2 elements (one sum per row)
     assert len(result) == 2
-    # Sums: [1+2=3, 3+4=7]
-    np.testing.assert_array_equal(result, np.array([3, 7]))
+    # row 0 += 0, row 1 += 1
+    np.testing.assert_array_equal(result, np.array([[1, 2], [4, 5]]))
 
 
 def test_array_apply_with_empty_dict():
@@ -477,15 +430,12 @@ def test_array_apply_with_empty_dict():
         """Process that records label."""
         return named_parameters.get("label")
 
-    # Test with empty dict
+    # Test with empty dict (degenerate input; array_apply is array-only)
     data = {}
     result = array_apply(data, record_label_process)
 
-    # Empty dict becomes single-element array
-    assert isinstance(result, np.ndarray)
-    assert len(result) == 1
-    # Label should be None (dicts are not supported, always None)
-    assert result[0] is None
+    # The callback is evaluated once and label is None for non-labeled input.
+    assert np.asarray(result).item() is None
 
 
 def test_array_apply_preserves_element_type():
@@ -568,7 +518,7 @@ def test_lazy_temporal_array_defers_realization():
     """The temporal callback receives a lazy array view that does not realize
     pixels until it is actually consumed, and then yields one timestamp at a time.
     """
-    from titiler.openeo.processes.implementations.apply import _LazyTemporalArray
+    from titiler.openeo.processes.implementations.apply import _LazyStackedArray
 
     realized = []
 
@@ -591,7 +541,7 @@ def test_lazy_temporal_array_defers_realization():
         def __len__(self):
             return 3
 
-    lazy = _LazyTemporalArray(_Stack())
+    lazy = _LazyStackedArray(_Stack())
 
     # Construction and len must not realize anything.
     assert len(lazy) == 3
