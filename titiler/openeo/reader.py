@@ -3,9 +3,10 @@
 import logging
 import time
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
 
 import attr
+import numpy
 import pystac
 import rasterio
 from morecantile import TileMatrixSet
@@ -27,8 +28,11 @@ from rio_tiler.utils import cast_to_sequence, inherit_rasterio_env
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
+from .settings import ProcessingSettings
 
 logger = logging.getLogger(__name__)
+
+processing_settings = ProcessingSettings()
 
 
 class Dims(TypedDict):
@@ -768,6 +772,87 @@ def _estimate_output_dimensions(
     )
 
 
+def _asset_extra_fields(item: Any, band: str) -> Dict[str, Any]:
+    """Return the STAC extra fields for ``band`` from ``item`` (dict or pystac.Item)."""
+    if isinstance(item, dict):
+        return item.get("assets", {}).get(band, {}) or {}
+    assets = getattr(item, "assets", None)
+    if not assets or band not in assets:
+        return {}
+    return dict(getattr(assets[band], "extra_fields", {}) or {})
+
+
+def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
+    """Extract (scale, offset) for a band from STAC asset metadata.
+
+    Looks at the asset level first (``raster:scale``/``raster:offset``), then the
+    raster-extension per-band variants. Defaults to ``(1.0, 0.0)`` (i.e. identity,
+    e.g. for Sentinel-2 SCL which carries no scale/offset).
+    """
+    scale = asset.get("raster:scale")
+    offset = asset.get("raster:offset")
+    if scale is None or offset is None:
+        bands = asset.get("raster:bands") or asset.get("bands")
+        if bands:
+            b0 = bands[0]
+            if scale is None:
+                scale = b0.get("scale", b0.get("raster:scale"))
+            if offset is None:
+                offset = b0.get("offset", b0.get("raster:offset"))
+    return (
+        float(scale) if scale is not None else 1.0,
+        float(offset) if offset is not None else 0.0,
+    )
+
+
+def _apply_scale_offset(
+    img: ImageData, item: Any, assets: Optional[Sequence[str]]
+) -> ImageData:
+    """Apply per-band STAC ``raster:scale``/``raster:offset`` to ``img``.
+
+    Returns physical values (e.g. reflectance) as ``float32``. Bands without
+    scale/offset metadata (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
+    keeps its integer class values. The nodata mask is preserved.
+
+    No-ops (returns ``img`` unchanged, keeping its dtype) when ``assets`` is missing,
+    its length does not match the band count, or every band is identity (1/0).
+    """
+    if not assets:
+        return img
+
+    nbands = img.array.shape[0]
+    if len(assets) != nbands:
+        logger.warning(
+            "Cannot apply scale/offset: %d band(s) but %d asset name(s); skipping.",
+            nbands,
+            len(assets),
+        )
+        return img
+
+    pairs = [_band_scale_offset(_asset_extra_fields(item, b)) for b in assets]
+    if all(scale == 1.0 and offset == 0.0 for scale, offset in pairs):
+        return img
+
+    scales = numpy.array([s for s, _ in pairs])
+    offsets = numpy.array([o for _, o in pairs])
+    # In-place unscale on a float32 copy, mirroring rio-tiler's Reader: casting the
+    # array to float32 (then ``out=`` float32) keeps the result float32 regardless
+    # of the scale/offset dtype, avoids extra allocations, and preserves the mask.
+    data = cast(numpy.ma.MaskedArray, img.array.astype("float32", casting="unsafe"))
+    numpy.multiply(data, scales.reshape((-1, 1, 1)), out=data, casting="unsafe")
+    numpy.add(data, offsets.reshape((-1, 1, 1)), out=data, casting="unsafe")
+
+    return ImageData(
+        data,
+        assets=img.assets,
+        crs=img.crs,
+        bounds=img.bounds,
+        band_names=img.band_names,
+        band_descriptions=img.band_descriptions,
+        metadata=img.metadata,
+    )
+
+
 def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
@@ -802,6 +887,12 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
         try:
             with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
+
+                # Apply STAC raster:scale/raster:offset (per band) so bands are
+                # returned as physical values (e.g. reflectance) instead of raw DN.
+                # Runs inside the lazy task — only when a slice is actually read.
+                if processing_settings.apply_scale_offset:
+                    img = _apply_scale_offset(img, item, kwargs.get("assets"))
 
                 # IMPORTANT: We intentionally do NOT set cutline_mask on individual tiles.
                 #
