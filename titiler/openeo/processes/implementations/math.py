@@ -433,8 +433,16 @@ def last(data):
         raise TypeError("Unsupported data type for last function.")
 
 
-def max(data, ignore_nodata=True):
-    """Return the maximum value of the array."""
+def max(data, ignore_nodata: bool = True):
+    """Return the maximum value of the array.
+
+    ``ignore_nodata`` is a boolean flag, annotated so the @process validator
+    rejects a non-boolean (e.g. an array) with a clear error instead of a cryptic
+    numpy "truth value of an array is ambiguous". This catches the common misuse
+    ``max(a, b)`` — openEO ``max`` is an array aggregator, so the second
+    positional ``b`` binds to ``ignore_nodata``; element-wise max of two bands is
+    ``max(array_create([a, b]))``.
+    """
     # Handle RasterStack
     if isinstance(data, RasterStack):
         # Return a single array with the maximum value for each array items in the stack.
@@ -454,8 +462,13 @@ def max(data, ignore_nodata=True):
         raise TypeError("Unsupported data type for max function.")
 
 
-def min(data, ignore_nodata=True):
-    """Return the minimum value of the array."""
+def min(data, ignore_nodata: bool = True):
+    """Return the minimum value of the array.
+
+    ``ignore_nodata`` is annotated as a boolean so the @process validator rejects
+    a non-boolean (e.g. an array) with a clear error rather than a cryptic numpy
+    crash — see the note in max().
+    """
     # Handle RasterStack
     if isinstance(data, RasterStack):
         # Return a single array with the minimum value for each array items in the stack.
