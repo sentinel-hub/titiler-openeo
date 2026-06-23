@@ -223,3 +223,88 @@ def test_array_apply_callback_references_enclosing_scope():
     assert by_ts[datetime(2024, 6, 1)] == [True, True, True, True]
     assert by_ts[datetime(2024, 6, 2)] == [False, False, False, False]
     assert by_ts[datetime(2024, 6, 3)] == [True, True, True, True]
+
+
+def _selection_pg() -> dict:
+    """apply_dimension(t) -> array_apply(neq(x, max(data))): the 'best pixel over
+    time' selection. ``max(data)`` must be the per-pixel temporal max, not a
+    single global scalar."""
+    return {
+        "ad": {
+            "process_id": "apply_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "process": {
+                    "process_graph": {
+                        "arrayapply1": {
+                            "process_id": "array_apply",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "process": {
+                                    "process_graph": {
+                                        "max1": {
+                                            "process_id": "max",
+                                            "arguments": {
+                                                "data": {"from_parameter": "data"}
+                                            },
+                                        },
+                                        "neq1": {
+                                            "process_id": "neq",
+                                            "arguments": {
+                                                "x": {"from_parameter": "x"},
+                                                "y": {"from_node": "max1"},
+                                            },
+                                            "result": True,
+                                        },
+                                    }
+                                },
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+
+
+def test_temporal_array_apply_max_is_per_pixel_not_global():
+    """Regression: max(data) inside a temporal array_apply must reduce over the
+    time axis PER PIXEL, not collapse the whole cube to one global scalar.
+
+    The earlier global-scalar behaviour broke the cloud-free "best pixel over
+    time" composite: with two complementary acquisitions (one valid on the left
+    half, one on the right), only the single globally-maximum pixel survived and
+    the rest of the scene was masked out instead of being filled by the other
+    acquisition. This test uses spatially VARYING values so global-max and
+    per-pixel-temporal-max differ (the uniform-valued test above cannot tell them
+    apart).
+    """
+
+    # 1x4 strip, single band. t0 valid on left (cols 0,1), t1 valid on right.
+    def _img(vals, mask):
+        return ImageData(
+            np.ma.MaskedArray(
+                np.array([[vals]], dtype=float), mask=np.array([[mask]], dtype=bool)
+            )
+        )
+
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): _img(
+                [5.0, 6.0, 0.0, 0.0], [False, False, True, True]
+            ),
+            datetime(2024, 6, 2): _img(
+                [0.0, 0.0, 7.0, 8.0], [True, True, False, False]
+            ),
+        }
+    )
+
+    sel = _run(_selection_pg(), data=stack)
+    flagged = {k: v.array.data.ravel().tolist() for k, v in sel.items()}
+    # Per pixel, the single valid time is its own temporal max -> NOT flagged.
+    # Global-scalar max (8) would instead flag every pixel except the one 8.
+    assert flagged[datetime(2024, 6, 1)] == [False, False, True, True]
+    assert flagged[datetime(2024, 6, 2)] == [True, True, False, False]
