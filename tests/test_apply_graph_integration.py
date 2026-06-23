@@ -122,6 +122,128 @@ def test_apply_via_graph_maps_each_image():
     assert by_ts[datetime(2021, 1, 2)] == [50, 50, 50, 50]
 
 
+def test_apply_dimension_bands_maps_each_image_via_graph():
+    """apply_dimension over 'bands' on a MULTI-temporal stack must compute each
+    timestamp from its OWN bands, not collapse every slice to the first image's.
+
+    Regression for the cloud-free-mosaic bug: the per-image loop in
+    _apply_spectral_dimension_stack hit the executor's node results_cache, so
+    every timestamp received the FIRST image's band result. In the real graph
+    that replicated the first acquisition's footprint (and its nodata) across all
+    dates, so a later acquisition covering an area the first one didn't was
+    dropped and the composite was never filled.
+    """
+    # Two timestamps, two bands, distinct constant values per slice/band.
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.stack([np.full((2, 2), 1.0), np.full((2, 2), 2.0)])),
+                band_descriptions=["b0", "b1"],
+            ),
+            datetime(2024, 6, 2): ImageData(
+                np.ma.array(np.stack([np.full((2, 2), 10.0), np.full((2, 2), 20.0)])),
+                band_descriptions=["b0", "b1"],
+            ),
+        }
+    )
+    # Callback builds a 1-band output = b0 + b1, per pixel/timestamp.
+    pg = {
+        "ad": {
+            "process_id": "apply_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "bands",
+                "process": {
+                    "process_graph": {
+                        "b0": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 0,
+                            },
+                        },
+                        "b1": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 1,
+                            },
+                        },
+                        "sum": {
+                            "process_id": "add",
+                            "arguments": {
+                                "x": {"from_node": "b0"},
+                                "y": {"from_node": "b1"},
+                            },
+                        },
+                        "out": {
+                            "process_id": "array_create",
+                            "arguments": {"data": [{"from_node": "sum"}]},
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
+    # Slice 1: 1 + 2 = 3 ; Slice 2: 10 + 20 = 30. The old bug gave [3,3,3,3] for both.
+    assert by_ts[datetime(2024, 6, 1)] == [3.0, 3.0, 3.0, 3.0]
+    assert by_ts[datetime(2024, 6, 2)] == [30.0, 30.0, 30.0, 30.0]
+
+
+def test_apply_dimension_bands_preserves_per_image_nodata_mask():
+    """apply_dimension over 'bands' must keep each slice's own nodata mask, so an
+    area that is nodata in one acquisition but valid in another is not lost."""
+    s1 = np.ma.MaskedArray(  # west (col 0) nodata in slice 1
+        np.stack([np.full((1, 2), 1.0), np.full((1, 2), 2.0)]),
+        mask=np.stack([[[True, False]], [[True, False]]]),
+    )
+    s2 = np.ma.MaskedArray(  # fully valid in slice 2
+        np.stack([np.full((1, 2), 10.0), np.full((1, 2), 20.0)]),
+        mask=False,
+    )
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(s1, band_descriptions=["b0", "b1"]),
+            datetime(2024, 6, 2): ImageData(s2, band_descriptions=["b0", "b1"]),
+        }
+    )
+    pg = {
+        "ad": {
+            "process_id": "apply_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "bands",
+                "process": {
+                    "process_graph": {
+                        "b0": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 0,
+                            },
+                        },
+                        "out": {
+                            "process_id": "array_create",
+                            "arguments": {"data": [{"from_node": "b0"}]},
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    m1 = np.ma.getmaskarray(result[datetime(2024, 6, 1)].array)
+    m2 = np.ma.getmaskarray(result[datetime(2024, 6, 2)].array)
+    assert m1.ravel().tolist() == [True, False]  # slice 1 keeps its west nodata
+    assert m2.ravel().tolist() == [False, False]  # slice 2 stays fully valid
+
+
 def test_apply_dimension_temporal_array_apply_via_graph():
     """The originally reported scenario: apply_dimension(t) -> array_apply -> multiply.
 
