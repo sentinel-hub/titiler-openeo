@@ -1,13 +1,11 @@
 """titiler.processes.implementations arrays."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy
 from numpy.typing import ArrayLike
-from rio_tiler.constants import MAX_THREADS
 from rio_tiler.models import ImageData
 
 from ...errors import OpenEOException
@@ -429,70 +427,67 @@ def array_apply(
     data: ArrayLike,
     process: Callable,
     context: Optional[Any] = None,
-    max_workers: int = MAX_THREADS,
 ) -> ArrayLike:
     """Apply a process to each element in an array.
 
     Applies a process to each individual value in the array. This is basically
     what other languages call either a `for each` loop or a `map` function.
 
-    Elements are processed concurrently with a thread pool: the per-element calls
-    are independent and numpy releases the GIL during array operations, so the
-    per-element work can overlap. Note that ``data`` is materialized up front via
-    ``numpy.asarray`` (a lazy view such as ``_LazyTemporalArray`` is realized at
-    that point), so the speedup comes from the concurrent ``process`` calls, not
-    from the realization. Result order is preserved.
+    The callback is a vectorized openEO process graph, so it is evaluated **once**
+    on the whole array and numpy broadcasting maps it over every element. This is
+    both correct and efficient:
+
+    - Correct: the openEO graph executor (openeo_pg_parser_networkx) memoizes each
+      callback node by id in a shared ``results_cache``. Invoking the callback once
+      per element — as a Python loop would — returns the first element's cached
+      result for every subsequent element (and, run concurrently, corrupts the
+      shared argument resolution). Evaluating it once sidesteps this entirely.
+    - Efficient: no Python-level per-element loop; the work happens in numpy.
+
+    Elements are taken along the leading axis. ``index`` is supplied as the
+    zero-based position along that axis, shaped to broadcast over the remaining
+    axes so callbacks may use it. ``label`` is only populated for labeled arrays
+    and is ``None`` here.
 
     Args:
         data: An array to process
-        process: A process that accepts and returns a single value. The process
-                 receives the following parameters:
-                 - x: The value of the current element (any data type)
-                 - index: The zero-based index of the element (integer)
-                 - label: The label of the element (only for labeled arrays, optional)
+        process: A vectorized process applied to all elements at once (NOT once per
+                 element — see the apply.py callback warning). It must operate on
+                 whole numpy arrays rather than Python scalars. It receives:
+                 - x: The whole array of element values (numpy array)
+                 - index: The zero-based element index along the leading axis, shaped
+                          to broadcast over each element's dimensions
+                 - label: The element label (only for labeled arrays, ``None`` here)
                  - context: Additional data passed by the user (optional)
         context: Additional data to be passed to the process
-        max_workers: Maximum number of threads used to process elements concurrently
 
     Returns:
         An array with the newly computed values. The number of elements is the
         same as for the original array.
     """
-    # Convert input to numpy array if needed
-    arr = numpy.asarray(data)
+    # Convert input to numpy array if needed, preserving masks
+    arr = numpy.asanyarray(data)
 
-    # Handle scalar case
+    # Handle scalar case (treat as a single-element array)
     if arr.ndim == 0:
-        arr = numpy.array([arr.item()])
+        arr = arr.reshape(1)
 
-    def _apply_one(index: int, value: Any) -> Any:
-        # Set up parameters for the process
-        # Only 'x' is passed as positional parameter (position 0)
-        positional_parameters = {"x": 0}
-        named_parameters = {
-            "x": value,
+    # Zero-based index per leading-axis element, shaped to broadcast over the
+    # element's own dimensions (so ``x * index`` works element-wise).
+    n = arr.shape[0]
+    index = numpy.arange(n).reshape((n,) + (1,) * (arr.ndim - 1))
+
+    # Evaluate the callback once on the whole array; broadcasting maps it over
+    # every element.
+    result = process(
+        arr,
+        positional_parameters={"x": 0},
+        named_parameters={
+            "x": arr,
             "index": index,
             "label": None,
             "context": context,
-        }
-        return process(
-            value,
-            positional_parameters=positional_parameters,
-            named_parameters=named_parameters,
-        )
+        },
+    )
 
-    # Process each element along the first dimension
-    n = len(arr)
-    if n <= 1 or max_workers <= 1:
-        # Avoid thread-pool overhead for trivial cases
-        result_list: List[Any] = [_apply_one(i, v) for i, v in enumerate(arr)]
-    else:
-        # ``executor.map`` preserves input order, so results stay aligned with
-        # the original elements.
-        with ThreadPoolExecutor(max_workers=min(max_workers, n)) as executor:
-            result_list = list(executor.map(_apply_one, range(n), arr))
-
-    # Convert result back to array
-    result_arr = numpy.array(result_list)
-
-    return result_arr
+    return numpy.asanyarray(result)
