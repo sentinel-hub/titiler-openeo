@@ -20,10 +20,21 @@ KEY REQUIREMENTS:
    e.g. a child ``max`` ends up with no ``data``). Rely on numpy broadcasting to map
    a vectorized callback over every element in a single call instead.
 
-2. **Why this matters:** this is the same caching pitfall documented in reduce.py;
-   it has caused production issues (silent wrong results) more than once.
+2. **Pass the callback a REALIZED numpy array, not a lazy/duck-array view.**
+   Many processes type-check their input with ``isinstance(x, numpy.ndarray)``
+   (e.g. ``max``, ``array_element``), so a lazy view is rejected. Realize the stack
+   before calling the callback.
 
-3. **Testing requirements:** cover these processes with *process-graph* integration
+3. **Forward the enclosing ``named_parameters``.** A callback may reference an
+   outer-scope parameter via ``from_parameter`` — e.g. ``array_apply`` running
+   ``neq(x, max(data))`` where ``data`` is the enclosing ``apply_dimension`` array.
+   When a process invokes a child callback it must merge its own parameters on top
+   of the inherited ones, never replace them.
+
+4. **Why this matters:** the single-call rule is the same caching pitfall documented
+   in reduce.py; it has caused production issues (silent wrong results) more than once.
+
+5. **Testing requirements:** cover these processes with *process-graph* integration
    tests (build an ``OpenEOProcessGraph`` and run it via ``to_callable``), not only
    plain-Python callbacks — the latter have no shared cache and hide the bug.
 
@@ -42,51 +53,16 @@ from .data_model import ImageData, RasterStack
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
 
-class _LazyStackedArray(numpy.lib.mixins.NDArrayOperatorsMixin):
-    """Lazy ``(n, bands, height, width)`` array view over a :class:`RasterStack`.
+def _stack_rasterstack(data: RasterStack) -> numpy.ma.MaskedArray:
+    """Realize a RasterStack into a ``(n, bands, height, width)`` masked array.
 
-    Behaves like a numpy array (via :class:`~numpy.lib.mixins.NDArrayOperatorsMixin`
-    and ``__array_ufunc__``) so it can be passed straight into an openEO callback —
-    including leaf processes that operate on it directly (e.g. ``multiply`` does
-    ``x * y``) and ``array_apply`` (which calls ``numpy.asarray``) — while deferring
-    pixel realization until the first operation/access.
-
-    This lets callers stack-and-call-the-callback-once (see module warning) without
-    eagerly forcing the whole stack into memory: realization is driven by the
-    consumer, mirroring how ``reduce_dimension`` hands the RasterStack to its reducer.
+    Callbacks must receive a **real** numpy array, not a lazy view: many openEO
+    processes type-check their input with ``isinstance(x, numpy.ndarray)``
+    (e.g. ``max``, ``array_element``), which any lazy/duck-array fails. Stacking
+    here realizes each image exactly once (cached on the RasterStack), which is
+    unavoidable for a temporal/whole-cube operation anyway.
     """
-
-    def __init__(self, data: RasterStack):
-        self._data = data
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __iter__(self) -> Any:
-        # Realize one image at a time, in key order, instead of ``values()`` which
-        # executes every task up front.
-        for key in self._data.keys():
-            yield self._data[key].array
-
-    def __array__(self, dtype: Optional[Any] = None) -> numpy.ndarray:
-        stacked = numpy.ma.stack(list(self))
-        return stacked.astype(dtype) if dtype is not None else stacked
-
-    def __array_ufunc__(self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any):
-        # Realize any lazy operands, then delegate to numpy. This makes the view
-        # usable directly by leaf processes (``x * y``) while deferring realization
-        # until the first ufunc is applied.
-        resolved = tuple(
-            numpy.asanyarray(i) if isinstance(i, _LazyStackedArray) else i
-            for i in inputs
-        )
-        out = kwargs.get("out")
-        if out:
-            kwargs["out"] = tuple(
-                numpy.asanyarray(o) if isinstance(o, _LazyStackedArray) else o
-                for o in out
-            )
-        return getattr(ufunc, method)(*resolved, **kwargs)
+    return numpy.ma.stack([data[key].array for key in data.keys()])
 
 
 class DimensionNotAvailable(Exception):
@@ -116,8 +92,8 @@ def apply(
     if not keys:
         return data
 
-    # Lazy (n, bands, h, w) view; the callback realizes it once via numpy.asarray.
-    stacked = _LazyStackedArray(data)
+    # Stack to a realized (n, bands, h, w) array and call the callback ONCE.
+    stacked = _stack_rasterstack(data)
     result = numpy.asanyarray(
         process(
             stacked,
@@ -235,14 +211,13 @@ def _apply_temporal_dimension(
 
     # Per the openEO ``apply_dimension`` spec the callback receives the values
     # along the dimension as an array (a labeled array), not the datacube itself.
-    # Pass a lazy array view so this function does not realize the whole stack;
-    # the consumer (e.g. ``array_apply`` via ``numpy.asarray``) drives realization,
-    # keeping the temporal path as lazy as the spectral path and ``reduce_dimension``.
-    stacked = _LazyStackedArray(data)
+    # It must be a realized numpy array: callbacks include processes that type-check
+    # with ``isinstance(x, numpy.ndarray)`` (e.g. ``max``).
+    stacked = _stack_rasterstack(data)
 
-    # Apply the process to the temporal dimension
+    # Apply the process to the temporal dimension (call the callback ONCE)
     result_array = process(
-        stacked,  # Pass as positional argument (a lazy (n_times, ...) array view)
+        stacked,  # Pass as positional argument: (n_times, bands, height, width)
         positional_parameters=positional_parameters,
         named_parameters=named_parameters,
     )

@@ -29,6 +29,23 @@ def _run(pg: dict, **named_parameters):
     return callable_(named_parameters=named_parameters)
 
 
+def _three_image_stack() -> RasterStack:
+    """A 3-timestamp single-band stack with values 3, 7, 5 (temporal max is 7)."""
+    return RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 3, np.float32))
+            ),
+            datetime(2024, 6, 2): ImageData(
+                np.ma.array(np.full((1, 2, 2), 7, np.float32))
+            ),
+            datetime(2024, 6, 3): ImageData(
+                np.ma.array(np.full((1, 2, 2), 5, np.float32))
+            ),
+        }
+    )
+
+
 def _two_image_stack() -> RasterStack:
     """A 2-timestamp stack with distinct constant values (1 and 5)."""
     return RasterStack.from_images(
@@ -149,3 +166,60 @@ def test_apply_dimension_temporal_array_apply_via_graph():
     by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
     assert by_ts[datetime(2021, 1, 1)] == [2, 2, 2, 2]
     assert by_ts[datetime(2021, 1, 2)] == [10, 10, 10, 10]
+
+
+def test_array_apply_callback_references_enclosing_scope():
+    """array_apply callbacks may reference an outer-scope parameter (`data`).
+
+    Real-world pattern: apply_dimension(t) -> array_apply(neq(x, max(data))), where
+    `max(data)` refers to the enclosing apply_dimension array (the whole temporal
+    series), not array_apply's element `x`. array_apply must forward the enclosing
+    `named_parameters` so the nested `from_parameter: data` resolves; otherwise the
+    child `max` is called with no `data`. The callback input must also be a realized
+    array, since `max` type-checks with isinstance(numpy.ndarray).
+    """
+    pg = {
+        "ad": {
+            "process_id": "apply_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "process": {
+                    "process_graph": {
+                        "arrayapply1": {
+                            "process_id": "array_apply",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "process": {
+                                    "process_graph": {
+                                        "max1": {
+                                            "process_id": "max",
+                                            "arguments": {
+                                                "data": {"from_parameter": "data"}
+                                            },
+                                        },
+                                        "neq1": {
+                                            "process_id": "neq",
+                                            "arguments": {
+                                                "x": {"from_parameter": "x"},
+                                                "y": {"from_node": "max1"},
+                                            },
+                                            "result": True,
+                                        },
+                                    }
+                                },
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+    by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
+    # Each timestamp is flagged where it is NOT the temporal maximum (7 @ 06-02).
+    assert by_ts[datetime(2024, 6, 1)] == [True, True, True, True]
+    assert by_ts[datetime(2024, 6, 2)] == [False, False, False, False]
+    assert by_ts[datetime(2024, 6, 3)] == [True, True, True, True]
