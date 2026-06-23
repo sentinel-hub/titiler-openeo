@@ -451,11 +451,13 @@ def array_apply(
 
     Args:
         data: An array to process
-        process: A process that accepts and returns a single value. The process
-                 receives the following parameters:
-                 - x: The value of the current element (any data type)
-                 - index: The zero-based index of the element (integer)
-                 - label: The label of the element (only for labeled arrays, optional)
+        process: A vectorized process applied to all elements at once (NOT once per
+                 element — see the apply.py callback warning). It must operate on
+                 whole numpy arrays rather than Python scalars. It receives:
+                 - x: The whole array of element values (numpy array)
+                 - index: The zero-based element index along the leading axis, shaped
+                          to broadcast over each element's dimensions
+                 - label: The element label (only for labeled arrays, ``None`` here)
                  - context: Additional data passed by the user (optional)
         context: Additional data to be passed to the process
 

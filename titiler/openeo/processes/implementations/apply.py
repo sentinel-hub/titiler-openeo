@@ -116,9 +116,6 @@ def apply(
     if not keys:
         return data
 
-    # Realize per-image metadata without loading pixels (lazy refs).
-    refs = dict(data.get_image_refs())
-
     # Lazy (n, bands, h, w) view; the callback realizes it once via numpy.asarray.
     stacked = _LazyStackedArray(data)
     result = numpy.asanyarray(
@@ -129,15 +126,17 @@ def apply(
         )
     )
 
+    # Preserve each image's metadata. Realizing the stack above already cached the
+    # ImageData instances, so ``data[key]`` is a cache hit (no extra I/O).
     out: Dict[Any, ImageData] = {}
     for i, key in enumerate(keys):
-        ref = refs.get(key)
+        img = data[key]
         out[key] = ImageData(
             result[i],
-            assets=[key],
-            crs=ref.crs if ref else None,
-            bounds=ref.bounds if ref else None,
-            band_descriptions=ref.band_names if ref and ref.band_names else [],
+            assets=img.assets,
+            crs=img.crs,
+            bounds=img.bounds,
+            band_descriptions=img.band_descriptions,
         )
     return RasterStack.from_images(out)
 
