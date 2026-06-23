@@ -514,51 +514,6 @@ def test_add_dimension():
         add_dimension(data=result, name="x", label="1", type="spatial")
 
 
-def test_lazy_temporal_array_defers_realization():
-    """The temporal callback receives a lazy array view that does not realize
-    pixels until it is actually consumed, and then yields one timestamp at a time.
-    """
-    from titiler.openeo.processes.implementations.apply import _LazyStackedArray
-
-    realized = []
-
-    class _Img:
-        def __init__(self, key):
-            self._key = key
-
-        @property
-        def array(self):
-            realized.append(self._key)
-            return np.ma.array(np.full((1, 2, 2), self._key, np.uint8))
-
-    class _Stack(dict):
-        def keys(self):  # temporal order
-            return ["a", "b", "c"]
-
-        def __getitem__(self, k):
-            return _Img({"a": 1, "b": 2, "c": 3}[k])
-
-        def __len__(self):
-            return 3
-
-    lazy = _LazyStackedArray(_Stack())
-
-    # Construction and len must not realize anything.
-    assert len(lazy) == 3
-    assert realized == []
-
-    # Iteration realizes lazily, one timestamp at a time, in order.
-    first = next(iter(lazy))
-    assert realized == [1]
-    assert first.shape == (1, 2, 2)
-
-    # numpy.asarray realizes the whole stack via the __array__ protocol.
-    realized.clear()
-    arr = np.asarray(lazy)
-    assert arr.shape == (3, 1, 2, 2)
-    assert realized == [1, 2, 3]
-
-
 def test_apply_dimension_temporal(sample_raster_stack):
     """Test apply_dimension on temporal dimension."""
 

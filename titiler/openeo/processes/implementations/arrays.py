@@ -427,6 +427,7 @@ def array_apply(
     data: ArrayLike,
     process: Callable,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> ArrayLike:
     """Apply a process to each element in an array.
 
@@ -449,6 +450,12 @@ def array_apply(
     axes so callbacks may use it. ``label`` is only populated for labeled arrays
     and is ``None`` here.
 
+    The callback's enclosing parameters (``named_parameters``) are forwarded so that
+    nested ``from_parameter`` references to an outer scope resolve — e.g. a callback
+    computing ``neq(x, max(data))`` where ``data`` is the enclosing
+    ``apply_dimension`` array. The element parameters (``x``/``index``/``label``/
+    ``context``) take precedence over any inherited ones.
+
     Args:
         data: An array to process
         process: A vectorized process applied to all elements at once (NOT once per
@@ -460,6 +467,9 @@ def array_apply(
                  - label: The element label (only for labeled arrays, ``None`` here)
                  - context: Additional data passed by the user (optional)
         context: Additional data to be passed to the process
+        named_parameters: Enclosing-scope parameters injected by the process
+                          executor; forwarded to the callback so outer references
+                          resolve.
 
     Returns:
         An array with the newly computed values. The number of elements is the
@@ -477,17 +487,22 @@ def array_apply(
     n = arr.shape[0]
     index = numpy.arange(n).reshape((n,) + (1,) * (arr.ndim - 1))
 
+    # Inherit the enclosing scope, then override with this callback's element
+    # parameters so nested ``from_parameter`` references (e.g. ``data``) still resolve.
+    child_named_parameters = {
+        **(named_parameters or {}),
+        "x": arr,
+        "index": index,
+        "label": None,
+        "context": context,
+    }
+
     # Evaluate the callback once on the whole array; broadcasting maps it over
     # every element.
     result = process(
         arr,
         positional_parameters={"x": 0},
-        named_parameters={
-            "x": arr,
-            "index": index,
-            "label": None,
-            "context": context,
-        },
+        named_parameters=child_named_parameters,
     )
 
     return numpy.asanyarray(result)
