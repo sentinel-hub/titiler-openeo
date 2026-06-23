@@ -38,8 +38,8 @@ KEY REQUIREMENTS:
    tests (build an ``OpenEOProcessGraph`` and run it via ``to_callable``), not only
    plain-Python callbacks — the latter have no shared cache and hide the bug.
 
-NOTE: ``_apply_spectral_dimension_stack`` still iterates per image; it is only correct
-for single-image stacks and must be reworked to a single stacked call (see issue).
+``_apply_spectral_dimension_stack`` evaluates the callback ONCE on the whole stack
+(bands moved to the front, broadcasting across time) for exactly this reason.
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -357,44 +357,58 @@ def _apply_spectral_dimension_stack(
             "Expected a non-empty RasterStack for spectral dimension processing"
         )
 
-    # Apply the process to each image in the stack
-    result = {}
-    for key, img in data.items():
-        # Pass the array (bands, height, width) to the process
-        result_array = process(
-            img.array,  # Pass the numpy array, not the ImageData object
-            positional_parameters=positional_parameters,
-            named_parameters=named_parameters,
+    # CRITICAL: evaluate the callback EXACTLY ONCE on the whole stack, never once
+    # per image. The openEO executor (openeo_pg_parser_networkx) memoizes each
+    # callback node by id in a shared results_cache, so a per-image loop returns
+    # the FIRST image's cached result for every other timestamp — silently
+    # collapsing every slice to the first one (e.g. dropping the data of every
+    # acquisition but the first). This is the same bug class fixed for apply /
+    # array_apply / temporal apply_dimension; see the module-level warning.
+    keys = list(data.keys())
+    images = [data[k] for k in keys]
+
+    # Stack to (time, bands, height, width), then move bands to the front so the
+    # callback's band-wise ops (array_element indexes axis 0) operate on bands
+    # while broadcasting across time. numpy.ma.stack (not numpy.stack) preserves
+    # the per-image nodata masks. Mirrors _reduce_spectral_dimension_stack.
+    stacked = numpy.ma.stack([img.array for img in images], axis=0)
+    transposed = numpy.moveaxis(stacked, 1, 0)  # (bands, time, height, width)
+
+    result_array = process(
+        transposed,
+        positional_parameters=positional_parameters,
+        named_parameters=named_parameters,
+    )
+
+    if not isinstance(result_array, numpy.ndarray):
+        raise ValueError(
+            "The process must return a numpy array for spectral dimension processing"
         )
 
-        # Validate the result
-        if not isinstance(result_array, numpy.ndarray):
-            raise ValueError(
-                "The process must return a numpy array for spectral dimension processing"
-            )
+    # Map the result back to per-time (out_bands, height, width) slices.
+    if result_array.ndim == 4:
+        # (out_bands, time, height, width) -> (time, out_bands, height, width)
+        per_time = numpy.moveaxis(result_array, 1, 0)
+    elif result_array.ndim == 3:
+        # (time, height, width) -> (time, 1, height, width): spectral dim reduced
+        # to a single band.
+        per_time = result_array[:, numpy.newaxis, :, :]
+    else:
+        raise ValueError(
+            "The spectral process must return a 3D (time, height, width) or 4D "
+            f"(out_bands, time, height, width) array, got shape {result_array.shape}."
+        )
 
-        # Ensure result maintains spatial dimensions
-        # If result is scalar or 1D, broadcast it to spatial dimensions
-        if isinstance(result_array, (int, float, numpy.number)):
-            # Scalar result - broadcast to spatial shape
-            result_array = numpy.full((img.height, img.width), result_array)
-        elif result_array.ndim == 1:
-            # 1D array - needs to be reshaped
-            if len(result_array) == 1:
-                # Single value - broadcast to spatial shape
-                result_array = numpy.full((img.height, img.width), result_array[0])
-            else:
-                # Multiple values
-                result_array = result_array.reshape(
-                    (len(result_array), img.height, img.width)
-                )
-        elif result_array.ndim == 2:
-            # 2D array (height, width) - add band dimension
-            result_array = result_array[numpy.newaxis, :]
-        # else: 3D array (bands, height, width) - already correct shape
+    if per_time.shape[0] != len(keys):
+        raise ValueError(
+            f"The spectral process changed the temporal dimension size "
+            f"(expected {len(keys)}, got {per_time.shape[0]})."
+        )
 
+    result = {}
+    for i, (key, img) in enumerate(zip(keys, images)):
         result[key] = ImageData(
-            result_array,
+            per_time[i],
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,
