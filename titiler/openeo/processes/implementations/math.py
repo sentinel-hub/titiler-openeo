@@ -362,8 +362,10 @@ def max(data, ignore_nodata=True):
     """Return the maximum value of the array."""
     # Handle RasterStack
     if isinstance(data, RasterStack):
-        # Return a single array with the maximum value for each array items in the stack
-        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
+        # Return a single array with the maximum value for each array items in the stack.
+        # numpy.ma.stack (not numpy.stack) preserves the per-slice nodata masks; plain
+        # numpy.stack silently drops them, turning masked nodata into valid values.
+        stacked_arrays = numpy.ma.stack([v.array for v in data.values()], axis=0)
         return _max(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
         return _max(data, ignore_nodata=ignore_nodata)
@@ -377,8 +379,10 @@ def min(data, ignore_nodata=True):
     """Return the minimum value of the array."""
     # Handle RasterStack
     if isinstance(data, RasterStack):
-        # Return a single array with the minimum value for each array items in the stack
-        stacked_arrays = numpy.stack([v.array for v in data.values()], axis=0)
+        # Return a single array with the minimum value for each array items in the stack.
+        # numpy.ma.stack (not numpy.stack) preserves the per-slice nodata masks; plain
+        # numpy.stack silently drops them, turning masked nodata into valid values.
+        stacked_arrays = numpy.ma.stack([v.array for v in data.values()], axis=0)
         return _min(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
         return _min(data, ignore_nodata=ignore_nodata)
