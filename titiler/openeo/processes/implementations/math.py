@@ -1,11 +1,60 @@
 """titiler.openeo processes Math."""
 
 import builtins
+import functools
 
 import numpy
 
 from .data_model import RasterStack
 from .reduce import apply_pixel_selection
+
+
+def _promote(a):
+    """Promote integer/boolean inputs to float32; leave everything else as-is.
+
+    numpy resolves integer inputs to float64 for division and transcendental
+    functions. For raster math that produces an index/derived cube, float32 is
+    ample and halves the result. Source rasters stay at their compact integer
+    dtype (we only convert at the point of a float-producing op), and existing
+    floating inputs keep their precision. Masks are preserved by ``astype``.
+
+    Only integer/boolean dtypes are converted — other dtypes (float, complex,
+    datetime, object) are left untouched. Python ``int``/``bool`` scalars are
+    promoted too, so a scalar operand (e.g. ``log(x, base=10)``) doesn't pull the
+    result back to float64.
+    """
+    dtype = getattr(a, "dtype", None)
+    if dtype is not None:
+        if numpy.issubdtype(dtype, numpy.integer) or numpy.issubdtype(
+            dtype, numpy.bool_
+        ):
+            return a.astype("float32")
+        return a
+    # Python scalars: promote int (incl. bool); leave float/other untouched so
+    # they don't upcast a float32 array.
+    if isinstance(a, int):
+        return numpy.float32(a)
+    return a
+
+
+def _float32_for_integers(func):
+    """Decorator: promote integer array arguments to float32 before calling.
+
+    Applied to element-wise ops that already convert integer input to float64
+    (divide, transcendental functions, normalized_difference, ...), so their
+    result is float32 instead. Only narrows existing float64 results; never
+    changes an integer-only result, since those ops are not decorated.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(
+            *(_promote(a) for a in args),
+            **{k: _promote(v) for k, v in kwargs.items()},
+        )
+
+    return wrapper
+
 
 __all__ = [
     "absolute",
@@ -89,6 +138,7 @@ def constant(x):
     return x
 
 
+@_float32_for_integers
 def divide(x, y):
     return x / y
 
@@ -121,66 +171,82 @@ def _round(x, p=0):
     return numpy.around(x, decimals=p)
 
 
+@_float32_for_integers
 def exp(p):
     return numpy.exp(p)
 
 
+@_float32_for_integers
 def log(x, base):
     return numpy.log(x) / numpy.log(base)
 
 
+@_float32_for_integers
 def ln(x):
     return numpy.log(x)
 
 
+@_float32_for_integers
 def cos(x):
     return numpy.cos(x)
 
 
+@_float32_for_integers
 def sin(x):
     return numpy.sin(x)
 
 
+@_float32_for_integers
 def tan(x):
     return numpy.tan(x)
 
 
+@_float32_for_integers
 def arccos(x):
     return numpy.arccos(x)
 
 
+@_float32_for_integers
 def arcsin(x):
     return numpy.arcsin(x)
 
 
+@_float32_for_integers
 def arctan(x):
     return numpy.arctan(x)
 
 
+@_float32_for_integers
 def cosh(x):
     return numpy.cosh(x)
 
 
+@_float32_for_integers
 def sinh(x):
     return numpy.sinh(x)
 
 
+@_float32_for_integers
 def tanh(x):
     return numpy.tanh(x)
 
 
+@_float32_for_integers
 def arcosh(x):
     return numpy.arccosh(x)
 
 
+@_float32_for_integers
 def arsinh(x):
     return numpy.arcsinh(x)
 
 
+@_float32_for_integers
 def artanh(x):
     return numpy.arctanh(x)
 
 
+@_float32_for_integers
 def arctan2(y, x):
     return numpy.arctan2(y, x)
 
@@ -197,6 +263,7 @@ def sgn(x):
     return numpy.sign(x)
 
 
+@_float32_for_integers
 def sqrt(x):
     return numpy.sqrt(x)
 
@@ -316,6 +383,7 @@ def count(data, condition=None):
         raise TypeError("Unsupported data type for count function.")
 
 
+@_float32_for_integers
 def normalized_difference(x, y):
     return (x - y) / (x + y)
 
@@ -324,6 +392,7 @@ def clip(x, min, max):
     return numpy.clip(x, min, max)
 
 
+@_float32_for_integers
 def linear_scale_range(
     x,
     inputMin: float,
