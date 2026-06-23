@@ -3,7 +3,7 @@
 import logging
 import time
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
 
 import attr
 import numpy
@@ -833,17 +833,17 @@ def _apply_scale_offset(
     if all(scale == 1.0 and offset == 0.0 for scale, offset in pairs):
         return img
 
-    # float32 operands so the result stays float32 (a float32 array times a Python
-    # float / float64 array would promote to float64).
-    scales = numpy.asarray([s for s, _ in pairs], dtype="float32").reshape(-1, 1, 1)
-    offsets = numpy.asarray([o for _, o in pairs], dtype="float32").reshape(-1, 1, 1)
-    # Rescale the underlying data (every pixel) and re-attach the original mask, so
-    # masked (nodata) pixels stay masked and no raw DN lingers under the mask.
-    data = numpy.ma.getdata(img.array).astype("float32") * scales + offsets
-    array = numpy.ma.MaskedArray(data, mask=numpy.ma.getmaskarray(img.array))
+    scales = numpy.array([s for s, _ in pairs])
+    offsets = numpy.array([o for _, o in pairs])
+    # In-place unscale on a float32 copy, mirroring rio-tiler's Reader: casting the
+    # array to float32 (then ``out=`` float32) keeps the result float32 regardless
+    # of the scale/offset dtype, avoids extra allocations, and preserves the mask.
+    data = cast(numpy.ma.MaskedArray, img.array.astype("float32", casting="unsafe"))
+    numpy.multiply(data, scales.reshape((-1, 1, 1)), out=data, casting="unsafe")
+    numpy.add(data, offsets.reshape((-1, 1, 1)), out=data, casting="unsafe")
 
     return ImageData(
-        array,
+        data,
         assets=img.assets,
         crs=img.crs,
         bounds=img.bounds,
