@@ -226,10 +226,12 @@ def _max(data, ignore_nodata=True, axis=None, keepdims=False):
     return numpy.max(data, axis=axis, keepdims=keepdims)
 
 
-def median(data, axis=None, keepdims=False):
+def median(data, axis=0, keepdims=False):
     """Calculate median across the data.
 
-    When used with RasterStack, it uses the efficient streaming approach.
+    Reduces over axis 0 (the leading "array" dimension) by default, consistent
+    with the other aggregators — see the note in max(). When used with
+    RasterStack, it uses the efficient streaming approach.
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
@@ -241,10 +243,12 @@ def median(data, axis=None, keepdims=False):
     return numpy.median(data, axis=axis, keepdims=keepdims)
 
 
-def mean(data, axis=None, keepdims=False):
+def mean(data, axis=0, keepdims=False):
     """Calculate mean across the data.
 
-    When used with RasterStack, it uses the efficient streaming approach.
+    Reduces over axis 0 (the leading "array" dimension) by default, consistent
+    with the other aggregators — see the note in max(). When used with
+    RasterStack, it uses the efficient streaming approach.
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
@@ -256,15 +260,17 @@ def mean(data, axis=None, keepdims=False):
     return numpy.mean(data, axis=axis, keepdims=keepdims)
 
 
-def sd(x, axis=None, keepdims=False):
+def sd(x, axis=0, keepdims=False):
     return numpy.std(x, axis=axis, keepdims=keepdims, ddof=1)
 
 
-def stdev(data, axis=None, keepdims=False):
+def stdev(data, axis=0, keepdims=False):
     """Calculate standard deviation across the data.
 
-    This is an alias for sd() that matches the PixelSelectionMethod naming.
-    When used with RasterStack, it uses the efficient streaming approach.
+    Reduces over axis 0 (the leading "array" dimension) by default, consistent
+    with the other aggregators — see the note in max(). This is an alias for
+    sd() that matches the PixelSelectionMethod naming. When used with
+    RasterStack, it uses the efficient streaming approach.
     """
     # Handle RasterStack - use apply_pixel_selection for efficiency
     if isinstance(data, RasterStack):
@@ -273,7 +279,7 @@ def stdev(data, axis=None, keepdims=False):
     return numpy.std(data, axis=axis, keepdims=keepdims, ddof=1)
 
 
-def variance(x, axis=None, keepdims=False):
+def variance(x, axis=0, keepdims=False):
     return numpy.var(x, axis=axis, keepdims=keepdims, ddof=1)
 
 
@@ -368,9 +374,13 @@ def max(data, ignore_nodata=True):
         stacked_arrays = numpy.ma.stack([v.array for v in data.values()], axis=0)
         return _max(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
-        return _max(data, ignore_nodata=ignore_nodata)
-    elif isinstance(data, numpy.ma.MaskedArray):
-        return _max(data, ignore_nodata=ignore_nodata)
+        # Reduce over axis 0 (the leading "array" dimension), NOT globally. In
+        # titiler's vectorized cube model the leading axis is the dimension an
+        # openEO aggregator operates on (the time axis in apply_dimension(t)
+        # callbacks, the band axis in reduce_dimension(bands)). This mirrors the
+        # RasterStack branch above and avoids collapsing every spatial pixel into
+        # a single scalar. (MaskedArray is an ndarray subclass, so it lands here.)
+        return _max(data, ignore_nodata=ignore_nodata, axis=0)
     else:
         raise TypeError("Unsupported data type for max function.")
 
@@ -385,9 +395,9 @@ def min(data, ignore_nodata=True):
         stacked_arrays = numpy.ma.stack([v.array for v in data.values()], axis=0)
         return _min(stacked_arrays, ignore_nodata=ignore_nodata, axis=0)
     elif isinstance(data, numpy.ndarray):
-        return _min(data, ignore_nodata=ignore_nodata)
-    elif isinstance(data, numpy.ma.MaskedArray):
-        return _min(data, ignore_nodata=ignore_nodata)
+        # Reduce over axis 0 (the leading "array" dimension), NOT globally — see
+        # the note in max(). (MaskedArray is an ndarray subclass, so it lands here.)
+        return _min(data, ignore_nodata=ignore_nodata, axis=0)
     else:
         raise TypeError("Unsupported data type for min function.")
 
