@@ -66,8 +66,10 @@ def array_element(
             array_dict = {k: v.array for k, v in data.items() if k == label}
         # return a multi-dimensional array
         # For RasterStack, this will execute all tasks when stacking is needed
-        # This is expected behavior for array operations
-        return numpy.stack(list(array_dict.values()), axis=0)
+        # This is expected behavior for array operations.
+        # Use numpy.ma.stack (not numpy.stack) so per-slice nodata masks are
+        # preserved; plain numpy.stack silently drops them.
+        return numpy.ma.stack(list(array_dict.values()), axis=0)
 
     # Handle regular arrays (index must be provided at this point)
     if index is None:
@@ -76,8 +78,10 @@ def array_element(
     # Get the array to work with
     array_data = data.array if isinstance(data, ImageData) else data
 
-    # Convert to numpy array to ensure we have a shape attribute
-    array_data = numpy.asarray(array_data)
+    # Convert to numpy array to ensure we have a shape attribute.
+    # Use numpy.ma.asanyarray (not numpy.asarray) so a MaskedArray keeps its
+    # nodata mask; numpy.asarray strips it, turning masked nodata into valid data.
+    array_data = numpy.ma.asanyarray(array_data)
 
     # Handle 0-dimensional arrays (scalars)
     # If index is 0, return the scalar value itself
@@ -123,8 +127,10 @@ def array_create(data: Optional[ArrayLike] = None, repeat: int = 1) -> ArrayLike
     if isinstance(data, (list, tuple)):
         # Convert each element to array and stack them
         arrays = [numpy.asanyarray(item) for item in data]
-        # Stack along first axis - this creates (n_elements, *spatial_dims)
-        return numpy.stack(arrays, axis=0)
+        # Stack along first axis - this creates (n_elements, *spatial_dims).
+        # Use numpy.ma.stack (not numpy.stack) so masked nodata in any element is
+        # preserved; plain numpy.stack silently drops the masks.
+        return numpy.ma.stack(arrays, axis=0)
 
     # Handle single array input
     arr = numpy.asanyarray(data)

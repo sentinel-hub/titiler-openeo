@@ -494,8 +494,10 @@ def _reduce_spectral_dimension_stack(
     # CRITICAL: Stack all images FIRST, then call reducer ONCE
     # This is required for reducers with internal caching/state
     # Stack all images along a new temporal dimension (axis 0)
-    # Shape will be (time, bands, height, width)
-    stacked_data = numpy.stack(images, axis=0)
+    # Shape will be (time, bands, height, width).
+    # Use numpy.ma.stack (not numpy.stack) so per-image nodata masks are preserved;
+    # plain numpy.stack silently drops them, turning masked nodata into valid data.
+    stacked_data = numpy.ma.stack(images, axis=0)
 
     # To reduce the spectral dimension while maintaining time separation,
     # we move the bands axis to the front: (bands, time, height, width)
