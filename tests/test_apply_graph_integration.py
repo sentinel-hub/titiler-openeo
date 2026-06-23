@@ -14,6 +14,7 @@ below would fail on the previous per-element / per-image implementations.
 from datetime import datetime
 
 import numpy as np
+import pytest
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rio_tiler.models import ImageData
 
@@ -120,6 +121,49 @@ def test_apply_via_graph_maps_each_image():
     by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
     assert by_ts[datetime(2021, 1, 1)] == [10, 10, 10, 10]
     assert by_ts[datetime(2021, 1, 2)] == [50, 50, 50, 50]
+
+
+def test_max_rejects_non_boolean_ignore_nodata():
+    """max/min must reject a non-boolean ``ignore_nodata`` with a clear validation
+    error, not a cryptic numpy "truth value of an array is ambiguous" crash.
+
+    This is the common misuse ``oe_max(a, b)``: openEO ``max`` is an array
+    aggregator ``max(data, ignore_nodata)``, so the second positional ``b`` binds
+    to ``ignore_nodata`` (which must be boolean). Element-wise max of two bands is
+    ``max(array_create([a, b]))``.
+    """
+    band = ImageData(
+        np.ma.array(np.full((1, 2, 2), 2.0), mask=[[[False, True], [False, False]]])
+    )
+    stack = RasterStack.from_images({datetime(2024, 6, 1): band})
+    pg = {
+        "m": {
+            "process_id": "max",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "ignore_nodata": {"from_parameter": "data"},  # an array, not a bool
+            },
+            "result": True,
+        }
+    }
+    with pytest.raises(TypeError, match="ignore_nodata.*expected 'boolean'"):
+        _run(pg, data=stack)
+
+
+def test_max_accepts_boolean_ignore_nodata():
+    """A valid boolean ``ignore_nodata`` (and the default) still works."""
+    band = ImageData(np.ma.array(np.full((2, 1, 2), 3.0)))
+    stack = RasterStack.from_images({datetime(2024, 6, 1): band})
+    pg = {
+        "m": {
+            "process_id": "max",
+            "arguments": {"data": {"from_parameter": "data"}, "ignore_nodata": False},
+            "result": True,
+        }
+    }
+    out = np.asarray(_run(pg, data=stack))
+    assert out.shape == (2, 1, 2)
+    assert (out == 3.0).all()
 
 
 def test_apply_dimension_bands_maps_each_image_via_graph():
