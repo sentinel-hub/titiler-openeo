@@ -218,6 +218,11 @@ class ProcessingSettings(BaseSettings):
     # memory to ~the working set. See titiler.openeo.results_cache.
     evict_intermediate_results: bool = True
 
+    # Apply STAC raster:scale / raster:offset (per band) when loading so bands are
+    # returned as physical values (e.g. Sentinel-2 BOA reflectance) instead of raw
+    # DN. Disable to keep raw DN (e.g. while migrating graphs that scale manually).
+    apply_scale_offset: bool = True
+
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_PROCESSING_",
         env_file=".env",
