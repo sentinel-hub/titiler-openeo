@@ -212,6 +212,12 @@ class ProcessingSettings(BaseSettings):
     max_pixels: int = 100_000_000  # 100 million pixels default
     max_items: int = 20
 
+    # Free a process-graph node's intermediate data as soon as every consumer of
+    # that node has run (reference-counted results cache), instead of keeping
+    # every intermediate cube resident for the whole evaluation. Bounds peak
+    # memory to ~the working set. See titiler.openeo.results_cache.
+    evict_intermediate_results: bool = True
+
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_PROCESSING_",
         env_file=".env",
