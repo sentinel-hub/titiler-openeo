@@ -3,6 +3,7 @@
 from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+import numpy
 import pyproj
 import pystac
 from attrs import define, field
@@ -22,6 +23,7 @@ from pystac_client.stac_api_io import StacApiIO
 from rasterio.warp import transform_bounds
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
+from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
@@ -39,6 +41,7 @@ from .processes.implementations.data_model import RasterStack
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
+from .virtualbands import VirtualBandRegistry
 
 pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
@@ -58,6 +61,7 @@ class stacApiBackend:
 
     url: str = field()
     exclude_collections: list = field(factory=list)
+    virtual_bands: VirtualBandRegistry = field(factory=VirtualBandRegistry.empty)
     _client_cache: Client = field(default=None, init=False)
 
     @property
@@ -98,6 +102,7 @@ class stacApiBackend:
 
             col_dict = collection.to_dict()
             self._fix_collection(col_dict)
+            self._augment_with_virtual_bands(col_dict)
             collections.append(col_dict)
 
         return collections
@@ -184,11 +189,18 @@ class stacApiBackend:
         # bands
         if "item_assets" in collection.extra_fields:
             ia.ItemAssetsExtension.add_to(collection)
-            bands_name = set()
+            # Preserve item_assets declaration order (and stay JSON-serializable);
+            # an unordered set here led to non-deterministic band order (#280).
+            bands_name: List[str] = []
+            seen_bands: set = set()
             for key, asset in collection.ext.item_assets.items():
-                if "data" in asset.properties.get("roles", []):
-                    bands_name.add(key)
-            if len(bands_name) > 0:
+                if (
+                    "data" in asset.properties.get("roles", [])
+                    and key not in seen_bands
+                ):
+                    bands_name.append(key)
+                    seen_bands.add(key)
+            if bands_name:
                 dims["spectral"] = dc.Dimension.from_dict(
                     {
                         "type": "bands",
@@ -197,6 +209,35 @@ class stacApiBackend:
                 )
 
         return dims
+
+    def _augment_with_virtual_bands(self, collection: Dict) -> None:
+        """Add registered virtual band names to the collection band dimension.
+
+        Pure metadata operation: ensures a ``cube:dimensions`` band dimension
+        exists and appends the virtual band names (deterministic order) so openEO
+        clients accept them. Does not read data or invoke plugin ``compute``.
+        """
+        collection_id = collection.get("id")
+        if not collection_id or not self.virtual_bands.has_plugins(collection_id):
+            return
+
+        names = self.virtual_bands.virtual_band_names(collection_id)
+        if not names:
+            return
+
+        cube_dims = collection.setdefault("cube:dimensions", {})
+        band_dim = next(
+            (d for d in cube_dims.values() if d.get("type") == "bands"), None
+        )
+        if band_dim is None:
+            band_dim = {"type": "bands", "values": []}
+            cube_dims["spectral"] = band_dim
+
+        values = list(band_dim.get("values") or [])
+        for name in names:
+            if name not in values:
+                values.append(name)
+        band_dim["values"] = values
 
     def getvariables(self, collection: Collection) -> Dict[str, dc.Variable]:
         """Get variables from collection"""
@@ -233,6 +274,7 @@ class stacApiBackend:
 
         col_dict = collection.to_dict()
         self._fix_collection(col_dict)
+        self._augment_with_virtual_bands(col_dict)
 
         return col_dict
 
@@ -271,6 +313,55 @@ class stacApiBackend:
             max_items=max_items,
         )
         return list(items.items())
+
+
+def _assemble_virtual_bands(
+    img: ImageData,
+    requested_bands: List[str],
+    read_bands: List[str],
+    virtual_names: set,
+    registry: VirtualBandRegistry,
+    collection_id: str,
+    items: List[Item],
+) -> ImageData:
+    """Compute requested virtual bands and reorder to the requested band order.
+
+    Runs inside the lazy per-date task, so it only executes when a slice is
+    materialized. ``img`` holds the real bands in ``read_bands`` order; the
+    returned ImageData holds exactly ``requested_bands`` in that order.
+    """
+    # Expose the real band names so plugins can look bands up by name.
+    img.band_names = read_bands
+    real_index = {name: i for i, name in enumerate(read_bands)}
+
+    out_arrays = []
+    for name in requested_bands:
+        if name in virtual_names:
+            plugin = registry.plugin_for_band(collection_id, name)
+            if plugin is None:  # pragma: no cover - guarded by virtual_names
+                raise ValueError(f"No plugin provides virtual band '{name}'")
+            arr = plugin.compute(name, items, img)
+            expected_hw = img.array.shape[-2:]
+            if arr.ndim == 2 and arr.shape == expected_hw:
+                arr = arr[numpy.newaxis, ...]
+            elif not (arr.ndim == 3 and arr.shape == (1, *expected_hw)):
+                raise ValueError(
+                    f"Virtual band '{name}' plugin "
+                    f"{type(plugin).__name__} returned an array of shape "
+                    f"{arr.shape}; expected {expected_hw} or (1, *{expected_hw})"
+                )
+            out_arrays.append(arr)
+        else:
+            i = real_index[name]
+            out_arrays.append(img.array[i : i + 1])
+
+    final = numpy.ma.concatenate(out_arrays, axis=0)
+    return ImageData(
+        final,
+        bounds=img.bounds,
+        crs=img.crs,
+        band_names=requested_bands,
+    )
 
 
 @define
@@ -709,6 +800,34 @@ class LoadCollection:
 
         return cql2_filter
 
+    def _resolve_virtual_bands(
+        self, collection_id: str, bands: Optional[List[str]]
+    ) -> tuple[set, Optional[List[str]]]:
+        """Split requested bands into virtual names and the real bands to read.
+
+        Pure metadata work (no reads, no plugin compute). Returns the set of
+        requested virtual band names and the list of real bands to actually read
+        (requested real bands plus support bands needed to compute the virtual
+        ones). When no virtual bands are requested, returns ``(set(), bands)``.
+        """
+        registry = self.stac_api.virtual_bands
+        if not bands or not registry.has_plugins(collection_id):
+            return set(), bands
+
+        split = registry.split(collection_id, bands)
+        if not split.virtual:
+            return set(), bands
+
+        read_bands = split.real + split.support
+        if not read_bands:
+            raise ValueError(
+                f"Virtual bands {split.virtual} for collection '{collection_id}' "
+                "require at least one real band to anchor the output grid; "
+                "request a real band alongside them or have the plugin "
+                "declare one via required_bands()."
+            )
+        return set(split.virtual), read_bands
+
     def load_collection(
         self,
         id: str,
@@ -776,9 +895,14 @@ class LoadCollection:
         if bands is None and items and items[0].assets:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
-        # Estimate dimensions based on items and spatial extent
+        # Split requested bands into real vs virtual (collection-bound plugins).
+        # This is pure metadata work: no reads and no plugin compute happen here.
+        registry = self.stac_api.virtual_bands
+        virtual_names, read_bands = self._resolve_virtual_bands(id, bands)
+
+        # Estimate dimensions based on the real bands that will actually be read
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height, target_crs=target_crs
+            items, spatial_extent, read_bands, width, height, target_crs=target_crs
         )
 
         # Extract values from the result
@@ -812,7 +936,7 @@ class LoadCollection:
             bbox: List[float],
             bounds_crs: Any,
             output_crs: Any,
-            bands: Optional[list[str]],
+            read_bands: Optional[list[str]],
             width: int,
             height: int,
             tile_buffer: Optional[float],
@@ -824,7 +948,7 @@ class LoadCollection:
                 mosaic_kwargs = {
                     "threads": 0,
                     "bounds_crs": bounds_crs,
-                    "assets": bands,
+                    "assets": read_bands,
                     "dst_crs": output_crs,
                     "width": int(width) if width else width,
                     "height": int(height) if height else height,
@@ -840,6 +964,21 @@ class LoadCollection:
                     bbox,
                     **mosaic_kwargs,
                 )
+
+                # Lazily compute virtual bands (if any) and reorder the bands to
+                # the originally requested order. Only requested virtual bands are
+                # computed, and only now that this slice is materialized.
+                if virtual_names:
+                    img = _assemble_virtual_bands(
+                        img,
+                        bands,
+                        read_bands,
+                        virtual_names,
+                        registry,
+                        id,
+                        date_items,
+                    )
+
                 return img
 
             return task
@@ -852,7 +991,7 @@ class LoadCollection:
                 bbox,
                 bounds_crs,
                 output_crs,
-                bands,
+                read_bands,
                 width,
                 height,
                 tile_buffer,

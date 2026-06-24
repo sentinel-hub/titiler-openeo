@@ -20,8 +20,28 @@ from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
 from .settings import ApiSettings, AuthSettings, BackendSettings
 from .stacapi import LoadCollection, LoadStac, stacApiBackend
+from .virtualbands import VirtualBandRegistry
 
 STAC_VERSION = "1.0.0"
+
+
+def _load_virtual_bands_registry(config_path: str | None) -> VirtualBandRegistry:
+    """Build the virtual band registry from a JSON config file (if configured)."""
+    if not config_path:
+        return VirtualBandRegistry.empty()
+
+    import json
+
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (OSError, json.JSONDecodeError) as err:
+        raise ValueError(
+            f"Failed to load virtual bands config from "
+            f"TITILER_OPENEO_VIRTUAL_BANDS_CONFIG='{config_path}': {err}"
+        ) from err
+    return VirtualBandRegistry.from_config(config)
+
 
 api_settings = ApiSettings()
 auth_settings = AuthSettings()
@@ -35,9 +55,11 @@ except Exception as err:
         "Please set TITILER_OPENEO_STAC_API_URL and TITILER_OPENEO_STORE_URL"
     ) from err
 
+virtual_bands = _load_virtual_bands_registry(backend_settings.virtual_bands_config)
 stac_client = stacApiBackend(
     str(backend_settings.stac_api_url),
     exclude_collections=backend_settings.exclude_collections,
+    virtual_bands=virtual_bands,
 )  # type: ignore
 service_store = get_store(str(backend_settings.store_url))
 udp_store = get_udp_store(str(backend_settings.store_url))

@@ -78,6 +78,10 @@ duckdb = ["duckdb"]
 postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary"]
 oidc = ["cryptography", "httpx"]
 
+[project.entry-points."titiler.openeo.virtual_bands"]
+normalized_difference = "titiler.openeo.virtualbands.examples:NormalizedDifferencePlugin"
+constant_from_property = "titiler.openeo.virtualbands.examples:ConstantFromPropertyPlugin"
+
 [project.urls]
 Homepage = "https://sentinel-hub.github.io/titiler-openeo/"
 Documentation = "https://sentinel-hub.github.io/titiler-openeo/"

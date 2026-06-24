@@ -169,6 +169,9 @@ class BackendSettings(BaseSettings):
     default_services_file: Optional[str] = (
         None  # Path to default services configuration file
     )
+    virtual_bands_config: Optional[str] = (
+        None  # Path to JSON config binding virtual band plugins to collections
+    )
     exclude_collections: list[str] = Field(
         default_factory=list,
         description="List of collection IDs to exclude from the API (e.g. non-compliant STAC collections).",

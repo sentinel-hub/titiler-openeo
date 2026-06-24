@@ -13,6 +13,19 @@ export $(cat .env | xargs)
 uvicorn titiler.openeo.main:app --host 0.0.0.0 --port 8081
 ```
 
+> **Stale `*.egg-info` shadows entry points.** The project builds with
+> `hatchling`. A leftover `titiler_openeo.egg-info/` directory at the repo root
+> (from an old `setuptools`/`pip install -e .`) is picked up by
+> `importlib.metadata` *before* the hatchling install and lacks the
+> `entry_points.txt`, so plugin entry points (e.g.
+> `titiler.openeo.virtual_bands`) silently resolve to nothing. If a registered
+> plugin reports as "unknown", remove the stale directory and re-sync:
+>
+> ```bash
+> rm -rf titiler_openeo.egg-info
+> uv sync --reinstall-package titiler-openeo
+> ```
+
 ## Pre-commit hooks
 
 This repo is set to use `pre-commit` to run *isort*, *flake8*, *pydocstring*, *black*, and *mypy* when committing new code.

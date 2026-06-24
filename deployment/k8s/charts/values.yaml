@@ -86,6 +86,13 @@ auth:
 # STAC configuration
 stac:
   apiUrl: "https://stac.eoapi.dev"  # STAC API endpoint URL
+  # Virtual bands plugin configuration. Path (relative to the chart) to a JSON
+  # file binding virtual band plugins to collections. The referenced plugins
+  # must be registered as `titiler.openeo.virtual_bands` entry points in the
+  # running image (the built-in examples ship with titiler-openeo; custom
+  # plugins require a custom image). Leave empty to disable. Example:
+  # files/virtual_bands.json
+  virtualBandsConfig: ""
 
 env:
   CPL_TMPDIR: /tmp
