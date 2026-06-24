@@ -123,8 +123,12 @@ class EvictingResultsCache(dict):
         self._stored.add(node)
         # Tag whether this result has exactly one consumer (no consumer has run
         # yet at store time, so _remaining[node] is the full consumer count). A
-        # sole consumer may stream-and-release this value safely.
-        _tag_single_consumer(value, self._remaining.get(node, 0) == 1)
+        # sole consumer may stream-and-release this value safely. However, if the
+        # same object is reachable via multiple cache slots (identity passthrough),
+        # streaming would be unsafe, so disable the tag in that case.
+        is_single = self._remaining.get(node, 0) == 1
+        is_unique = sum(1 for v in self.values() if v is value) == 1
+        _tag_single_consumer(value, is_single and is_unique)
         for parent in self._parents.get(node, ()):
             self._remaining[parent] = self._remaining.get(parent, 0) - 1
             if self._remaining[parent] <= 0:
