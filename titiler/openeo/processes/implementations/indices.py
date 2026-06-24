@@ -37,9 +37,11 @@ def _apply_per_slice(
         batch = keys[start : start + window]
         data.prefetch(batch)  # load the window concurrently
         for key in batch:
-            try:
-                img_data = data[key]
-            except KeyError:
+            # Avoid re-executing tasks that failed during prefetch (prefetch skips
+            # allowed exceptions without caching).
+            with data._cache_lock:
+                img_data = data._data_cache.get(key)
+            if img_data is None:
                 continue
             result[key] = fn(img_data)
             data.release(key)  # safe: this stack has no other consumer
