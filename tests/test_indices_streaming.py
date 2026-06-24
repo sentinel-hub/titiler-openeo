@@ -87,10 +87,9 @@ def test_streaming_bounds_resident_slices_to_window():
 
 
 def test_non_single_consumer_falls_back_and_keeps_source():
-    """Without the tag the source may have other consumers: don't mutate it."""
+    """Without the single-consumer tag enabled the source may have other consumers: don't mutate it."""
     stack, _ = _regenerable_stack(n=4)
-    # no _single_consumer attribute set -> fallback (data.items())
-    result = ndvi(stack, nir=2, red=1)
+    # `_single_consumer` defaults to False -> fallback (data.items())
     assert len(result) == 4
     # Fallback realizes the whole stack and leaves it cached (not released).
     assert len(stack._data_cache) == 4
