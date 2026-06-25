@@ -868,6 +868,41 @@ def _normalize_intervals(intervals: Any) -> List[List[Optional[str]]]:
     return [_interval_to_pair(iv) for iv in items]
 
 
+def _callback_results_cache(callback: Callable) -> Optional[Dict[Any, Any]]:
+    """Return the openEO executor's shared ``results_cache`` backing a callback.
+
+    The reducer/callback compiled by openeo_pg_parser_networkx is a
+    ``functools.partial(node_callable, ...)`` whose closure holds the
+    ``results_cache`` dict shared across the whole graph. We reach it so a process
+    that must invoke the callback more than once (e.g. ``aggregate_temporal``, once
+    per interval) can reset the callback's subgraph cache between calls — otherwise
+    the executor memoizes each node by id and every call returns the FIRST call's
+    result. Returns ``None`` if the structure can't be introspected (degrade
+    gracefully).
+    """
+    func = getattr(callback, "func", callback)  # unwrap functools.partial
+    freevars = getattr(getattr(func, "__code__", None), "co_freevars", ()) or ()
+    closure = getattr(func, "__closure__", None) or ()
+    for name, cell in zip(freevars, closure):
+        if name == "results_cache" and isinstance(cell.cell_contents, dict):
+            return cell.cell_contents
+    return None
+
+
+def _reset_results_cache(
+    cache: Optional[Dict[Any, Any]], baseline: Dict[Any, Any]
+) -> None:
+    """Reset a callback's shared results_cache to ``baseline`` (no-op if None).
+
+    Used to force a per-call recompute (e.g. ``aggregate_temporal`` per interval)
+    while preserving upstream cache entries captured in ``baseline``.
+    """
+    if cache is None:
+        return
+    cache.clear()
+    cache.update(baseline)
+
+
 def aggregate_temporal(
     data: RasterStack,
     intervals: Union[TemporalIntervals, List[List[Optional[str]]]],
@@ -934,6 +969,16 @@ def aggregate_temporal(
     if union_keys:
         data.prefetch(union_keys)
 
+    # The reducer is invoked once PER interval, but the executor memoizes each
+    # callback node in a results_cache SHARED across those calls. Without
+    # intervention every interval after the first returns the first interval's
+    # result (identical labels -> e.g. a grayscale composite instead of distinct
+    # per-period values). Snapshot the cache before any reduction and reset it to
+    # that state before each interval, so each recomputes on its own sub-stack
+    # while upstream entries are preserved (no re-reads).
+    reducer_cache = _callback_results_cache(reducer)
+    cache_baseline = dict(reducer_cache or {})
+
     result_images: Dict[datetime, ImageData] = {}
 
     for idx in range(len(parsed_intervals)):
@@ -960,6 +1005,10 @@ def aggregate_temporal(
         reducer_kwargs: Dict[str, Any] = {"data": sub_stack}
         if context is not None:
             reducer_kwargs["context"] = context
+
+        # Force this interval's reducer to recompute (see snapshot above).
+        _reset_results_cache(reducer_cache, cache_baseline)
+
         reduced_array = _coerce_reduced_array(reducer(**reducer_kwargs))
 
         first_img = next(iter(sub_images.values()))
