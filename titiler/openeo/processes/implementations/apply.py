@@ -258,14 +258,34 @@ def _apply_temporal_dimension(
             )
         return RasterStack.from_images(result)
     else:
-        # Replace temporal dimension with target dimension
-        # This collapses to a single result
+        # Replace the temporal dimension with the target dimension: the source
+        # ("t") dimension is removed and its per-timestamp values become the new
+        # (e.g. spectral) bands of a SINGLE image. The temporal axis must therefore
+        # be folded into the band axis, otherwise the ImageData stays 4-D and later
+        # rendering (e.g. save_result GTiff) fails with
+        # "too many values to unpack (expected 3)".
+        #   (n_times, bands, height, width) -> (n_times * bands, height, width)
+        collapsed = result_array
+        if collapsed.ndim == 4:
+            n_times, n_bands = collapsed.shape[:2]
+            collapsed = collapsed.reshape(n_times * n_bands, *collapsed.shape[2:])
+        elif collapsed.ndim == 2:
+            collapsed = collapsed[numpy.newaxis, ...]
+        # else: 3-D already has the leading axis acting as the band axis.
+
+        # Name the new bands after the source timestamps when each contributes one
+        # band; otherwise let ImageData assign default band names.
+        if collapsed.shape[0] == len(data):
+            band_descriptions = [str(key) for key in data.keys()]
+        else:
+            band_descriptions = []
+
         result_img = ImageData(
-            result_array[0] if result_array.shape[0] == 1 else result_array,
+            collapsed,
             assets=list(data.keys()),
             crs=first_ref.crs,
             bounds=first_ref.bounds,
-            band_descriptions=first_ref.band_names if first_ref.band_names else [],
+            band_descriptions=band_descriptions,
             metadata={
                 "applied_dimension": "temporal",
                 "target_dimension": target_dimension,
