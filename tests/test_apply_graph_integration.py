@@ -538,3 +538,59 @@ def test_apply_dimension_temporal_to_spectral_collapses_via_graph():
     assert img.array.shape == (3, 2, 2)  # 3 timestamps -> 3 spectral bands (renderable)
     # band values are the per-timestamp inputs * 10
     np.testing.assert_allclose([img.array[b].mean() for b in range(3)], [2.0, 5.0, 8.0])
+
+
+def test_aggregate_temporal_distinct_per_interval_via_graph():
+    """aggregate_temporal must compute EACH interval from its own slices.
+
+    The reducer is invoked once per interval, but the executor memoizes callback
+    nodes in a shared results_cache, so without resetting it every interval
+    returned the FIRST interval's result. In the real graph that made every
+    aggregated period identical (e.g. a 3-band temporal composite came out
+    grayscale because all bands were equal).
+    """
+
+    def _img(v):
+        return ImageData(
+            np.ma.array(np.full((1, 2, 2), v, np.float32)),
+            band_descriptions=["ndvi"],
+        )
+
+    # Distinct value per month -> per-interval means must be 0.2 / 0.5 / 0.8.
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 4, 10): _img(0.2),
+            datetime(2024, 4, 20): _img(0.2),
+            datetime(2024, 5, 10): _img(0.5),
+            datetime(2024, 6, 10): _img(0.8),
+        }
+    )
+    pg = {
+        "aggt": {
+            "process_id": "aggregate_temporal",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "intervals": [
+                    ["2024-04-01", "2024-05-01"],
+                    ["2024-05-01", "2024-06-01"],
+                    ["2024-06-01", "2024-07-01"],
+                ],
+                "labels": ["2024-04-01", "2024-05-01", "2024-06-01"],
+                "reducer": {
+                    "process_graph": {
+                        "mean1": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    means = sorted(
+        round(float(np.ma.asarray(v.array).mean()), 3) for v in result.values()
+    )
+    assert means == [0.2, 0.5, 0.8]
