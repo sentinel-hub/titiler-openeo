@@ -474,3 +474,67 @@ def test_temporal_array_apply_max_is_per_pixel_not_global():
     # Global-scalar max (8) would instead flag every pixel except the one 8.
     assert flagged[datetime(2024, 6, 1)] == [False, False, True, True]
     assert flagged[datetime(2024, 6, 2)] == [True, True, False, False]
+
+
+def test_apply_dimension_temporal_to_spectral_collapses_via_graph():
+    """apply_dimension(dimension='t', target_dimension='spectral') must FOLD the
+    per-timestamp results into the bands of a single image.
+
+    Each of the 3 monthly single-band inputs becomes one spectral band, so the
+    output is one image of shape (3, h, w). The previous code left a 4-D
+    (n_times, bands, h, w) array in a single ImageData, which later broke
+    ``save_result``/``render`` with "too many values to unpack (expected 3)".
+    """
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 4, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.2, np.float32))
+            ),
+            datetime(2024, 5, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.5, np.float32))
+            ),
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.8, np.float32))
+            ),
+        }
+    )
+    pg = {
+        "ad": {
+            "process_id": "apply_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "target_dimension": "spectral",
+                "process": {
+                    "process_graph": {
+                        "aa": {
+                            "process_id": "array_apply",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "process": {
+                                    "process_graph": {
+                                        "m": {
+                                            "process_id": "multiply",
+                                            "arguments": {
+                                                "x": {"from_parameter": "x"},
+                                                "y": 10,
+                                            },
+                                            "result": True,
+                                        }
+                                    }
+                                },
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    assert len(result) == 1  # temporal dimension removed -> single image
+    img = result.first
+    assert img.array.shape == (3, 2, 2)  # 3 timestamps -> 3 spectral bands (renderable)
+    # band values are the per-timestamp inputs * 10
+    np.testing.assert_allclose([img.array[b].mean() for b in range(3)], [2.0, 5.0, 8.0])
