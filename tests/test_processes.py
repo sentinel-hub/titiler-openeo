@@ -483,32 +483,37 @@ def test_add_dimension():
     assert first_img.metadata["label"] == "2021-01"
     assert first_img.metadata["type"] == "temporal"
 
-    # Test with non-empty data cube
-    # First create a cube with some data
+    # Test with non-empty data cube – bands/spectral type labels band_descriptions.
+    # Use band_descriptions=[] to simulate the state after reduce_dimension("spectral"),
+    # which explicitly clears band names when the band count changes.
     data = np.ma.masked_array(
         np.random.randint(0, 256, size=(1, 10, 10), dtype=np.uint8),
         mask=np.zeros((1, 10, 10), dtype=bool),
     )
-    cube = RasterStack.from_images({datetime(2021, 1, 1): ImageData(data)})
+    cube = RasterStack.from_images(
+        {datetime(2021, 1, 1): ImageData(data, band_descriptions=[])}
+    )
 
-    # Add a bands dimension
-    result = add_dimension(data=cube, name="bands", label="red", type="bands")
+    # add_dimension for type="bands" must set band_descriptions, not add a temporal entry
+    result = add_dimension(data=cube, name="spectral", label="red", type="bands")
     assert isinstance(result, RasterStack)
-    assert len(result) == 2  # Original + new dimension
-    # Get the newly added image (most recent timestamp)
-    timestamps = list(result.keys())
-    new_timestamp = max(timestamps)
-    new_img = result[new_timestamp]
-    assert isinstance(new_img, ImageData)
-    # Should match spatial dimensions of existing data
-    original_img = result[min(timestamps)]
-    assert new_img.height == original_img.height
-    assert new_img.width == original_img.width
-    assert new_img.metadata["dimension"] == "bands"
-    assert new_img.metadata["label"] == "red"
-    assert new_img.metadata["type"] == "bands"
+    assert len(result) == 1  # Same temporal keys – only band_descriptions updated
+    img = result.first
+    assert img.band_descriptions == ["red"]
 
-    # Test error cases
+    # Adding a second band label appends to existing descriptions
+    result2 = add_dimension(
+        data=result, name="spectral", label="green", type="spectral"
+    )
+    assert len(result2) == 1
+    assert result2.first.band_descriptions == ["red", "green"]
+
+    # type="temporal" / "other" still adds a new temporal entry
+    result3 = add_dimension(
+        data=cube, name="temporal", label="2021-06", type="temporal"
+    )
+    assert len(result3) == 2  # Original + new entry
+
     # Cannot add spatial dimension
     with pytest.raises(ValueError, match="Cannot add spatial dimensions"):
         add_dimension(data=result, name="x", label="1", type="spatial")
