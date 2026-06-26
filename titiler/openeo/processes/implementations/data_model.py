@@ -4,7 +4,7 @@ import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import (
     Any,
     Callable,
@@ -37,6 +37,21 @@ from rio_tiler.types import BBox
 # NOTE: RasterStack is now a class, not a type alias. The class is defined below.
 
 T = TypeVar("T")
+
+
+def _normalize_to_naive_utc(dt: datetime) -> datetime:
+    """Convert a datetime to naive UTC.
+
+    If the datetime is tz-aware, convert to UTC and strip tzinfo.
+    If naive, treat as UTC (return as-is).
+
+    RasterStack keys are normalized through this so a single stack never mixes
+    tz-aware and tz-naive datetimes (which can't be compared/sorted). This is the
+    one source of truth — other modules import it from here.
+    """
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def compute_cutline_mask(
@@ -392,10 +407,11 @@ class RasterStack(Dict[datetime, ImageData]):
 
         Keys are datetime objects directly, ensuring natural temporal ordering.
         """
-        # First pass: extract timestamps
+        # First pass: extract timestamps, normalized to naive UTC so a stack never
+        # mixes tz-aware and tz-naive keys (which can't be compared when sorting).
         timestamp_task_pairs: List[Tuple[datetime, int, Dict[str, Any]]] = []
         for i, (_task_fn, asset) in enumerate(self._tasks):
-            timestamp = self._timestamp_fn(asset)
+            timestamp = _normalize_to_naive_utc(self._timestamp_fn(asset))
             timestamp_task_pairs.append((timestamp, i, asset))
 
         # Sort by timestamp to ensure temporal ordering
@@ -776,6 +792,11 @@ class RasterStack(Dict[datetime, ImageData]):
         """
         if not images:
             raise ValueError("Cannot create RasterStack from empty images dict")
+
+        # Normalize keys to naive UTC up front so the cache/ImageRefs/keys stay in
+        # sync and a stack never mixes tz-aware and tz-naive datetimes (e.g. an
+        # aware load_collection key combined with a naive datetime.now()).
+        images = {_normalize_to_naive_utc(dt): img for dt, img in images.items()}
 
         # Get first image for dimension parameters
         first_key = next(iter(images))

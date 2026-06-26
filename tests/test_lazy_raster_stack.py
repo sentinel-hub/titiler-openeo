@@ -22,7 +22,7 @@ def mock_task():
 
 def test_lazy_raster_stack():
     # Create a mock asset with datetime
-    dt = datetime(2021, 1, 1, tzinfo=timezone.utc)
+    dt = datetime(2021, 1, 1)
     mock_asset = {"datetime": dt}
 
     # Create a list of tasks
@@ -53,7 +53,7 @@ def test_lazy_raster_stack_same_timestamp():
     Since keys are now datetime objects directly, items with the same
     timestamp will have the same key (last one wins in the mapping).
     """
-    dt = datetime(2021, 1, 1, tzinfo=timezone.utc)
+    dt = datetime(2021, 1, 1)
     mock_asset_1 = {"datetime": dt}
     mock_asset_2 = {"datetime": dt}
 
@@ -123,9 +123,9 @@ def test_truly_lazy_execution():
         return ImageData(array)
 
     # Create multiple mock assets with different timestamps
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
+    dt3 = datetime(2021, 1, 3)
 
     assets = [
         {"datetime": dt1},
@@ -180,9 +180,9 @@ def test_truly_lazy_execution():
 
 def test_lazy_raster_stack_first_last_properties():
     """Test the first and last properties for efficient RasterStack access."""
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
+    dt3 = datetime(2021, 1, 3)
 
     assets = [
         {"datetime": dt1},
@@ -230,8 +230,8 @@ def test_lazy_raster_stack_error_handling():
     def success_task():
         return mock_task()
 
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
 
     assets = [
         {"datetime": dt1},  # failing
@@ -275,10 +275,10 @@ def test_lazy_raster_stack_selective_execution():
 
         return task
 
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)
-    dt4 = datetime(2021, 1, 4, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
+    dt3 = datetime(2021, 1, 3)
+    dt4 = datetime(2021, 1, 4)
 
     assets = [
         {"datetime": dt1, "id": "item-001"},
@@ -309,9 +309,9 @@ def test_lazy_raster_stack_selective_execution():
 
 def test_lazy_raster_stack_timestamps():
     """Test timestamp-related functionality."""
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)  # Earliest
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)  # Middle
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)  # Latest
+    dt1 = datetime(2021, 1, 1)  # Earliest
+    dt2 = datetime(2021, 1, 2)  # Middle
+    dt3 = datetime(2021, 1, 3)  # Latest
 
     # Insert in non-chronological order
     assets = [
@@ -404,8 +404,8 @@ def test_lazy_raster_stack_future_tasks():
 
 def test_lazy_raster_stack_iteration_methods():
     """Test iteration methods of RasterStack."""
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
 
     assets = [
         {"datetime": dt1},
@@ -524,9 +524,9 @@ def test_first_property_with_failing_tasks():
 
         return task
 
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
+    dt3 = datetime(2021, 1, 3)
 
     # Create tasks where first 2 fail and 3rd succeeds
     assets = [
@@ -654,9 +654,9 @@ def test_apply_pixel_selection_with_failing_tasks():
 
         return task
 
-    dt1 = datetime(2021, 1, 1, tzinfo=timezone.utc)
-    dt2 = datetime(2021, 1, 2, tzinfo=timezone.utc)
-    dt3 = datetime(2021, 1, 3, tzinfo=timezone.utc)
+    dt1 = datetime(2021, 1, 1)
+    dt2 = datetime(2021, 1, 2)
+    dt3 = datetime(2021, 1, 3)
 
     # Create tasks where first 2 fail and 3rd succeeds
     assets = [
@@ -707,3 +707,31 @@ def test_empty_lazy_raster_stack():
     # apply_pixel_selection should also fail gracefully
     with pytest.raises(ValueError, match="Method returned an empty array"):
         apply_pixel_selection(lazy_stack, pixel_selection="first")
+
+
+def test_keys_normalized_to_naive_utc():
+    """tz-aware inputs are normalized to naive UTC at the source so a stack never
+    mixes tz-aware and tz-naive keys (which can't be compared when sorting)."""
+    aware = datetime(2021, 1, 1, 12, tzinfo=timezone.utc)
+    naive = datetime(2021, 1, 2)  # already naive
+    tasks = [
+        (mock_task, {"datetime": naive}),
+        (mock_task, {"datetime": aware}),
+    ]
+    stack = RasterStack(tasks=tasks, timestamp_fn=lambda a: a["datetime"])
+
+    keys = list(stack.keys())
+    assert all(k.tzinfo is None for k in keys)  # all naive
+    # sorted chronologically, aware converted to naive UTC
+    assert keys == [datetime(2021, 1, 1, 12), datetime(2021, 1, 2)]
+
+
+def test_from_images_normalizes_mixed_awareness():
+    """RasterStack.from_images normalizes keys so mixed awareness doesn't crash."""
+    img = ImageData(np.ma.array(np.zeros((1, 2, 2), "float32")))
+    aware = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    naive = datetime(2024, 2, 1)
+    stack = RasterStack.from_images({aware: img, naive: img})
+    keys = list(stack.keys())
+    assert all(k.tzinfo is None for k in keys)
+    assert keys == [datetime(2024, 1, 1), datetime(2024, 2, 1)]

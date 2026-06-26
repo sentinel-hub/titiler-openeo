@@ -50,7 +50,7 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
-from .data_model import ImageRef, RasterStack
+from .data_model import ImageRef, RasterStack, _normalize_to_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -733,17 +733,6 @@ def _resolve_output_keys(
     if len(set(starts)) < len(starts):
         raise DistinctDimensionLabelsRequired()
     return [s if s is not None else datetime.min for s in starts]
-
-
-def _normalize_to_naive_utc(dt: datetime) -> datetime:
-    """Convert a datetime to naive UTC.
-
-    If the datetime is tz-aware, convert to UTC and strip tzinfo.
-    If naive, treat as UTC (return as-is).
-    """
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
 
 
 def _timestamp_in_interval(
