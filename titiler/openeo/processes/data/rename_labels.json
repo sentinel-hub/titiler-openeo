@@ -1,0 +1,71 @@
+{
+  "id": "rename_labels",
+  "summary": "Rename dimension labels",
+  "description": "Renames the labels of the specified dimension in the data cube from `source` to `target`.\n\nIf the array for the parameter `source` is empty, the dimension labels are renamed to the labels specified in the parameter `target` based on their position in the data cube. Otherwise, the labels in `source` are renamed to the corresponding labels in `target` and the number of labels in `source` and `target` must be equal.\n\nThis process only renames the labels, it does not reorder or change the data in any other way.",
+  "categories": [
+    "cubes"
+  ],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "The data cube.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube"
+      }
+    },
+    {
+      "name": "dimension",
+      "description": "The name of the dimension to rename the labels for.",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "target",
+      "description": "The new names for the labels. If a target dimension label already exists in the data cube, a `LabelExists` exception is thrown.",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      }
+    },
+    {
+      "name": "source",
+      "description": "The original names of the labels to be renamed to corresponding labels specified in the parameter `target`. If this array is empty, the dimension labels are renamed by their position. The number of labels in the parameters `source` and `target` must be equal.",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      },
+      "default": [],
+      "optional": true
+    }
+  ],
+  "returns": {
+    "description": "The data cube with the same dimensions. The only change is the names of the dimension labels.",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube"
+    }
+  },
+  "exceptions": {
+    "LabelMismatch": {
+      "message": "The number of labels in the parameters `source` and `target` don't match."
+    },
+    "LabelsNotEnumerated": {
+      "message": "The dimension labels are not enumerated."
+    },
+    "LabelExists": {
+      "message": "A label with the specified name exists."
+    }
+  }
+}

@@ -21,6 +21,7 @@ __all__ = [
     "create_data_cube",
     "add_dimension",
     "merge_cubes",
+    "rename_labels",
 ]
 
 
@@ -223,6 +224,164 @@ def add_dimension(
     )
 
     return RasterStack.from_images(new_data)
+
+
+class LabelMismatch(OpenEOException):
+    """Raised when the number of source and target labels don't match."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message, code="LabelMismatch", status_code=400)
+
+
+class LabelExists(OpenEOException):
+    """Raised when a renamed label collides with an existing label."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message, code="LabelExists", status_code=400)
+
+
+class LabelsNotEnumerated(OpenEOException):
+    """Raised when the dimension labels are not enumerated/available."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message, code="LabelsNotEnumerated", status_code=400)
+
+
+def _compute_renamed_labels(
+    current: List[Any], source: List[Any], target: List[Any]
+) -> List[Any]:
+    """Rename ``current`` per the source/target mapping (generic over hashables).
+
+    - source empty: ``target`` replaces all labels by position (lengths must match).
+    - source given: each ``source`` label is renamed to its ``target`` counterpart.
+
+    Enforces the openEO ``LabelMismatch``/``LabelsNotEnumerated``/``LabelExists``
+    exceptions.
+    """
+    if source:
+        if len(source) != len(target):
+            raise LabelMismatch(
+                f"The number of labels in 'source' ({len(source)}) and 'target' "
+                f"({len(target)}) don't match."
+            )
+        missing = [s for s in source if s not in current]
+        if missing:
+            raise LabelsNotEnumerated(
+                f"Source label(s) {missing} do not exist in the dimension."
+            )
+        mapping = dict(zip(source, target))
+        renamed = [mapping.get(label, label) for label in current]
+    else:
+        if len(target) != len(current):
+            raise LabelMismatch(
+                f"Renaming by position requires one 'target' label per existing "
+                f"label (expected {len(current)}, got {len(target)})."
+            )
+        renamed = list(target)
+
+    seen: set = set()
+    for label in renamed:
+        if label in seen:
+            raise LabelExists(f"A label with the name '{label}' already exists.")
+        seen.add(label)
+    return renamed
+
+
+def _rename_band_labels(
+    data: RasterStack, source: List[Any], target: List[Any]
+) -> RasterStack:
+    """Rename the spectral (band) labels of every image in the stack."""
+    result: Dict[datetime, ImageData] = {}
+    for key, img in data.items():
+        current = list(img.band_descriptions or [])
+        if not current:
+            # Bands are not named yet; positional placeholders of the right length.
+            current = [f"band{i + 1}" for i in range(img.count)]
+        renamed = _compute_renamed_labels(current, source, target)
+        result[key] = ImageData(
+            img.array,
+            assets=img.assets,
+            crs=img.crs,
+            bounds=img.bounds,
+            band_descriptions=renamed,
+            metadata=img.metadata,
+        )
+    return RasterStack.from_images(result)
+
+
+def _coerce_temporal_label(label: Any) -> datetime:
+    """Parse a temporal label into a naive-UTC datetime (stack keys are datetimes)."""
+    if isinstance(label, datetime):
+        return _normalize_to_naive_utc(label)
+    try:
+        return _normalize_to_naive_utc(datetime.fromisoformat(str(label)))
+    except (ValueError, TypeError) as err:
+        raise LabelsNotEnumerated(
+            f"Temporal label '{label}' is not a valid ISO datetime."
+        ) from err
+
+
+def _rename_temporal_labels(
+    data: RasterStack, source: List[Any], target: List[Any]
+) -> RasterStack:
+    """Rename temporal labels (the stack keys); targets are parsed to datetimes."""
+    current = list(data.keys())
+    src = [_coerce_temporal_label(s) for s in source]
+    tgt = [_coerce_temporal_label(t) for t in target]
+    renamed = _compute_renamed_labels(current, src, tgt)
+    result: Dict[datetime, ImageData] = {
+        new_key: data[old_key] for old_key, new_key in zip(current, renamed)
+    }
+    return RasterStack.from_images(result)
+
+
+@process
+def rename_labels(
+    data: RasterStack,
+    dimension: str,
+    target: List[Union[str, float]],
+    source: Optional[List[Union[str, float]]] = None,
+) -> RasterStack:
+    """Rename the labels of a dimension in the data cube.
+
+    Supports the spectral (``"bands"``/``"spectral"``) and temporal
+    (``"t"``/``"temporal"``/``"time"``) dimensions: for bands the band descriptions
+    are renamed; for the temporal dimension the stack keys are renamed (targets are
+    parsed to datetimes). The data itself is unchanged.
+
+    Args:
+        data: The data cube.
+        dimension: The name of the dimension to rename the labels for.
+        target: The new label names. If a target label already exists, a
+            ``LabelExists`` exception is raised.
+        source: The original label names to rename. When empty (default), labels
+            are renamed by position and ``target`` must have one entry per label.
+
+    Returns:
+        The data cube with renamed labels.
+
+    Raises:
+        LabelMismatch: If the number of source and target labels don't match.
+        LabelsNotEnumerated: If a source label does not exist.
+        LabelExists: If a renamed label collides with another label.
+    """
+    if not data:
+        raise ValueError("Expected a non-empty data cube")
+
+    source = list(source or [])
+    target = list(target)
+    dim = dimension.lower()
+
+    if dim in ("bands", "spectral"):
+        return _rename_band_labels(data, source, target)
+    if dim in ("t", "temporal", "time"):
+        return _rename_temporal_labels(data, source, target)
+
+    raise OpenEOException(
+        message=f"A dimension with the name '{dimension}' does not exist.",
+        code="DimensionNotAvailable",
+        status_code=400,
+    )
 
 
 class OverlapResolverMissing(OpenEOException):
