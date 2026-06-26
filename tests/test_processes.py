@@ -514,6 +514,22 @@ def test_add_dimension():
     )
     assert len(result3) == 2  # Original + new entry
 
+    # Multi-timestamp cube: band label applied to EVERY image in the stack
+    multi = RasterStack.from_images(
+        {
+            datetime(2021, 1, 1): ImageData(
+                np.ma.ones((1, 4, 4), np.float32), band_descriptions=[]
+            ),
+            datetime(2021, 1, 2): ImageData(
+                np.ma.array(np.full((1, 4, 4), 2.0, np.float32)), band_descriptions=[]
+            ),
+        }
+    )
+    result4 = add_dimension(data=multi, name="spectral", label="ndvi", type="bands")
+    assert len(result4) == 2  # Same number of temporal keys
+    for img in result4.values():
+        assert img.band_descriptions == ["ndvi"]
+
     # Cannot add spatial dimension
     with pytest.raises(ValueError, match="Cannot add spatial dimensions"):
         add_dimension(data=result, name="x", label="1", type="spatial")
