@@ -67,6 +67,16 @@ __all__ = ["aggregate_temporal", "apply_pixel_selection", "reduce_dimension"]
 # Use 'firstpixel' reducer for pixel-wise first valid value behavior.
 # Note: rio_tiler doesn't have a 'last' PixelSelectionMethod, so 'lastpixel'
 # uses a fallback array-based implementation (not in this mapping).
+# Canonical key used as the RasterStack key for temporally-reduced cubes.
+# After reduce_dimension("t") the temporal dimension no longer exists per the
+# openEO spec. In our RasterStack model we still need *some* key, but it must
+# be the SAME for every reduced cube so that merge_cubes treats two reduced
+# cubes as having the same (single) temporal label and merges them at the band
+# level rather than keeping them as separate temporal slices.
+# A date from 1900 is safely before any real satellite acquisition and trivially
+# distinct from any user-supplied aggregate_temporal label.
+REDUCED_TEMPORAL_SENTINEL = datetime(1900, 1, 1)
+
 PIXEL_SELECTION_REDUCERS = {
     "firstpixel": "first",  # first available pixel (fills masked values)
     "mean": "mean",
@@ -145,9 +155,7 @@ def _create_pixel_selection_result(
         band_descriptions=band_names if band_names is not None else [],
         metadata={"pixel_selection_method": pixel_selection},
     )
-    # Use the first asset's datetime as the result key
-    result_datetime = assets_used[0] if assets_used else datetime.now()
-    return RasterStack.from_images({result_datetime: result_img})
+    return RasterStack.from_images({REDUCED_TEMPORAL_SENTINEL: result_img})
 
 
 def _collect_images_from_data(
@@ -358,7 +366,7 @@ def _reduce_temporal_dimension(
             "reduction_method": getattr(reducer, "__name__", "custom_reducer"),
         },
     )
-    return RasterStack.from_images({first_key: reduced_img})
+    return RasterStack.from_images({REDUCED_TEMPORAL_SENTINEL: reduced_img})
 
 
 def _reshape_reduced_spectral_data(

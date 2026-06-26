@@ -596,6 +596,68 @@ def test_aggregate_temporal_distinct_per_interval_via_graph():
     assert means == [0.2, 0.5, 0.8]
 
 
+def test_reduce_temporal_then_merge_produces_single_slice():
+    """reduce_dimension("t") on two cubes from DIFFERENT time ranges must yield
+    the same canonical temporal key so that merge_cubes combines them into a
+    single slice at the band level, not two separate temporal slices.
+
+    Regression: the old implementation kept the first acquisition's datetime as
+    the RasterStack key, so merging S2 (key 2019-09-07) with S1-p1 (key
+    2019-09-06) produced two temporal slices with mismatched band counts.
+    _apply_spectral_dimension_stack then failed with "all input arrays must
+    have the same shape" because it tried to stack (5,h,w) and (1,h,w) images.
+    """
+    # Simulate two temporally-reduced cubes at DIFFERENT original timestamps
+    # (as produced by load_collection→reduce_dimension("t") from different periods)
+    from titiler.openeo.processes.implementations.reduce import (
+        REDUCED_TEMPORAL_SENTINEL,
+    )
+
+    cube_s2 = RasterStack.from_images(
+        {
+            REDUCED_TEMPORAL_SENTINEL: ImageData(
+                np.ma.array(np.stack([np.full((2, 2), float(i)) for i in range(5)])),
+                band_descriptions=["B03", "B04", "B08", "B11", "B12"],
+            )
+        }
+    )
+    cube_s1 = RasterStack.from_images(
+        {
+            REDUCED_TEMPORAL_SENTINEL: ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.5, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+
+    pg_add_and_merge = {
+        "ad": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "s1"},
+                "name": "spectral",
+                "label": "vh",
+                "type": "bands",
+            },
+        },
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_parameter": "s2"},
+                "cube2": {"from_node": "ad"},
+            },
+            "result": True,
+        },
+    }
+    result = _run(pg_add_and_merge, s2=cube_s2, s1=cube_s1)
+
+    # Must be a single temporal slice with 6 bands, not two slices
+    assert len(result) == 1
+    img = result.first
+    assert img.count == 6
+    assert img.band_descriptions == ["B03", "B04", "B08", "B11", "B12", "vh"]
+
+
 def test_add_dimension_bands_via_graph():
     """add_dimension(type='bands') must set band_descriptions, not add a temporal entry.
 
