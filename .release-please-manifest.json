@@ -1,4 +1,4 @@
 {
   ".": "0.16.5",
-  "deployment/k8s/charts": "2.0.0"
+  "deployment/k8s/charts": "2.0.1"
 }
