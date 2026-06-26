@@ -614,10 +614,22 @@ class TestReduceDimensionIntegration:
             np.testing.assert_array_almost_equal(reduced_img.array.data, expected_value)
 
     def test_reduce_single_item_temporal(self):
-        """Test that single-item stack returns as-is for temporal reduction."""
+        """Single-item temporal stack must still get the sentinel key.
+
+        A STAC query that returns exactly one acquisition produces a 1-item
+        RasterStack.  reduce_dimension("t") must still normalise the key to
+        REDUCED_TEMPORAL_SENTINEL so that the result can be merged with another
+        temporally-reduced cube (which also has the sentinel key).  Returning
+        the original key would cause merge_cubes to treat the two cubes as
+        having different timestamps and keep them as separate temporal slices.
+        """
+        from titiler.openeo.processes.implementations.reduce import (
+            REDUCED_TEMPORAL_SENTINEL,
+        )
+
         data = RasterStack.from_images(
             {
-                datetime.now(): ImageData(
+                datetime(2019, 9, 7): ImageData(
                     np.ma.ones((2, 3, 3)),
                     assets=["asset"],
                     crs="EPSG:4326",
@@ -628,8 +640,7 @@ class TestReduceDimensionIntegration:
 
         result = reduce_dimension(data, mock_temporal_reducer, "temporal")
 
-        # Should return the original data unchanged
-        assert list(result.keys()) == list(data.keys())
+        assert list(result.keys()) == [REDUCED_TEMPORAL_SENTINEL]
 
     def test_unsupported_dimension(self):
         """Test error for unsupported dimension."""
