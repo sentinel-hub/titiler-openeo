@@ -594,3 +594,157 @@ def test_aggregate_temporal_distinct_per_interval_via_graph():
         round(float(np.ma.asarray(v.array).mean()), 3) for v in result.values()
     )
     assert means == [0.2, 0.5, 0.8]
+
+
+def test_add_dimension_bands_via_graph():
+    """add_dimension(type='bands') must set band_descriptions, not add a temporal entry.
+
+    Regression: the old implementation added a new temporal RasterStack entry for
+    every dimension type, so band labels were never propagated and merge_cubes
+    raised OverlapResolverMissing on the unlabeled images.
+    """
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 3.0, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+    pg = {
+        "ad": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "name": "spectral",
+                "label": "ndvi",
+                "type": "bands",
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    assert len(result) == 1  # temporal key count unchanged
+    assert result.first.band_descriptions == ["ndvi"]
+
+
+def test_reduce_add_dimension_merge_via_graph():
+    """Full graph pattern: reduce spectral → add_dimension → merge_cubes.
+
+    This is the openEO spec example 3a pattern and the real-world workflow that
+    produced OverlapResolverMissing before the add_dimension fix.  Two cubes from
+    different time ranges are each reduced to a single band, labelled with
+    add_dimension, and merged without an overlap resolver.
+    """
+    # Two single-band stacks at different timestamps, no band labels
+    cube1 = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 1.0, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+    cube2 = RasterStack.from_images(
+        {
+            datetime(2024, 9, 1): ImageData(
+                np.ma.array(np.full((1, 2, 2), 2.0, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+    pg = {
+        "ad1": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "cube1"},
+                "name": "spectral",
+                "label": "vh_t1",
+                "type": "bands",
+            },
+        },
+        "ad2": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "cube2"},
+                "name": "spectral",
+                "label": "vh_t2",
+                "type": "bands",
+            },
+        },
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_node": "ad1"},
+                "cube2": {"from_node": "ad2"},
+            },
+            "result": True,
+        },
+    }
+    result = _run(pg, cube1=cube1, cube2=cube2)
+    # Disjoint temporal keys → 2 entries; each retains its band label and value.
+    assert len(result) == 2
+    assert result[datetime(2024, 6, 1)].band_descriptions == ["vh_t1"]
+    assert result[datetime(2024, 9, 1)].band_descriptions == ["vh_t2"]
+    np.testing.assert_array_equal(result[datetime(2024, 6, 1)].array, 1.0)
+    np.testing.assert_array_equal(result[datetime(2024, 9, 1)].array, 2.0)
+
+
+def test_reduce_add_dimension_merge_same_timestamp_via_graph():
+    """Same-timestamp variant: two cubes at the same time with distinct band labels.
+
+    After add_dimension both have named disjoint bands, so merge_cubes concatenates
+    them without a resolver.  This is the overlap-resolver-missing scenario from
+    the filed bug.
+    """
+    dt = datetime(2024, 6, 1)
+    cube1 = RasterStack.from_images(
+        {
+            dt: ImageData(
+                np.ma.array(np.full((1, 2, 2), 10.0, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+    cube2 = RasterStack.from_images(
+        {
+            dt: ImageData(
+                np.ma.array(np.full((1, 2, 2), 20.0, np.float32)),
+                band_descriptions=[],
+            )
+        }
+    )
+    pg = {
+        "ad1": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "cube1"},
+                "name": "spectral",
+                "label": "scene1",
+                "type": "bands",
+            },
+        },
+        "ad2": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_parameter": "cube2"},
+                "name": "spectral",
+                "label": "scene2",
+                "type": "bands",
+            },
+        },
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_node": "ad1"},
+                "cube2": {"from_node": "ad2"},
+            },
+            "result": True,
+        },
+    }
+    result = _run(pg, cube1=cube1, cube2=cube2)
+    assert len(result) == 1
+    img = result[dt]
+    assert img.band_descriptions == ["scene1", "scene2"]
+    np.testing.assert_array_equal(img.array[0], 10.0)
+    np.testing.assert_array_equal(img.array[1], 20.0)

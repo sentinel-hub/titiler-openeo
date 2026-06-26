@@ -9,6 +9,7 @@ from rio_tiler.models import ImageData
 from titiler.openeo.processes.implementations.arrays import (
     OverlapResolverMissing,
     _merge_images_bands,
+    add_dimension,
     merge_cubes,
 )
 from titiler.openeo.processes.implementations.data_model import RasterStack
@@ -479,3 +480,84 @@ class TestMergeCubes:
         img = result[dt]
         assert img.count == 4
         assert img.band_descriptions == ["B1", "B2", "B3", "B4"]
+
+    def test_add_dimension_then_merge_spec_example_3a(self):
+        """Spec example 3a: same x,y,t – use add_dimension to distinguish cubes.
+
+        The spec says: keep overlapping values separately by adding a new dimension
+        with distinct labels (e.g. 'scene1' vs 'scene2') before merging. The merge
+        then sees disjoint band labels and needs no resolver.
+
+        This is also the pattern used when merging per-sensor composites (e.g.
+        reduce S1 temporal → add_dimension('spectral', 'vh_t1') and similarly for
+        a second period, then merge_cubes without a resolver).
+        """
+        dt = datetime(2021, 6, 15)
+
+        # Two cubes share the same temporal label and have unlabeled single bands
+        raw1 = RasterStack.from_images({dt: _make_image(bands=1, fill=1.0)})
+        raw2 = RasterStack.from_images({dt: _make_image(bands=1, fill=2.0)})
+
+        # add_dimension must label the band so merge_cubes can see they're disjoint
+        cube1 = add_dimension(data=raw1, name="spectral", label="scene1", type="bands")
+        cube2 = add_dimension(data=raw2, name="spectral", label="scene2", type="bands")
+
+        assert cube1.first.band_descriptions == ["scene1"]
+        assert cube2.first.band_descriptions == ["scene2"]
+
+        result = merge_cubes(cube1=cube1, cube2=cube2)
+
+        assert len(result) == 1
+        img = result[dt]
+        assert img.count == 2
+        assert img.band_descriptions == ["scene1", "scene2"]
+        np.testing.assert_array_equal(img.array[0], 1.0)
+        np.testing.assert_array_equal(img.array[1], 2.0)
+
+    def test_add_dimension_no_resolver_without_labeling_raises(self):
+        """Spec example 3b: same x,y,t, no band labels, no resolver → error.
+
+        Without add_dimension (i.e. no distinct band labels), merge_cubes cannot
+        distinguish the two cubes and must raise OverlapResolverMissing.
+        """
+        dt = datetime(2021, 6, 15)
+
+        # Both cubes have unlabeled bands and the same temporal key
+        cube1 = RasterStack.from_images({dt: _make_image(bands=1, fill=1.0)})
+        cube2 = RasterStack.from_images({dt: _make_image(bands=1, fill=2.0)})
+
+        with pytest.raises(OverlapResolverMissing):
+            merge_cubes(cube1=cube1, cube2=cube2)
+
+    def test_via_process_graph(self):
+        """merge_cubes works end-to-end through the openEO process graph executor."""
+        from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+
+        from titiler.openeo.processes import process_registry
+
+        dt1 = datetime(2021, 1, 1)
+        dt2 = datetime(2021, 1, 2)
+        cube1 = RasterStack.from_images(
+            {dt1: _make_image(bands=1, fill=1.0, band_names=["B1"])}
+        )
+        cube2 = RasterStack.from_images(
+            {dt2: _make_image(bands=1, fill=2.0, band_names=["B1"])}
+        )
+        pg = {
+            "process_graph": {
+                "m": {
+                    "process_id": "merge_cubes",
+                    "arguments": {
+                        "cube1": {"from_parameter": "cube1"},
+                        "cube2": {"from_parameter": "cube2"},
+                    },
+                    "result": True,
+                }
+            }
+        }
+        fn = OpenEOProcessGraph(pg_data=pg).to_callable(
+            process_registry=process_registry
+        )
+        result = fn(named_parameters={"cube1": cube1, "cube2": cube2})
+        assert len(result) == 2
+        assert sorted(result.keys()) == [dt1, dt2]

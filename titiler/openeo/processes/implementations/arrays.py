@@ -176,14 +176,8 @@ def add_dimension(
         The data cube with a newly added dimension.
 
     Raises:
-        ValueError: If a dimension with the specified name already exists.
         ValueError: If trying to add a spatial dimension (not supported).
     """
-    # Check if dimension name conflicts with existing timestamps (converted to string)
-    existing_keys = [str(k) for k in data.keys()]
-    if name in existing_keys:
-        raise ValueError(f"A dimension with name '{name}' already exists")
-
     if type == "spatial":
         raise ValueError(
             "Cannot add spatial dimensions - they are inherent to the raster data"
@@ -191,30 +185,46 @@ def add_dimension(
 
     # For empty data cube, we can add any non-spatial dimension
     if not data:
-        # Create an ImageData with a default shape for XYZ tiles
         new_data = {
             datetime.now(): ImageData(
                 numpy.ma.masked_array(array_create()),
                 metadata={"dimension": name, "label": label, "type": type},
-                bounds=(0, 0, 1, 1),  # Default bounds for a single pixel
-                crs="EPSG:4326",  # Default CRS
+                bounds=(0, 0, 1, 1),
+                crs="EPSG:4326",
             )
         }
         return RasterStack.from_images(new_data)
 
-    # For non-empty data cube, we need to ensure the new dimension is compatible
-    # with existing spatial dimensions
-    # Use get_image_refs() to get metadata WITHOUT loading pixel data
+    if type in ("bands", "spectral"):
+        # For spectral/band dimensions: label the band_descriptions of every image.
+        # After reduce_dimension("spectral"), images have band_descriptions=[] (the
+        # spectral dimension was eliminated). add_dimension re-introduces it with
+        # `label` as the single band name, which is what merge_cubes uses to detect
+        # overlap — without this the two cubes appear identical and OverlapResolverMissing
+        # is raised even when the bands are logically distinct.
+        result: Dict[datetime, ImageData] = {}
+        for key in data.keys():
+            img = data[key]
+            new_bands = list(img.band_descriptions or []) + [str(label)]
+            result[key] = ImageData(
+                img.array,
+                assets=img.assets,
+                crs=img.crs,
+                bounds=img.bounds,
+                band_descriptions=new_bands,
+                metadata=img.metadata or {},
+            )
+        return RasterStack.from_images(result)
+
+    # For temporal/other dimensions: add a new temporal entry (preserves existing images)
     image_refs = data.get_image_refs()
     if not image_refs:
         raise ValueError("No image refs available for metadata")
-    _first_key, first_ref = image_refs[0]
+    _, first_ref = image_refs[0]
     empty_array = numpy.ma.masked_array(
         numpy.zeros((1, first_ref.height, first_ref.width)),
-        mask=True,  # All values are masked initially
+        mask=True,
     )
-
-    # Copy existing data and add the new dimension with a new timestamp
     new_data = dict(data.items())
     new_data[datetime.now()] = ImageData(
         empty_array,
@@ -222,7 +232,6 @@ def add_dimension(
         crs=first_ref.crs,
         bounds=first_ref.bounds,
     )
-
     return RasterStack.from_images(new_data)
 
 
