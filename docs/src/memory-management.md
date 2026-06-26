@@ -47,6 +47,17 @@ The cache is conservative by construction:
   `aggregate_spatial`, which the engine re-executes and would re-read, fall back
   to the original keep-everything behavior.
 
+## Streaming index operations
+
+Eviction frees a cube *after* the node that produced it is done, but a single
+node can still briefly hold two full cubes — e.g. `ndvi` reads the whole source
+stack and builds the whole index stack. When the cache determines a result has a
+single downstream consumer, that consumer is allowed to **stream**: `ndvi`/`ndwi`
+read the source in concurrent windows and release each slice as soon as it is
+consumed, so the whole source cube and the whole index cube are never both fully
+resident. Inputs with more than one consumer fall back to the plain (non-mutating)
+path, so this never affects correctness.
+
 ## Configuration
 
 Eviction is **on by default**. To restore the engine's original behavior (keep
