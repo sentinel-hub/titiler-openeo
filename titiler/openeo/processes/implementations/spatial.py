@@ -1,15 +1,111 @@
 """titiler.openeo.processes Spatial."""
 
-import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy
 from pyproj import CRS
+from rasterio.crs import CRS as RioCRS
+from rasterio.enums import Resampling
+from rasterio.transform import array_bounds
+from rasterio.transform import from_bounds as transform_from_bounds
+from rasterio.warp import calculate_default_transform
+from rasterio.warp import reproject as rio_reproject
 from rio_tiler.utils import resize_array
 
 from .data_model import ImageData, RasterStack, compute_cutline_mask
 
-__all__ = ["resample_spatial", "aggregate_spatial", "mask_polygon", "mask"]
+__all__ = [
+    "resample_spatial",
+    "resample_cube_spatial",
+    "aggregate_spatial",
+    "mask_polygon",
+    "mask",
+]
+
+# openEO resampling method names -> rasterio.enums.Resampling members.
+_RESAMPLING_METHODS = {
+    "near": "nearest",
+    "nearest": "nearest",
+    "bilinear": "bilinear",
+    "cubic": "cubic",
+    "cubicspline": "cubic_spline",
+    "lanczos": "lanczos",
+    "average": "average",
+    "mode": "mode",
+    "max": "max",
+    "min": "min",
+    "med": "med",
+    "q1": "q1",
+    "q3": "q3",
+    "rms": "rms",
+    "sum": "sum",
+}
+
+
+def _resolve_resampling(method: str) -> Resampling:
+    """Map an openEO resampling method name to a rasterio Resampling member."""
+    if method not in _RESAMPLING_METHODS:
+        raise ValueError(f"Unsupported resampling method: {method}")
+    return Resampling[_RESAMPLING_METHODS[method]]
+
+
+def _warp_image_to_grid(
+    img: ImageData,
+    dst_crs: Any,
+    dst_transform: Any,
+    dst_width: int,
+    dst_height: int,
+    resampling: Resampling,
+) -> ImageData:
+    """Warp one image onto an explicit destination grid (crs + transform + size).
+
+    Shared by ``resample_spatial`` (grid from CRS+resolution) and
+    ``resample_cube_spatial`` (grid from a target cube). The data is warped with the
+    requested method and the nodata mask is warped with nearest neighbour so
+    valid/nodata regions follow the data and uncovered pixels stay masked.
+    """
+    src = img.array
+    bands = src.shape[0]
+    dtype = src.dtype
+    src_crs = RioCRS.from_user_input(img.crs)
+    out_crs = RioCRS.from_user_input(dst_crs)
+    src_transform = transform_from_bounds(*img.bounds, img.width, img.height)
+
+    dst_data = numpy.zeros((bands, dst_height, dst_width), dtype=dtype)
+    rio_reproject(
+        numpy.ascontiguousarray(src.data),
+        dst_data,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=dst_transform,
+        dst_crs=out_crs,
+        resampling=resampling,
+    )
+
+    src_mask = numpy.ma.getmaskarray(src).astype("uint8")
+    dst_mask = numpy.ones((bands, dst_height, dst_width), dtype="uint8")
+    rio_reproject(
+        numpy.ascontiguousarray(src_mask),
+        dst_mask,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=dst_transform,
+        dst_crs=out_crs,
+        resampling=Resampling.nearest,
+        src_nodata=1,
+        dst_nodata=1,
+    )
+
+    out = numpy.ma.masked_array(dst_data, mask=dst_mask.astype(bool))
+    west, south, east, north = array_bounds(dst_height, dst_width, dst_transform)
+    return ImageData(
+        out,
+        assets=img.assets,
+        crs=out_crs,
+        bounds=(west, south, east, north),
+        band_descriptions=img.band_descriptions,
+        metadata=img.metadata,
+    )
 
 
 class IncompatibleDataCubes(Exception):
@@ -279,35 +375,13 @@ def resample_spatial(
         # align parameter is accepted but not yet implemented
         # We silently ignore it for now (uses GDAL defaults)
 
-        logging.info(
-            f"resample_spatial: input crs={img.crs}, dst_crs={dst_crs}, "
-            f"resolution={resolution}, size={img.width}x{img.height}, bounds={img.bounds}"
-        )
-
         # If no projection change requested and no resolution change, return as-is
         if dst_crs is None and (resolution is None or resolution == 0):
             return img
 
+        resampling = _resolve_resampling(method)
         # Use the image's existing CRS if no new projection specified
         target_crs = dst_crs if dst_crs is not None else img.crs
-        # Map the string resampling method to the matching enum name
-        resampling_method_map = {
-            "nearest": "nearest",
-            "near": "nearest",  # OpenEO alias for nearest
-            "bilinear": "bilinear",
-            "cubic": "cubic",
-            "cubicspline": "cubic_spline",
-            "lanczos": "lanczos",
-            "average": "average",
-            "mode": "mode",
-            "sum": "sum",
-            "rms": "rms",
-        }
-
-        if method not in resampling_method_map:
-            raise ValueError(f"Unsupported resampling method: {method}")
-
-        resampling_method = resampling_method_map[method]
 
         if (
             resolution is not None
@@ -315,19 +389,21 @@ def resample_spatial(
             and not isinstance(resolution, (list, tuple))
         ):
             resolution = (resolution, resolution)
-
-        # Handle resolution of 0 as no resolution change
         actual_resolution = None if resolution == 0 else resolution
 
-        # Reproject the image with the string method name
-        result = img.reproject(
-            target_crs, resolution=actual_resolution, reproject_method=resampling_method
+        # Derive the destination grid for this CRS/resolution (GDAL default extent),
+        # then warp onto it via the shared helper used by resample_cube_spatial.
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            RioCRS.from_user_input(img.crs),
+            RioCRS.from_user_input(target_crs),
+            img.width,
+            img.height,
+            *img.bounds,
+            resolution=actual_resolution,
         )
-        logging.info(
-            f"resample_spatial: output crs={result.crs}, "
-            f"size={result.width}x{result.height}, bounds={result.bounds}"
+        return _warp_image_to_grid(
+            img, target_crs, dst_transform, dst_width, dst_height, resampling
         )
-        return result
 
     # Get destination CRS from parameters (None if not specified)
     dst_crs: Optional[CRS] = None
@@ -340,6 +416,103 @@ def resample_spatial(
     # Reproject each image in the stack
     return RasterStack.from_images(
         {k: _reproject_img(v, dst_crs, resolution, method) for k, v in data.items()}
+    )
+
+
+def _target_spatial_grid(
+    target: RasterStack,
+) -> Tuple[Optional[CRS], Tuple[float, float, float, float], int, int]:
+    """Return (crs, bounds, width, height) of the target cube's spatial grid.
+
+    Reads ImageRef metadata first (no pixel load); falls back to realizing the
+    first image when the refs don't carry spatial dimensions.
+    """
+    refs = target.get_image_refs()
+    if refs:
+        _, ref = refs[0]
+        if ref.crs is not None and ref.bounds and ref.width and ref.height:
+            return ref.crs, tuple(ref.bounds), ref.width, ref.height  # type: ignore[return-value]
+    img = target.first
+    return img.crs, tuple(img.bounds), img.width, img.height  # type: ignore[return-value]
+
+
+def _resample_image_to_grid(
+    img: ImageData,
+    dst_crs: Optional[CRS],
+    dst_bounds: Tuple[float, float, float, float],
+    dst_width: int,
+    dst_height: int,
+    resampling: Resampling,
+) -> ImageData:
+    """Resample a single image onto the target (crs, bounds, width, height) grid."""
+    # Already aligned: nothing to do.
+    if (
+        img.crs == dst_crs
+        and img.width == dst_width
+        and img.height == dst_height
+        and img.bounds is not None
+        and numpy.allclose(img.bounds, dst_bounds)
+    ):
+        return img
+
+    # Without georeferencing we can only resize to the target size.
+    if img.crs is None or img.bounds is None:
+        src = img.array
+        resized = resize_array(src.data, dst_height, dst_width)
+        resized_mask = resize_array(
+            numpy.ma.getmaskarray(src).astype("uint8"), dst_height, dst_width
+        ).astype(bool)
+        return ImageData(
+            numpy.ma.masked_array(resized, mask=resized_mask),
+            assets=img.assets,
+            crs=dst_crs,
+            bounds=dst_bounds,
+            band_descriptions=img.band_descriptions,
+            metadata=img.metadata,
+        )
+
+    # Warp onto the exact target grid via the shared helper.
+    dst_transform = transform_from_bounds(*dst_bounds, dst_width, dst_height)
+    return _warp_image_to_grid(
+        img, dst_crs, dst_transform, dst_width, dst_height, resampling
+    )
+
+
+def resample_cube_spatial(
+    data: RasterStack,
+    target: RasterStack,
+    method: str = "near",
+) -> RasterStack:
+    """Resample the spatial dimensions of ``data`` to match the ``target`` cube.
+
+    Each image in ``data`` is warped onto the target cube's spatial grid (CRS,
+    bounds and width/height). Non-spatial dimensions (time, bands) are preserved.
+
+    Args:
+        data: The source raster data cube.
+        target: A raster data cube describing the target spatial grid.
+        method: Resampling method (gdalwarp names, e.g. ``near`` (default),
+            ``bilinear``, ``cubic``, ``average``, ``min``, ``max``, ``med`` ...).
+
+    Returns:
+        The source cube resampled onto the target's spatial grid.
+    """
+    if not data:
+        raise ValueError("Expected a non-empty data cube")
+    if not target:
+        raise ValueError("Expected a non-empty target data cube")
+
+    resampling = _resolve_resampling(method)
+
+    dst_crs, dst_bounds, dst_width, dst_height = _target_spatial_grid(target)
+
+    return RasterStack.from_images(
+        {
+            key: _resample_image_to_grid(
+                img, dst_crs, dst_bounds, dst_width, dst_height, resampling
+            )
+            for key, img in data.items()
+        }
     )
 
 
