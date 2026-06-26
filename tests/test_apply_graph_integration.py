@@ -658,6 +658,100 @@ def test_reduce_temporal_then_merge_produces_single_slice():
     assert img.band_descriptions == ["B03", "B04", "B08", "B11", "B12", "vh"]
 
 
+def test_reduce_temporal_single_timestamp_gets_sentinel():
+    """reduce_dimension("t") on a single-timestamp cube must still normalise the
+    key to REDUCED_TEMPORAL_SENTINEL so that the result can be merged with another
+    temporally-reduced cube at the band level.
+
+    Regression: the old shortcut ``if len(data) <= 1: return data`` preserved the
+    original STAC datetime.  Two cubes whose STAC queries happened to return only
+    one acquisition each (or different single acquisitions) then had DIFFERENT keys
+    and merge_cubes kept them as separate temporal slices.  apply_dimension on the
+    merged cube later failed with "all input arrays must have the same shape"
+    because the slices had different band counts.
+    """
+    from titiler.openeo.processes.implementations.reduce import (
+        REDUCED_TEMPORAL_SENTINEL,
+    )
+
+    single_ts = datetime(2019, 9, 7)
+    cube_s1 = RasterStack.from_images(
+        {
+            single_ts: ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.3, np.float32)),
+                band_descriptions=["vh"],
+            )
+        }
+    )
+    multi_ts_s2 = RasterStack.from_images(
+        {
+            datetime(2019, 9, 1): ImageData(
+                np.ma.array(np.full((5, 2, 2), 1.0, np.float32)),
+                band_descriptions=["B03", "B04", "B08", "B11", "B12"],
+            ),
+            datetime(2019, 9, 15): ImageData(
+                np.ma.array(np.full((5, 2, 2), 2.0, np.float32)),
+                band_descriptions=["B03", "B04", "B08", "B11", "B12"],
+            ),
+        }
+    )
+
+    pg = {
+        "reduce_s1": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "s1"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "mean1": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+        },
+        "reduce_s2": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "s2"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "mean2": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+        },
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_node": "reduce_s2"},
+                "cube2": {"from_node": "reduce_s1"},
+            },
+            "result": True,
+        },
+    }
+
+    result = _run(pg, s1=cube_s1, s2=multi_ts_s2)
+
+    # Both reduced cubes must share REDUCED_TEMPORAL_SENTINEL → single merged slice
+    assert len(result) == 1, (
+        f"Expected 1 temporal slice after merging two reduced cubes, got {len(result)}. "
+        "The single-timestamp cube likely kept its original STAC key instead of the sentinel."
+    )
+    img = result[REDUCED_TEMPORAL_SENTINEL]
+    # 5 S2 bands + 1 S1 band = 6 total
+    assert img.count == 6
+    assert img.band_descriptions == ["B03", "B04", "B08", "B11", "B12", "vh"]
+
+
 def test_add_dimension_bands_via_graph():
     """add_dimension(type='bands') must set band_descriptions, not add a temporal entry.
 

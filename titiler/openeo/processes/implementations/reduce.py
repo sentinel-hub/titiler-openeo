@@ -1048,10 +1048,6 @@ def reduce_dimension(
 
     # Handle temporal dimension
     if dim_lower in ["t", "temporal", "time"]:
-        # If there's only one item in the stack, there's no temporal dimension to reduce
-        if len(data) <= 1:
-            return data
-
         return _reduce_temporal_dimension(data, reducer)
 
     # Handle spectral dimension
