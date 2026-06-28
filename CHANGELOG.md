@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.17.0 (2026-06-28)
+
+## What's Changed
+* fix: save_result GTiff preserves data instead of uint8/RGB by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/297
+* fix: load_collection no longer silently caps items at 100 by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/302
+* fix: make /healthz async so liveness isn't starved under load by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/303
+* docs: add concurrency & memory usage audits for titiler-openeo by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/306
+* feat: implement array_apply function to apply processes to array elements by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/313
+* feat: array_apply over temporal dimension + thread pool by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/315
+* fix: evaluate callbacks exactly once + graph integration tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/316
+* perf: free process-graph intermediates during evaluation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/311
+* fix: forward enclosing scope to array_apply callbacks + realized arrays by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/317
+* fix: preserve nodata masks when stacking arrays by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/318
+* fix: aggregators reduce over the leading axis, not globally by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/319
+* perf: compute float math in float32 (promote integer inputs) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/309
+* fix: evaluate the bands callback once over a multi-temporal stack by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/320
+* feat: apply STAC raster:scale/offset (per band) on read by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/322
+* fix: validate ignore_nodata as boolean (clear error, not numpy crash) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/321
+* fix: bound & document GDAL/VSI native caches by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/310
+* fix: collapse temporal axis into bands for target_dimension by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/323
+* fix: recompute reducer per interval (fixes identical/grayscale periods) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/324
+* feat: add rename_labels by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/325
+* feat: add resample_cube_spatial; unify spatial resampling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/326
+* fix: normalize RasterStack timestamps to naive UTC at creation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/327
+* fix: set band_descriptions for type=bands/spectral by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/328
+* fix: sentinel key + band labels for multi-sensor feature fusion by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/329
+* fix: apply dimension target collapse by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/330
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.16.5...v0.17.0
+
 ## 0.16.5 (2026-06-21)
 
 ## What's Changed
