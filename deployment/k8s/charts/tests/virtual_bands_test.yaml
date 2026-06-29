@@ -1,0 +1,40 @@
+suite: test virtual bands wiring
+templates:
+  - deployment.yaml
+  - configmap.yaml
+tests:
+  - it: should not set the virtual bands env var by default
+    template: deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_VIRTUAL_BANDS_CONFIG
+            value: "/config/virtual_bands.json"
+
+  - it: should set the virtual bands env var when configured
+    template: deployment.yaml
+    set:
+      stac.virtualBandsConfig: files/virtual_bands.json
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_VIRTUAL_BANDS_CONFIG
+            value: "/config/virtual_bands.json"
+
+  - it: should not add the configmap key by default
+    template: configmap.yaml
+    asserts:
+      - exists:
+          path: data["virtual_bands.json"]
+        not: true
+
+  - it: should embed the config in the configmap when configured
+    template: configmap.yaml
+    set:
+      stac.virtualBandsConfig: files/virtual_bands.json
+    asserts:
+      - matchRegex:
+          path: data["virtual_bands.json"]
+          pattern: normalized_difference
