@@ -300,6 +300,11 @@ class RasterStack(Dict[datetime, ImageData]):
     - ImageRef instances enable cutline mask computation without task execution
     """
 
+    # Set by the reference-counted results cache when this stack has exactly one
+    # downstream consumer, so that consumer may stream-and-release it slice by
+    # slice. See titiler.openeo.results_cache.
+    _single_consumer: bool = False
+
     def __init__(
         self,
         tasks: TaskType,
