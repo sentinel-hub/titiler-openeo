@@ -949,6 +949,46 @@ def test_ndvi_via_graph_with_band_names():
     np.testing.assert_allclose(img.array[0], 1.0 / 3.0, rtol=1e-6)
 
 
+def test_ndvi_via_graph_resolves_rio_tiler_band_names():
+    """ndvi resolves a requested band name against the reader's ``_b<n>`` names.
+
+    The reader (SimpleSTACReader) labels a single-band asset ``B04_10m`` as
+    ``B04_10m_b1`` in the cube. A graph that requests ``B04_10m`` must still
+    resolve. The earlier complete-graph tests used hand-built cubes with clean
+    band names, so they exercised the executor + process but NOT the reader's
+    naming — this fills that gap.
+    """
+    arr = np.ma.stack(
+        [
+            np.ma.array(np.full((2, 2), 100.0, np.float32)),  # B04_10m_b1 (red)
+            np.ma.array(np.full((2, 2), 200.0, np.float32)),  # B08_10m_b1 (nir)
+        ]
+    )
+    stack = RasterStack.from_images(
+        {
+            datetime(2026, 2, 1): ImageData(
+                arr, band_descriptions=["B04_10m_b1", "B08_10m_b1"]
+            )
+        }
+    )
+    pg = {
+        "ndvi1": {
+            "process_id": "ndvi",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "nir": "B08_10m",
+                "red": "B04_10m",
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    img = result[datetime(2026, 2, 1)]
+    assert img.band_descriptions == ["ndvi"]
+    np.testing.assert_allclose(img.array[0], 1.0 / 3.0, rtol=1e-6)
+
+
 def test_ndvi_via_graph_with_target_band():
     """ndvi with `target_band` keeps the bands dimension and appends the index."""
     pg = {

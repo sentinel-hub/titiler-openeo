@@ -140,7 +140,42 @@ def test_ndvi_band_names(sample_raster_stack):
 def test_ndvi_unknown_band(sample_raster_stack):
     """NDVI raises a clear error when a band name can't be resolved."""
     with pytest.raises(ValueError, match="not found"):
-        ndvi(sample_raster_stack, "B08_10m", "red")
+        ndvi(sample_raster_stack, "purple", "red")
+
+
+def test_ndvi_band_names_with_rio_tiler_suffix():
+    """NDVI resolves openEO band names against rio-tiler ``<asset>_b<n>`` names.
+
+    The reader labels a single-band asset ``B04_10m`` as ``B04_10m_b1`` in the
+    cube, so a graph referencing ``B04_10m`` must still resolve.
+    """
+    arr = np.ma.stack(
+        [
+            np.ma.array(np.full((4, 4), 100.0, np.float32)),  # B04_10m_b1 (red)
+            np.ma.array(np.full((4, 4), 200.0, np.float32)),  # B08_10m_b1 (nir)
+        ]
+    )
+    stack = RasterStack.from_images(
+        {
+            datetime(2026, 2, 1): ImageData(
+                arr, band_descriptions=["B04_10m_b1", "B08_10m_b1"]
+            )
+        }
+    )
+    result = ndvi(stack, "B08_10m", "B04_10m")
+    for _key, img_data in result.items():
+        assert img_data.band_descriptions == ["ndvi"]
+        np.testing.assert_allclose(img_data.array[0], 1.0 / 3.0, rtol=1e-6)
+
+
+def test_ndvi_band_names_ambiguous_suffix():
+    """A base name matching several ``_b<n>`` bands is rejected as ambiguous."""
+    arr = np.ma.array(np.random.rand(2, 4, 4).astype(np.float32))
+    stack = RasterStack.from_images(
+        {datetime(2026, 2, 1): ImageData(arr, band_descriptions=["RGB_b1", "RGB_b2"])}
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        ndvi(stack, "RGB", "RGB")
 
 
 def test_ndvi_target_band(sample_raster_stack):
