@@ -1,5 +1,6 @@
 """titiler.openeo.processes indices."""
 
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
@@ -12,6 +13,12 @@ __all__ = ["ndvi", "ndwi"]
 
 BandIdentifier = Union[int, str]
 
+# rio-tiler labels each band read from an asset as ``<asset>_b<n>`` (see
+# reader.SimpleSTACReader). For the common one-band-per-asset case that turns a
+# requested band ``B08_10m`` into a cube band ``B08_10m_b1``, so band-name
+# lookups must tolerate that trailing ``_b<n>`` suffix.
+_BAND_SUFFIX_RE = re.compile(r"_b\d+$")
+
 
 def _resolve_band_index(data: ImageData, band: BandIdentifier) -> int:
     """Resolve a band identifier to a 1-based band index.
@@ -20,6 +27,11 @@ def _resolve_band_index(data: ImageData, band: BandIdentifier) -> int:
     name that is matched against ``data.band_descriptions``. The openEO spec for
     ``ndvi`` expects band *names* (e.g. ``"B08_10m"``), while the historic
     implementation took integer indices; both are supported here.
+
+    Matching is progressive: exact name, then case-insensitive, then against the
+    band name with a rio-tiler ``_b<n>`` suffix stripped (so ``B08_10m`` matches
+    the read band ``B08_10m_b1``). A suffix match is only accepted when it is
+    unambiguous.
     """
     # Integer (or digit string) => already a 1-based index.
     if isinstance(band, bool):  # bool is a subclass of int; reject it explicitly
@@ -30,12 +42,28 @@ def _resolve_band_index(data: ImageData, band: BandIdentifier) -> int:
         return int(band)
 
     names = data.band_descriptions or []
-    # Exact match first, then case-insensitive as a convenience.
+
+    # Exact match, then case-insensitive.
     if band in names:
         return names.index(band) + 1
     lowered = [n.lower() for n in names]
-    if isinstance(band, str) and band.lower() in lowered:
+    if band.lower() in lowered:
         return lowered.index(band.lower()) + 1
+
+    # Suffix-tolerant match: compare against band names with the rio-tiler
+    # ``_b<n>`` suffix removed. Only accept when exactly one band matches.
+    target = band.lower()
+    matches = [
+        i for i, n in enumerate(names) if _BAND_SUFFIX_RE.sub("", n).lower() == target
+    ]
+    if len(matches) == 1:
+        return matches[0] + 1
+    if len(matches) > 1:
+        ambiguous = [names[i] for i in matches]
+        raise ValueError(
+            f"Band '{band}' is ambiguous; candidates: {ambiguous}. "
+            "Specify the full band name."
+        )
 
     raise ValueError(f"Band '{band}' not found. Available bands: {names or 'unknown'}")
 
