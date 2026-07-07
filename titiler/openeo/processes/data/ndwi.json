@@ -18,17 +18,34 @@
         },
         {
             "name": "nir",
-            "description": "The index of the NIR band.",
+            "description": "The name of the NIR band.\n\nEither the unique band name (metadata field `name` in bands) or one of the common band names (metadata field `common_name` in bands) can be specified. If the unique band name and the common name conflict, the unique band name has a higher priority.",
             "schema": {
-                "type": "number"
+                "type": "string",
+                "subtype": "band-name"
             }
         },
         {
             "name": "swir",
-            "description": "The index of the SWIR band",
+            "description": "The name of the SWIR band.\n\nEither the unique band name (metadata field `name` in bands) or one of the common band names (metadata field `common_name` in bands) can be specified. If the unique band name and the common name conflict, the unique band name has a higher priority.",
             "schema": {
-                "type": "number"
+                "type": "string",
+                "subtype": "band-name"
             }
+        },
+        {
+            "name": "target_band",
+            "description": "By default, the dimension of type `bands` is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
+            "schema": [
+                {
+                    "type": "string",
+                    "pattern": "^\\w+$"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "optional": true
         }
     ],
     "returns": {

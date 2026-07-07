@@ -904,3 +904,71 @@ def test_reduce_add_dimension_merge_same_timestamp_via_graph():
     assert img.band_descriptions == ["scene1", "scene2"]
     np.testing.assert_array_equal(img.array[0], 10.0)
     np.testing.assert_array_equal(img.array[1], 20.0)
+
+
+def _two_band_named_stack() -> RasterStack:
+    """A single-timestamp cube with two named bands: B04_10m (red), B08_10m (nir).
+
+    red=100, nir=200 => NDVI = (200-100)/(200+100) = 1/3.
+    """
+    arr = np.ma.stack(
+        [
+            np.ma.array(np.full((2, 2), 100.0, np.float32)),  # B04_10m / red
+            np.ma.array(np.full((2, 2), 200.0, np.float32)),  # B08_10m / nir
+        ]
+    )
+    return RasterStack.from_images(
+        {datetime(2026, 2, 1): ImageData(arr, band_descriptions=["B04_10m", "B08_10m"])}
+    )
+
+
+def test_ndvi_via_graph_with_band_names():
+    """ndvi resolves openEO `band-name` string arguments through the real executor.
+
+    This is the graph shape that previously raised
+    ``expected 'integer' but got 'string'`` because the implementation took
+    integer indices while the process spec (and this graph) pass band names.
+    """
+    pg = {
+        "ndvi1": {
+            "process_id": "ndvi",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "nir": "B08_10m",
+                "red": "B04_10m",
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_two_band_named_stack())
+
+    assert len(result) == 1
+    img = result[datetime(2026, 2, 1)]
+    # Bands dimension dropped by default: a single computed band.
+    assert img.band_descriptions == ["ndvi"]
+    np.testing.assert_allclose(img.array[0], 1.0 / 3.0, rtol=1e-6)
+
+
+def test_ndvi_via_graph_with_target_band():
+    """ndvi with `target_band` keeps the bands dimension and appends the index."""
+    pg = {
+        "ndvi1": {
+            "process_id": "ndvi",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "nir": "B08_10m",
+                "red": "B04_10m",
+                "target_band": "ndvi",
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_two_band_named_stack())
+
+    assert len(result) == 1
+    img = result[datetime(2026, 2, 1)]
+    # Original bands preserved, computed band appended under `target_band`.
+    assert img.band_descriptions == ["B04_10m", "B08_10m", "ndvi"]
+    np.testing.assert_array_equal(img.array[0], 100.0)
+    np.testing.assert_array_equal(img.array[1], 200.0)
+    np.testing.assert_allclose(img.array[2], 1.0 / 3.0, rtol=1e-6)
