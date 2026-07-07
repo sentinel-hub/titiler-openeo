@@ -125,6 +125,39 @@ def test_ndvi(sample_raster_stack):
         assert img_data.band_descriptions == ["ndvi"]  # Should be named "ndvi"
 
 
+def test_ndvi_band_names(sample_raster_stack):
+    """NDVI accepts band names (openEO `band-name`), not just indices."""
+    by_index = ndvi(sample_raster_stack, 3, 1)
+    by_name = ndvi(sample_raster_stack, "blue", "red")
+
+    for key, img_data in by_name.items():
+        assert img_data.count == 1
+        assert img_data.band_descriptions == ["ndvi"]
+        # Same result whether bands are referenced by name or by index.
+        np.testing.assert_array_equal(img_data.array, by_index[key].array)
+
+
+def test_ndvi_unknown_band(sample_raster_stack):
+    """NDVI raises a clear error when a band name can't be resolved."""
+    with pytest.raises(ValueError, match="not found"):
+        ndvi(sample_raster_stack, "B08_10m", "red")
+
+
+def test_ndvi_target_band(sample_raster_stack):
+    """When target_band is set, the bands dimension is kept and the index appended."""
+    result = ndvi(sample_raster_stack, "blue", "red", target_band="ndvi")
+
+    for _key, img_data in result.items():
+        assert img_data.count == 4  # 3 original bands + ndvi
+        assert img_data.band_descriptions == ["red", "green", "blue", "ndvi"]
+
+
+def test_ndvi_target_band_conflict(sample_raster_stack):
+    """target_band that collides with an existing band raises."""
+    with pytest.raises(ValueError, match="already exists"):
+        ndvi(sample_raster_stack, "blue", "red", target_band="red")
+
+
 def test_ndwi(sample_raster_stack):
     """Test the ndwi function."""
     # NDWI uses nir and swir bands, but we only have 3 bands
