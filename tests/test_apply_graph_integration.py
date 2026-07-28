@@ -1012,3 +1012,134 @@ def test_ndvi_via_graph_with_target_band():
     np.testing.assert_array_equal(img.array[0], 100.0)
     np.testing.assert_array_equal(img.array[1], 200.0)
     np.testing.assert_allclose(img.array[2], 1.0 / 3.0, rtol=1e-6)
+
+
+def _labelled_vv_stack(dates, value) -> RasterStack:
+    """Single-band stack carrying the collection's band label ("vv")."""
+    return RasterStack.from_images(
+        {
+            d: ImageData(
+                np.ma.array(np.full((1, 2, 2), value, np.float32)),
+                band_descriptions=["vv"],
+            )
+            for d in dates
+        }
+    )
+
+
+def _before_after_pg(param: str, label: str, n: int) -> dict:
+    """reduce_dimension(t) → reduce_dimension(spectral) → add_dimension(label)."""
+    return {
+        f"rt{n}": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": param},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        f"mean{n}": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+        },
+        f"rs{n}": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_node": f"rt{n}"},
+                "dimension": "spectral",
+                "reducer": {
+                    "process_graph": {
+                        f"ae{n}": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 0,
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+        },
+        f"ad{n}": {
+            "process_id": "add_dimension",
+            "arguments": {
+                "data": {"from_node": f"rs{n}"},
+                "name": "spectral",
+                "label": label,
+                "type": "bands",
+            },
+        },
+    }
+
+
+def test_spectral_reduce_of_single_band_cube_drops_band_label():
+    """reduce_dimension('spectral') eliminates the dimension → no band labels left.
+
+    A single-band cube is the tricky case: input and output band counts both equal
+    1, so a count-based check would wrongly keep the input label ("vv") on data
+    that no longer has a spectral dimension.
+    """
+    pg = _before_after_pg("data", "vv_before", 1)
+    pg["rs1"] = {**pg["rs1"], "result": True}
+
+    result = _run(pg, data=_labelled_vv_stack([datetime(2024, 1, 1)], 1.0))
+
+    assert result.first.band_descriptions == []
+
+
+def test_add_dimension_replaces_stale_band_label():
+    """add_dimension labels the single band; it never appends to stale labels.
+
+    Appending would leave 2 names on a 1-band image, and merge_cubes would then
+    treat the leftover name as a band shared by both cubes.
+    """
+    pg = _before_after_pg("data", "vv_before", 1)
+    pg["ad1"] = {**pg["ad1"], "result": True}
+
+    result = _run(pg, data=_labelled_vv_stack([datetime(2024, 1, 1)], 1.0))
+
+    assert result.first.band_descriptions == ["vv_before"]
+
+
+def test_before_after_merge_of_same_band_needs_no_resolver():
+    """Regression: two periods of the same band merge without an overlap resolver.
+
+    Real-world change-detection graph: load the same collection ("vv") over two
+    time ranges, reduce each to a single image, label them "vv_before"/"vv_during"
+    and merge.  The labels are disjoint, so no resolver is required — this raised
+    OverlapResolverMissing while the reduced cubes still carried the "vv" label.
+    """
+    pg = {
+        **_before_after_pg("cube_before", "vv_before", 1),
+        **_before_after_pg("cube_during", "vv_during", 2),
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_node": "ad1"},
+                "cube2": {"from_node": "ad2"},
+            },
+            "result": True,
+        },
+    }
+
+    result = _run(
+        pg,
+        cube_before=_labelled_vv_stack(
+            [datetime(2024, 1, 1), datetime(2024, 1, 5)], 1.0
+        ),
+        cube_during=_labelled_vv_stack(
+            [datetime(2024, 3, 1), datetime(2024, 3, 5)], 2.0
+        ),
+    )
+
+    # Both branches reduce to the sentinel key → one slice holding both bands
+    assert len(result) == 1
+    img = result.first
+    assert img.band_descriptions == ["vv_before", "vv_during"]
+    np.testing.assert_array_equal(img.array[0], 1.0)
+    np.testing.assert_array_equal(img.array[1], 2.0)

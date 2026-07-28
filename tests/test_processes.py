@@ -12,6 +12,7 @@ from titiler.openeo.processes.implementations.apply import (
     apply_dimension,
 )
 from titiler.openeo.processes.implementations.arrays import (
+    DimensionExists,
     add_dimension,
     array_apply,
     array_create,
@@ -569,12 +570,21 @@ def test_add_dimension():
     img = result.first
     assert img.band_descriptions == ["red"]
 
-    # Adding a second band label appends to existing descriptions
+    # Re-adding the dimension relabels the single band – it must never append, or
+    # the image would carry more band names than the array has bands and merge_cubes
+    # would see a phantom overlapping band (OverlapResolverMissing).
     result2 = add_dimension(
         data=result, name="spectral", label="green", type="spectral"
     )
     assert len(result2) == 1
-    assert result2.first.band_descriptions == ["red", "green"]
+    assert result2.first.band_descriptions == ["green"]
+
+    # A multi-band cube already has a spectral dimension – adding one is an error
+    multiband = RasterStack.from_images(
+        {datetime(2021, 1, 1): ImageData(np.ma.ones((3, 4, 4), np.float32))}
+    )
+    with pytest.raises(DimensionExists):
+        add_dimension(data=multiband, name="spectral", label="red", type="bands")
 
     # type="temporal" / "other" still adds a new temporal entry
     result3 = add_dimension(

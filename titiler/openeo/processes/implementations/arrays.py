@@ -177,6 +177,7 @@ def add_dimension(
 
     Raises:
         ValueError: If trying to add a spatial dimension (not supported).
+        DimensionExists: If a band dimension is added to a multi-band cube.
     """
     if type == "spatial":
         raise ValueError(
@@ -197,15 +198,23 @@ def add_dimension(
 
     if type in ("bands", "spectral"):
         # For spectral/band dimensions: label the band_descriptions of every image.
-        # After reduce_dimension("spectral"), images have band_descriptions=[] (the
-        # spectral dimension was eliminated). add_dimension re-introduces it with
-        # `label` as the single band name, which is what merge_cubes uses to detect
-        # overlap — without this the two cubes appear identical and OverlapResolverMissing
-        # is raised even when the bands are logically distinct.
+        # The added dimension has a single label, so the images must end up with
+        # exactly one band name — that name is what merge_cubes uses to detect
+        # overlap. Appending instead of setting would leave more labels than the
+        # array has bands (e.g. ["vv", "vv_before"] on a 1-band image after
+        # reduce_dimension("spectral")), and merge_cubes would then see a phantom
+        # shared band and raise OverlapResolverMissing for logically distinct cubes.
         result: Dict[datetime, ImageData] = {}
         for key in data.keys():
             img = data[key]
-            new_bands = list(img.band_descriptions or []) + [str(label)]
+            band_count = img.array.shape[0] if img.array.ndim == 3 else 1
+            if band_count > 1:
+                raise DimensionExists(
+                    f"A dimension with the name '{name}' already exists: the data cube "
+                    f"has {band_count} bands, so a new single-label band dimension "
+                    "cannot be added. Reduce the spectral dimension first."
+                )
+            new_bands = [str(label)]
             result[key] = ImageData(
                 img.array,
                 assets=img.assets,
@@ -233,6 +242,13 @@ def add_dimension(
         bounds=first_ref.bounds,
     )
     return RasterStack.from_images(new_data)
+
+
+class DimensionExists(OpenEOException):
+    """Raised when adding a dimension the data cube already has."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message, code="DimensionExists", status_code=400)
 
 
 class LabelMismatch(OpenEOException):
