@@ -230,6 +230,25 @@ class ProcessingSettings(BaseSettings):
     )
 
 
+class SARSettings(BaseSettings):
+    """Sentinel-1 SAR backscatter settings.
+
+    See docs/adr/0001-sar-backscatter.md for the design this configures.
+    """
+
+    # Max number of parsed calibration/noise LUT sets to keep cached. Each
+    # parsed set is ~100 KB; the raw annotation XML they come from is
+    # ~1-1.5 MB per polarisation (ADR S7.5), so caching the parsed result
+    # rather than the bytes is what keeps this cheap.
+    annotation_cache_maxsize: int = 128
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_SAR_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class HealthSettings(BaseSettings):
     """Settings for the /healthz and /readyz health endpoints."""
 

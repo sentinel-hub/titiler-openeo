@@ -1,0 +1,88 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<noise>
+  <adsHeader>
+    <missionId>S1C</missionId>
+    <productType>GRD</productType>
+    <polarisation>VH</polarisation>
+    <mode>IW</mode>
+    <swath>IW</swath>
+    <startTime>2026-07-28T15:10:18.530797</startTime>
+    <stopTime>2026-07-28T15:10:51.106157</stopTime>
+    <absoluteOrbitNumber>8745</absoluteOrbitNumber>
+    <missionDataTakeId>70990</missionDataTakeId>
+    <imageNumber>002</imageNumber>
+  </adsHeader>
+  <noiseRangeVectorList count="4">
+    <noiseRangeVector>
+      <azimuthTime>2026-07-28T15:10:18.530797</azimuthTime>
+      <line>0</line>
+      <pixel count="16">0 1600 3200 4800 6400 8000 9552 11152 12752 14352 15952 17552 19080 20680 22280 25506</pixel>
+      <noiseRangeLut count="16">1.178921e+03 8.351952e+02 7.746929e+02 7.138854e+02 6.575748e+02 7.549489e+02 5.334625e+02 3.899338e+02 3.433592e+02 3.417052e+02 4.104770e+02 6.578434e+02 2.081746e+02 1.644552e+02 1.882735e+02 0.000000e+00</noiseRangeLut>
+    </noiseRangeVector>
+    <noiseRangeVector>
+      <azimuthTime>2026-07-28T15:10:26.536033</azimuthTime>
+      <line>5328</line>
+      <pixel count="16">0 1600 3200 4800 6400 8000 9552 11152 12752 14352 15952 17552 19080 20680 22280 25506</pixel>
+      <noiseRangeLut count="16">1.183033e+03 8.372875e+02 7.764565e+02 7.155967e+02 6.590219e+02 7.561616e+02 5.406565e+02 3.949820e+02 3.477137e+02 3.459550e+02 4.154324e+02 6.654984e+02 2.078180e+02 1.640935e+02 1.878009e+02 0.000000e+00</noiseRangeLut>
+    </noiseRangeVector>
+    <noiseRangeVector>
+      <azimuthTime>2026-07-28T15:10:34.541269</azimuthTime>
+      <line>10656</line>
+      <pixel count="16">0 1600 3200 4800 6400 8000 9552 11152 12752 14352 15952 17552 19080 20680 22280 25506</pixel>
+      <noiseRangeLut count="16">1.191370e+03 8.403027e+02 7.785812e+02 7.179080e+02 6.606523e+02 7.560068e+02 5.373630e+02 3.917577e+02 3.445016e+02 3.423727e+02 4.103205e+02 6.555046e+02 2.099272e+02 1.651786e+02 1.884887e+02 0.000000e+00</noiseRangeLut>
+    </noiseRangeVector>
+    <noiseRangeVector>
+      <azimuthTime>2026-07-28T15:10:42.546504</azimuthTime>
+      <line>15984</line>
+      <pixel count="16">0 1600 3200 4800 6400 8000 9552 11152 12752 14352 15952 17552 19080 20680 22280 25506</pixel>
+      <noiseRangeLut count="16">1.197468e+03 8.429121e+02 7.806281e+02 7.199630e+02 6.622617e+02 7.567352e+02 5.396522e+02 3.929444e+02 3.453281e+02 3.429761e+02 4.106132e+02 6.550001e+02 2.106839e+02 1.654805e+02 1.885639e+02 0.000000e+00</noiseRangeLut>
+    </noiseRangeVector>
+    </noiseRangeVectorList>
+  <noiseAzimuthVectorList count="5">
+    <noiseAzimuthVector>
+      <swath>IW1</swath>
+      <firstAzimuthLine>0</firstAzimuthLine>
+      <firstRangeSample>0</firstRangeSample>
+      <lastAzimuthLine>20308</lastAzimuthLine>
+      <lastRangeSample>8751</lastRangeSample>
+      <line count="8">0 2530 5070 7600 10150 12690 15210 20308</line>
+      <noiseAzimuthLut count="8">1.095119e+00 1.014538e+00 1.019685e+00 1.082670e+00 1.000499e+00 1.060164e+00 1.034015e+00 1.123392e+00</noiseAzimuthLut>
+    </noiseAzimuthVector>
+    <noiseAzimuthVector>
+      <swath>IW2</swath>
+      <firstAzimuthLine>0</firstAzimuthLine>
+      <firstRangeSample>8752</firstRangeSample>
+      <lastAzimuthLine>20308</lastAzimuthLine>
+      <lastRangeSample>17559</lastRangeSample>
+      <line count="8">0 2540 5060 7600 10130 12670 15210 20300</line>
+      <noiseAzimuthLut count="8">1.004019e+00 1.083645e+00 1.006192e+00 1.020661e+00 1.047304e+00 1.000050e+00 1.052435e+00 1.008885e+00</noiseAzimuthLut>
+    </noiseAzimuthVector>
+    <noiseAzimuthVector>
+      <swath>IW3</swath>
+      <firstAzimuthLine>0</firstAzimuthLine>
+      <firstRangeSample>17560</firstRangeSample>
+      <lastAzimuthLine>20942</lastAzimuthLine>
+      <lastRangeSample>25506</lastRangeSample>
+      <line count="8">0 2620 5230 7850 10480 13080 15700 20940</line>
+      <noiseAzimuthLut count="8">1.022698e+00 1.011538e+00 1.059622e+00 1.000209e+00 1.078654e+00 1.005728e+00 1.033616e+00 1.008597e+00</noiseAzimuthLut>
+    </noiseAzimuthVector>
+    <noiseAzimuthVector>
+      <swath>IW2</swath>
+      <firstAzimuthLine>20309</firstAzimuthLine>
+      <firstRangeSample>8684</firstRangeSample>
+      <lastAzimuthLine>20942</lastAzimuthLine>
+      <lastRangeSample>17559</lastRangeSample>
+      <line count="8">20309 20380 20460 20540 20620 20700 20780 20942</line>
+      <noiseAzimuthLut count="8">1.009457e+00 1.014416e+00 1.020986e+00 1.029141e+00 1.038364e+00 1.049167e+00 1.061485e+00 1.090860e+00</noiseAzimuthLut>
+    </noiseAzimuthVector>
+    <noiseAzimuthVector>
+      <swath>IW3</swath>
+      <firstAzimuthLine>20943</firstAzimuthLine>
+      <firstRangeSample>17489</firstRangeSample>
+      <lastAzimuthLine>21681</lastAzimuthLine>
+      <lastRangeSample>25506</lastRangeSample>
+      <line count="8">20943 21030 21120 21210 21300 21390 21480 21681</line>
+      <noiseAzimuthLut count="8">1.008764e+00 1.014862e+00 1.022943e+00 1.032857e+00 1.044801e+00 1.058574e+00 1.074436e+00 1.117652e+00</noiseAzimuthLut>
+    </noiseAzimuthVector>
+  </noiseAzimuthVectorList>
+</noise>
