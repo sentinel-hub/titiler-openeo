@@ -176,7 +176,113 @@ def test_parse_calibration_empty_raises():
         parse_calibration(b"<calibration><calibrationVectorList/></calibration>")
 
 
+def test_parse_calibration_resamples_rows_onto_common_pixel_axis():
+    """Vectors that sample the pixel axis differently are aligned, not naively stacked.
+
+    Regression guard: real, un-trimmed CDSE calibration/noise annotations do
+    not guarantee every vector samples the same pixel positions (confirmed
+    against genuine ESA data -- see ADR/PR discussion). This constructs a
+    minimal two-vector annotation where the second vector's own pixel axis
+    is shifted, and checks that a query at a canonical-axis position reads
+    back the correctly interpolated value from the *second vector's own*
+    axis rather than a naive column-stack (which would just return the raw
+    second element of that vector's array, unadjusted for the shift).
+    """
+    xml = b"""<?xml version="1.0"?>
+    <calibration>
+      <calibrationVectorList count="2">
+        <calibrationVector>
+          <line>0</line>
+          <pixel count="3">0 100 200</pixel>
+          <sigmaNought count="3">10 20 30</sigmaNought>
+          <betaNought count="3">10 20 30</betaNought>
+          <gamma count="3">10 20 30</gamma>
+          <dn count="3">10 20 30</dn>
+        </calibrationVector>
+        <calibrationVector>
+          <line>100</line>
+          <pixel count="3">0 110 200</pixel>
+          <sigmaNought count="3">10 2000 30</sigmaNought>
+          <betaNought count="3">10 20 30</betaNought>
+          <gamma count="3">10 20 30</gamma>
+          <dn count="3">10 20 30</dn>
+        </calibrationVector>
+      </calibrationVectorList>
+    </calibration>
+    """
+    cal = parse_calibration(xml)
+
+    # Canonical axis is vector 0's: [0, 100, 200]. At line=100, pixel=100,
+    # naively stacking raw rows would return the raw second element of
+    # vector 1's sigmaNought (2000). Correctly interpolating vector 1's own
+    # axis (pixel 0->10, 110->2000, 200->30) at pixel=100 gives a different,
+    # smaller value.
+    value = cal.sigma_nought(np.array([100.0]), np.array([100.0]))[0]
+    expected = np.interp(100.0, [0, 110, 200], [10, 2000, 30])
+    assert value == pytest.approx(expected)
+    assert value != pytest.approx(2000.0)
+
+
+def test_parse_calibration_own_pixel_grid_ragged_raises():
+    """A vector whose own <pixel> count disagrees with its own LUT count raises."""
+    xml = b"""<?xml version="1.0"?>
+    <calibration>
+      <calibrationVectorList count="1">
+        <calibrationVector>
+          <line>0</line>
+          <pixel count="3">0 100 200</pixel>
+          <sigmaNought count="2">10 20</sigmaNought>
+          <betaNought count="3">10 20 30</betaNought>
+          <gamma count="3">10 20 30</gamma>
+          <dn count="3">10 20 30</dn>
+        </calibrationVector>
+      </calibrationVectorList>
+    </calibration>
+    """
+    with pytest.raises(ValueError, match="[Rr]agged"):
+        parse_calibration(xml)
+
+
 # --------------------------------------------------------------------------- noise
+
+
+def test_parse_noise_resamples_rows_onto_common_pixel_axis():
+    """Range vectors with different own pixel axes are aligned, not naively stacked.
+
+    Same defect class as calibration (both share `_resample_row`), verified
+    directly against the real committed fixture too: `noise_legacy.xml`'s
+    own vectors genuinely sample at slightly different pixel positions
+    (e.g. one vector's 7th column is at pixel 9312, another's at 9303).
+    """
+    xml = b"""<?xml version="1.0"?>
+    <noise>
+      <noiseRangeVectorList count="2">
+        <noiseRangeVector>
+          <line>0</line>
+          <pixel count="3">0 100 200</pixel>
+          <noiseRangeLut count="3">10 20 30</noiseRangeLut>
+        </noiseRangeVector>
+        <noiseRangeVector>
+          <line>100</line>
+          <pixel count="3">0 110 200</pixel>
+          <noiseRangeLut count="3">10 2000 30</noiseRangeLut>
+        </noiseRangeVector>
+      </noiseRangeVectorList>
+    </noise>
+    """
+    noise = parse_noise(xml)
+
+    value = noise.range_grid.interp(
+        "noiseRangeLut", np.array([100.0]), np.array([100.0])
+    )[0]
+    expected = np.interp(100.0, [0, 110, 200], [10, 2000, 30])
+    assert value == pytest.approx(expected)
+    assert value != pytest.approx(2000.0)
+
+    # The real fixture's vectors do have distinct own pixel axes (confirmed
+    # against un-trimmed CDSE data); parsing it must not raise.
+    real_noise = parse_noise((FIXTURES / "noise_legacy.xml").read_bytes())
+    assert real_noise.range_grid.values["noiseRangeLut"].shape[0] >= 2
 
 
 def test_parse_noise_modern_schema_has_azimuth_blocks():

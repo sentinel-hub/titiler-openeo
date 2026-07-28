@@ -28,6 +28,10 @@ def _http_get(url: str) -> bytes:
         return resp.read()
 
 
+def _env_true(name: str) -> bool:
+    return os.environ.get(name, "").strip().upper() in ("YES", "TRUE", "1", "ON")
+
+
 class ObstoreFetcher:
     """Default AssetFetcher: `obstore` for s3://, a plain HTTP GET otherwise.
 
@@ -39,8 +43,18 @@ class ObstoreFetcher:
     already documented for the rasterio read path (see .env.cdse) so one
     credential secret can drive both without duplication. Static keys, custom
     endpoints, requester-pays, IRSA, IMDS and ECS container credentials are
-    handled by obstore's native (Rust) auth path. `AWS_PROFILE`/SSO
-    credentials are not -- support was removed upstream in arrow-rs
+    handled by obstore's native (Rust) auth path -- but only if this class
+    does not get in the way. Passing `skip_signature=True` whenever no
+    explicit credential is configured would defeat that native chain (IRSA
+    pods typically set only `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN`, not
+    `AWS_ACCESS_KEY_ID`; confirmed empirically -- with no credential kwargs at
+    all, obstore tries IMDS at `169.254.169.254` before anything else). So
+    unsigned access is opt-in only, via `AWS_NO_SIGN_REQUEST` (GDAL's own
+    variable for the same thing); by default nothing here overrides the
+    native chain.
+
+    `AWS_PROFILE`/SSO credentials are the one mechanism the native chain does
+    not cover -- support was removed upstream in arrow-rs
     (https://github.com/apache/arrow-rs/pull/4238) -- so when `AWS_PROFILE`
     is set this falls back to `obstore.auth.boto3.Boto3CredentialProvider`,
     which needs the optional `boto3` extra
@@ -69,9 +83,7 @@ class ObstoreFetcher:
             "region": os.environ.get("AWS_REGION", "us-east-1"),
             "request_payer": os.environ.get("AWS_REQUEST_PAYER", "").lower()
             == "requester",
-            "virtual_hosted_style_request": os.environ.get("AWS_VIRTUAL_HOSTING", "")
-            .upper()
-            .startswith("T"),
+            "virtual_hosted_style_request": _env_true("AWS_VIRTUAL_HOSTING"),
         }
 
         # obstore reads its own AWS_ENDPOINT_URL; fall back to GDAL's
@@ -108,8 +120,12 @@ class ObstoreFetcher:
             opts["secret_access_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
             if os.environ.get("AWS_SESSION_TOKEN"):
                 opts["token"] = os.environ["AWS_SESSION_TOKEN"]
-        else:
+        elif _env_true("AWS_NO_SIGN_REQUEST"):
             opts["skip_signature"] = True
+        # Otherwise: leave credentials to obstore's native chain (env vars
+        # already handled above, plus IMDS / WebIdentity(IRSA) / ECS
+        # container credentials tried automatically). Setting
+        # skip_signature here would silently disable all of that.
 
         return opts
 

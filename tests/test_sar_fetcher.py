@@ -68,6 +68,7 @@ def _clean_aws_env(monkeypatch):
         "AWS_VIRTUAL_HOSTING",
         "AWS_ENDPOINT_URL",
         "AWS_S3_ENDPOINT",
+        "AWS_NO_SIGN_REQUEST",
         "AWS_PROFILE",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -76,16 +77,44 @@ def _clean_aws_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
-def test_s3_store_options_anonymous_by_default():
-    """With no AWS env at all, options fall back to anonymous access."""
+def test_s3_store_options_defaults_to_native_chain_not_anonymous():
+    """With no AWS env at all, credentials are left to obstore's native chain.
+
+    Regression guard: an earlier version of this code set
+    skip_signature=True whenever neither AWS_PROFILE nor AWS_ACCESS_KEY_ID
+    were set, which silently disabled IRSA/IMDS/ECS container credentials --
+    exactly the deployments that only ever set AWS_WEB_IDENTITY_TOKEN_FILE/
+    AWS_ROLE_ARN or nothing at all. Confirmed empirically that omitting all
+    credential kwargs makes obstore try IMDS (169.254.169.254) before
+    anything else, so `skip_signature` must be absent unless the caller
+    opts in explicitly.
+    """
     opts = ObstoreFetcher()._s3_store_options()
-    assert opts["skip_signature"] is True
+    assert "skip_signature" not in opts
     assert "endpoint" not in opts  # obstore rejects endpoint=None
     assert "credential_provider" not in opts
     assert "access_key_id" not in opts
     assert opts["region"] == "us-east-1"
     assert opts["request_payer"] is False
     assert opts["virtual_hosted_style_request"] is False
+
+
+def test_s3_store_options_no_sign_request_opts_into_anonymous(monkeypatch):
+    """AWS_NO_SIGN_REQUEST (GDAL's own variable) explicitly enables unsigned access."""
+    monkeypatch.setenv("AWS_NO_SIGN_REQUEST", "YES")
+    opts = ObstoreFetcher()._s3_store_options()
+    assert opts["skip_signature"] is True
+
+
+def test_s3_store_options_static_keys_take_priority_over_no_sign_request(monkeypatch):
+    """Static keys are preferred even if AWS_NO_SIGN_REQUEST is also (redundantly) set."""
+    monkeypatch.setenv("AWS_NO_SIGN_REQUEST", "YES")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+
+    opts = ObstoreFetcher()._s3_store_options()
+    assert opts["access_key_id"] == "AKIDEXAMPLE"
+    assert "skip_signature" not in opts
 
 
 def test_s3_store_options_static_keys(monkeypatch):

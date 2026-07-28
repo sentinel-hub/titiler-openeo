@@ -13,6 +13,12 @@ radiometric background this implements, in particular:
 * The noise annotation schema changed at IPF 2.90 (2018-03): older products
   use a single `noiseVectorList`, newer ones use `noiseRangeVectorList` +
   `noiseAzimuthVectorList`. Both are parsed here.
+* Vectors within one annotation are not guaranteed to sample the range axis
+  at identical pixel positions -- confirmed against genuine, un-trimmed CDSE
+  data, where the sampled pixel index drifts by a few samples line to line
+  and the vector length can even differ by one. Every vector is resampled
+  onto a common pixel axis (`_resample_row`) before being stacked into a
+  `Grid2D`; naively assuming a shared axis silently misaligns values.
 
 XML is parsed with `defusedxml` rather than the stdlib `xml.etree`, which was
 measured expanding a billion-laughs payload on Python 3.13.1 (ADR S9.2).
@@ -55,6 +61,27 @@ def _text(el: Element, tag: str) -> str:
 
 def _floats(el: Element, tag: str) -> np.ndarray:
     return np.array(_text(el, tag).split(), dtype="f8")
+
+
+def _resample_row(
+    canonical_pixels: np.ndarray, own_pixels: np.ndarray, own_values: np.ndarray
+) -> np.ndarray:
+    """Resample one calibration/noise vector's LUT column onto a shared pixel axis.
+
+    ESA does not guarantee that every vector in an annotation samples the
+    range axis at identical pixel positions. Real CDSE products drift by a
+    handful of samples line to line (confirmed against genuine, un-trimmed
+    ESA data), and the sample *count* can even differ by one between
+    vectors. Stacking raw rows under the assumption that they share
+    vectors[0]'s pixel axis silently misaligns values -- interpolating each
+    row onto a common axis first is what makes that assumption safe.
+    """
+    if own_values.shape != own_pixels.shape:
+        raise ValueError(
+            f"Ragged LUT vector: {len(own_values)} values but "
+            f"{len(own_pixels)} pixel positions"
+        )
+    return np.interp(canonical_pixels, own_pixels, own_values)
 
 
 @dataclass(frozen=True)
@@ -140,17 +167,14 @@ def parse_calibration(xml: bytes) -> CalibrationLUT:
 
     lines = np.array([float(_text(v, "line")) for v in vectors])
     pixels = _floats(vectors[0], "pixel")
+    per_vector_pixels = [_floats(v, "pixel") for v in vectors]
+
     values = {}
     for name in ("sigmaNought", "betaNought", "gamma", "dn"):
-        rows = []
-        for v in vectors:
-            row = _floats(v, name)
-            if row.shape != pixels.shape:
-                raise ValueError(
-                    f"Ragged calibration grid in <{name}>: expected shape "
-                    f"{pixels.shape}, got {row.shape}"
-                )
-            rows.append(row)
+        rows = [
+            _resample_row(pixels, own_pixels, _floats(v, name))
+            for v, own_pixels in zip(vectors, per_vector_pixels)
+        ]
         values[name] = np.vstack(rows)
     return CalibrationLUT(Grid2D(lines, pixels, values))
 
@@ -220,7 +244,9 @@ def parse_noise(xml: bytes) -> NoiseLUT:
 
     lines = np.array([float(_text(v, "line")) for v in vectors])
     pixels = _floats(vectors[0], "pixel")
-    rows = [_floats(v, lut_tag) for v in vectors]
+    rows = [
+        _resample_row(pixels, _floats(v, "pixel"), _floats(v, lut_tag)) for v in vectors
+    ]
     range_grid = Grid2D(lines, pixels, {"noiseRangeLut": np.vstack(rows)})
 
     blocks = []
