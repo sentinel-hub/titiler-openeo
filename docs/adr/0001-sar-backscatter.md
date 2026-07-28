@@ -273,7 +273,9 @@ Compared field by field on one GRD item from each catalogue (all verified, 2026-
 | Calibration / noise keys | `schema-calibration-<pol>`, `schema-noise-<pol>` | same | same |
 | Manifest key | `safe_manifest` (**underscore**) | `safe-manifest` (**hyphen**) | `safe-manifest` |
 | Extra assets | `Product` (zip) | — | `tilejson`, `rendered_preview` |
-| `product:type` | `IW_GRDH_1S`, `IW_GRDH_1S_B`, `EW_GRDM_1S`, … | **absent** | **absent** |
+| `product:type` | `IW_GRDH_1S`, `IW_GRDH_1S_B`, `EW_GRDM_1S`, … | absent | absent |
+| `sar:product_type` | absent | `GRD` | `GRD` |
+| `sar:instrument_mode` / `sar:polarizations` | yes | yes | yes |
 | Item `proj:*` | **absent** | `proj:epsg`/`transform`/`shape`/`bbox`/`centroid` | **same set as Earth Search** |
 | Asset `proj:*` | `proj:shape`, `proj:code` (null) | — | — |
 | Nodata declaration | asset `nodata: 0`, `data_type` | `raster:bands[].nodata` | — |
@@ -283,9 +285,20 @@ Compared field by field on one GRD item from each catalogue (all verified, 2026-
 
 Two rows deserve emphasis because they invert assumptions that look safe:
 
-**`product:type` exists only on CDSE.** Both Earth Search and Planetary Computer omit it
-entirely, so the product-type whitelist the geopyspark driver relies on (§1.3) is simply
-not implementable outside CDSE. Capability there has to be inferred from the assets.
+**No product-type field is universal, and the two that exist disagree in granularity.**
+CDSE publishes `product:type` with the full identifier (`EW_GRDM_1S`); Earth Search and
+Planetary Computer omit it and instead publish the SAR extension's `sar:product_type`,
+whose value is just `GRD`. A whitelist of full product-type strings — as the geopyspark
+driver uses (§1.3) — therefore works on CDSE and rejects the other two outright.
+
+Support must key off **capability rather than identity**: the real requirement is that the
+calibration and noise annotation siblings resolve for the requested polarisation. If they
+do, the item is processable whatever its metadata says; if they do not, it is not,
+whatever its metadata says. Product type is still worth consulting — accept a `GRD` match
+from either field, treat absence as acceptable, and reject positively-known-unsupported
+types (`SLC`, `OCN`) — but as a sharpener for error messages, not as the gate.
+`sar:instrument_mode` and `sar:polarizations` are present on all three catalogues and are
+the reliable way to enumerate polarisations.
 
 **Earth Search and Planetary Computer both publish a fabricated `proj:transform`.** Each
 advertises `proj:epsg: 4326` with a north-up affine obtained by dividing a bbox by the
@@ -868,9 +881,12 @@ Six of the original seven are now settled. Struck items are kept for the audit t
    `EW_GRDM_1S_C`, `EW_GRDH_1S`, `EW_GRDH_1S_B`, plus stripmap `S2_/S3_/S4_/S6_GRDH_1S`
    (and `S3_GRDH_1S_B`). The trailing `_B`/`_C` is the **platform** (S1A has no suffix),
    not an IPF version — which is why the geopyspark driver's three-entry whitelist works.
-   A pattern such as `^(IW|EW|S[1-6])_GRD[HM]_1S(_[A-Z])?$` covers the observed archive.
-   Caveat from §1.7: `product:type` is **absent** on Earth Search and Planetary Computer,
-   so outside CDSE capability must be inferred from the assets instead.
+   A pattern such as `^(IW|EW|S[1-6])_GRD[HM]_1S(_[A-Z])?$` covers the observed CDSE
+   archive. **But do not gate on it.** Per §1.7, `product:type` is absent on Earth Search
+   and Planetary Computer, which publish `sar:product_type = "GRD"` instead — a whitelist
+   of full identifiers would reject them outright. Gate on capability (do the annotation
+   siblings resolve?) and use product type only to sharpen errors and to reject
+   positively-unsupported types such as `SLC`.
 6. **Speckle filtering — deferred, not open.** Sentinel Hub exposes a Lee filter; openEO
    has no standard parameter, so it would live in `options` and reduce portability. Out of
    scope for Phase 1; recorded as a follow-up.
