@@ -150,13 +150,19 @@ polynomial, and asking it for TPS produces a silently wrong result — the most 
 possible failure mode, since it looks like it worked. (Found by the Phase 0 prototype,
 after this ADR initially recommended exactly that call.)
 
-**Consequence for the design:** do not delegate the geocoding transformer to GDAL at all.
-Build the inverse map once with `GCPTransformer(gcps, tps=True).rowcol(...)` and use that
-_same_ map both to sample the DN and to evaluate the LUTs (§7.3). This is exact, removes
-the dependency on undocumented transformer-option plumbing, and makes it structurally
-impossible for the radiometry and the geometry to be sampled on different geometries.
-Measured cost on a 384 × 384 tile: 0.45 s for the inverse map, 0.50 s for the decimated
-read — _faster_ than the 1.84 s `reproject` call it replaces.
+**Consequence for the design:** TPS is unreachable through GDAL's warp API — neither
+`reproject` nor `WarpedVRT` honours `METHOD=GCP_TPS` (§1.6i confirms the same for
+`WarpedVRT`). Where we need exact source coordinates — evaluating the calibration LUTs —
+build them directly with `GCPTransformer(gcps, tps=True).rowcol(...)` rather than trying
+to coax them out of a warp.
+
+> **Superseded in part.** An earlier revision of this ADR drew a much broader conclusion
+> from the same measurement: that the process should therefore own the whole read path,
+> sampling DN through its own inverse map. That was wrong, and it cost a discarded
+> implementation. `rio_tiler.io.rasterio.Reader` already auto-wraps GCP datasets in a
+> `WarpedVRT`, so `RasterStack` reads this data correctly today (§1.6i). The finding
+> above is about _transformer accuracy_, not about who performs the read. Reading stays
+> with `RasterStack`; only LUT-coordinate computation uses the TPS map.
 
 **(c) Decimated / overview reads are radiometrically safe.** SAR intensity averaging must
 happen in power (DN²), not amplitude (DN). Theory predicts up to −1.05 dB bias for
@@ -257,6 +263,78 @@ Median **−23.0 dB** over the Barents Sea is the expected magnitude for open-wa
 so `noise_removal` is doing real work rather than being a no-op. The 384 × 384 tile in
 3.2 s cold meets the §7.8 latency budget with margin. No `proj:*` warning fired, as
 expected for CDSE (§1.7).
+
+**(i) The existing read path already reads GCP-referenced GRD — but approximates the
+GCPs with a single affine, and is ~2 km off. Improve that path; do not build a second
+one.** This reverses an assumption that shaped the original §7.1/§7.3 and cost a
+discarded implementation, so it is recorded in full, including the part that is _not_
+good news.
+
+`rio_tiler.io.rasterio.Reader.__attrs_post_init__` detects GCPs and wraps the dataset in
+a `WarpedVRT` by itself:
+
+```python
+if self.dataset.gcps[0]:
+    vrt_options = {
+        "src_crs": self.dataset.gcps[1],
+        "src_transform": transform.from_gcps(self.dataset.gcps[0]),   # <-- single affine
+        "add_alpha": True,
+    }
+    ...
+    self.dataset = self._ctx_stack.enter_context(WarpedVRT(self.dataset, **vrt_options))
+```
+
+Opening a raw Sentinel-1 GRD measurement asset through it does produce a georeferenced
+dataset:
+
+```text
+raw rasterio dataset : crs = None, transform = identity, 189 GCPs (EPSG:4326)
+rio-tiler Reader     : crs = EPSG:4326
+                       bounds = (-7.1614, 68.0766, 0.2296, 70.0097)   # true footprint
+                       dataset type = WarpedVRT                        # auto-wrapped
+```
+
+**But `transform.from_gcps()` fits one affine to the whole GCP grid**, and a SAR swath's
+grid is strongly non-affine (range/azimuth distortion, meridian convergence at high
+latitude). Measured on `S1D_IW_GRDH_1SDV_20260728T173725…` (189 GCPs), residuals at the
+GCPs themselves:
+
+| Georeferencing | Ground error |
+| --- | --- |
+| **rio-tiler `from_gcps` affine (what runs today)** | **RMS 1957 m / max 4948 m** (201 px / 508 px RMS/max at 10 m) |
+| GDAL GCP polynomial | RMS 51.6 m / max 142.7 m |
+| TPS | RMS 0.3 m / max 0.5 m |
+
+So the current read is ~38× worse than GDAL's own GCP handling and ~6500× worse than TPS.
+`MAX_GCP_ORDER=3` on the `WarpedVRT` measurably changes the warp (VRT envelope
+38700 × 10122 → 38654 × 10106), while `METHOD=GCP_TPS` is ignored — the same as for
+`reproject` (§1.6b). TPS is not reachable through GDAL's warp API at all.
+
+**Consequences for the design.** Two things follow, and they pull in different
+directions — both must be respected:
+
+1. **Reading stays with `RasterStack`.** Every read concern — overviews and decimation,
+   CRS handling, resampling, masks, mosaicking, output-size limits, `RasterioIOError`
+   retries — is already solved there, for this and every other format. A SAR-specific
+   reader would duplicate all of it and drift out of sync. The original §7.3 did exactly
+   that and is superseded.
+2. **But the shared read path needs a GCP accuracy fix**, because ~2 km is not usable.
+   The fix belongs in the read path, benefits every GCP-referenced dataset rather than
+   just SAR, and is small: hand rio-tiler a `WarpedVRT` built from the real GCPs
+   (`Reader(None, dataset=vrt)` is rio-tiler's own documented pattern) instead of letting
+   it collapse them to `from_gcps`. Whether that lands as a `Reader` subclass here or as
+   an upstream rio-tiler fix is an implementation decision (§9.8).
+
+What is genuinely SAR-specific — and therefore genuinely `sar_backscatter`'s job — is
+only that **DN is not a physical quantity**. Converting it to σ⁰/γ⁰/β⁰ needs the ESA
+LUTs, and that is a pixel operation on an already-read array, not a read (§7.3).
+
+Separately, **`proj:*` still corrupts `SimpleSTACReader`'s advertised grid**: the auto-VRT
+concerns the _pixel_ geometry, but `SimpleSTACReader.__attrs_post_init__` still overrides
+`crs`/`bounds`/`width`/`height` from item `proj:*` when present. On the same item that
+metadata is not merely imprecise but transposed — `proj:shape` `[26545, 15940]` against an
+actual `(H, W)` of `(15940, 26545)`. That is issue #338: pre-existing, independent of SAR
+backscatter, and affecting output-dimension estimation rather than the warp.
 
 ### 1.7 Catalogue dependence
 
@@ -591,11 +669,15 @@ titiler/openeo/sar/
   __init__.py
   annotation.py     # calibration/noise XML parsing → LUT objects
   calibration.py    # LUT interpolation + coefficient maths
-  geocode.py        # GCP/TPS warp of DN into the destination grid
-  reader.py         # per-item read: STAC item + dst grid → ImageData
+  geocode.py        # dst grid + GCPs → source (line, pixel) inverse map
 titiler/openeo/processes/implementations/sar.py     # the `sar_backscatter` function
 titiler/openeo/processes/data/sar_backscatter.json  # spec (copy of the openEO spec)
 ```
+
+**There is deliberately no `reader.py`.** Reading is `RasterStack`'s job and already
+works for this data — see §1.6i. `geocode.py` does not read pixels; it only converts the
+destination grid into source `(line, pixel)` coordinates so the LUTs can be evaluated at
+the right places.
 
 ### 7.2 Process signature
 
@@ -619,49 +701,55 @@ message must say so plainly.
 
 ### 7.3 Algorithm (per item, per tile)
 
-The process is a **task rewrite**, not a pixel operation. It consumes the _unrealised_
-`RasterStack` produced by `load_collection`, reads `stack._tasks` (each carrying its STAC
-item dict) together with `stack.width`, `stack.height`, `stack.bounds`, `stack.dst_crs`,
-and returns a new lazy `RasterStack` whose task functions call the SAR reader. Laziness is
-preserved end to end.
+**`sar_backscatter` is a calibration step, not a read step.** The DN pixels are read by
+`RasterStack` through the normal `load_collection` path, which already handles
+GCP-referenced Sentinel-1 GRD correctly (§1.6i). The process consumes the `ImageData`
+that path produces and converts DN to physical backscatter. It does **not** open,
+window, resample or warp the measurement raster — doing so would duplicate machinery
+rio-tiler already provides (overviews, decimation, CRS handling, masks, mosaicking,
+output-size limits, retries) and would inevitably drift from it.
 
-For each item and each requested polarisation:
+The one thing calibration needs that the read does not provide is the source
+`(line, pixel)` coordinate of every output pixel, since ESA's LUTs are defined on the
+GRD grid. That is recovered from the measurement asset's GCPs, which is a **header-only
+open** (`src.gcps`) — metadata, not pixels, and cacheable per asset.
 
-1. Resolve the measurement asset (`vv`/`vh`/`hh`/`hv`) and its
-   `schema-calibration-<pol>` / `schema-noise-<pol>` siblings, honouring
-   `STAC_ALTERNATE_KEY` exactly as `reader.py` already does.
-2. Open the measurement TIFF; read `src.gcps`. **Ignore item and asset `proj:*`
-   entirely** — some catalogues advertise a bbox-derived affine that is fiction for
-   SAR geometry (§1.7). The TIFF's own GCPs are the only trusted georeferencing.
-3. Build the destination grid from `(bounds, crs, width, height)`.
-4. **Build the inverse map, once.** `GCPTransformer(gcps, tps=True).rowcol(xs, ys)` on
-   the destination pixel centres gives source `(line, pixel)` for every output pixel.
-   This single array pair drives both of the next two steps, so the radiometry and the
-   geometry cannot be sampled on different geometries. **Do not use
-   `rasterio.warp.reproject`** — it silently ignores `METHOD=GCP_TPS` and runs an
-   order-2 polynomial (§1.6b).
-5. **Sample the DN.** Take the source window spanned by the inverse map (plus a small
-   margin), read it decimated to roughly the destination sampling — GDAL serves this
-   from the COG overviews, which §1.6c showed is radiometrically safe — then bilinearly
-   sample it at the mapped coordinates. Bilinear per the openEO spec.
-6. **Evaluate the LUTs at the same coordinates.** Bilinearly interpolate
-   `A_σ`/`A_β`/`A_γ` and `η` on their rectilinear coarse grids (`np.interp` along each
-   axis; no scipy). Exact, rather than warping a rasterised LUT.
-7. **Calibrate.** `value = (DN² − η·noise_removal) / A²` with `A` selected by
+Per item, per requested polarisation:
+
+1. Take the `ImageData` for that polarisation from the stack, with its `bounds`, `crs`,
+   `width`, `height`.
+2. Resolve the `schema-calibration-<pol>` / `schema-noise-<pol>` sibling assets,
+   honouring `STAC_ALTERNATE_KEY` as `reader.py` does.
+3. **Build the inverse map.** Read `src.gcps` from the measurement asset (header only),
+   then `GCPTransformer(gcps, tps=True).rowcol(...)` on the destination pixel centres
+   gives source `(line, pixel)` for every output pixel. **Ignore item and asset
+   `proj:*`** — some catalogues advertise a bbox-derived affine that is fiction for SAR
+   geometry (§1.7).
+4. **Evaluate the LUTs at those coordinates.** Bilinearly interpolate `A_σ`/`A_β`/`A_γ`
+   and `η` on their rectilinear coarse grids (`np.interp` along each axis; no scipy).
+5. **Calibrate.** `value = (DN² − η·noise_removal) / A²` with `A` selected by
    `coefficient`; `null` → `DN²` uncalibrated; `beta0` uses the constant `A_β`.
-8. **Clamp.** Noise subtraction can drive values negative in low-backscatter areas; clamp
+6. **Clamp.** Noise subtraction can drive values negative in low-backscatter areas; clamp
    to 0 and record the count (SNAP does the same). Do not emit negatives.
-9. **Mask.** `DN == 0` marks border/no-data. Combine with the footprint cutline the
-   existing `ImageRef` machinery already computes. Emit a `mask` band when `mask=true`.
-10. **Extra bands.** When `ellipsoid_incidence_angle=true`, append
-    `degrees(arccos((A_γ/A_σ)²))` (§1.6d).
-11. Assemble `ImageData` with `band_descriptions` = polarisation names (lower-case, e.g.
-    `vv`), `float32`, linear scale.
+7. **Mask.** Preserve the mask the stack already produced; `DN == 0` additionally marks
+   border/no-data. Emit a `mask` band when `mask=true`.
+8. **Extra bands.** When `ellipsoid_incidence_angle=true`, append
+   `degrees(arccos((A_γ/A_σ)²))` (§1.6d).
+9. Assemble `ImageData` with `band_descriptions` = polarisation names (lower-case, e.g.
+   `vv`), `float32`, linear scale.
 
-Validated end to end by the Phase 0 prototype
-([`scripts/sar_backscatter_prototype.py`](../../scripts/sar_backscatter_prototype.py)):
-384 × 384 tile in 4.1 s cold, of which 0.45 s inverse map + 0.50 s decimated read + 0.84 s
-LUT fetch and parse.
+**On the inverse map vs the read geometry.** The LUT coordinates (TPS) and the DN pixels
+(GDAL's warp, §1.6i) are not computed by the identical transformer, so they can differ by
+tens of metres. This is radiometrically negligible: the calibration LUTs are sampled every
+~1500 pixels in range and vary smoothly, so a few pixels of coordinate error changes `A`
+by far less than 0.01 dB. What that offset _does_ affect is geolocation, and that is a
+property of the read, addressed in §1.6i — not something calibration can or should
+compensate for.
+
+The Phase 0 prototype
+([`scripts/sar_backscatter_prototype.py`](../../scripts/sar_backscatter_prototype.py))
+implements its own read because it is standalone and predates this decision; it remains
+the reference for the _radiometry_, not for the read path.
 
 ### 7.4 Errors
 
@@ -898,6 +986,16 @@ Six of the original seven are now settled. Struck items are kept for the audit t
    their residual border-noise artefacts warrant the Ali et al. algorithm. Ship the
    two-schema parser either way; treat explicit border-noise removal as a follow-up driven
    by a real user need.
+8. **Where the GCP accuracy fix lands, and how far it goes.** §1.6i establishes that the
+   shared read path collapses GCPs to a single affine (~2 km RMS on real S1 GRD) and that
+   this must be fixed in the read path rather than worked around in `sar_backscatter`.
+   Open: (a) whether it ships here as a `Reader`/`SimpleSTACReader` adjustment or as an
+   upstream rio-tiler contribution — upstream is the better home, since nothing about the
+   defect is SAR-specific; (b) whether to stop at GDAL's GCP polynomial (~52 m),
+   add `MAX_GCP_ORDER=3`, or go further. TPS (~0.3 m) is unreachable through GDAL's warp
+   API, so matching the LUT-coordinate accuracy exactly would require warping outside it
+   — which is precisely the duplication this ADR now rejects. **Decide before increment 2
+   restarts**, since it determines whether Phase 1 ships with ~52 m or ~2 km geolocation.
 
 ---
 
