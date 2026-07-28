@@ -238,6 +238,26 @@ to 2015** (sampled 200 items in each of 2015/2017/2019/2021/2023/2025/2026 — e
 carries the `_COG` id suffix). The archive is homogeneous in pixels and heterogeneous in
 annotations.
 
+**(h) End-to-end validated against CDSE, the reference catalogue.** Phase 0 run on
+`S1C_IW_GRDH_1SDV_20260728T150953…_COG` (IW GRDH VV, 25494 × 16639, 210 GCPs, `_COG`
+overviews), authenticating with `AWS_PROFILE=cdse` +
+`AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu` + `AWS_VIRTUAL_HOSTING=FALSE`:
+
+```text
+LUTs      calibration (27, 639)                fetch+parse 1.04 s
+read      window 9477x9342 -> 394x389 (x24)    0.43 s   inverse TPS map 0.22 s
+noise     subtracted; 0.48 % of valid pixels clamped at 0
+sigma0-ellipsoid   p05 -29.96 / median -23.02 / p95 -21.59 dB   (146 738 px)
+incidence 35.39-41.00 deg, LUT identity holds to 0.00008 deg
+total     3.2 s
+```
+
+Median **−23.0 dB** over the Barents Sea is the expected magnitude for open-water VV at
+~38° incidence, and the 0.48 % clamped pixels are exactly where thermal noise dominates —
+so `noise_removal` is doing real work rather than being a no-op. The 384 × 384 tile in
+3.2 s cold meets the §7.8 latency budget with margin. No `proj:*` warning fired, as
+expected for CDSE (§1.7).
+
 ### 1.7 Catalogue dependence
 
 `sar_backscatter` is unusually tightly coupled to the catalogue — the openEO spec says so
@@ -755,10 +775,18 @@ rasterio (GCPs, TPS transformer, reproject) and numpy — both already present. 
 
 ### 7.8 Acceptance criteria
 
-1. `sigma0-ellipsoid` on a fixture tile matches a SNAP-produced reference to
-   **< 0.1 dB** RMS over valid pixels.
+1. **Plausibility, not cross-validation.** External comparison against SNAP is
+   **deferred** — it needs a SNAP install and a documented generation procedure, and it
+   would gate Phase 1 on work outside this repo. Instead assert that
+   `sigma0-ellipsoid` over a known open-water fixture falls in a physically sensible band
+   (VV open water at ~38° incidence sits around −20 to −25 dB; the Phase 0 run against
+   CDSE measured a median of **−23.0 dB**, §1.6h). This catches gross errors — wrong LUT,
+   missing square, K applied twice — without an external toolchain. Promote to a proper
+   SNAP golden test as a follow-up once someone has the reference to hand.
 2. `gamma0-ellipsoid / sigma0-ellipsoid == 1/cos(θ_ell)` to **< 0.01 dB** (self-consistency,
-   §1.6d).
+   §1.6d). With criterion 1 deferred, this and criterion 3 carry most of the radiometric
+   assurance — they are exact identities derived from ESA's own LUT definitions, so they
+   are strong, just not independent of ESA's annotations being correct.
 3. `beta0` is spatially constant × DN² to floating-point precision.
 4. Geolocation: round-tripping the GCPs through the inverse map gives **< 1 m** RMS
    residual (i.e. TPS really is in use). This is the test that would have caught both the
@@ -775,8 +803,10 @@ rasterio (GCPs, TPS transformer, reproject) and numpy — both already present. 
   assembly; incidence-angle identity; coefficient maths; error taxonomy.
 - **Fixture:** commit a small subset (one burst-sized window + trimmed annotation XML) so
   the suite runs offline, consistent with the existing `tests/fixtures/` approach.
-- **Golden:** one reference tile produced by SNAP (or pyroSAR), stored as a compressed
-  array, compared under criterion 1. Document how it was generated.
+- **Golden:** deferred with criterion 1. When it lands, it is one reference tile produced
+  by SNAP (or pyroSAR), stored as a compressed array, with its generation procedure
+  documented. Until then the fixture test asserts a physically sensible dB band, not an
+  external reference.
 - **Regression:** criterion 4, to pin the TPS finding.
 - **Catalogue contract:** a table-driven test over committed item JSON from each
   catalogue, asserting the §1.7 requirements — annotation siblings resolvable, GCPs
@@ -802,19 +832,18 @@ rasterio (GCPs, TPS transformer, reproject) and numpy — both already present. 
 
 Six of the original seven are now settled. Struck items are kept for the audit trail.
 
-1. **Annotation asset fetcher — settled in design, one credential check outstanding.**
-   `obstore` 0.11.0 verified working: a real anonymous S3 `GET` succeeded, and a
-   CDSE-shaped store (`S3Store("eodata", endpoint="https://eodata.dataspace.copernicus.eu",
-   virtual_hosted_style_request=False, …)`) constructs cleanly. Two API details found the
-   hard way: `S3Store` is a Rust extension so its signature is opaque to `inspect`, and it
-   **rejects `endpoint=None`** — the option must be omitted, not passed as `None`.
-   §7.6 now also records the credential-mechanism gap: native auth covers static keys,
-   IRSA, IMDS and ECS but **not `AWS_PROFILE`/SSO**, which needs `Boto3CredentialProvider`
-   and therefore `boto3` as an optional extra. CDSE (static key + custom endpoint) and
-   production Kubernetes (IRSA) are both natively covered; only local profile-based
-   development needs the extra. What remains is simply whether CDSE _authorises_ the
-   request, which needs real credentials. **Not a design risk; a 10-minute check once
-   creds exist.**
+1. ~~**Annotation asset fetcher.**~~ **Settled — verified against CDSE end to end**
+   (§1.6h). `obstore` 0.11.0 + `Boto3CredentialProvider` fetches the annotation XML from
+   `s3://eodata` with `AWS_PROFILE=cdse` and a custom endpoint, alongside GDAL reading the
+   measurement TIFF with the same profile. Three API details found the hard way:
+   `S3Store` is a Rust extension so its signature is opaque to `inspect`; it **rejects
+   `endpoint=None`** (omit the option rather than passing `None`); and
+   `Boto3CredentialProvider` takes a **`session`**, not a `profile_name` — pass
+   `boto3.Session(profile_name=…)`, or rely on boto3's own `AWS_PROFILE` handling.
+   §7.6 records the credential-mechanism gap this exposes: obstore's native auth covers
+   static keys, IRSA, IMDS and ECS but **not `AWS_PROFILE`/SSO**, so `boto3` is a required
+   optional extra for profile-based deployments — including, in practice, CDSE as
+   configured on this machine.
 2. ~~**XML hardening — "cheap insurance".**~~ **Settled, and it is not optional.** Measured
    on this project's Python 3.13.1: a billion-laughs payload through
    `xml.etree.ElementTree` **expands** (30 000 characters from a 4-level bomb). The stdlib

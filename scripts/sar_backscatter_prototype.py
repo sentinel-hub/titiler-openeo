@@ -121,7 +121,20 @@ def fetch_bytes(href: str) -> bytes:
             }
             if endpoint:
                 opts["endpoint"] = endpoint
-            if os.environ.get("AWS_ACCESS_KEY_ID"):
+
+            if os.environ.get("AWS_PROFILE"):
+                # obstore's native auth does NOT read ~/.aws/credentials or
+                # AWS_PROFILE -- support was removed upstream in arrow-rs. The
+                # documented route is the boto3 credential provider, which is why
+                # boto3 is an optional extra. See ADR 7.6 and
+                # https://github.com/developmentseed/obstore/issues/571
+                import boto3
+                from obstore.auth.boto3 import Boto3CredentialProvider
+
+                opts["credential_provider"] = Boto3CredentialProvider(
+                    boto3.Session(profile_name=os.environ["AWS_PROFILE"])
+                )
+            elif os.environ.get("AWS_ACCESS_KEY_ID"):
                 opts["access_key_id"] = os.environ["AWS_ACCESS_KEY_ID"]
                 opts["secret_access_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
             else:
