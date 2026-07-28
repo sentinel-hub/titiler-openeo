@@ -25,7 +25,7 @@ measured expanding a billion-laughs payload on Python 3.13.1 (ADR S9.2).
 """
 
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import Condition
 from typing import Dict, List, Optional
 from xml.etree.ElementTree import Element
 
@@ -271,14 +271,24 @@ def parse_noise(xml: bytes) -> NoiseLUT:
 # raw XML bytes: a parsed set is ~100 KB vs ~1-1.5 MB of XML per polarisation
 # (ADR S7.5), and a href never changes its content once published. RasterStack
 # executes tasks on a thread pool, so these must be safe under concurrent use.
+#
+# cachetools' plain `lock=` only guards the cache dict during lookup/store; it
+# does not stop N concurrent misses from all calling the wrapped function
+# before the first one finishes (`lock=` is released between the miss check
+# and the call -- confirmed against cachetools 7.0.5's own source). `cached`
+# has a `condition=` parameter specifically for this: it tracks in-flight keys
+# and blocks other callers on them until the first caller stores a result, so
+# only one fetch ever happens per href even under concurrent access.
 _calibration_cache: LRUCache = LRUCache(maxsize=_settings.annotation_cache_maxsize)
 _noise_cache: LRUCache = LRUCache(maxsize=_settings.annotation_cache_maxsize)
+_calibration_cache_condition = Condition()
+_noise_cache_condition = Condition()
 
 
 @cached(
     _calibration_cache,
     key=lambda href, fetcher=None: hashkey(href),
-    lock=Lock(),
+    condition=_calibration_cache_condition,
 )
 def get_calibration(
     href: str, fetcher: Optional[AssetFetcher] = None
@@ -291,7 +301,7 @@ def get_calibration(
 @cached(
     _noise_cache,
     key=lambda href, fetcher=None: hashkey(href),
-    lock=Lock(),
+    condition=_noise_cache_condition,
 )
 def get_noise(href: str, fetcher: Optional[AssetFetcher] = None) -> NoiseLUT:
     """Fetch and parse a noise annotation, cached by href."""
