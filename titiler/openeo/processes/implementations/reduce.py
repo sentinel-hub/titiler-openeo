@@ -541,6 +541,14 @@ def _reduce_spectral_dimension_stack(
                 f"Expected array-like data with reduced spectral bands."
             ) from e
 
+    # A reducer that eliminates the spectral dimension returns (time, height, width):
+    # no band axis is left. A 4-D output keeps a (smaller) spectral dimension, i.e. a
+    # partial reduction. The distinction matters for band names: when the dimension is
+    # gone the input labels no longer describe the output, even if the band count
+    # happens to match (single-band cube reduced with array_element). Keeping them
+    # would let merge_cubes see a shared band and raise OverlapResolverMissing.
+    spectral_dimension_eliminated = reduced_data.ndim < 4
+
     # Transform the result back to (time, ...) format for splitting into time slices
     final_data = _reshape_reduced_spectral_data(reduced_data, len(images))
 
@@ -560,7 +568,8 @@ def _reduce_spectral_dimension_stack(
         # If band count changed, clear band_names to avoid mismatches
         output_band_names = []
         if (
-            num_output_bands > 0
+            not spectral_dimension_eliminated
+            and num_output_bands > 0
             and meta["band_descriptions"]
             and len(meta["band_descriptions"]) == num_output_bands
         ):
