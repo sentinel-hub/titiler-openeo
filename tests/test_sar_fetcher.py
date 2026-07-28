@@ -140,15 +140,40 @@ def test_s3_store_options_request_payer(monkeypatch):
 
 
 def test_s3_store_options_profile_uses_boto3_credential_provider(monkeypatch):
-    """AWS_PROFILE selects the boto3 credential provider, even if static keys are also set."""
+    """AWS_PROFILE selects the boto3 credential provider, even if static keys are also set.
+
+    boto3.Session(profile_name=...) validates the profile against
+    ~/.aws/config at construction, and Boto3CredentialProvider eagerly calls
+    session.get_credentials(). Neither can be exercised for real in a unit
+    test without a real AWS profile present (which CI does not have), so
+    both are faked here -- this test verifies our own wiring (the right
+    profile name reaches the right constructor), not boto3/obstore's
+    internals.
+    """
     monkeypatch.setenv("AWS_PROFILE", "cdse")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "should-be-ignored")
 
+    calls = {}
+
+    class FakeSession:
+        def __init__(self, profile_name=None):
+            calls["profile_name"] = profile_name
+
+    class FakeProvider:
+        def __init__(self, session):
+            calls["session"] = session
+
+    import boto3
+    import obstore.auth.boto3 as obstore_boto3
+
+    monkeypatch.setattr(boto3, "Session", FakeSession)
+    monkeypatch.setattr(obstore_boto3, "Boto3CredentialProvider", FakeProvider)
+
     opts = ObstoreFetcher()._s3_store_options()
 
-    from obstore.auth.boto3 import Boto3CredentialProvider
-
-    assert isinstance(opts["credential_provider"], Boto3CredentialProvider)
+    assert calls["profile_name"] == "cdse"
+    assert isinstance(calls["session"], FakeSession)
+    assert isinstance(opts["credential_provider"], FakeProvider)
     assert "access_key_id" not in opts
 
 
