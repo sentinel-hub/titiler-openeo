@@ -37,6 +37,8 @@ dependencies = [
     "pystac-client",
     "pydantic-settings~=2.0",
     "jsonpath-ng~=1.7.0",
+    "obstore>=0.11",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]
@@ -51,6 +53,7 @@ docs = [
     "nbconvert>=7.2.9",
 ]
 dev = [
+    "boto3",
     "brotlipy",
     "cryptography",
     "duckdb",
@@ -77,6 +80,10 @@ server = ["uvicorn[standard]>=0.12.0,<0.19.0"]
 duckdb = ["duckdb"]
 postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary"]
 oidc = ["cryptography", "httpx"]
+# AWS_PROFILE / SSO credentials for the SAR annotation fetcher (titiler.openeo.sar).
+# obstore's native auth covers static keys, custom endpoints, IRSA, IMDS and ECS
+# without this; only profile/SSO-based credentials need it. See docs/adr/0001-sar-backscatter.md S7.6.
+boto3 = ["boto3"]
 
 [project.urls]
 Homepage = "https://sentinel-hub.github.io/titiler-openeo/"

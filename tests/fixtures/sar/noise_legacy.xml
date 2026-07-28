@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<noise>
+  <adsHeader>
+    <missionId>S1A</missionId>
+    <productType>GRD</productType>
+    <polarisation>VH</polarisation>
+    <mode>IW</mode>
+    <swath>IW</swath>
+    <startTime>2016-06-01T23:48:02.311905</startTime>
+    <stopTime>2016-06-01T23:48:27.384122</stopTime>
+    <absoluteOrbitNumber>11524</absoluteOrbitNumber>
+    <missionDataTakeId>72028</missionDataTakeId>
+    <imageNumber>002</imageNumber>
+  </adsHeader>
+  <noiseVectorList count="4">
+    <noiseVector>
+      <azimuthTime>2016-06-01T23:48:02.311905</azimuthTime>
+      <line>0</line>
+      <pixel count="16">0 1560 3120 4680 6240 7800 9312 10872 12432 13992 15552 17112 18600 20160 21720 23280</pixel>
+      <noiseLut count="16">1.606331e+03 1.199401e+03 1.090215e+03 9.991997e+02 9.372876e+02 1.079768e+03 7.799833e+02 5.564640e+02 4.804927e+02 4.709772e+02 5.455712e+02 8.160308e+02 3.515211e+02 2.536281e+02 2.649745e+02 3.914142e+02</noiseLut>
+    </noiseVector>
+    <noiseVector>
+      <azimuthTime>2016-06-01T23:48:09.316259</azimuthTime>
+      <line>4697</line>
+      <pixel count="16">0 1560 3120 4680 6240 7800 9313 10873 12433 13993 15553 17113 18602 20162 21722 23282</pixel>
+      <noiseLut count="16">1.591548e+03 1.187482e+03 1.079212e+03 9.891224e+02 9.276831e+02 1.068078e+03 7.693961e+02 5.497944e+02 4.751322e+02 4.661246e+02 5.406685e+02 8.102180e+02 3.470209e+02 2.508956e+02 2.626098e+02 3.886174e+02</noiseLut>
+    </noiseVector>
+    <noiseVector>
+      <azimuthTime>2016-06-01T23:48:16.320613</azimuthTime>
+      <line>9394</line>
+      <pixel count="16">0 1560 3120 4680 6240 7800 9303 10863 12423 13983 15543 17103 18595 20155 21715 23275</pixel>
+      <noiseLut count="16">1.567513e+03 1.168677e+03 1.061947e+03 9.733227e+02 9.126772e+02 1.049922e+03 7.550677e+02 5.402006e+02 4.671081e+02 4.584987e+02 5.322292e+02 7.983412e+02 3.406912e+02 2.467350e+02 2.586276e+02 3.832255e+02</noiseLut>
+    </noiseVector>
+    <noiseVector>
+      <azimuthTime>2016-06-01T23:48:23.324967</azimuthTime>
+      <line>14091</line>
+      <pixel count="16">0 1560 3120 4680 6240 7800 9305 10865 12425 13985 15545 17105 18598 20158 21718 23278</pixel>
+      <noiseLut count="16">1.551401e+03 1.153583e+03 1.047633e+03 9.603690e+02 8.998598e+02 1.032505e+03 7.409965e+02 5.308236e+02 4.593124e+02 4.511180e+02 5.241589e+02 7.872114e+02 3.345110e+02 2.427266e+02 2.548506e+02 3.782147e+02</noiseLut>
+    </noiseVector>
+    </noiseVectorList>
+</noise>
