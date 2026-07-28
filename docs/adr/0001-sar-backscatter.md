@@ -299,16 +299,42 @@ grid is strongly non-affine (range/azimuth distortion, meridian convergence at h
 latitude). Measured on `S1D_IW_GRDH_1SDV_20260728T173725…` (189 GCPs), residuals at the
 GCPs themselves:
 
-| Georeferencing | Ground error |
-| --- | --- |
-| **rio-tiler `from_gcps` affine (what runs today)** | **RMS 1957 m / max 4948 m** (201 px / 508 px RMS/max at 10 m) |
-| GDAL GCP polynomial | RMS 51.6 m / max 142.7 m |
-| TPS | RMS 0.3 m / max 0.5 m |
+| Georeferencing | Ground error | at 10 m px |
+| --- | --- | --- |
+| **rio-tiler `from_gcps` affine (what runs today)** | **RMS 2008 m / max 5084 m** | 200 px |
+| polynomial order 2 | RMS 51.6 m / max 143 m | 5 px |
+| **polynomial order 3** | **RMS 1.7 m / max 4.8 m** | **0.17 px** |
+| TPS | RMS 0.3 m / max 0.5 m | 0.03 px |
 
-So the current read is ~38× worse than GDAL's own GCP handling and ~6500× worse than TPS.
-`MAX_GCP_ORDER=3` on the `WarpedVRT` measurably changes the warp (VRT envelope
-38700 × 10122 → 38654 × 10106), while `METHOD=GCP_TPS` is ignored — the same as for
-`reproject` (§1.6b). TPS is not reachable through GDAL's warp API at all.
+(Residuals from normalised least-squares fits; an unnormalised order-3 fit is
+ill-conditioned at these pixel magnitudes — `col³ ≈ 1.9 × 10¹³` — and diverges. Image
+correlation is **not** a usable check here: the scene has a real across-swath brightness
+gradient, so even a 200 px offset correlates ≈ 0.9. Only the residual-at-GCPs numbers
+above are definitional.)
+
+Verified against the `WarpedVRT` itself, comparing output transforms deterministically:
+
+| `WarpedVRT` setting | VRT | note |
+| --- | --- | --- |
+| stock rio-tiler (`src_transform=from_gcps`) | 38700 × 10122 | ≈ order 1 |
+| real GCPs, `MAX_GCP_ORDER=2` | 38700 × 10122 | **bit-identical to stock** — GDAL falls back to order 1 |
+| real GCPs, **`MAX_GCP_ORDER=3`** | 38654 × 10106 | the fix |
+| real GCPs, `MAX_GCP_ORDER=4` | — | GDAL raises _"Failed to compute GCP transform: Parameter error"_ |
+
+So **order 3 is both the ceiling and sufficient**: sub-pixel, reachable through the stock
+`WarpedVRT`, no custom sampling. `METHOD=GCP_TPS` is ignored by `WarpedVRT` exactly as by
+`reproject` (§1.6b) — TPS is unreachable through GDAL's warp API, but at 1.7 m vs 0.3 m
+that no longer matters for the read. TPS remains used where it is free and exact: the LUT
+coordinates we compute ourselves (§7.3).
+
+**The fix cannot be passed as a kwarg.** By the time `part()` runs, `Reader.dataset` is
+already a `WarpedVRT` carrying **zero** GCPs — they were consumed at construction.
+Passing `vrt_options={"MAX_GCP_ORDER": "3"}` through `part()` yields bit-identical
+arrays. It has to happen at VRT-construction time, which means overriding
+`__attrs_post_init__`. That is a ~15-line `Reader` subclass, and `SimpleSTACReader`
+already exposes the hook (`reader: Type[BaseReader] = attr.ib(default=Reader)`), so it
+stays local — no upstream rio-tiler dependency, though contributing it upstream later
+remains worthwhile since nothing about the defect is SAR-specific.
 
 **Consequences for the design.** Two things follow, and they pull in different
 directions — both must be respected:
@@ -917,6 +943,75 @@ rasterio (GCPs, TPS transformer, reproject) and numpy — both already present. 
   Search and Planetary Computer is the natural first negative case; Planetary Computer's
   is the cleaner one to assert against, being bbox-derived to the last digit.
 
+### 7.10 Reader capability negotiation (graph-anticipatory reader selection)
+
+`sar_backscatter` needs the read to behave differently from a default optical read, but
+that need is **not inferable from the data alone** — it is a property of what the graph
+intends to do downstream. openEO graphs are fully known before execution, so this is a
+query-planning problem, and the codebase already has a precedent for it:
+[`results_cache.py`](../../titiler/openeo/results_cache.py) walks the parsed DAG, detects
+a set of process names (`_RECOMPUTE_PROCESSES`), and changes execution behaviour via
+`to_callable(results_cache=…)`. Same shape, same wiring points.
+
+**Decision: hybrid (data-driven baseline + graph-driven intent).** The two are not
+alternatives — one is a bug fix, the other a feature.
+
+**(a) Data-driven, unconditional — the GCP fix.** Any GCP-referenced dataset is warped
+from its real GCPs with `MAX_GCP_ORDER=3` rather than a collapsed affine (§1.6i). This is
+a correctness fix worth ~2008 m → 1.7 m, it applies to every GCP dataset rather than just
+SAR, it needs no graph knowledge, and it preserves rio-tiler's pluggable-reader
+architecture: a `Reader` subclass overriding only VRT construction, injected through
+`SimpleSTACReader`'s existing `reader=` hook. COG/Zarr/xarray readers are untouched.
+
+**(b) Graph-driven — reader requirements.** For intent that no amount of inspecting the
+file can reveal. The motivating case is **raw DN**: `_reader` applies `raster:scale/offset`
+when `ProcessingSettings.apply_scale_offset` is on, and calibration must run on unscaled
+DN. Nothing in the asset says so; only the presence of `sar_backscatter` downstream does.
+
+Mechanism:
+
+1. Processes declare a `ReaderRequirement` (e.g. `sar_backscatter` →
+   `raw_values=True`, `geocoding="exact"`), in a registry keyed by process name — mirroring
+   `_RECOMPUTE_PROCESSES`.
+2. A pre-execution pass walks the parsed DAG. For each `load_collection` node it unions the
+   requirements of every process in that node's downstream cone, so requirements compose
+   and multiple `load_collection`s in one graph are resolved independently.
+3. The resolved requirement is applied by building a **per-request process registry**: a
+   shallow copy with `load_collection` rebound to carry the resolved reader class and
+   options.
+
+**Why the per-request registry, and not the alternatives.** Four channels were considered
+for getting the planner's output to `load_collection`:
+
+| Channel | Verdict |
+| --- | --- |
+| **Per-request process registry** | **Chosen.** Explicit, request-scoped, graph untouched. Mirrors `to_callable(process_registry=…, results_cache=…)`, where planner output already travels _beside_ the graph. Cost: one shallow copy per request, plus confirming the rebinding survives `openeo_pg_parser_networkx`'s `Process` wrapping — worth a spike. |
+| `contextvar` | Implicit, and easy to lose across the `ThreadPoolExecutor` that `RasterStack` uses. |
+| Graph node-arg injection | Rejected: injects non-spec arguments (validation risk, graph no longer round-trips), is user-forgeable unless stripped on ingest, risks mutating stored UDP/service definitions, and churns any graph-hash cache key. It is the only option that alters a user-visible artifact. |
+| Backend instance state | Backend is shared; needs concurrency care for no gain over the registry. |
+
+Node-arg injection's one genuine merit — the executed graph _showing_ what the planner
+decided — is recovered by **logging the resolved requirements per `load_collection`
+node**, which gives the same observability with none of the drawbacks.
+
+**Extensibility.** This is deliberately general. A future process needing unresampled
+data, a particular chunking, per-pixel viewing angles, or a specific dtype declares a
+requirement and the planner handles it; nothing about the mechanism is SAR-specific. The
+requirement type should therefore stay a small, composable value object rather than a
+SAR-shaped one.
+
+**Sequencing.** (a) and (b) are independent and can ship separately. (a) is a standalone
+correctness fix with no SAR dependency and should land first, on its own issue. Increment 2
+of #340 then reduces to what it should always have been: `calibration.py` plus a
+`geocode.py` that only builds the TPS inverse map for LUT coordinates.
+
+**Caveat to confirm.** (b)'s first client is motivated by `raster:scale/offset` being
+present on Sentinel-1 GRD assets. That has **not** been verified — if those fields are
+absent, `raw_values` is moot for SAR and (b) may have no first client yet, in which case
+it should be deferred rather than built speculatively.
+
+---
+
 ---
 
 ## 8. Documentation deliverables
@@ -986,16 +1081,10 @@ Six of the original seven are now settled. Struck items are kept for the audit t
    their residual border-noise artefacts warrant the Ali et al. algorithm. Ship the
    two-schema parser either way; treat explicit border-noise removal as a follow-up driven
    by a real user need.
-8. **Where the GCP accuracy fix lands, and how far it goes.** §1.6i establishes that the
-   shared read path collapses GCPs to a single affine (~2 km RMS on real S1 GRD) and that
-   this must be fixed in the read path rather than worked around in `sar_backscatter`.
-   Open: (a) whether it ships here as a `Reader`/`SimpleSTACReader` adjustment or as an
-   upstream rio-tiler contribution — upstream is the better home, since nothing about the
-   defect is SAR-specific; (b) whether to stop at GDAL's GCP polynomial (~52 m),
-   add `MAX_GCP_ORDER=3`, or go further. TPS (~0.3 m) is unreachable through GDAL's warp
-   API, so matching the LUT-coordinate accuracy exactly would require warping outside it
-   — which is precisely the duplication this ADR now rejects. **Decide before increment 2
-   restarts**, since it determines whether Phase 1 ships with ~52 m or ~2 km geolocation.
+8. ~~**Where the GCP accuracy fix lands, and how far it goes.**~~ **Decided** — see
+   §7.10. It lands here as a `Reader` subclass (not upstream, not a kwarg — neither is
+   possible, §1.6i), and it goes to `MAX_GCP_ORDER=3`, which is sub-pixel and is GDAL's
+   ceiling.
 
 ---
 
