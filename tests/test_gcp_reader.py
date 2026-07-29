@@ -1,20 +1,30 @@
 """Tests for GCPReader -- georeferencing datasets from their actual GCPs.
 
-The geometry fixture uses a **real** Sentinel-1 IW GRDH geolocation grid
-(`fixtures/sar/gcps_iw_grdh.json`, 189 GCPs), scaled down to a testable raster
-size. Row/col are divided by a constant; longitude/latitude are untouched, so
-the grid's curvature in normalised coordinates -- the thing that defeats an
-affine fit -- is preserved exactly. An invented curve would only test an
-invented regime.
+rio-tiler's ``Reader`` collapses a dataset's GCP grid to a single affine via
+``transform.from_gcps()``. ``GCPReader`` hands GDAL the real GCPs instead. See
+docs/adr/0001-sar-backscatter.md S1.6i, issue #343, and the upstream discussion
+at cogeotiff/rio-tiler#977.
 
-Position is asserted by decoding it from pixel *values*: the fixture is a ramp
-where every pixel is unique and decodes back to its own (row, col). Two traps
-made image-based checks useless during investigation (ADR 0001 S1.6i):
+**The fixture is deliberately polar.** The affine approximation's error is
+strongly latitude-dependent -- measured on real products, the two warp paths
+diverge by <= 30 m at 69 deg N but by 204-2042 m at 81-86 deg N, because
+meridian convergence makes a single affine a poor model of the grid. A
+mid-latitude fixture therefore *cannot* discriminate the two paths: their
+difference falls below the nearest-resampling quantisation floor. Anyone
+retargeting these tests at a temperate scene will find them silently
+non-discriminating.
 
-* Correlation cannot validate this. A real scene has an across-swath brightness
-  gradient, so even a 200 px misalignment still correlates ~0.9.
-* An unnormalised order-3 polynomial fit is ill-conditioned at realistic pixel
-  magnitudes and diverges.
+Position is asserted by decoding it from pixel *values*: the raster is a ramp
+where every pixel is unique and decodes back to its own (row, col). Three
+measurement traps are worth knowing (all cost real time, all are recorded in
+the ADR):
+
+* Image correlation cannot validate this geometry -- a real scene's
+  across-swath brightness gradient makes even a 200 px offset correlate ~0.9.
+* Unnormalised order-3 polynomial fits are ill-conditioned at realistic pixel
+  magnitudes and diverge.
+* Converting a *rotated* affine's pixel error to metres via |a|/|e| ignores
+  rotation; apply the transform forward and compare in ground units instead.
 """
 
 import json
@@ -31,19 +41,20 @@ from rasterio.vrt import WarpedVRT
 
 from titiler.openeo.reader import GCPReader
 
-FIXTURE = Path(__file__).parent / "fixtures" / "sar" / "gcps_iw_grdh.json"
+FIXTURE = Path(__file__).parent / "fixtures" / "sar" / "gcps_ew_grdm_polar.json"
 
-# The real product is 26545 x 15940; scale it to something a test can hold while
-# keeping the grid's shape. 16 -> 1659 x 996. Do not scale much harder: longitude
-# and latitude are untouched, so shrinking row/col also shrinks the *pixel* error
-# proportionally, and past ~SCALE 40 the affine's error drops into the
-# nearest-resampling quantisation floor and the comparison stops discriminating.
-SCALE = 16
+# The real product is 10725 x 10777. Scale it to something a test can hold while
+# keeping the grid's shape: lon/lat are untouched, so only row/col shrink.
+# Do not scale much harder -- shrinking row/col shrinks the *pixel* error
+# proportionally, and the affine-vs-order-3 separation collapses into the
+# resampling quantisation floor (measured: 5.9x separation at 4, 2.7x at 8,
+# 1.9x at 16).
+SCALE = 4
 
 
 @pytest.fixture(scope="module")
-def real_gcps():
-    """The real S1 IW GRDH geolocation grid, scaled to a testable raster."""
+def polar_gcps():
+    """The real 81-86 deg N geolocation grid, scaled to a testable raster."""
     raw = json.loads(FIXTURE.read_text())
     height, width = (d // SCALE for d in raw["source_shape"])
     gcps = [
@@ -52,18 +63,16 @@ def real_gcps():
         )
         for g in raw["gcps"]
     ]
-    # keep only GCPs that land inside the scaled raster
     gcps = [g for g in gcps if 0 <= g.row < height and 0 <= g.col < width]
     return gcps, CRS.from_string(raw["gcp_crs"]), width, height
 
 
-@pytest.fixture
-def gcp_dataset(real_gcps):
+@pytest.fixture(scope="module")
+def gcp_dataset(polar_gcps):
     """A GCP-referenced raster whose pixel values encode their own (row, col)."""
-    gcps, crs, width, height = real_gcps
+    gcps, crs, width, height = polar_gcps
     rows, cols = np.mgrid[0:height, 0:width]
-    # unique per pixel and non-zero, so 0 can mean nodata
-    data = (rows * width + cols + 1).astype("uint32")
+    data = (rows * width + cols + 1).astype("uint32")  # unique, non-zero
 
     with MemoryFile() as memfile:
         with memfile.open(
@@ -79,10 +88,12 @@ def _position_error_px(dataset, gcps, width) -> np.ndarray:
     """Per-GCP position error in source pixels, decoded from pixel values."""
     errors = []
     for g in gcps:
-        r, c = dataset.index(g.x, g.y)
-        if not (0 <= r < dataset.height and 0 <= c < dataset.width):
+        row, col = dataset.index(g.x, g.y)
+        if not (0 <= row < dataset.height and 0 <= col < dataset.width):
             continue
-        value = int(dataset.read(1, window=rasterio.windows.Window(c, r, 1, 1))[0, 0])
+        value = int(
+            dataset.read(1, window=rasterio.windows.Window(col, row, 1, 1))[0, 0]
+        )
         if value == 0:
             continue  # nodata / outside the warped footprint
         got_row, got_col = divmod(value - 1, width)
@@ -90,27 +101,15 @@ def _position_error_px(dataset, gcps, width) -> np.ndarray:
     return np.array(errors)
 
 
-def test_gcp_reader_is_accurate_on_a_real_grid(gcp_dataset, real_gcps):
-    """GCPReader reproduces a real SAR geolocation grid to ~a pixel."""
-    gcps, _, width, _ = real_gcps
-    with GCPReader(None, dataset=gcp_dataset) as reader:
-        err = _position_error_px(reader.dataset, gcps, width)
-
-    assert len(err) > 50, "expected most GCPs to be probed"
-    assert err.max() <= 2.0, f"max position error {err.max():.2f} px"
-    assert np.sqrt((err**2).mean()) <= 1.0, f"RMS {np.sqrt((err**2).mean()):.2f} px"
-
-
-def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, real_gcps):
+def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, polar_gcps):
     """The real-GCP warp is materially better than rio-tiler's from_gcps affine.
 
-    Regression guard for the defect itself: rio-tiler passes
-    ``src_transform=from_gcps(...)``, collapsing the grid to one affine. This
-    asserts the *improvement*, not that a particular option was passed, so it
-    still holds if the mechanism changes -- e.g. once the upstream fix in
-    cogeotiff/rio-tiler#977 lands and this subclass is dropped.
+    This is the regression guard for the defect itself. It asserts the
+    *improvement* rather than that a particular option was passed, so it keeps
+    working if the mechanism changes -- notably once the upstream fix in
+    cogeotiff/rio-tiler#977 lands and this subclass can be dropped.
     """
-    gcps, _, width, _ = real_gcps
+    gcps, _, width, _ = polar_gcps
 
     with GCPReader(None, dataset=gcp_dataset) as reader:
         fixed = _position_error_px(reader.dataset, gcps, width)
@@ -122,10 +121,31 @@ def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, real_gcps):
     ) as vrt:
         collapsed = _position_error_px(vrt, gcps, width)
 
-    assert collapsed.max() > 5 * fixed.max(), (
-        f"expected the collapsed affine to be much worse; "
-        f"affine max={collapsed.max():.2f} px, gcp max={fixed.max():.2f} px"
+    assert len(fixed) > 100, "expected most GCPs to be probed"
+    # Measured ~5.9x on max and ~3.2x on RMS; assert well inside that so the
+    # test is not brittle to GDAL version differences in transformer selection.
+    assert (
+        collapsed.max() > 2.0 * fixed.max()
+    ), f"affine max={collapsed.max():.2f} px vs gcp max={fixed.max():.2f} px"
+    assert np.sqrt((collapsed**2).mean()) > 2.0 * np.sqrt((fixed**2).mean()), (
+        f"affine rms={np.sqrt((collapsed**2).mean()):.2f} px vs "
+        f"gcp rms={np.sqrt((fixed**2).mean()):.2f} px"
     )
+
+
+def test_gcp_reader_accuracy_on_a_real_polar_grid(gcp_dataset, polar_gcps):
+    """GCPReader keeps position error small on a genuinely hard grid.
+
+    Not sub-pixel: at 81-86 deg N even an order-3 fit leaves a few pixels of
+    residual, and the value-decode probe carries its own resampling
+    quantisation. The bound below is a regression guard, not a precision claim.
+    """
+    gcps, _, width, _ = polar_gcps
+    with GCPReader(None, dataset=gcp_dataset) as reader:
+        err = _position_error_px(reader.dataset, gcps, width)
+
+    assert np.sqrt((err**2).mean()) < 4.0, f"RMS {np.sqrt((err**2).mean()):.2f} px"
+    assert err.max() < 10.0, f"max {err.max():.2f} px"
 
 
 def test_gcp_reader_georeferences_from_gcps(gcp_dataset):
