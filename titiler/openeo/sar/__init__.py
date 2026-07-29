@@ -11,7 +11,9 @@ from .annotation import (  # noqa
     parse_calibration,
     parse_noise,
 )
+from .calibration import CalibrationResult, calibrate  # noqa
 from .fetcher import AssetFetcher, ObstoreFetcher, get_default_fetcher  # noqa
+from .geocode import InverseMap, build_inverse_map  # noqa
 
 __all__ = [
     "AssetFetcher",
@@ -23,4 +25,8 @@ __all__ = [
     "parse_noise",
     "get_calibration",
     "get_noise",
+    "InverseMap",
+    "build_inverse_map",
+    "CalibrationResult",
+    "calibrate",
 ]
