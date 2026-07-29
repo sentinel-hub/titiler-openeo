@@ -1056,10 +1056,14 @@ correctness fix with no SAR dependency and should land first, on its own issue. 
 of #340 then reduces to what it should always have been: `calibration.py` plus a
 `geocode.py` that only builds the TPS inverse map for LUT coordinates.
 
-**Caveat to confirm.** (b)'s first client is motivated by `raster:scale/offset` being
-present on Sentinel-1 GRD assets. That has **not** been verified — if those fields are
-absent, `raw_values` is moot for SAR and (b) may have no first client yet, in which case
-it should be deferred rather than built speculatively.
+**Caveat, confirmed (2026-07-29).** (b)'s first client was motivated by `raster:scale`/
+`raster:offset` being present on Sentinel-1 GRD assets. Checked live against all three
+target catalogues' current GRD items (CDSE STAC, Earth Search, Planetary Computer): none
+declare `raster:scale`/`raster:offset` on the measurement assets, at the asset level or
+per-band. So `raw_values` is moot for SAR today, (b) has no first client, and it is
+deferred rather than built speculatively. Increment 2 proceeds unchanged: `calibration.py`
+plus a `geocode.py` that only builds the TPS inverse map for LUT coordinates, with no
+reader-requirement plumbing.
 
 ---
 
