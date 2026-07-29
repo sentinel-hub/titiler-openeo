@@ -35,6 +35,7 @@ import pytest
 import rasterio
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
+from rasterio.enums import ColorInterp
 from rasterio.io import MemoryFile
 from rasterio.transform import from_gcps
 from rasterio.vrt import WarpedVRT
@@ -188,3 +189,60 @@ def test_simplestacreader_uses_gcp_reader_by_default():
         f.default for f in attr.fields(SimpleSTACReader) if f.name == "reader"
     )
     assert default is GCPReader
+
+
+def _write_gcp_tif(path, polar_gcps, *, nodata=None, alpha=False):
+    """Write a small GCP-referenced GeoTIFF to disk."""
+    gcps, crs, width, height = polar_gcps
+    width, height = min(width, 64), min(height, 64)
+    scaled = [
+        GroundControlPoint(
+            row=g.row * height / 673, col=g.col * width / 670, x=g.x, y=g.y, z=0
+        )
+        for g in gcps
+    ]
+    count = 2 if alpha else 1
+    profile = {
+        "driver": "GTiff",
+        "width": width,
+        "height": height,
+        "count": count,
+        "dtype": "uint8",
+    }
+    if nodata is not None:
+        profile["nodata"] = nodata
+    with rasterio.open(path, "w", **profile) as dst:
+        dst.write(np.full((height, width), 7, "uint8"), 1)
+        if alpha:
+            dst.write(np.full((height, width), 255, "uint8"), 2)
+            dst.colorinterp = [ColorInterp.gray, ColorInterp.alpha]
+        dst.gcps = (scaled, crs)
+    return path
+
+
+def test_gcp_reader_opens_from_a_path(tmp_path, polar_gcps):
+    """The input-path branch works, not just a pre-opened dataset."""
+    path = _write_gcp_tif(tmp_path / "gcp.tif", polar_gcps)
+    with GCPReader(str(path)) as reader:
+        assert reader.crs == CRS.from_epsg(4326)
+        assert reader.dataset.gcps[0] == []  # warped, GCPs consumed
+
+
+def test_gcp_reader_preserves_nodata_instead_of_adding_alpha(tmp_path, polar_gcps):
+    """A source nodata value is carried into the VRT rather than an alpha band.
+
+    Real Sentinel-1 GRD assets declare nodata=0, so this is the branch they
+    actually take -- worth covering explicitly rather than only exercising
+    fixtures that happen to have no nodata.
+    """
+    path = _write_gcp_tif(tmp_path / "nodata.tif", polar_gcps, nodata=0)
+    with GCPReader(str(path)) as reader:
+        assert reader.dataset.nodata == 0
+        assert reader.dataset.count == 1  # no alpha band added
+
+
+def test_gcp_reader_does_not_double_up_an_existing_alpha_band(tmp_path, polar_gcps):
+    """A source that already has an alpha band does not get a second one."""
+    path = _write_gcp_tif(tmp_path / "alpha.tif", polar_gcps, alpha=True)
+    with GCPReader(str(path)) as reader:
+        assert reader.dataset.count == 2  # unchanged, not 3
