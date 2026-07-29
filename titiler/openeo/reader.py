@@ -47,43 +47,47 @@ class Dims(TypedDict):
 
 
 @attr.s
-class GCPReader(Reader):
-    """Reader that georeferences GCP datasets from their actual GCPs.
+class OpenEOReader(Reader):
+    """titiler-openeo's asset reader: rio-tiler's ``Reader`` plus our own fixes.
 
-    rio-tiler's ``Reader`` detects GCPs but collapses them to a single affine
-    via ``transform.from_gcps()`` and passes it as ``src_transform``. Because a
-    ``src_transform`` is supplied, GDAL never sees the GCPs and cannot do its
-    own higher-order fit. For grids that are not well approximated by an affine
-    -- Sentinel-1 GRD, where slant-to-ground range distortion and meridian
-    convergence make the grid strongly non-affine -- that is a large error.
+    This is the single customisation point for how titiler-openeo reads a
+    raster asset. It inherits everything from ``rio_tiler.io.Reader`` -- driver
+    and format support (COG, Zarr, xarray, ...), overviews, decimation, CRS
+    handling, resampling, masks, output-size limits -- and overrides only the
+    specific behaviours we need to change. New per-asset read behaviour belongs
+    here rather than in a parallel reader; see
+    docs/adr/0001-sar-backscatter.md S7.10, which anticipates this class
+    growing to carry reader requirements resolved from the process graph.
 
-    Measured on a Sentinel-1 IW GRDH product (189 GCPs, 10 m pixels), residuals
-    at the GCPs themselves:
+    Current overrides:
 
-    ==========================  ===========================  ===========
-    Georeferencing              Ground error                 at 10 m px
-    ==========================  ===========================  ===========
-    ``from_gcps`` affine        RMS 2008 m / max 5084 m      200 px
-    order 2                     RMS 51.6 m / max 143 m       5 px
-    **order 3**                 **RMS 1.7 m / max 4.8 m**    **0.17 px**
-    TPS                         RMS 0.3 m / max 0.5 m        0.03 px
-    ==========================  ===========================  ===========
+    **Georeferencing of GCP datasets.** rio-tiler detects GCPs but collapses
+    them to a single affine via ``transform.from_gcps()`` and passes it as
+    ``src_transform``. Because a ``src_transform`` is supplied, GDAL never sees
+    the GCPs and cannot do its own higher-order fit. For grids that are not
+    well approximated by an affine -- Sentinel-1 GRD, where slant-to-ground
+    range distortion and meridian convergence make the grid strongly
+    non-affine -- that matters, and it matters more the further from the
+    equator you go. Measured divergence between the two warp paths on real
+    products: <= 30 m at 69 deg N, but 204-2042 m at 81-86 deg N.
 
-    Omitting ``src_transform`` and capping at ``MAX_GCP_ORDER=3`` is therefore
-    both sufficient (sub-pixel) and GDAL's ceiling -- order 4 raises
-    ``Failed to compute GCP transform``. Note ``MAX_GCP_ORDER=2`` produces a
-    bit-identical VRT to the affine, since GDAL falls back to order 1.
+    Omitting ``src_transform`` and capping at ``MAX_GCP_ORDER=3`` lets GDAL
+    warp from the real GCPs. Order 3 is both sufficient and GDAL's ceiling:
+    ``MAX_GCP_ORDER=2`` produces a bit-identical VRT to the affine (GDAL falls
+    back to order 1) and ``4`` raises ``Failed to compute GCP transform``.
 
     This cannot be done from the outside: the collapse happens at dataset-open
     time, and by the time ``part()`` runs the dataset is a ``WarpedVRT``
     holding zero GCPs, so ``vrt_options`` arrives too late.
 
-    Datasets without GCPs are untouched and fall through to ``Reader``.
+    Datasets without GCPs are untouched and fall through to ``Reader``
+    unchanged -- the same condition rio-tiler itself gates on, so this adds no
+    cost for non-GCP assets.
 
-    See docs/adr/0001-sar-backscatter.md S1.6i / S7.10(a), issue #343, and the
-    upstream discussion at https://github.com/cogeotiff/rio-tiler/issues/977 --
-    this mirrors the fix proposed there by rio-tiler's maintainer, and should
-    be dropped once it ships upstream.
+    See ADR 0001 S1.6i, issue #343, and the upstream discussion at
+    https://github.com/cogeotiff/rio-tiler/issues/977 -- this mirrors the fix
+    proposed there by rio-tiler's maintainer. When it ships upstream, drop the
+    GCP override and keep the class as the customisation point.
     """
 
     def __attrs_post_init__(self):
@@ -135,7 +139,7 @@ class SimpleSTACReader(MultiBaseReader):
     assets: Sequence[str] = attr.ib(init=False)
     default_assets: Optional[Sequence[AssetType]] = attr.ib(default=None)
 
-    reader: Type[BaseReader] = attr.ib(default=GCPReader)
+    reader: Type[BaseReader] = attr.ib(default=OpenEOReader)
     reader_options: Dict = attr.ib(factory=dict)
 
     ctx: Any = attr.ib(default=rasterio.Env)

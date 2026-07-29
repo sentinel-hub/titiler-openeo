@@ -1,7 +1,10 @@
-"""Tests for GCPReader -- georeferencing datasets from their actual GCPs.
+"""Tests for OpenEOReader, titiler-openeo's asset reader.
+
+Currently it overrides one thing: how GCP-referenced datasets are
+georeferenced. If it grows further overrides, they belong here too.
 
 rio-tiler's ``Reader`` collapses a dataset's GCP grid to a single affine via
-``transform.from_gcps()``. ``GCPReader`` hands GDAL the real GCPs instead. See
+``transform.from_gcps()``. ``OpenEOReader`` hands GDAL the real GCPs instead. See
 docs/adr/0001-sar-backscatter.md S1.6i, issue #343, and the upstream discussion
 at cogeotiff/rio-tiler#977.
 
@@ -40,7 +43,7 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_gcps
 from rasterio.vrt import WarpedVRT
 
-from titiler.openeo.reader import GCPReader
+from titiler.openeo.reader import OpenEOReader
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sar" / "gcps_ew_grdm_polar.json"
 
@@ -102,7 +105,7 @@ def _position_error_px(dataset, gcps, width) -> np.ndarray:
     return np.array(errors)
 
 
-def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, polar_gcps):
+def test_gcp_warp_beats_the_collapsed_affine(gcp_dataset, polar_gcps):
     """The real-GCP warp is materially better than rio-tiler's from_gcps affine.
 
     This is the regression guard for the defect itself. It asserts the
@@ -112,7 +115,7 @@ def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, polar_gcps):
     """
     gcps, _, width, _ = polar_gcps
 
-    with GCPReader(None, dataset=gcp_dataset) as reader:
+    with OpenEOReader(None, dataset=gcp_dataset) as reader:
         fixed = _position_error_px(reader.dataset, gcps, width)
 
     with WarpedVRT(
@@ -134,24 +137,24 @@ def test_gcp_reader_beats_the_collapsed_affine(gcp_dataset, polar_gcps):
     )
 
 
-def test_gcp_reader_accuracy_on_a_real_polar_grid(gcp_dataset, polar_gcps):
-    """GCPReader keeps position error small on a genuinely hard grid.
+def test_gcp_warp_accuracy_on_a_real_polar_grid(gcp_dataset, polar_gcps):
+    """OpenEOReader keeps position error small on a genuinely hard grid.
 
     Not sub-pixel: at 81-86 deg N even an order-3 fit leaves a few pixels of
     residual, and the value-decode probe carries its own resampling
     quantisation. The bound below is a regression guard, not a precision claim.
     """
     gcps, _, width, _ = polar_gcps
-    with GCPReader(None, dataset=gcp_dataset) as reader:
+    with OpenEOReader(None, dataset=gcp_dataset) as reader:
         err = _position_error_px(reader.dataset, gcps, width)
 
     assert np.sqrt((err**2).mean()) < 4.0, f"RMS {np.sqrt((err**2).mean()):.2f} px"
     assert err.max() < 10.0, f"max {err.max():.2f} px"
 
 
-def test_gcp_reader_georeferences_from_gcps(gcp_dataset):
+def test_gcp_dataset_is_georeferenced_from_gcps(gcp_dataset):
     """A GCP dataset comes back georeferenced, with the GCPs consumed."""
-    with GCPReader(None, dataset=gcp_dataset) as reader:
+    with OpenEOReader(None, dataset=gcp_dataset) as reader:
         assert reader.crs == CRS.from_epsg(4326)
         assert reader.dataset.gcps[0] == []  # consumed by the warp
         left, bottom, right, top = reader.bounds
@@ -173,14 +176,14 @@ def test_non_gcp_dataset_is_untouched():
         ) as dst:
             dst.write(np.arange(64, dtype="uint8").reshape(8, 8), 1)
         with memfile.open() as src:
-            with GCPReader(None, dataset=src) as reader:
+            with OpenEOReader(None, dataset=src) as reader:
                 assert reader.dataset is src  # not wrapped
                 assert reader.crs == CRS.from_epsg(4326)
                 assert reader.bounds == (0.0, 0.0, 10.0, 10.0)
 
 
-def test_simplestacreader_uses_gcp_reader_by_default():
-    """SimpleSTACReader routes assets through GCPReader."""
+def test_simplestacreader_uses_openeo_reader_by_default():
+    """SimpleSTACReader routes assets through OpenEOReader."""
     import attr
 
     from titiler.openeo.reader import SimpleSTACReader
@@ -188,7 +191,7 @@ def test_simplestacreader_uses_gcp_reader_by_default():
     default = next(
         f.default for f in attr.fields(SimpleSTACReader) if f.name == "reader"
     )
-    assert default is GCPReader
+    assert default is OpenEOReader
 
 
 def _write_gcp_tif(path, polar_gcps, *, nodata=None, alpha=False):
@@ -220,15 +223,15 @@ def _write_gcp_tif(path, polar_gcps, *, nodata=None, alpha=False):
     return path
 
 
-def test_gcp_reader_opens_from_a_path(tmp_path, polar_gcps):
+def test_opens_from_an_input_path(tmp_path, polar_gcps):
     """The input-path branch works, not just a pre-opened dataset."""
     path = _write_gcp_tif(tmp_path / "gcp.tif", polar_gcps)
-    with GCPReader(str(path)) as reader:
+    with OpenEOReader(str(path)) as reader:
         assert reader.crs == CRS.from_epsg(4326)
         assert reader.dataset.gcps[0] == []  # warped, GCPs consumed
 
 
-def test_gcp_reader_preserves_nodata_instead_of_adding_alpha(tmp_path, polar_gcps):
+def test_preserves_nodata_instead_of_adding_alpha(tmp_path, polar_gcps):
     """A source nodata value is carried into the VRT rather than an alpha band.
 
     Real Sentinel-1 GRD assets declare nodata=0, so this is the branch they
@@ -236,13 +239,13 @@ def test_gcp_reader_preserves_nodata_instead_of_adding_alpha(tmp_path, polar_gcp
     fixtures that happen to have no nodata.
     """
     path = _write_gcp_tif(tmp_path / "nodata.tif", polar_gcps, nodata=0)
-    with GCPReader(str(path)) as reader:
+    with OpenEOReader(str(path)) as reader:
         assert reader.dataset.nodata == 0
         assert reader.dataset.count == 1  # no alpha band added
 
 
-def test_gcp_reader_does_not_double_up_an_existing_alpha_band(tmp_path, polar_gcps):
+def test_does_not_double_up_an_existing_alpha_band(tmp_path, polar_gcps):
     """A source that already has an alpha band does not get a second one."""
     path = _write_gcp_tif(tmp_path / "alpha.tif", polar_gcps, alpha=True)
-    with GCPReader(str(path)) as reader:
+    with OpenEOReader(str(path)) as reader:
         assert reader.dataset.count == 2  # unchanged, not 3

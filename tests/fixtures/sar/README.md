@@ -19,7 +19,7 @@ product before March 2018.
 `gcps_ew_grdm_polar.json` — the 483-point geolocation grid from
 `S1C_EW_GRDM_1SDH_20260728T084043_20260728T084148_008741_01152A`
 (EW GRDM, HH, 10725 × 10777, **81.1–86.6° N**), used by
-`tests/test_gcp_reader.py`.
+`tests/test_openeo_reader.py`.
 
 **Polar on purpose.** rio-tiler collapses a GCP grid to one affine, and that
 approximation's error is strongly latitude-dependent — measured on real
