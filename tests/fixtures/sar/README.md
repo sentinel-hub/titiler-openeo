@@ -13,3 +13,18 @@ than synthetic data, while keeping the files small enough to commit.
 See `docs/adr/0001-sar-backscatter.md` S1.6g for why both schemas must be
 covered: a parser written against only the modern layout fails on every CDSE
 product before March 2018.
+
+## GCP geolocation grid
+
+`gcps_ew_grdm_polar.json` — the 483-point geolocation grid from
+`S1C_EW_GRDM_1SDH_20260728T084043_20260728T084148_008741_01152A`
+(EW GRDM, HH, 10725 × 10777, **81.1–86.6° N**), used by
+`tests/test_openeo_reader.py`.
+
+**Polar on purpose.** rio-tiler collapses a GCP grid to one affine, and that
+approximation's error is strongly latitude-dependent — measured on real
+products, the affine and `MAX_GCP_ORDER=3` warp paths diverge by ≤ 30 m at
+69° N but 204–2042 m at 81–86° N, because meridian convergence makes a single
+affine a poor model of the grid. A mid-latitude grid cannot discriminate the
+two paths at all: the difference falls below the resampling quantisation
+floor. See `docs/adr/0001-sar-backscatter.md` §1.6i and issue #343.

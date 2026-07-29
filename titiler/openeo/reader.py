@@ -15,6 +15,7 @@ from pystac.extensions.projection import ProjectionExtension
 from rasterio.errors import RasterioIOError
 from rasterio.features import bounds as featureBounds
 from rasterio.features import rasterize
+from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds, transform_geom
 from rio_tiler.constants import WEB_MERCATOR_TMS, WGS84_CRS
 from rio_tiler.errors import AssetAsBandError, InvalidAssetName, MissingAssets
@@ -24,7 +25,7 @@ from rio_tiler.io.stac import STAC_ALTERNATE_KEY, _extract_proj_info
 from rio_tiler.models import ImageData
 from rio_tiler.tasks import multi_arrays
 from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
-from rio_tiler.utils import cast_to_sequence, inherit_rasterio_env
+from rio_tiler.utils import cast_to_sequence, has_alpha_band, inherit_rasterio_env
 from typing_extensions import TypedDict
 
 from .errors import OutputLimitExceeded
@@ -46,6 +47,86 @@ class Dims(TypedDict):
 
 
 @attr.s
+class OpenEOReader(Reader):
+    """titiler-openeo's asset reader: rio-tiler's ``Reader`` plus our own fixes.
+
+    This is the single customisation point for how titiler-openeo reads a
+    raster asset. It inherits everything from ``rio_tiler.io.Reader`` -- driver
+    and format support (COG, Zarr, xarray, ...), overviews, decimation, CRS
+    handling, resampling, masks, output-size limits -- and overrides only the
+    specific behaviours we need to change. New per-asset read behaviour belongs
+    here rather than in a parallel reader; see
+    docs/adr/0001-sar-backscatter.md S7.10, which anticipates this class
+    growing to carry reader requirements resolved from the process graph.
+
+    Current overrides:
+
+    **Georeferencing of GCP datasets.** rio-tiler detects GCPs but collapses
+    them to a single affine via ``transform.from_gcps()`` and passes it as
+    ``src_transform``. Because a ``src_transform`` is supplied, GDAL never sees
+    the GCPs and cannot do its own higher-order fit. For grids that are not
+    well approximated by an affine -- Sentinel-1 GRD, where slant-to-ground
+    range distortion and meridian convergence make the grid strongly
+    non-affine -- that matters, and it matters more the further from the
+    equator you go. Measured divergence between the two warp paths on real
+    products: <= 30 m at 69 deg N, but 204-2042 m at 81-86 deg N.
+
+    Omitting ``src_transform`` and capping at ``MAX_GCP_ORDER=3`` lets GDAL
+    warp from the real GCPs. Order 3 is both sufficient and GDAL's ceiling:
+    ``MAX_GCP_ORDER=2`` produces a bit-identical VRT to the affine (GDAL falls
+    back to order 1) and ``4`` raises ``Failed to compute GCP transform``.
+
+    This cannot be done from the outside: the collapse happens at dataset-open
+    time, and by the time ``part()`` runs the dataset is a ``WarpedVRT``
+    holding zero GCPs, so ``vrt_options`` arrives too late.
+
+    Datasets without GCPs are untouched and fall through to ``Reader``
+    unchanged -- the same condition rio-tiler itself gates on, so this adds no
+    cost for non-GCP assets.
+
+    See ADR 0001 S1.6i, issue #343, and the upstream discussion at
+    https://github.com/cogeotiff/rio-tiler/issues/977 -- this mirrors the fix
+    proposed there by rio-tiler's maintainer. When it ships upstream, drop the
+    GCP override and keep the class as the customisation point.
+    """
+
+    def __attrs_post_init__(self):
+        """Open the dataset, warping from real GCPs when the dataset has them."""
+        if not self.dataset:
+            self.dataset = self._ctx_stack.enter_context(rasterio.open(self.input))
+
+        if self.dataset.gcps[0]:
+            vrt_options: Dict[str, Any] = {
+                "src_crs": self.dataset.gcps[1],
+                "MAX_GCP_ORDER": 3,
+                "add_alpha": True,
+            }
+
+            if self.dataset.nodata is not None:
+                vrt_options.update(
+                    {
+                        "nodata": self.dataset.nodata,
+                        "add_alpha": False,
+                        "src_nodata": self.dataset.nodata,
+                    }
+                )
+
+            if has_alpha_band(self.dataset):
+                vrt_options.update({"add_alpha": False})
+
+            self.dataset = self._ctx_stack.enter_context(
+                WarpedVRT(self.dataset, **vrt_options)
+            )
+
+        # Delegate the remaining setup (bounds, crs, dtype, colormap, zooms) to
+        # rio-tiler. Our VRT has already consumed the GCPs, so the parent's own
+        # GCP branch is a no-op -- which keeps this override tied to the one
+        # thing it changes, rather than duplicating a tail that varies by
+        # rio-tiler version.
+        super().__attrs_post_init__()
+
+
+@attr.s
 class SimpleSTACReader(MultiBaseReader):
     """Simplified STAC Reader."""
 
@@ -58,7 +139,7 @@ class SimpleSTACReader(MultiBaseReader):
     assets: Sequence[str] = attr.ib(init=False)
     default_assets: Optional[Sequence[AssetType]] = attr.ib(default=None)
 
-    reader: Type[BaseReader] = attr.ib(default=Reader)
+    reader: Type[BaseReader] = attr.ib(default=OpenEOReader)
     reader_options: Dict = attr.ib(factory=dict)
 
     ctx: Any = attr.ib(default=rasterio.Env)
