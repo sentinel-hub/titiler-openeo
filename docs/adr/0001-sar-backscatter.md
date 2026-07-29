@@ -116,7 +116,7 @@ Measured against live Planetary Computer data (`S1C_EW_GRDM_1SSH_20260728T111431
 
 **(a) Measurement TIFFs are GCP-referenced COGs.**
 `uint16` DN, `crs=None`, identity transform, **462 GCPs** (22 × 21 grid) for EW GRDM /
-**147 GCPs** (7 × 21) for IW GRDH, `gcp_crs=EPSG:4326`, GCP _z_ ≈ 0 (ellipsoid heights).
+**147 GCPs** (7 × 21) for IW GRDH, `gcp_crs=EPSG:4326`. **GCP _z_ is terrain height, not zero** — see the correction below, which supersedes an earlier claim here that it was ≈ 0.
 Internally tiled 1024 × 1024 with overviews `[2, 4, 8, 16, 32, 64]`. A
 `WarpedVRT(src, src_crs=gcp_crs, crs="EPSG:4326")` opens and reads correctly
 (256 × 256 whole-scene read in **0.5 s**).
@@ -670,16 +670,38 @@ slightly reduces — but does not remove — the terrain error below. The openEO
 name `sigma0-ellipsoid` is still the correct label; the docs should just not overstate it
 as "sea-level referenced".
 
-**Geometric accuracy — terrain-dependent, and this is the real limitation.** The
-geolocation grid is referenced to the WGS84 ellipsoid (GCP _z_ ≈ 0, §1.6a). Planimetric
-error is:
+**Geometric accuracy — terrain-dependent, but less so than first stated.**
+
+> **Correction.** An earlier revision asserted the geolocation grid is ellipsoid-referenced
+> with GCP _z_ ≈ 0, and derived the error below from that. That was generalised from a
+> single polar scene. Sampling 10 CDSE products across 2015–2026 shows **_z_ carries
+> terrain height**: 0 m over ocean and sea ice (EW 83–87°N, IW 19–21°N), but 196–253 m and
+> 251–351 m over European land at 52–56°N, and 0–835 m over the tropics at 4–7°N.
+>
+> ESA computes the geolocation grid against a terrain model, so each grid point's
+> latitude/longitude corresponds to its stated height. Geocoding through these GCPs
+> therefore already accounts for terrain **at grid resolution** — a coarse ~10–25 km
+> sampling. What remains uncorrected is local relief _relative to the smoothly interpolated
+> grid_, not the full terrain height. The figures below are consequently an **upper bound**,
+> and are pessimistic for large-scale topography while remaining valid for local relief.
+>
+> This does not change the radiometry: `sigma0-ellipsoid`/`gamma0-ellipsoid` use the
+> ellipsoid incidence angle from the calibration LUTs (§1.6d) regardless of what the
+> geolocation grid does. The geometric and radiometric senses of "ellipsoid" are
+> independent, and conflating them is what produced the original error.
+>
+> Quantifying the residual — and how it varies by mission, mode and IPF — is tracked for
+> Phase 2, where geometric terrain correction depends on knowing the starting point.
+
+Planimetric error, as an upper bound:
 
 ```
 Δx  =  Δh / tan(θ)
 ```
 
-For IW (θ ≈ 29°–46°) that is **1.0 × to 1.8 × the terrain height above the ellipsoid
-reference**. Concretely: 100 m of relief → 100–180 m of horizontal displacement; 500 m →
+For IW (θ ≈ 29°–46°) that is **1.0 × to 1.8 × the height above the grid's own
+reference** — which, per the correction above, is the terrain-sampled grid rather than the
+bare ellipsoid. Concretely: 100 m of relief → 100–180 m of horizontal displacement; 500 m →
 0.5–0.9 km. Over flat coastal or agricultural terrain the error is metres. Over mountains
 it is catastrophic for any per-pixel analysis.
 
