@@ -336,6 +336,35 @@ already exposes the hook (`reader: Type[BaseReader] = attr.ib(default=Reader)`),
 stays local — no upstream rio-tiler dependency, though contributing it upstream later
 remains worthwhile since nothing about the defect is SAR-specific.
 
+**Correction (measured later, on a second scene).** The residuals above are an _upper
+bound_, not a measurement of realised error, and the impact is **strongly
+latitude-dependent**. They describe how poorly a single affine represents the GCP grid;
+GDAL does not use that naive fit, so what users actually see is the _divergence_ between
+the two warp paths. Measured by FFT cross-correlation of both warps over the same ground
+window, at several points across each scene:
+
+| Scene | `from_gcps` residual | affine vs `MAX_GCP_ORDER=3` divergence |
+| --- | --- | --- |
+| `S1D_IW_GRDH…` — 69°N | RMS 2008 m / max 5084 m | **≤ 30 m** |
+| `S1C_EW_GRDM…` — 81–86°N, 483 GCPs | RMS 21588 m / max 53269 m | **204 m – 2042 m** |
+
+At mid-latitude the two paths effectively coincide; in the polar regime they do not (the
+warped VRT height alone differs by 5.6 %: 1639 vs 1731 rows). So the fix is real but
+narrower than first stated — negligible for most users, kilometre-scale above ~80°N,
+which is exactly where Sentinel-1 EW sea-ice work lives. **There is no evidence GDAL
+geocodes incorrectly, and no alternative geocoding path is needed.**
+
+A practical consequence for testing: a mid-latitude fixture can never discriminate the
+two paths, because their difference sits below the resampling quantisation floor. Any
+regression test for this must use a polar grid.
+
+Three measurement traps cost real time here and are recorded so they are not repeated:
+image correlation cannot validate this geometry (an across-swath brightness gradient
+makes a 200 px offset still correlate ≈ 0.9); unnormalised order-3 polynomial fits are
+ill-conditioned at realistic pixel magnitudes and diverge; and converting a _rotated_
+affine's pixel error to metres via `|a|`/`|e|` ignores rotation — apply the transform
+forward and compare in ground units instead.
+
 **Consequences for the design.** Two things follow, and they pull in different
 directions — both must be respected:
 
