@@ -8,6 +8,7 @@ docs/adr/0001-sar-backscatter.md S7.1-S7.4.
 """
 
 import re
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -34,13 +35,55 @@ _UNSUPPORTED_COEFFICIENTS = {"sigma0-terrain", "gamma0-terrain"}
 _UNSUPPORTED_PRODUCT_TYPES = {"SLC", "OCN"}
 
 
+def _item_id(item: Any) -> str:
+    """Item id, from a plain STAC dict or a `pystac.Item`."""
+    if isinstance(item, dict):
+        return str(item.get("id", "<unknown>"))
+    return str(getattr(item, "id", "<unknown>"))
+
+
+def _item_properties(item: Any) -> Dict[str, Any]:
+    """Item properties, from a plain STAC dict or a `pystac.Item`."""
+    if isinstance(item, dict):
+        return item.get("properties", {}) or {}
+    return getattr(item, "properties", {}) or {}
+
+
+def _asset_fields(asset: Any) -> Dict[str, Any]:
+    """Flatten one asset to a plain dict of fields, including `href`.
+
+    `load_collection` hands processes `pystac.Item`s, whose assets are
+    `pystac.Asset` objects (href as an attribute, everything else in
+    `extra_fields`); `load_stac` hands through plain STAC dicts. Normalizing
+    once here keeps the resolution logic below written against one shape.
+    """
+    if isinstance(asset, dict):
+        return asset
+    fields = dict(getattr(asset, "extra_fields", {}) or {})
+    href = getattr(asset, "href", None)
+    if href is not None:
+        fields["href"] = href
+    return fields
+
+
+def _item_assets(item: Any) -> Dict[str, Dict[str, Any]]:
+    """All of an item's assets, normalized to `{name: fields_dict}`."""
+    raw = (
+        item.get("assets", {})
+        if isinstance(item, dict)
+        else getattr(item, "assets", {})
+    )
+    return {name: _asset_fields(asset) for name, asset in (raw or {}).items()}
+
+
 def _asset_href(asset: Dict[str, Any]) -> str:
     """Resolve an asset's href, preferring the STAC_ALTERNATE_KEY variant.
 
     Mirrors SimpleSTACReader's alternate-href handling (../../reader.py).
+    Expects an already-normalized asset dict (see `_asset_fields`).
     """
     if STAC_ALTERNATE_KEY:
-        alternate = asset.get("alternate", {}).get(STAC_ALTERNATE_KEY)
+        alternate = (asset.get("alternate") or {}).get(STAC_ALTERNATE_KEY)
         if alternate and alternate.get("href"):
             return alternate["href"]
     return asset["href"]
@@ -82,12 +125,10 @@ def _find_annotation_asset(
     )
 
 
-def _resolve_polarisation_assets(
-    item: Dict[str, Any], polarisation: str
-) -> Tuple[str, str, str]:
+def _resolve_polarisation_assets(item: Any, polarisation: str) -> Tuple[str, str, str]:
     """Resolve (measurement, calibration, noise) hrefs for one polarisation."""
-    item_id = item.get("id", "<unknown>")
-    assets = item.get("assets", {})
+    item_id = _item_id(item)
+    assets = _item_assets(item)
     if polarisation not in assets:
         raise ProcessParameterInvalid(
             f"Item {item_id!r} has no {polarisation!r} measurement asset "
@@ -104,12 +145,12 @@ def _resolve_polarisation_assets(
     return measurement_href, calibration_href, noise_href
 
 
-def _check_product_type(item: Dict[str, Any]) -> None:
+def _check_product_type(item: Any) -> None:
     """Reject items positively known to be unsupported; accept everything else."""
-    sar_type = item.get("properties", {}).get("sar:product_type")
-    if sar_type and sar_type.upper() in _UNSUPPORTED_PRODUCT_TYPES:
+    sar_type = _item_properties(item).get("sar:product_type")
+    if sar_type and str(sar_type).upper() in _UNSUPPORTED_PRODUCT_TYPES:
         raise ProcessParameterInvalid(
-            f"Item {item.get('id', '<unknown>')!r} has sar:product_type "
+            f"Item {_item_id(item)!r} has sar:product_type "
             f"{sar_type!r}; sar_backscatter expects detected GRD amplitude data"
         )
 
@@ -142,27 +183,44 @@ def _validate_parameters(
 
 def _resolve_stack_assets(
     data: RasterStack, polarisations: List[str]
-) -> Dict[str, Dict[str, Tuple[str, str, str]]]:
-    """Resolve every item's per-polarisation asset hrefs, eagerly.
+) -> Dict[datetime, Dict[str, Tuple[str, str, str]]]:
+    """Resolve each slice's per-polarisation asset hrefs, eagerly, keyed by stack key.
 
-    Metadata-only (dict lookups via `get_stac_item`), no pixel I/O -- so a bad
-    graph fails immediately rather than only once some downstream node
+    Metadata-only (`get_source_items` plus dict lookups), no pixel I/O -- so a
+    bad graph fails immediately rather than only once some downstream node
     consumes a slice.
+
+    Each slice must resolve to exactly one source item. `load_collection`
+    mosaics all items sharing an acquisition datetime into a single image, and
+    calibration is inherently per item -- every item carries its own LUTs and
+    its own GCP geometry, so no single item's LUTs can correctly calibrate a
+    blend of several. Rather than silently applying one item's radiometry to
+    another's pixels, that case is rejected. Doing it properly means
+    calibrating per item *before* the mosaic, i.e. in the read path (ADR
+    S7.10(b)), which Phase 1 does not build.
     """
-    resolved: Dict[str, Dict[str, Tuple[str, str, str]]] = {}
+    resolved: Dict[datetime, Dict[str, Tuple[str, str, str]]] = {}
     for key in data.keys():
-        item = data.get_stac_item(key)
-        if not isinstance(item, dict) or "assets" not in item:
+        items = data.get_source_items(key)
+        if not items:
             raise ProcessParameterInvalid(
-                "sar_backscatter requires `data` to be a STAC-item-backed "
-                "load_collection stack (no asset metadata found for one of "
-                "its timestamps)"
+                "sar_backscatter requires `data` to come from load_collection "
+                "or load_stac, which carry the STAC metadata it needs; the "
+                f"slice at {key} has no source-item metadata (a stack built "
+                "from in-memory images cannot be calibrated)"
             )
-        item_id = item.get("id", "<unknown>")
-        if item_id in resolved:
-            continue
+        if len(items) > 1:
+            raise ProcessParameterInvalid(
+                f"The slice at {key} mosaics {len(items)} source items "
+                f"({', '.join(_item_id(i) for i in items)}). sar_backscatter "
+                "calibrates per source item -- each has its own calibration "
+                "LUTs and geolocation -- so it cannot calibrate an already "
+                "mosaicked blend of several. Narrow the spatial or temporal "
+                "extent so each acquisition datetime resolves to one item."
+            )
+        item = items[0]
         _check_product_type(item)
-        resolved[item_id] = {
+        resolved[key] = {
             pol: _resolve_polarisation_assets(item, pol) for pol in polarisations
         }
     return resolved
@@ -228,13 +286,13 @@ def sar_backscatter(
     if mask:
         new_band_names.append("mask")
 
-    def transform(item: Dict[str, Any], realize: Callable[[], ImageData]) -> ImageData:
+    def transform(key: datetime, realize: Callable[[], ImageData]) -> ImageData:
         img = realize()
         # Always set by the read path (SimpleSTACReader/OpenEOReader) that produced
         # `img`; asserted rather than typed non-optional since ImageData's own
         # fields are Optional for the general case.
         assert img.bounds is not None and img.crs is not None
-        hrefs = resolved[item.get("id", "<unknown>")]
+        hrefs = resolved[key]
         # np.ma.getmaskarray, not img.array.mask directly: the latter can be the
         # scalar `nomask` sentinel (not indexable) when nothing upstream masked
         # any pixel; this always returns a full per-band boolean array.

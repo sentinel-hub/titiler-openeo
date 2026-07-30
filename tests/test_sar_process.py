@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import pystac
 import pytest
 import rasterio
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
@@ -50,6 +51,22 @@ class _FixtureFetcher:
         """Return the fixed payload for href, recording the call."""
         self.calls.append(href)
         return self._mapping[href]
+
+
+def _date_group_meta(items: List[Any]) -> Dict[str, Any]:
+    """Task metadata in the exact shape `load_collection` builds.
+
+    Mirrors `titiler.openeo.stacapi.LoadCollection.load_collection`: one task per
+    acquisition datetime, whose source items (possibly several, mosaicked) are
+    carried under "items". Kept in one place so the contract with stacapi is
+    obvious if either side changes.
+    """
+    return {
+        "id": items[0].datetime.isoformat() if items else "empty",
+        "datetime": items[0].datetime if items else None,
+        "geometry": None,
+        "items": items,
+    }
 
 
 def _write_measurement_gcp_tiff(path: Path) -> None:
@@ -108,13 +125,27 @@ def _make_stack(
     if extra_assets:
         assets.update(extra_assets)
 
-    item: Dict[str, Any] = {
-        "id": "S1TEST_0001",
-        "properties": {"datetime": "2024-01-01T00:00:00Z", "sar:product_type": "GRD"},
-        "assets": assets,
+    properties: Dict[str, Any] = {
+        "datetime": "2024-01-01T00:00:00Z",
+        "sar:product_type": "GRD",
     }
-    if item_overrides:
-        item.update(item_overrides)
+    if item_overrides and "properties" in item_overrides:
+        properties = item_overrides["properties"]
+
+    # A real pystac.Item, because that is what load_collection carries -- its
+    # assets are pystac.Asset objects (href as an attribute), not dicts. Testing
+    # against dicts alone is exactly what let the original implementation pass
+    # CI and then fail against a live backend.
+    item = pystac.Item(
+        id="S1TEST_0001",
+        geometry=None,
+        bbox=None,
+        datetime=datetime(2024, 1, 1),
+        properties=properties,
+    )
+    for name, fields in assets.items():
+        extra = {k: v for k, v in fields.items() if k != "href"}
+        item.add_asset(name, pystac.Asset(href=fields["href"], extra_fields=extra))
 
     stacked_dn = np.stack([dn[pol] for pol in polarisations]).astype("uint16")
     array = np.ma.MaskedArray(
@@ -132,8 +163,8 @@ def _make_stack(
         return image
 
     stack = RasterStack(
-        tasks=[(task_fn, item)],
-        timestamp_fn=lambda asset: datetime(2024, 1, 1),
+        tasks=[(task_fn, _date_group_meta([item]))],
+        timestamp_fn=lambda asset: asset["datetime"],
         width=width,
         height=height,
         bounds=(0.0, 0.0, 1.0, 1.0),
@@ -207,7 +238,52 @@ def test_rejects_non_item_backed_stack():
         {datetime(2024, 1, 1): ImageData(np.ma.array(np.ones((1, 2, 2))))},
         band_names=["vv"],
     )
-    with pytest.raises(ProcessParameterInvalid, match="STAC-item-backed"):
+    with pytest.raises(ProcessParameterInvalid, match="no source-item metadata"):
+        sar_backscatter(stack, coefficient="sigma0-ellipsoid")
+
+
+def test_rejects_a_slice_that_mosaics_several_items(tmp_path):
+    """load_collection mosaics all items sharing a datetime into one image.
+
+    Calibration is per source item -- each has its own LUTs and geolocation --
+    so an already-mosaicked blend of several must be refused rather than
+    calibrated with one item's radiometry. This is the case ADR S7.10(b)
+    (per-item calibration in the read path) would properly solve.
+    """
+    measurement_path = tmp_path / "measurement.tif"
+    _write_measurement_gcp_tiff(measurement_path)
+
+    def _item(item_id: str) -> pystac.Item:
+        it = pystac.Item(
+            id=item_id,
+            geometry=None,
+            bbox=None,
+            datetime=datetime(2024, 1, 1),
+            properties={"sar:product_type": "GRD"},
+        )
+        it.add_asset("vv", pystac.Asset(href=str(measurement_path)))
+        it.add_asset("schema-calibration-vv", pystac.Asset(href="fixture://cal"))
+        it.add_asset("schema-noise-vv", pystac.Asset(href="fixture://noise"))
+        return it
+
+    image = ImageData(
+        np.ma.MaskedArray(np.ones((1, 1, 1), dtype="uint16")),
+        crs=CRS.from_epsg(4326),
+        bounds=(0, 0, 1, 1),
+        band_names=["vv"],
+        band_descriptions=["vv"],
+    )
+    stack = RasterStack(
+        tasks=[(lambda: image, _date_group_meta([_item("A"), _item("B")]))],
+        timestamp_fn=lambda asset: asset["datetime"],
+        width=1,
+        height=1,
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        dst_crs=CRS.from_epsg(4326),
+        band_names=["vv"],
+    )
+
+    with pytest.raises(ProcessParameterInvalid, match="mosaics 2 source items"):
         sar_backscatter(stack, coefficient="sigma0-ellipsoid")
 
 

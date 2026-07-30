@@ -772,24 +772,47 @@ class RasterStack(Dict[datetime, ImageData]):
 
         return instance
 
-    def get_stac_item(self, key: datetime) -> Optional[Dict[str, Any]]:
-        """Return the STAC item dict associated with ``key``, without executing its task.
+    def get_source_items(self, key: datetime) -> List[Any]:
+        """Return the STAC item(s) behind ``key``, without executing its task.
 
-        This is the per-task metadata `create_tasks` carries alongside each
-        reader task (item properties, assets, geometry) -- the same object
-        `get_image_ref` derives its geometry from, but returned directly for
-        processes that need to inspect asset hrefs/properties themselves
-        (e.g. resolving sibling assets) rather than just the image's shape.
+        A single key can be backed by **several** source items: ``load_collection``
+        groups items by acquisition datetime and mosaics each group into one
+        image, so anything that needs genuinely per-item metadata (asset hrefs,
+        properties) must handle a list, not assume one item.
+
+        Two task-metadata shapes exist and are normalized here:
+
+        * ``load_collection`` (:mod:`titiler.openeo.stacapi`) stores a date-group
+          dict carrying its source items under ``"items"``.
+        * ``load_stac`` / ``_process_spatial_extent`` pass each STAC item through
+          as the task metadata itself.
+
+        Items may be ``pystac.Item`` objects (the ``load_collection`` path) or
+        plain dicts (``load_stac``); callers must handle both. Returns an empty
+        list when the key is unknown or its task carries no item metadata.
         """
         index = self._key_to_task_index.get(key)
         if index is None:
-            return None
-        _task_fn, item = self._tasks[index]
-        return item
+            return []
+        _task_fn, meta = self._tasks[index]
+
+        if isinstance(meta, dict):
+            items = meta.get("items")
+            if items is not None:
+                return list(items)
+            # A bare STAC item dict (load_stac): treat as a single source item.
+            if "assets" in meta:
+                return [meta]
+            return []
+
+        # A pystac.Item (or anything item-like) passed through directly.
+        if hasattr(meta, "assets"):
+            return [meta]
+        return []
 
     def map_tasks(
         self,
-        transform: Callable[[Dict[str, Any], Callable[[], ImageData]], ImageData],
+        transform: Callable[[datetime, Callable[[], ImageData]], ImageData],
         **overrides: Any,
     ) -> "RasterStack":
         """Build a new RasterStack whose per-key task applies ``transform``, lazily.
@@ -797,9 +820,13 @@ class RasterStack(Dict[datetime, ImageData]):
         Calling this executes nothing -- not even one call to ``transform``. Each
         key's task in the *returned* stack, only once actually consumed (via
         indexing, ``.items()``, ``.values()``, etc.), calls
-        ``transform(item, realize)`` where ``item`` is this stack's STAC item dict
-        for that key and ``realize()`` runs the *original* task to get the
-        raw ``ImageData``.
+        ``transform(key, realize)`` where ``realize()`` runs the *original* task
+        to get the raw ``ImageData``.
+
+        ``transform`` receives the *key* rather than the task's metadata because
+        that metadata's shape varies by loader (see :meth:`get_source_items`);
+        the key is the slice's identity, and everything else about the slice --
+        its source items included -- is reachable from it.
 
         ``realize()`` deliberately does not go through ``self[key]``: that would
         write into ``self._data_cache``, which the reference-counted results
@@ -811,8 +838,8 @@ class RasterStack(Dict[datetime, ImageData]):
 
         Args:
             transform: Called once per key, only on actual consumption, with the
-                key's STAC item dict and a zero-arg ``realize`` that runs the
-                original task and returns its ``ImageData``.
+                key and a zero-arg ``realize`` that runs the original task and
+                returns its ``ImageData``.
             overrides: Stack-level metadata to replace on the new stack (e.g.
                 ``band_names`` when the transform changes band count/naming).
                 Anything not given here is copied from this stack.
@@ -823,16 +850,22 @@ class RasterStack(Dict[datetime, ImageData]):
 
         def _build_new_task(key: datetime) -> Callable[[], ImageData]:
             def new_task() -> ImageData:
-                task_fn, item = self._tasks[self._key_to_task_index[key]]
+                task_fn, _meta = self._tasks[self._key_to_task_index[key]]
 
                 def realize() -> ImageData:
                     return self._execute_task(key, task_fn)
 
-                return transform(item, realize)
+                return transform(key, realize)
 
             return new_task
 
-        new_tasks = [(_build_new_task(k), self.get_stac_item(k)) for k in self._keys]
+        # Carry each task's original metadata through unchanged, so the new stack
+        # keeps working with the same `timestamp_fn` and still exposes the source
+        # items/geometry to whatever consumes it next.
+        new_tasks = [
+            (_build_new_task(k), self._tasks[self._key_to_task_index[k]][1])
+            for k in self._keys
+        ]
 
         kwargs: Dict[str, Any] = {
             "timestamp_fn": self._timestamp_fn,

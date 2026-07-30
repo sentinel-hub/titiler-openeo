@@ -868,6 +868,14 @@ class LoadCollection:
                         "id": date,
                         "datetime": date_items[0].datetime if date_items else None,
                         "geometry": geometries if geometries else None,
+                        # The source items behind this date group's mosaic. Carried
+                        # so processes that need per-item STAC metadata (asset
+                        # hrefs, properties) can reach it -- notably
+                        # `sar_backscatter`, whose calibration LUTs and GCP
+                        # geometry are per source item. Retrieve via
+                        # `RasterStack.get_source_items`, never by reaching into
+                        # task metadata directly. These are `pystac.Item`s.
+                        "items": date_items,
                     },
                 )
             )
