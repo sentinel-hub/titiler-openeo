@@ -288,11 +288,11 @@ def sar_backscatter(
 
     def transform(key: datetime, realize: Callable[[], ImageData]) -> ImageData:
         img = realize()
-        # Always set by the read path (SimpleSTACReader/OpenEOReader) that produced
-        # `img`; asserted rather than typed non-optional since ImageData's own
-        # fields are Optional for the general case.
-        assert img.bounds is not None and img.crs is not None
-        hrefs = resolved[key]
+        # Always set by the read path (SimpleSTACReader/OpenEOReader) that produced `img`.
+        if img.bounds is None or img.crs is None:
+            raise ProcessParameterInvalid(
+                "sar_backscatter requires input slices to include bounds and CRS metadata"
+            )
         # np.ma.getmaskarray, not img.array.mask directly: the latter can be the
         # scalar `nomask` sentinel (not indexable) when nothing upstream masked
         # any pixel; this always returns a full per-band boolean array.
