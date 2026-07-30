@@ -25,6 +25,7 @@ from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
+from shapely.geometry import box, mapping
 
 from titiler.openeo.errors import (
     DigitalElevationModelInvalid,
@@ -33,11 +34,16 @@ from titiler.openeo.errors import (
 )
 from titiler.openeo.processes import process_registry
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from titiler.openeo.processes.implementations.reduce import apply_pixel_selection
 from titiler.openeo.processes.implementations.sar import sar_backscatter
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sar"
 _CALIBRATION_XML = (FIXTURES / "calibration_ipf290.xml").read_bytes()
 _NOISE_XML = (FIXTURES / "noise_ipf290.xml").read_bytes()
+
+# Grid + fixture wiring for the mosaic/stitching tests at the end of this file.
+_MOSAIC_W = _MOSAIC_H = 8
+_MOSAIC_FIXTURES = {"fixture://cal": _CALIBRATION_XML, "fixture://noise": _NOISE_XML}
 
 
 class _FixtureFetcher:
@@ -547,3 +553,127 @@ def test_sar_backscatter_runs_through_the_real_process_graph(tmp_path):
     )
     result = callable_(named_parameters={"data": stack})
     assert _only_image(result).band_descriptions == ["vv"]
+
+
+def _half_covering_slice(
+    tmp_path: Path, item_id: str, day: int, cols: slice, footprint
+):
+    """One slice covering only part of the AOI, in load_collection's real shape.
+
+    Faithful to what the backend actually builds: DN is no-data outside the
+    item's footprint, and the task metadata carries the footprint under
+    "geometry" as a *list* (as load_collection does), which is what gives the
+    ImageRef a real cutline mask.
+    """
+    measurement_path = tmp_path / "measurement.tif"
+    if not measurement_path.exists():
+        _write_measurement_gcp_tiff(measurement_path)
+
+    item = pystac.Item(
+        id=item_id,
+        geometry=mapping(footprint),
+        bbox=list(footprint.bounds),
+        datetime=datetime(2024, 1, day),
+        properties={"sar:product_type": "GRD"},
+    )
+    item.add_asset("vv", pystac.Asset(href=str(measurement_path)))
+    item.add_asset("schema-calibration-vv", pystac.Asset(href="fixture://cal"))
+    item.add_asset("schema-noise-vv", pystac.Asset(href="fixture://noise"))
+
+    dn = np.zeros((1, _MOSAIC_H, _MOSAIC_W), dtype="uint16")
+    dn[:, :, cols] = 2000  # bright, well above the noise floor
+    nodata = np.ones((1, _MOSAIC_H, _MOSAIC_W), dtype=bool)
+    nodata[:, :, cols] = False
+    image = ImageData(
+        np.ma.MaskedArray(dn, mask=nodata),
+        crs=CRS.from_epsg(4326),
+        bounds=(0, 0, 1, 1),
+        band_names=["vv"],
+        band_descriptions=["vv"],
+    )
+    meta = {
+        "id": item.datetime.isoformat(),
+        "datetime": item.datetime,
+        "geometry": [mapping(footprint)],
+        "items": [item],
+    }
+    return (lambda: image, meta)
+
+
+def _two_half_slices_stack(tmp_path) -> RasterStack:
+    """A 2-slice stack whose slices together cover the AOI (left half, right half)."""
+    return RasterStack(
+        tasks=[
+            _half_covering_slice(
+                tmp_path, "LEFT", 1, slice(0, _MOSAIC_W // 2), box(0, 0, 0.5, 1)
+            ),
+            _half_covering_slice(
+                tmp_path,
+                "RIGHT",
+                2,
+                slice(_MOSAIC_W // 2, _MOSAIC_W),
+                box(0.5, 0, 1, 1),
+            ),
+        ],
+        timestamp_fn=lambda asset: asset["datetime"],
+        width=_MOSAIC_W,
+        height=_MOSAIC_H,
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        dst_crs=CRS.from_epsg(4326),
+        band_names=["vv"],
+    )
+
+
+@pytest.mark.parametrize("with_mask_band", [False, True])
+def test_calibrated_slices_still_mosaic_together(tmp_path, with_mask_band):
+    """Calibrated slices must still stitch: map_tasks preserves what mosaicking needs.
+
+    Two slices each covering half the AOI, run through sar_backscatter and then
+    apply_pixel_selection("first"), must produce a fully-filled image. This
+    guards the map_tasks rewrite against dropping the per-slice masks/geometry
+    that pixel selection depends on. Parametrized over the `mask` band because
+    it adds a band whose mask semantics differ from the data bands.
+    """
+    calibrated = sar_backscatter(
+        _two_half_slices_stack(tmp_path),
+        coefficient="sigma0-ellipsoid",
+        mask=with_mask_band,
+        options={"fetcher": _FixtureFetcher(_MOSAIC_FIXTURES)},
+    )
+    mosaicked = apply_pixel_selection(calibrated, pixel_selection="first")
+    img = _only_image(mosaicked)
+
+    vv = img.array[img.band_descriptions.index("vv")]
+    assert not np.ma.getmaskarray(vv).any(), (
+        "mosaic left unfilled pixels; per-column masked counts: "
+        f"{np.ma.getmaskarray(vv).sum(axis=0).tolist()}"
+    )
+    assert (vv.data > 0).all(), (
+        "mosaic has zero-valued pixels; per-column zero counts: "
+        f"{(vv.data == 0).sum(axis=0).tolist()}"
+    )
+
+
+def test_mask_band_does_not_report_nodata_as_valid(tmp_path):
+    """The `mask` band must not make a slice's no-data region look like data.
+
+    `ImageData._mask` is `logical_or.reduce(~array.mask)` -- a pixel is valid if
+    ANY band is unmasked -- so an unmasked informational `mask` band would make
+    `img.mask` (and hence GeoTIFF nodata/alpha on save_result) claim the whole
+    grid is data, including the half this slice does not cover.
+    """
+    calibrated = sar_backscatter(
+        _two_half_slices_stack(tmp_path),
+        coefficient="sigma0-ellipsoid",
+        mask=True,
+        options={"fetcher": _FixtureFetcher(_MOSAIC_FIXTURES)},
+    )
+    first_key = next(iter(calibrated.keys()))
+    img = calibrated[first_key]
+
+    valid_px = int((img.mask > 0).sum())
+    half = _MOSAIC_W * _MOSAIC_H // 2
+    assert valid_px == half, (
+        f"dataset mask reports {valid_px}/{_MOSAIC_W * _MOSAIC_H} px valid; "
+        f"this slice covers only {half}"
+    )

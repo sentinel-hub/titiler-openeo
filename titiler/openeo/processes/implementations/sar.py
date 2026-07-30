@@ -352,19 +352,33 @@ def sar_backscatter(
             band_masks.append(combined_invalid)
 
         if mask:
-            # openEO's own contract for this band (not rio-tiler's internal
-            # 0/255 mask convention): 1.0 valid, 0.0 invalid/no-data. The mask
-            # band's own values are never themselves "no data".
+            # Values follow openEO's contract for this band -- 1.0 valid, 0.0
+            # invalid/no-data -- and survive in `array.data` regardless of the
+            # mask below, so reading the band still reports validity per spec.
+            #
+            # Its *mask* must match the data bands even though the band is
+            # informational. `ImageData._mask` is
+            # `logical_or.reduce(~array.mask)` -- a pixel counts as valid if ANY
+            # band is unmasked -- so leaving this band unmasked would report a
+            # slice's no-data region as valid data at the ImageData level, to
+            # every dataset-mask consumer (`img.mask`, GeoTIFF nodata/alpha on
+            # save_result). Pixel selection is unaffected either way: it feeds
+            # `img.array`, whose per-band masks are correct regardless.
             band_values.append(
                 np.where(combined_invalid, np.float32(0.0), np.float32(1.0))
             )
-            band_masks.append(np.zeros_like(combined_invalid))
+            band_masks.append(combined_invalid)
 
         array = np.ma.MaskedArray(np.stack(band_values), mask=np.stack(band_masks))
         return ImageData(
             array,
+            # Preserved so downstream mosaicking sees the same footprint the
+            # read produced; dropping it loses the per-item cutline.
+            cutline_mask=img.cutline_mask,
             crs=img.crs,
             bounds=img.bounds,
+            assets=img.assets,
+            metadata=img.metadata,
             band_names=new_band_names,
             band_descriptions=new_band_names,
         )
