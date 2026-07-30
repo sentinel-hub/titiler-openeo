@@ -146,6 +146,30 @@ class ProcessParameterMissing(OpenEOException):
         )
 
 
+class FeatureUnsupported(OpenEOException):
+    """The functionality (process, parameter, ...) is not supported by this back-end."""
+
+    def __init__(self, message: str):
+        """Initialize error with the unsupported feature."""
+        super().__init__(
+            message=message,
+            code="FeatureUnsupported",
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        )
+
+
+class DigitalElevationModelInvalid(OpenEOException):
+    """The specified elevation model is not supported or invalid."""
+
+    def __init__(self, message: str):
+        """Initialize error with the invalid elevation model."""
+        super().__init__(
+            message=message,
+            code="DigitalElevationModelInvalid",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class NoDataAvailable(OpenEOException):
     """No data available for the requested extent."""
 

@@ -283,3 +283,72 @@ def test_load_collection_raises_when_items_exceed_limit(monkeypatch):
             width=64,
             height=64,
         )
+
+
+def test_load_collection_carries_source_items_into_the_stack(monkeypatch):
+    """load_collection must expose its source items via get_source_items().
+
+    Processes that need genuinely per-item STAC metadata -- asset hrefs,
+    properties -- can only get it from here: load_collection groups items by
+    acquisition datetime and mosaics each group, so without this the source
+    items are discarded at task-construction time and no downstream process can
+    recover them. `sar_backscatter` depends on it for calibration LUTs and GCPs.
+
+    This asserts the contract between stacapi's task metadata and
+    RasterStack.get_source_items, which is what a unit test built on a
+    hand-rolled stack shape cannot catch.
+    """
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    items = [
+        Item.from_dict(_stac_item_dict("2021-01-01T00:00:00Z")),
+        Item.from_dict(_stac_item_dict("2021-02-01T00:00:00Z")),
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+    stack = loader.load_collection(
+        id="test",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        width=64,
+        height=64,
+    )
+
+    keys = list(stack.keys())
+    assert len(keys) == 2
+    for key in keys:
+        source_items = stack.get_source_items(key)
+        assert len(source_items) == 1
+        # The real pystac.Item, with its assets reachable.
+        assert source_items[0] in items
+        assert "B01" in source_items[0].assets
+
+
+def test_load_collection_groups_same_datetime_items_into_one_slice(monkeypatch):
+    """Items sharing an acquisition datetime are mosaicked into a single slice.
+
+    get_source_items then reports *all* of them, which is what lets a process
+    detect the case rather than silently treating the mosaic as one item.
+    """
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    same_dt = "2021-01-01T00:00:00Z"
+    first = _stac_item_dict(same_dt)
+    second = _stac_item_dict(same_dt)
+    second["id"] = "item-second"
+    items = [Item.from_dict(first), Item.from_dict(second)]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+    stack = loader.load_collection(
+        id="test",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        width=64,
+        height=64,
+    )
+
+    keys = list(stack.keys())
+    assert len(keys) == 1, "same-datetime items must collapse into one slice"
+    assert len(stack.get_source_items(keys[0])) == 2

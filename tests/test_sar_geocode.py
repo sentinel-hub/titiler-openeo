@@ -8,14 +8,17 @@ acceptance criterion (ADR S7.8.4) on a real Sentinel-1 GCP grid.
 """
 
 import json
+import uuid
 from pathlib import Path
 
 import numpy as np
+import pytest
+import rasterio
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from rasterio.warp import transform as warp_transform
 
-from titiler.openeo.sar.geocode import build_inverse_map
+from titiler.openeo.sar.geocode import _gdal_path, build_inverse_map, get_gcps
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sar" / "gcps_ew_grdm_polar.json"
 
@@ -134,3 +137,91 @@ def test_tps_round_trip_on_real_polar_gcps_sub_metre():
     residual_m = np.hypot(row_err_px, col_err_px) * metres_per_pixel
     rms_m = float(np.sqrt((residual_m**2).mean()))
     assert rms_m < 1.0, f"RMS residual {rms_m:.4f} m (>= 1 m)"
+
+
+# --------------------------------------------------------------------------- _gdal_path
+
+
+@pytest.mark.parametrize(
+    "href,expected",
+    [
+        ("s3://bucket/key/measurement.tif", "/vsis3/bucket/key/measurement.tif"),
+        (
+            "https://example.com/measurement.tif",
+            "/vsicurl/https://example.com/measurement.tif",
+        ),
+        (
+            "http://example.com/measurement.tif",
+            "/vsicurl/http://example.com/measurement.tif",
+        ),
+        ("/local/path/measurement.tif", "/local/path/measurement.tif"),
+    ],
+)
+def test_gdal_path_translates_by_scheme(href, expected):
+    assert _gdal_path(href) == expected
+
+
+# --------------------------------------------------------------------------- get_gcps
+
+
+def _write_gcp_geotiff(path: Path) -> list:
+    """A tiny single-band GCP-referenced GeoTIFF, written to a real path.
+
+    `get_gcps` opens by href/path (not a MemoryFile), since it caches by that
+    path and rasterio/GDAL needs a real URL for the VSI translation it feeds
+    into `_gdal_path` in production use.
+    """
+    gcps = [
+        GroundControlPoint(row=0, col=0, x=10.0, y=45.0, z=0),
+        GroundControlPoint(row=0, col=9, x=10.1, y=45.0, z=0),
+        GroundControlPoint(row=9, col=0, x=10.0, y=44.9, z=0),
+        GroundControlPoint(row=9, col=9, x=10.1, y=44.9, z=0),
+    ]
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=10,
+        height=10,
+        count=1,
+        dtype="uint16",
+    ) as dst:
+        dst.write(np.ones((10, 10), dtype="uint16"), 1)
+        dst.gcps = (gcps, CRS.from_epsg(4326))
+    return gcps
+
+
+def test_get_gcps_returns_the_written_gcps(tmp_path):
+    path = tmp_path / f"{uuid.uuid4()}.tif"
+    written = _write_gcp_geotiff(path)
+
+    gcps, crs = get_gcps(str(path))
+
+    assert crs == CRS.from_epsg(4326)
+    assert len(gcps) == len(written)
+    got = sorted((g.row, g.col, g.x, g.y) for g in gcps)
+    want = sorted((g.row, g.col, g.x, g.y) for g in written)
+    np.testing.assert_allclose(got, want)
+
+
+def test_get_gcps_caches_by_href(tmp_path):
+    """A second call for the same href must not reopen the file."""
+    path = tmp_path / f"{uuid.uuid4()}.tif"
+    _write_gcp_geotiff(path)
+
+    first = get_gcps(str(path))
+    path.unlink()  # if the cache is bypassed, the second call raises
+
+    second = get_gcps(str(path))
+    assert second[1] == first[1]
+
+
+def test_get_gcps_raises_when_asset_has_no_gcps(tmp_path):
+    path = tmp_path / f"{uuid.uuid4()}.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=4, height=4, count=1, dtype="uint16"
+    ) as dst:
+        dst.write(np.ones((4, 4), dtype="uint16"), 1)
+
+    with pytest.raises(ValueError, match="has no GCPs"):
+        get_gcps(str(path))

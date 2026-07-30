@@ -5,10 +5,12 @@ These tests verify that when RasterStack is created with dimension parameters
 that enable cutline mask computation without executing tasks.
 """
 
+from concurrent.futures import Future
 from datetime import datetime
 from unittest.mock import MagicMock
 
 import numpy as np
+import pystac
 from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 from shapely.geometry import box, mapping
@@ -348,6 +350,162 @@ class TestRasterStackWithDimensions:
 
         # Task should NOT have been executed
         mock_future.result.assert_not_called()
+
+
+class TestMapTasksAndGetSourceItems:
+    """Tests for RasterStack.get_source_items and RasterStack.map_tasks."""
+
+    def _stack(self, meta=None, image_data=None):
+        """A one-task stack. `meta` defaults to load_collection's shape."""
+        bounds = (0.0, 0.0, 10.0, 10.0)
+        crs = CRS.from_epsg(4326)
+        image_data = image_data or ImageData(
+            np.ma.array(np.ones((1, 4, 4), dtype=np.float32)), bounds=bounds, crs=crs
+        )
+
+        mock_future = MagicMock(spec=Future)
+        mock_future.result.return_value = image_data
+        if meta is None:
+            # Mirrors titiler.openeo.stacapi.LoadCollection.load_collection: a
+            # date-group dict whose source items live under "items".
+            meta = {
+                "id": "2021-01-01T00:00:00",
+                "datetime": datetime(2021, 1, 1),
+                "geometry": None,
+                "items": [{"id": "item1", "assets": {"vv": {"href": "s3://b/vv.tif"}}}],
+            }
+        stack = RasterStack(
+            tasks=[(mock_future, meta)],
+            timestamp_fn=lambda asset: datetime(2021, 1, 1),
+            width=4,
+            height=4,
+            bounds=bounds,
+            dst_crs=crs,
+            band_names=["vv"],
+        )
+        return stack, mock_future, meta, image_data
+
+    def test_get_source_items_from_a_load_collection_date_group(self):
+        """The load_collection shape: source items carried under "items"."""
+        stack, _mock_future, meta, _image = self._stack()
+        key = next(iter(stack.keys()))
+        assert stack.get_source_items(key) == meta["items"]
+
+    def test_get_source_items_from_a_bare_item_dict(self):
+        """The load_stac / _process_spatial_extent shape: the item *is* the metadata."""
+        item = {"id": "i1", "assets": {"vv": {"href": "s3://b/vv.tif"}}}
+        stack, *_ = self._stack(meta=item)
+        key = next(iter(stack.keys()))
+        assert stack.get_source_items(key) == [item]
+
+    def test_get_source_items_from_a_pystac_item(self):
+        """load_collection carries pystac.Item objects, not dicts."""
+        item = pystac.Item(
+            id="i1",
+            geometry=None,
+            bbox=None,
+            datetime=datetime(2021, 1, 1),
+            properties={},
+        )
+        item.add_asset("vv", pystac.Asset(href="s3://b/vv.tif"))
+        stack, *_ = self._stack(
+            meta={"datetime": datetime(2021, 1, 1), "items": [item]}
+        )
+        key = next(iter(stack.keys()))
+        assert stack.get_source_items(key) == [item]
+
+    def test_get_source_items_multiple_items_in_one_group(self):
+        """A date group can mosaic several items -- all of them are returned."""
+        items = [
+            {"id": "a", "assets": {"vv": {"href": "s3://b/a.tif"}}},
+            {"id": "b", "assets": {"vv": {"href": "s3://b/b.tif"}}},
+        ]
+        stack, *_ = self._stack(meta={"datetime": datetime(2021, 1, 1), "items": items})
+        key = next(iter(stack.keys()))
+        assert stack.get_source_items(key) == items
+
+    def test_get_source_items_empty_for_missing_key(self):
+        """An absent key returns [], not a KeyError."""
+        stack, *_ = self._stack()
+        assert stack.get_source_items(datetime(1999, 1, 1)) == []
+
+    def test_get_source_items_empty_when_no_item_metadata(self):
+        """from_images-style stacks carry no item metadata at all."""
+        stack, *_ = self._stack(meta={"datetime": datetime(2021, 1, 1)})
+        key = next(iter(stack.keys()))
+        assert stack.get_source_items(key) == []
+
+    def test_map_tasks_executes_nothing_eagerly(self):
+        """Building the new stack must not run the original task or transform."""
+        stack, mock_future, _meta, _image = self._stack()
+        transform = MagicMock()
+
+        stack.map_tasks(transform)
+
+        mock_future.result.assert_not_called()
+        transform.assert_not_called()
+
+    def test_map_tasks_transform_runs_only_on_consumption(self):
+        """transform() only fires when a key of the *new* stack is consumed."""
+        stack, mock_future, _meta, image = self._stack()
+        transformed = ImageData(
+            np.ma.array(np.full((1, 4, 4), 7, dtype=np.float32)),
+            bounds=image.bounds,
+            crs=image.crs,
+        )
+
+        def transform(passed_key, realize):
+            assert passed_key == datetime(2021, 1, 1)
+            assert realize() is image  # realize() runs the *original* task
+            return transformed
+
+        new_stack = stack.map_tasks(transform)
+        mock_future.result.assert_not_called()  # still nothing before consumption
+
+        key = next(iter(new_stack.keys()))
+        result = new_stack[key]
+
+        mock_future.result.assert_called_once()
+        assert result is transformed
+
+    def test_map_tasks_realize_does_not_populate_original_cache(self):
+        """realize() must not leak into the original stack's cache (see docstring:
+        results_cache.py may already have released it by the time this runs)."""
+        stack, _mock_future, _meta, image = self._stack()
+
+        def transform(_key, realize):
+            realize()
+            return image
+
+        new_stack = stack.map_tasks(transform)
+        key = next(iter(new_stack.keys()))
+        new_stack[key]
+
+        assert key not in stack._data_cache
+
+    def test_map_tasks_preserves_source_items_on_the_new_stack(self):
+        """The rewritten stack still exposes the original source items, so a
+        chained process can resolve them too."""
+        stack, _mock_future, meta, image = self._stack()
+        new_stack = stack.map_tasks(lambda key, realize: image)
+        key = next(iter(new_stack.keys()))
+        assert new_stack.get_source_items(key) == meta["items"]
+
+    def test_map_tasks_overrides_band_names(self):
+        """`**overrides` (e.g. band_names) replaces the corresponding stack-level metadata."""
+        stack, _mock_future, _meta, image = self._stack()
+        new_stack = stack.map_tasks(lambda key, realize: image, band_names=["out"])
+        assert new_stack.band_names == ["out"]
+
+    def test_map_tasks_copies_metadata_when_not_overridden(self):
+        """Metadata not passed via `**overrides` is copied from the source stack."""
+        stack, _mock_future, _meta, image = self._stack()
+        new_stack = stack.map_tasks(lambda key, realize: image)
+        assert new_stack.width == stack.width
+        assert new_stack.height == stack.height
+        assert new_stack.bounds == stack.bounds
+        assert new_stack.dst_crs == stack.dst_crs
+        assert new_stack.band_names == stack.band_names
 
 
 class TestCollectImagesFromDataWithImageRefs:

@@ -175,3 +175,4 @@ file::memory:
 ._temp_store.json
 docs/src/notebooks/evi.tif
 docs/src/notebooks/timeseries-basic.csv
+docs/src/notebooks/sar_backscatter_vv_vh_mask.tif
