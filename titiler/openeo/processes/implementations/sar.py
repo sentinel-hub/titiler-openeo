@@ -293,6 +293,7 @@ def sar_backscatter(
             raise ProcessParameterInvalid(
                 "sar_backscatter requires input slices to include bounds and CRS metadata"
             )
+        hrefs = resolved[key]
         # np.ma.getmaskarray, not img.array.mask directly: the latter can be the
         # scalar `nomask` sentinel (not indexable) when nothing upstream masked
         # any pixel; this always returns a full per-band boolean array.
