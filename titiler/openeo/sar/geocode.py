@@ -20,16 +20,25 @@ source product, each destination pixel's radiometry LUTs live.
 """
 
 from dataclasses import dataclass
-from typing import Sequence
+from threading import Condition
+from typing import Sequence, Tuple
+from urllib.parse import urlparse
 
 import numpy as np
+import rasterio
+from cachetools import LRUCache, cached
+from cachetools.keys import hashkey
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from rasterio.transform import GCPTransformer, from_bounds, xy
 from rasterio.warp import transform as warp_transform
 from rio_tiler.types import BBox
 
-__all__ = ["InverseMap", "build_inverse_map"]
+from ..settings import SARSettings
+
+__all__ = ["InverseMap", "build_inverse_map", "get_gcps"]
+
+_settings = SARSettings()
 
 
 @dataclass(frozen=True)
@@ -86,3 +95,44 @@ def build_inverse_map(
         line=np.asarray(line, dtype="f8").reshape(height, width),
         pixel=np.asarray(pixel, dtype="f8").reshape(height, width),
     )
+
+
+def _gdal_path(href: str) -> str:
+    """Translate a STAC href into something rasterio/GDAL can open."""
+    parsed = urlparse(href)
+    if parsed.scheme == "s3":
+        return f"/vsis3/{parsed.netloc}{parsed.path}"
+    if parsed.scheme in ("http", "https"):
+        return f"/vsicurl/{href}"
+    return href
+
+
+# Thread-safe cache of parsed GCP sets, keyed on the measurement asset href.
+# Mirrors annotation.py's calibration/noise caches: `condition=` makes concurrent
+# misses for the same href single-flight (RasterStack executes tasks on a thread
+# pool) rather than each triggering its own header read.
+_gcp_cache: LRUCache = LRUCache(maxsize=_settings.annotation_cache_maxsize)
+_gcp_cache_condition = Condition()
+
+
+@cached(_gcp_cache, key=lambda href: hashkey(href), condition=_gcp_cache_condition)
+def get_gcps(href: str) -> Tuple[Sequence[GroundControlPoint], CRS]:
+    """Fetch a measurement asset's GCPs, header-only, cached by href.
+
+    This must open the measurement asset independently of any already-realized
+    read: `OpenEOReader` (the GCP-warping reader read through the normal
+    `load_collection` path, issue #344) *consumes* the source GCPs while
+    building its warped VRT, so by the time a process has that asset's
+    `ImageData`, `src.gcps` on that dataset is already empty. Getting the real
+    GCPs back means opening the source file again -- but only its header
+    (`rasterio.open` does not read pixel data), and only once per href thanks
+    to the cache above.
+    """
+    with rasterio.open(_gdal_path(href)) as src:
+        gcps, gcp_crs = src.gcps
+        if not gcps:
+            raise ValueError(
+                f"Measurement asset {href!r} has no GCPs -- unexpected for "
+                "Sentinel-1 GRD"
+            )
+        return gcps, gcp_crs

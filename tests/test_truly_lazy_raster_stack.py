@@ -5,6 +5,7 @@ These tests verify that when RasterStack is created with dimension parameters
 that enable cutline mask computation without executing tasks.
 """
 
+from concurrent.futures import Future
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -348,6 +349,110 @@ class TestRasterStackWithDimensions:
 
         # Task should NOT have been executed
         mock_future.result.assert_not_called()
+
+
+class TestMapTasksAndGetStacItem:
+    """Tests for RasterStack.get_stac_item and RasterStack.map_tasks."""
+
+    def _stack(self, item_id="item1", image_data=None):
+        bounds = (0.0, 0.0, 10.0, 10.0)
+        crs = CRS.from_epsg(4326)
+        image_data = image_data or ImageData(
+            np.ma.array(np.ones((1, 4, 4), dtype=np.float32)), bounds=bounds, crs=crs
+        )
+
+        mock_future = MagicMock(spec=Future)
+        mock_future.result.return_value = image_data
+        item = {
+            "id": item_id,
+            "assets": {"vv": {"href": "s3://bucket/vv.tif"}},
+            "properties": {"datetime": "2021-01-01T00:00:00Z"},
+        }
+        stack = RasterStack(
+            tasks=[(mock_future, item)],
+            timestamp_fn=lambda asset: datetime(2021, 1, 1),
+            width=4,
+            height=4,
+            bounds=bounds,
+            dst_crs=crs,
+            band_names=["vv"],
+        )
+        return stack, mock_future, item, image_data
+
+    def test_get_stac_item_returns_the_item_dict(self):
+        """get_stac_item returns the exact item dict a task was created with."""
+        stack, _mock_future, item, _image = self._stack()
+        key = next(iter(stack.keys()))
+        assert stack.get_stac_item(key) is item
+
+    def test_get_stac_item_returns_none_for_missing_key(self):
+        """get_stac_item on an absent key returns None, not a KeyError."""
+        stack, *_ = self._stack()
+        assert stack.get_stac_item(datetime(1999, 1, 1)) is None
+
+    def test_map_tasks_executes_nothing_eagerly(self):
+        """Building the new stack must not run the original task or transform."""
+        stack, mock_future, _item, _image = self._stack()
+        transform = MagicMock()
+
+        stack.map_tasks(transform)
+
+        mock_future.result.assert_not_called()
+        transform.assert_not_called()
+
+    def test_map_tasks_transform_runs_only_on_consumption(self):
+        """transform() only fires when a key of the *new* stack is consumed."""
+        stack, mock_future, item, image = self._stack()
+        transformed = ImageData(
+            np.ma.array(np.full((1, 4, 4), 7, dtype=np.float32)),
+            bounds=image.bounds,
+            crs=image.crs,
+        )
+
+        def transform(passed_item, realize):
+            assert passed_item is item
+            assert realize() is image  # realize() runs the *original* task
+            return transformed
+
+        new_stack = stack.map_tasks(transform)
+        mock_future.result.assert_not_called()  # still nothing before consumption
+
+        key = next(iter(new_stack.keys()))
+        result = new_stack[key]
+
+        mock_future.result.assert_called_once()
+        assert result is transformed
+
+    def test_map_tasks_realize_does_not_populate_original_cache(self):
+        """realize() must not leak into the original stack's cache (see docstring:
+        results_cache.py may already have released it by the time this runs)."""
+        stack, _mock_future, _item, image = self._stack()
+
+        def transform(_item, realize):
+            realize()
+            return image
+
+        new_stack = stack.map_tasks(transform)
+        key = next(iter(new_stack.keys()))
+        new_stack[key]
+
+        assert key not in stack._data_cache
+
+    def test_map_tasks_overrides_band_names(self):
+        """`**overrides` (e.g. band_names) replaces the corresponding stack-level metadata."""
+        stack, _mock_future, _item, image = self._stack()
+        new_stack = stack.map_tasks(lambda item, realize: image, band_names=["out"])
+        assert new_stack.band_names == ["out"]
+
+    def test_map_tasks_copies_metadata_when_not_overridden(self):
+        """Metadata not passed via `**overrides` is copied from the source stack."""
+        stack, _mock_future, _item, image = self._stack()
+        new_stack = stack.map_tasks(lambda item, realize: image)
+        assert new_stack.width == stack.width
+        assert new_stack.height == stack.height
+        assert new_stack.bounds == stack.bounds
+        assert new_stack.dst_crs == stack.dst_crs
+        assert new_stack.band_names == stack.band_names
 
 
 class TestCollectImagesFromDataWithImageRefs:

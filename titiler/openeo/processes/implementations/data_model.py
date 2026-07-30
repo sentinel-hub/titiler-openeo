@@ -772,6 +772,81 @@ class RasterStack(Dict[datetime, ImageData]):
 
         return instance
 
+    def get_stac_item(self, key: datetime) -> Optional[Dict[str, Any]]:
+        """Return the STAC item dict associated with ``key``, without executing its task.
+
+        This is the per-task metadata `create_tasks` carries alongside each
+        reader task (item properties, assets, geometry) -- the same object
+        `get_image_ref` derives its geometry from, but returned directly for
+        processes that need to inspect asset hrefs/properties themselves
+        (e.g. resolving sibling assets) rather than just the image's shape.
+        """
+        index = self._key_to_task_index.get(key)
+        if index is None:
+            return None
+        _task_fn, item = self._tasks[index]
+        return item
+
+    def map_tasks(
+        self,
+        transform: Callable[[Dict[str, Any], Callable[[], ImageData]], ImageData],
+        **overrides: Any,
+    ) -> "RasterStack":
+        """Build a new RasterStack whose per-key task applies ``transform``, lazily.
+
+        Calling this executes nothing -- not even one call to ``transform``. Each
+        key's task in the *returned* stack, only once actually consumed (via
+        indexing, ``.items()``, ``.values()``, etc.), calls
+        ``transform(item, realize)`` where ``item`` is this stack's STAC item dict
+        for that key and ``realize()`` runs the *original* task to get the
+        raw ``ImageData``.
+
+        ``realize()`` deliberately does not go through ``self[key]``: that would
+        write into ``self._data_cache``, which the reference-counted results
+        cache (:mod:`titiler.openeo.results_cache`) may have already released by
+        the time the returned stack's tasks actually run (it releases a node's
+        input stack as soon as that node's process function returns, which for a
+        lazy rewrite is *before* any of these tasks fire). Writing into an
+        already-released cache would leak -- nothing would ever release it again.
+
+        Args:
+            transform: Called once per key, only on actual consumption, with the
+                key's STAC item dict and a zero-arg ``realize`` that runs the
+                original task and returns its ``ImageData``.
+            overrides: Stack-level metadata to replace on the new stack (e.g.
+                ``band_names`` when the transform changes band count/naming).
+                Anything not given here is copied from this stack.
+
+        Returns:
+            RasterStack: A new, unrealized stack of the same keys.
+        """
+
+        def _build_new_task(key: datetime) -> Callable[[], ImageData]:
+            def new_task() -> ImageData:
+                task_fn, item = self._tasks[self._key_to_task_index[key]]
+
+                def realize() -> ImageData:
+                    return self._execute_task(key, task_fn)
+
+                return transform(item, realize)
+
+            return new_task
+
+        new_tasks = [(_build_new_task(k), self.get_stac_item(k)) for k in self._keys]
+
+        kwargs: Dict[str, Any] = {
+            "timestamp_fn": self._timestamp_fn,
+            "allowed_exceptions": self._allowed_exceptions,
+            "max_workers": self._max_workers,
+            "width": self._width,
+            "height": self._height,
+            "bounds": self._bounds,
+            "dst_crs": self._dst_crs,
+            "band_names": self._band_names,
+        }
+        kwargs.update(overrides)
+        return RasterStack(tasks=new_tasks, **kwargs)
+
     @classmethod
     def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
         """Create a RasterStack from pre-loaded ImageData instances.
