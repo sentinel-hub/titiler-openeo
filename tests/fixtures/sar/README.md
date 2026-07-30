@@ -28,3 +28,20 @@ products, the affine and `MAX_GCP_ORDER=3` warp paths diverge by ≤ 30 m at
 affine a poor model of the grid. A mid-latitude grid cannot discriminate the
 two paths at all: the difference falls below the resampling quantisation
 floor. See `docs/adr/0001-sar-backscatter.md` §1.6i and issue #343.
+
+## STAC item fixtures (`items/`)
+
+Trimmed real STAC items — one per catalogue this project targets — fetched
+live 2026-07-30, used by `tests/test_sar_catalogue_contract.py` (ADR §7.9).
+Each keeps only `sar:*`/`proj:*`/`product:type` properties and the
+measurement + `schema-calibration-*`/`schema-noise-*` assets; thumbnails,
+manifests and other unrelated assets are dropped.
+
+| File | Source item | Notes |
+| --- | --- | --- |
+| `cdse.json` | `S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG` | No `proj:*` at all. `sar:product_type` absent (only `product:type`, a different field). |
+| `earth_search.json` | `S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E` | Same acquisition as the CDSE fixture, from a different catalogue. Publishes a bbox-derived `proj:transform` that is fiction for SAR geometry. |
+| `planetary_computer.json` | `S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E` | HH/HV (EW mode), not VV/VH — exercises a different polarisation pair. Also publishes a bbox-derived `proj:transform`. |
+
+Adding a catalogue means adding a row here and a fixture, per the ADR — this
+is what makes portability a verified claim rather than an assumption.
