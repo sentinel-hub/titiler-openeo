@@ -1,0 +1,101 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E",
+  "properties": {
+    "datetime": "2026-07-30T18:12:13.300709Z",
+    "proj:bbox": [
+      -29.470901,
+      73.192726,
+      -10.764712,
+      77.822441
+    ],
+    "proj:epsg": 4326,
+    "proj:shape": [
+      10414,
+      9992
+    ],
+    "proj:centroid": {
+      "lat": 75.50966,
+      "lon": -19.45521
+    },
+    "proj:transform": [
+      0.0018721165932746198,
+      0.0,
+      -29.470901,
+      0.0,
+      -0.0004445664490109472,
+      77.822441
+    ],
+    "sar:looks_range": 6,
+    "sar:product_type": "GRD",
+    "sar:looks_azimuth": 2,
+    "sar:polarizations": [
+      "HH",
+      "HV"
+    ],
+    "sar:frequency_band": "C",
+    "sar:instrument_mode": "EW",
+    "sar:center_frequency": 5.405,
+    "sar:resolution_range": 93,
+    "sar:resolution_azimuth": 87,
+    "sar:pixel_spacing_range": 40,
+    "sar:observation_direction": "right",
+    "sar:pixel_spacing_azimuth": 40,
+    "sar:looks_equivalent_number": 10.7
+  },
+  "assets": {
+    "hh": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hh.tiff"
+    },
+    "hv": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hv.tiff"
+    },
+    "schema-noise-hh": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hh.xml"
+    },
+    "schema-noise-hv": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hv.xml"
+    },
+    "schema-calibration-hh": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hh.xml"
+    },
+    "schema-calibration-hv": {
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hv.xml"
+    }
+  },
+  "bbox": [
+    -29.470900999999998,
+    73.192726,
+    -10.764712000000003,
+    77.822441
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -29.470900999999998,
+          76.500153
+        ],
+        [
+          -23.52973700000001,
+          73.192726
+        ],
+        [
+          -10.764712000000003,
+          74.289749
+        ],
+        [
+          -13.712120999999996,
+          77.822441
+        ],
+        [
+          -29.470900999999998,
+          76.500153
+        ]
+      ]
+    ]
+  },
+  "links": []
+}

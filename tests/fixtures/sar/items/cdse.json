@@ -1,0 +1,151 @@
+{
+  "type": "Feature",
+  "stac_version": "1.1.0",
+  "id": "S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG",
+  "properties": {
+    "datetime": "2026-07-30T18:59:10.437185Z",
+    "product:type": "IW_GRDH_1S",
+    "sar:polarizations": [
+      "VV",
+      "VH"
+    ],
+    "sar:frequency_band": "C",
+    "sar:instrument_mode": "IW",
+    "sar:center_frequency": 5.405,
+    "sar:pixel_spacing_range": 10.0,
+    "sar:observation_direction": "right",
+    "sar:pixel_spacing_azimuth": 10.0
+  },
+  "assets": {
+    "vh": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/measurement/s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.tiff",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(measurement)/Nodes(s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.tiff)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VH"
+      ]
+    },
+    "vv": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/measurement/s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.tiff",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(measurement)/Nodes(s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.tiff)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VV"
+      ]
+    },
+    "schema-noise-vh": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/annotation/calibration/noise-s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.xml",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(annotation)/Nodes(calibration)/Nodes(noise-s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.xml)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VH"
+      ]
+    },
+    "schema-noise-vv": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/annotation/calibration/noise-s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.xml",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(annotation)/Nodes(calibration)/Nodes(noise-s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.xml)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VV"
+      ]
+    },
+    "schema-calibration-vh": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/annotation/calibration/calibration-s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.xml",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(annotation)/Nodes(calibration)/Nodes(calibration-s1d-iw-grd-vh-20260730t185910-20260730t185937-003907-00710e-002-cog.xml)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VH"
+      ]
+    },
+    "schema-calibration-vv": {
+      "href": "s3://eodata/Sentinel-1/SAR/IW_GRDH_1S-COG/2026/07/30/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE/annotation/calibration/calibration-s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.xml",
+      "alternate": {
+        "https": {
+          "href": "https://download.dataspace.copernicus.eu/odata/v1/Products(276a2da2-4ae2-482c-b7cc-32fc944c5253)/Nodes(S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_0863_COG.SAFE)/Nodes(annotation)/Nodes(calibration)/Nodes(calibration-s1d-iw-grd-vv-20260730t185910-20260730t185937-003907-00710e-001-cog.xml)/$value",
+          "auth:refs": [
+            "oidc"
+          ],
+          "storage:refs": [],
+          "alternate:name": "HTTPS"
+        }
+      },
+      "sar:polarizations": [
+        "VV"
+      ]
+    }
+  },
+  "bbox": [
+    -26.230534,
+    66.19828,
+    -19.560696,
+    68.293411
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -26.230534,
+          67.806076
+        ],
+        [
+          -25.138008,
+          66.19828
+        ],
+        [
+          -19.560696,
+          66.666328
+        ],
+        [
+          -20.276073,
+          68.293411
+        ],
+        [
+          -26.230534,
+          67.806076
+        ]
+      ]
+    ]
+  },
+  "links": []
+}
