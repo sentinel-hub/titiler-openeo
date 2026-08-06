@@ -56,7 +56,7 @@ def test_derive_bands_formats_named_groups_into_band_names():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv", "application/xml", ["metadata"])]
 
@@ -69,7 +69,7 @@ def test_derive_bands_requires_matching_media_type():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv", "application/json", ["metadata"])]
 
@@ -82,7 +82,7 @@ def test_derive_bands_requires_matching_role():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv", "application/xml", ["data"])]
 
@@ -98,7 +98,7 @@ def test_derive_bands_asset_key_must_fullmatch():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv-extra", "application/xml", ["metadata"])]
 
@@ -111,7 +111,7 @@ def test_derive_bands_requires_matching_collection():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv", "application/xml", ["metadata"])]
 
@@ -127,14 +127,14 @@ def test_derive_bands_sorted_and_deduplicated():
             media_types=frozenset({"application/xml"}),
             roles=frozenset({"metadata"}),
             asset=re.compile(r"z-(?P<pol>[a-z]{2})"),
-            bands=("{pol}_shared",),
+            bands=(("{pol}_shared", "q1"),),
         ),
         BandSource(
             collection=re.compile("c"),
             media_types=frozenset({"application/xml"}),
             roles=frozenset({"metadata"}),
             asset=re.compile(r"a-(?P<pol>[a-z]{2})"),
-            bands=("{pol}_shared", "{pol}_only_here"),
+            bands=(("{pol}_shared", "q1"), ("{pol}_only_here", "q2")),
         ),
     ]
     assets = [
@@ -151,7 +151,7 @@ def test_derive_bands_empty_roles_never_matches():
         media_types=frozenset({"application/xml"}),
         roles=frozenset({"metadata"}),
         asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
     )
     assets = [("noise-vv", "application/xml", [])]
 

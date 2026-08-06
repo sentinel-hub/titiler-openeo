@@ -4,8 +4,10 @@ Increment 1 (tests/test_band_sources_discovery.py) covered discovery only.
 This covers production: `NoiseBandReader` end to end through
 `SimpleSTACReader`'s `_get_asset_info`/`_get_reader` hooks, mask inheritance,
 band ordering, multi-item mosaicking, resolution/pixel-limit accounting for a
-derived-only request, and the clean failure for a band discovery already
-advertises but no reader yet exists for (`vv_sigma0_lut`, increment 3).
+derived-only request, and the clean failure for a band discovery advertises
+but has no reader for yet (a synthetic case as of increment 3, which gives
+`CalibrationBandReader` a reader for the last such band --
+see tests/test_calibration_band_reader.py).
 
 The measurement GCP fixture and fetcher double mirror
 tests/test_sar_process.py exactly (same GCP grid, same real
@@ -15,6 +17,7 @@ its pixels, so the tiny, deliberately degenerate-at-full-resolution GCP tiff
 that file uses is exactly as valid here.
 """
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -236,20 +239,45 @@ def test_missing_sibling_asset_raises_a_clear_error(tmp_path):
             src_dst._get_asset_info("vv_noise_lut")
 
 
-def test_band_with_no_reader_yet_fails_clearly(tmp_path):
-    """`vv_sigma0_lut` is advertised by discovery (increment 1) but has no
-    reader until increment 3 -- requesting it must raise InvalidAssetName,
-    not silently produce nothing or crash obscurely."""
+def test_band_with_no_reader_yet_fails_clearly(tmp_path, monkeypatch):
+    """A band `derive_bands` advertises but whose `BandSource.reader` is
+    still `None` -- discovery ahead of a reader existing, increment 1's
+    shipped state for every band before its reader landed, and possibly a
+    future band again -- must raise InvalidAssetName when requested, not
+    silently produce nothing or crash obscurely. Every band this registry
+    describes has a reader as of increment 3, so this is exercised against a
+    synthetic entry rather than a real (now fully wired) one."""
+    from titiler.openeo.bandsources.registry import BandSource
+
+    fake_source = BandSource(
+        collection=re.compile("sentinel-1-grd"),
+        media_types=frozenset({"application/xml"}),
+        roles=frozenset({"metadata"}),
+        asset=re.compile(r"schema-fake-(?P<pol>[a-z]{2})"),
+        bands=(("{pol}_fake_lut", "fake"),),
+        sibling="{pol}",
+        reader=None,
+    )
+    monkeypatch.setattr("titiler.openeo.reader.BAND_SOURCES", [fake_source])
+
     measurement_path = tmp_path / "measurement.tif"
     _write_measurement_gcp_tiff(measurement_path)
     item = _s1_item(
-        str(measurement_path), calibration_href="fixture://band-source-cal-vv"
+        str(measurement_path),
+        noise_href=None,
+        extra_assets={
+            "schema-fake-vv": pystac.Asset(
+                href="fixture://band-source-fake-vv",
+                media_type="application/xml",
+                roles=["metadata"],
+            )
+        },
     )
 
     with SimpleSTACReader(item) as src_dst:
-        assert "vv_sigma0_lut" not in src_dst._derived_bands
+        assert "vv_fake_lut" not in src_dst._derived_bands
         with pytest.raises(InvalidAssetName):
-            src_dst._get_asset_info("vv_sigma0_lut")
+            src_dst._get_asset_info("vv_fake_lut")
 
 
 # --------------------------------------------------------------------------- band ordering
@@ -301,7 +329,10 @@ def test_inherit_derived_band_masks_forces_sibling_mask():
     )
     derived = {
         "vv_noise_lut": ResolvedBand(
-            asset_key="schema-noise-vv", sibling_key="vv", reader=NoiseBandReader
+            asset_key="schema-noise-vv",
+            sibling_key="vv",
+            quantity="noise",
+            reader=NoiseBandReader,
         )
     }
     original_values = img.array.data.copy()
@@ -320,7 +351,10 @@ def test_inherit_derived_band_masks_leaves_derived_only_request_untouched():
     img = _image(np.zeros((1, 2, 2), dtype=bool), ["vv_noise_lut"])
     derived = {
         "vv_noise_lut": ResolvedBand(
-            asset_key="schema-noise-vv", sibling_key="vv", reader=NoiseBandReader
+            asset_key="schema-noise-vv",
+            sibling_key="vv",
+            quantity="noise",
+            reader=NoiseBandReader,
         )
     }
 

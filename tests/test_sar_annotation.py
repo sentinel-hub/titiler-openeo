@@ -102,7 +102,7 @@ def test_parse_calibration_fixtures(fixture_name):
 
     # Sanity range: Sentinel-1 calibration LUT values are on the order of
     # hundreds, never negative or absurdly large.
-    for getter in (cal.sigma_nought, cal.beta_nought, cal.gamma):
+    for getter in (cal.sigma_nought, cal.beta_nought, cal.gamma, cal.dn):
         value = getter(mid_line, mid_pixel)[0]
         assert 0 < value < 1e5
 

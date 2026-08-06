@@ -163,16 +163,23 @@ duty: they discriminate the asset *and* parameterize the band names and the sibl
 lookup.
 
 ```python
-@attr.s(frozen=True)
+@dataclass(frozen=True)
 class BandSource:
-    collection: str            # regex on collection id
-    media_types: Set[str]      # {"application/xml"}
-    roles: Set[str]            # {"metadata"}
-    asset: str                 # r"^schema-calibration-(?P<pol>[a-z]{2})$"
-    bands: Sequence[str]       # ["{pol}_sigma0_lut", ...] formatted with match groups
-    sibling: Optional[str]     # "{pol}" -- measurement asset, for GCPs
-    reader: Type[BandReader]
+    collection: "re.Pattern[str]"       # regex on collection id
+    media_types: FrozenSet[str]         # {"application/xml"}
+    roles: FrozenSet[str]               # {"metadata"}
+    asset: "re.Pattern[str]"            # r"schema-calibration-(?P<pol>[a-z]{2})"
+    bands: Tuple[Tuple[str, str], ...]  # ("{pol}_sigma0_lut", "sigma_nought"), ...
+    sibling: Optional[str] = None       # "{pol}" -- measurement asset, for GCPs
+    reader: Optional[Type[BaseReader]] = None
 ```
+
+`bands` pairs a name template with a **quantity** string (increment 3):
+opaque to the registry itself, threaded straight through to the reader's
+`quantity` constructor kwarg, so one asset can back several
+distinctly-computed bands without a reader subclass per quantity — one
+calibration annotation's four LUT vectors plus the incidence angle all share
+`CalibrationBandReader`, dispatching on `quantity` alone.
 
 Shipped in code, not configured. The matcher is designed so a JSON/env override or
 entry-point discovery is purely additive later, but neither ships now. **If
@@ -337,16 +344,29 @@ signature, spec or output band names; fixing item-provenance loss in the 30+
   nodes. Settled by the increment-4 spike.
 - **Does registry rebinding survive `openeo_pg_parser_networkx`'s `Process`
   wrapping?** §7.10(b) flags this as worth a spike; increment 4 does it.
-- **Inverse-map duplication across readers.** Two derived bands of the same
-  polarisation are two assets, so each reader builds its own TPS map for the same
-  GCPs and grid. The scope is per-(measurement href, bbox, width, height, dst_crs) —
-  cleanly keyable here, unlike in a process — but a global LRU is a memory hazard
-  (2 × H×W float64 = 64 MB at 2048²), so any cache needs a small maxsize, float32
-  storage, or both. Measured at the increment-2 gate (below) to be a real,
-  pre-existing cost — ~0.2 s at 256² and ~3.0 s at 1024² for a 440-GCP scene — but
-  not one decomposition makes worse, since increment 2 has exactly one derived
-  band. Do not add a cache speculatively; revisit once increment 3 makes the
-  duplication real.
+- **Inverse-map duplication across readers — resolved in increment 3.** Two
+  derived bands of the same polarisation are two assets, so each reader would
+  build its own TPS map for the same GCPs and grid unless something shares it.
+  Not a module-global cache (a global LRU keyed by bbox/width/height/dst_crs in
+  addition to href is a memory hazard — 2 × H×W float64 = 64 MB at 2048² — and
+  has no natural eviction). Instead, `SimpleSTACReader` holds a plain dict plus
+  a `threading.Lock` per item-read (`_inverse_map_cache`/`_inverse_map_lock`)
+  and hands the *same* pair to every derived-band reader it constructs for that
+  item's `part()` call; `BandReader._get_inverse_map` checks it first. Dies
+  with the `SimpleSTACReader` instance — no eviction policy needed because
+  nothing outlives one read.
+
+  **The lock is load-bearing, not defensive.** `RasterStack` reads assets via a
+  thread pool (`multi_arrays`/`create_tasks`), so several of one item's
+  derived-band readers run concurrently. A first version used a bare
+  `dict.get`-then-`dict.__setitem__` with no lock; requesting all five
+  calibration bands together measured **2 builds, not 1** (`tests/
+  test_calibration_band_reader.py::test_inverse_map_built_once_for_five_bands_from_one_asset`
+  caught it directly, deterministically, across repeated runs) — two threads
+  raced past the check before either stored a result, the same single-flight
+  gap `annotation.py`/`geocode.py`'s own `condition=` caches exist to close.
+  Fixed with a single coarse lock around the whole check-build-store section
+  (per-key granularity buys nothing when the cache is effectively one entry).
 - **`sar.py:313` builds the inverse map inside the per-polarisation loop**, so
   dual-pol pays for it twice on identical geometry today. Increment 6 removes the
   loop. Whether VV and VH of one product actually share GCP sets is an unverified
@@ -364,7 +384,7 @@ Delivered as **stacked pull requests**, one per increment, based on this branch.
 | --- | --- | --- |
 | 1 | **Discovery only.** Registry module + `getdimensions` pass. Bands advertised; requesting one still fails at read time. Ships the `Product` fix and #280. | Abandon if derived names collide with real asset keys on any target catalogue. |
 | 2 | **One reader end to end.** `NoiseBandReader` — the narrowest path exercising pseudo-asset resolution, `reader_options` injection, sibling GCP lookup, inverse map, grid alignment, mask inheritance and mosaicking. | **Gate:** per-tile wall time at 256² and 1024², decomposed (independent DN + `NoiseBandReader` reads) vs. fused (`sar_backscatter`'s existing DN-read-then-geocode-then-evaluate body) — not vs. DN alone, since both decomposed and fused pay the same TPS inverse-map cost once; that comparison would measure the cost of wanting a LUT at all, not the cost of decomposition. **Measured:** 1.00× at both 256² and 1024² on the real 440-GCP polar fixture (0.20 s / 3.03 s respectively for both shapes) — decomposition adds no measurable overhead. Abandon if mask inheritance cannot hold or the mosaic case does not work — both invalidate §2.3. |
-| 3 | **The remaining bands.** `CalibrationBandReader` for the four vectors plus incidence angle. One asset yielding several bands maps onto the existing `bands`/`indexes` selection in `_get_options` (`reader.py:176-223`). | — |
+| 3 | **The remaining bands.** `CalibrationBandReader` for the four LUT vectors plus the incidence angle — one class, all five, dispatching on a `quantity` string (`BandSource.bands` became `(name_template, quantity)` pairs; `ResolvedBand` carries `quantity` through to the reader's constructor). Not, as originally planned here, "the existing `bands`/`indexes` selection in `_get_options`" — that mechanism resolves a real STAC asset's own declared `eo:bands`/`bands` metadata, which a calibration XML asset has none of; `quantity` is this increment's own, simpler answer to the same "one asset, several bands" question. Also added `CalibrationLUT.dn()` (`sar/annotation.py`, mirroring the other three accessors — `dn` was already parsed, just not exposed) and the `_inverse_map_cache`/`_inverse_map_lock` memo the increment-2 risk log anticipated (see above). | **Gate:** a concurrency bug, not a timing one — see the risk log above. Fixed with a lock; `tests/test_calibration_band_reader.py`'s call-count tests are the regression guard, run in this project's default single-worker pytest config, not proof against every possible scheduling. |
 | 4 | **Spike the requirement channel.** Settle both §3.1 unknowns. Deliverable is a decision plus a failing-then-passing test, not production code. | — |
 | 5 | **Build the planner.** Requirement registry, DAG pass, per-request registry, resolved-requirement logging. | A graph with no requiring process must produce a byte-identical read. |
 | 6 | **Convergence.** `sar_backscatter` consumes injected bands; `calibrate` reduces to arithmetic; delete `_resolve_stack_assets`, `_resolve_polarisation_assets`, `_find_annotation_asset` and the `sar.py:212` rejection (~150 lines). | Abandon if increment 2's gate showed the decomposed read is materially more expensive. Then stop at 3, keep `sar_backscatter` fused, and record why here. |
