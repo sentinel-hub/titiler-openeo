@@ -55,14 +55,27 @@ class _FixtureFetcher:
 
 
 def _write_measurement_gcp_tiff(path: Path) -> None:
-    """Same GCP grid as test_sar_process.py/test_band_source_readers.py --
-    lands a (0,0,1,1)-bounds destination grid inside the fixture LUT's real
-    coordinate domain."""
+    """Same GCP grid as test_band_source_readers.py -- a 4x4 grid (16 points,
+    same corner mapping and coordinate domain as test_sar_process.py's
+    original 4-corner version), lands a (0,0,1,1)-bounds destination grid
+    inside the fixture LUT's real coordinate domain.
+
+    16 points rather than 4: `OpenEOReader` fits an order-3 polynomial
+    (`MAX_GCP_ORDER=3`, needs >= 10 points), and 4 corners alone raised
+    `CPLE_AppDefinedError: Failed to compute GCP transform: Not enough points
+    available` on Python 3.11/3.12 CI (confirmed via #357) for any test
+    mixing a real "vv" read with a derived band -- see
+    test_band_source_readers.py for the fuller story. No test in *this* file
+    currently mixes "vv" in, but the fixture is shared in spirit (same
+    rationale, same file layout), so it gets the same fix rather than being
+    left as a landmine for the next test that does.
+    """
+    rows = np.linspace(0, 8000, 4)
+    cols = np.linspace(0, 12000, 4)
     gcps = [
-        GroundControlPoint(row=0, col=0, x=0, y=1),
-        GroundControlPoint(row=0, col=12000, x=1, y=1),
-        GroundControlPoint(row=8000, col=0, x=0, y=0),
-        GroundControlPoint(row=8000, col=12000, x=1, y=0),
+        GroundControlPoint(row=row, col=col, x=col / 12000, y=1 - row / 8000)
+        for row in rows
+        for col in cols
     ]
     with rasterio.open(
         path, "w", driver="GTiff", width=2, height=2, count=1, dtype="uint16"
