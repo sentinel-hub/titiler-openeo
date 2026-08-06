@@ -176,3 +176,6 @@ file::memory:
 docs/src/notebooks/evi.tif
 docs/src/notebooks/timeseries-basic.csv
 docs/src/notebooks/sar_backscatter_vv_vh_mask.tif
+docs/src/notebooks/band_sources_*.tif
+docs/src/notebooks/_tmp_decomposed_*.tif
+docs/src/notebooks/_tmp_fused_*.tif
