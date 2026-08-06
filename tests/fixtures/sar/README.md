@@ -45,3 +45,22 @@ manifests and other unrelated assets are dropped.
 
 Adding a catalogue means adding a row here and a fixture, per the ADR — this
 is what makes portability a verified claim rather than an assumption.
+
+## STAC collection fixtures (`collections/`)
+
+Trimmed real STAC collections — one per catalogue, `item_assets` only — fetched
+live 2026-08-06 against each catalogue's `/collections/sentinel-1-grd`, used by
+`tests/test_band_sources_discovery.py` (docs/adr/0002-band-sources.md §1.2).
+Unlike the item fixtures above, these describe the *collection's* declared
+asset shape (media type, roles), not one item's actual hrefs.
+
+| File | Notable difference from the others |
+| --- | --- |
+| `cdse.json` | Only catalogue with a `Product` asset (`application/zip`, roles include `data`) — the fixture that pins the `Product`-as-band fix. Manifest key is `safe_manifest` (underscore). |
+| `earth_search.json` | No `Product` asset. Manifest key is `safe-manifest` (hyphen). |
+| `planetary_computer.json` | Same shape as Earth Search. |
+
+All three publish `schema-calibration-<pol>`/`schema-noise-<pol>`/
+`schema-product-<pol>` as `application/xml` with role `metadata`, and all
+three currently use the collection id `sentinel-1-grd` — verified live, not
+assumed.

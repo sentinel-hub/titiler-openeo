@@ -1,0 +1,50 @@
+{
+  "type": "Collection",
+  "stac_version": "1.0.0",
+  "id": "sentinel-1-grd",
+  "description": "Sentinel-1 GRD (Earth Search) -- trimmed collection fixture, item_assets only.",
+  "license": "proprietary",
+  "extent": {
+    "spatial": {"bbox": [[-180, -90, 180, 90]]},
+    "temporal": {"interval": [["2014-01-01T00:00:00Z", null]]}
+  },
+  "links": [],
+  "item_assets": {
+    "hh": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"]
+    },
+    "hv": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"]
+    },
+    "vh": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"]
+    },
+    "vv": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"]
+    },
+    "safe-manifest": {
+      "type": "application/xml",
+      "roles": ["metadata"]
+    },
+    "thumbnail": {
+      "type": "image/png",
+      "roles": ["thumbnail"]
+    },
+    "schema-calibration-hh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-calibration-hv": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-calibration-vh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-calibration-vv": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-noise-hh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-noise-hv": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-noise-vh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-noise-vv": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-product-hh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-product-hv": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-product-vh": {"type": "application/xml", "roles": ["metadata"]},
+    "schema-product-vv": {"type": "application/xml", "roles": ["metadata"]}
+  }
+}
