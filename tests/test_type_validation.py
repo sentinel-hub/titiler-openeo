@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from titiler.openeo.errors import ProcessParameterInvalid
 from titiler.openeo.processes.implementations.arrays import array_create
 from titiler.openeo.processes.implementations.data_model import RasterStack
 
@@ -23,7 +24,7 @@ def test_array_create_with_raster_stack():
 
     # Create an actual RasterStack instance (not a plain dict)
     raster_stack = RasterStack(tasks=[], timestamp_fn=lambda x: datetime.now())
-    with pytest.raises(TypeError):
+    with pytest.raises(ProcessParameterInvalid):
         _ = array_create(data=raster_stack, repeat=1)
 
 

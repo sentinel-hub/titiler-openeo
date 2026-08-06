@@ -95,7 +95,7 @@ class ExceptionHandler:
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "code": "ServerError" if exc.status_code >= 500 else "InvalidRequest",
+                "code": "Internal" if exc.status_code >= 500 else "InvalidRequest",
                 "message": exc.detail,
             },
         )
@@ -103,9 +103,17 @@ class ExceptionHandler:
     def general_exception_handler(
         self, request: Request, exc: Exception
     ) -> JSONResponse:
-        """Handle general exceptions."""
+        """Handle general exceptions.
+
+        This is a safety net for exceptions that are not (yet) raised as a
+        specific ``OpenEOException`` subclass. ``ValueError``/``TypeError`` are
+        treated as client-input errors, since process implementations raise
+        them for bad parameter values/types; anything else is a genuine
+        server fault, reported with the standardized ``Internal`` code (see
+        https://github.com/Open-EO/openeo-api/blob/master/errors.json).
+        """
         self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
-        if isinstance(exc, ValueError):
+        if isinstance(exc, (ValueError, TypeError)):
             return JSONResponse(
                 status_code=400,
                 content={
@@ -116,8 +124,8 @@ class ExceptionHandler:
         return JSONResponse(
             status_code=500,
             content={
-                "code": "ServerError",
-                "message": str(exc),
+                "code": "Internal",
+                "message": f"Server error: {exc}",
             },
         )
 
@@ -134,15 +142,15 @@ class ProcessParameterInvalid(OpenEOException):
         )
 
 
-class ProcessParameterMissing(OpenEOException):
-    """Invalid Parameters."""
+class ProcessParameterRequired(OpenEOException):
+    """A required process parameter is missing."""
 
     def __init__(self, parameter: str):
         """Initialize error with missing process parameter."""
         super().__init__(
             message=f"Required process parameter '{parameter}' is missing",
-            code="ProcessParameterMissing",
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="ProcessParameterRequired",
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
 
 

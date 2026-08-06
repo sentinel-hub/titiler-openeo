@@ -2,7 +2,7 @@
 
 import pytest
 
-from titiler.openeo.errors import ProcessParameterInvalid, ProcessParameterMissing
+from titiler.openeo.errors import ProcessParameterInvalid, ProcessParameterRequired
 from titiler.openeo.processes.implementations.get_param_item import get_param_item
 
 
@@ -30,7 +30,7 @@ def test_get_param_item_basic():  # Test basic dictionary access
 def test_get_param_item_errors():  # Test missing path
     param = {"metadata": {"resolution": 10}}
 
-    with pytest.raises(ProcessParameterMissing) as excinfo:
+    with pytest.raises(ProcessParameterRequired) as excinfo:
         get_param_item(param, "$.nonexistent")
         assert "not found in parameter" in str(excinfo.value)
 

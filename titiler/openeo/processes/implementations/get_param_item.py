@@ -10,7 +10,7 @@ from jsonpath_ng import parse
 from jsonpath_ng.exceptions import JsonPathParserError
 from pydantic import BaseModel
 
-from ...errors import ProcessParameterInvalid, ProcessParameterMissing
+from ...errors import ProcessParameterInvalid, ProcessParameterRequired
 
 __all__ = [
     "get_param_item",
@@ -73,11 +73,11 @@ def get_param_item(parameter: Any, path: str) -> Any:
         matches = jsonpath_expr.find(parameter)
 
         if not matches:
-            raise ProcessParameterMissing("Path not found in parameter")
+            raise ProcessParameterRequired("Path not found in parameter")
 
         return matches[0].value
 
-    except ProcessParameterMissing as err:
+    except ProcessParameterRequired as err:
         raise err from err
     except JsonPathParserError as err:
         raise ProcessParameterInvalid("Invalid JSONPath expression") from err

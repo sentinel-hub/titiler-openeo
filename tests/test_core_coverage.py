@@ -26,7 +26,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 )
 
 from titiler.openeo.auth import User
-from titiler.openeo.errors import ProcessParameterMissing
+from titiler.openeo.errors import ProcessParameterInvalid, ProcessParameterRequired
 from titiler.openeo.processes.implementations.apply import apply, apply_dimension
 from titiler.openeo.processes.implementations.arrays import merge_cubes
 from titiler.openeo.processes.implementations.core import (
@@ -88,7 +88,7 @@ class TestResolvePositionalArgs:
         assert result == (10, 20)
 
     def test_resolve_positional_args_missing_parameter(self):
-        """Test that missing parameter raises ProcessParameterMissing error.
+        """Test that missing parameter raises ProcessParameterRequired error.
 
         Validates: When a ParameterReference points to a non-existent parameter,
         a clear error is raised with the parameter name.
@@ -102,7 +102,7 @@ class TestResolvePositionalArgs:
 
         args = (ParameterReference(from_parameter="missing"),)
         named_parameters = {}
-        with pytest.raises(ProcessParameterMissing, match="missing"):
+        with pytest.raises(ProcessParameterRequired, match="missing"):
             _resolve_positional_args(args, named_parameters, "test_func")
 
 
@@ -559,7 +559,7 @@ class TestTypeValidation:
     """
 
     def test_validation_none_not_allowed(self):
-        """Test that None raises TypeError for non-optional parameters.
+        """Test that None raises ProcessParameterInvalid for non-optional parameters.
 
         Validates: Required parameters (int, not Optional[int]) must not be None.
 
@@ -571,13 +571,14 @@ class TestTypeValidation:
         def requires_int(x: int) -> int:
             return x * 2
 
-        with pytest.raises(TypeError, match="cannot be None"):
+        with pytest.raises(ProcessParameterInvalid, match="cannot be None"):
             requires_int(x=None)
 
     def test_validation_dict_to_array_mismatch(self):
         """Test dict to array type mismatch detection via Pydantic.
 
-        Validates: Passing a dict when List[int] expected raises clear TypeError.
+        Validates: Passing a dict when List[int] expected raises clear
+        ProcessParameterInvalid.
 
         Why important: Plain dicts are no longer pre-rejected as datacubes.
         Instead, Pydantic validation catches the type mismatch and reports
@@ -588,7 +589,7 @@ class TestTypeValidation:
         def requires_array(data: List[int]) -> int:
             return len(data)
 
-        with pytest.raises(TypeError, match="expected.*got.*object"):
+        with pytest.raises(ProcessParameterInvalid, match="expected.*got.*object"):
             requires_array(data={"a": 1})
 
     def test_validation_lazy_raster_stack_to_array_mismatch(self):
@@ -606,7 +607,9 @@ class TestTypeValidation:
 
         # Create an empty RasterStack (without tasks, but with required timestamp_fn)
         mock_stack = RasterStack(tasks=[], timestamp_fn=lambda x: datetime.now())
-        with pytest.raises(TypeError, match="expected.*List.*got.*datacube"):
+        with pytest.raises(
+            ProcessParameterInvalid, match="expected.*List.*got.*datacube"
+        ):
             requires_array(data=mock_stack)
 
     def test_validation_skip_for_empty_annotation(self):
@@ -627,19 +630,21 @@ class TestTypeValidation:
         assert result == "anything"
 
     def test_validation_pydantic_error_handling(self):
-        """Test Pydantic ValidationError is caught and converted to TypeError.
+        """Test Pydantic ValidationError is caught and converted to ProcessParameterInvalid.
 
         Validates: Invalid types caught by Pydantic get clear error messages.
 
         Why important: Pydantic ValidationErrors can be technical. We convert
-        them to TypeErrors with OpenEO terminology for better UX.
+        them to ProcessParameterInvalid errors with OpenEO terminology for
+        better UX, and so the API reports a spec-compliant 400 instead of a
+        bare 500.
         """
 
         @process
         def requires_int(x: int) -> int:
             return x * 2
 
-        with pytest.raises(TypeError) as exc_info:
+        with pytest.raises(ProcessParameterInvalid) as exc_info:
             requires_int(x="not_an_int")
 
         assert "expected 'integer'" in str(exc_info.value)
@@ -678,7 +683,7 @@ class TestTypeValidation:
         # Pass TemporalInterval when BoundingBox expected
         interval = TemporalInterval(["2020-01-01", "2020-12-31"])
         # This should pass through Pydantic validation which will catch the error
-        with pytest.raises(TypeError):
+        with pytest.raises(ProcessParameterInvalid):
             accepts_bbox(bbox=interval)
 
     def test_validation_complex_type_exception_handling(self):
@@ -735,7 +740,7 @@ class TestProcessDecoratorEdgeCases:
     ensuring robustness and clear error messages.
 
     Scenarios covered:
-    - Missing parameter references (should raise ProcessParameterMissing)
+    - Missing parameter references (should raise ProcessParameterRequired)
     - Special arguments removal (namespace, positional_parameters, etc.)
     - Named parameters passthrough when expected by function
     - Debug logging (should not crash)
@@ -745,7 +750,7 @@ class TestProcessDecoratorEdgeCases:
     """
 
     def test_missing_parameter_in_named_parameters(self):
-        """Test ProcessParameterMissing raised for unresolvable ParameterReference.
+        """Test ProcessParameterRequired raised for unresolvable ParameterReference.
 
         Validates: ParameterReference to non-existent key raises clear error.
 
@@ -757,7 +762,7 @@ class TestProcessDecoratorEdgeCases:
         def add(a: int, b: int) -> int:
             return a + b
 
-        with pytest.raises(ProcessParameterMissing, match="missing"):
+        with pytest.raises(ProcessParameterRequired, match="missing"):
             add(
                 a=ParameterReference(from_parameter="missing_param"),
                 b=5,
@@ -823,7 +828,7 @@ class TestProcessDecoratorEdgeCases:
             return x * 2
 
         # Pass context as ParameterReference to non-existent parameter
-        # This should NOT raise ProcessParameterMissing
+        # This should NOT raise ProcessParameterRequired
         result = simple_func(
             x=5,
             context=ParameterReference(from_parameter="context"),
@@ -905,7 +910,7 @@ class TestProcessDecoratorEdgeCases:
     def test_parameter_resolution_with_exception(self):
         """Test clear error when ParameterReference points to missing key.
 
-        Validates: ProcessParameterMissing raised with parameter name.
+        Validates: ProcessParameterRequired raised with parameter name.
 
         Why important: Error message must indicate which parameter couldn't
         be resolved, helping users fix their OpenEO graph.
@@ -917,7 +922,7 @@ class TestProcessDecoratorEdgeCases:
 
         # When a ParameterReference points to a missing parameter
         # the decorator will try to resolve from named_parameters in the kwargs resolution phase
-        with pytest.raises(ProcessParameterMissing, match="missing"):
+        with pytest.raises(ProcessParameterRequired, match="missing"):
             test_func(x=ParameterReference(from_parameter="missing"))
 
     def test_resolve_special_parameter_with_error(self):
@@ -926,7 +931,7 @@ class TestProcessDecoratorEdgeCases:
         Validates: ParameterReference resolution checks named_parameters exists.
 
         Why important: If named_parameters is empty or missing the key,
-        should raise ProcessParameterMissing with helpful message.
+        should raise ProcessParameterRequired with helpful message.
         """
 
         @process
@@ -934,7 +939,7 @@ class TestProcessDecoratorEdgeCases:
             return x
 
         # Test error from kwargs resolution when named_parameters entry doesn't exist
-        with pytest.raises(ProcessParameterMissing, match="from_nonexistent"):
+        with pytest.raises(ProcessParameterRequired, match="from_nonexistent"):
             test_func(
                 x=ParameterReference(from_parameter="from_nonexistent"),
                 named_parameters={},
