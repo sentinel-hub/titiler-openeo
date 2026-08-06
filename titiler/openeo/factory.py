@@ -24,6 +24,7 @@ from .errors import InvalidProcessGraph
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
+from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
@@ -1314,8 +1315,11 @@ class EndpointsFactory(BaseFactory):
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             results_cache = make_results_cache(parsed_graph)
+            process_registry = plan_process_registry(
+                parsed_graph, self.process_registry
+            )
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry,
+                process_registry=process_registry,
                 parameters=process.get("parameters"),
                 results_cache=results_cache,
             )
@@ -1462,8 +1466,11 @@ class EndpointsFactory(BaseFactory):
 
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             results_cache = make_results_cache(parsed_graph)
+            process_registry = plan_process_registry(
+                parsed_graph, self.process_registry
+            )
             pg_callable = parsed_graph.to_callable(
-                process_registry=self.process_registry,
+                process_registry=process_registry,
                 parameters=process.get("parameters"),
                 results_cache=results_cache,
                 # parameters=args,  # Use built-in parameter substitution instead of manual
