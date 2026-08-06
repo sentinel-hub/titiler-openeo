@@ -13,6 +13,7 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from openeo_pg_parser_networkx.resolving_utils import resolve_process_graph
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -110,6 +111,57 @@ class EndpointsFactory(BaseFactory):
                     detail=f"Invalid JSON in query parameter '{param_name}': {param_value}",
                 ) from err
         return query_params
+
+    def _resolve_udp_references(self, process_graph: dict, user) -> dict:
+        """Inline any user-defined process (UDP) references in a flat graph.
+
+        A process graph may reference a stored UDP by ``process_id`` — a
+        "graph that extends another graph". The process registry only holds
+        predefined processes, so such references must be inlined (with their
+        parameters bound) before the graph is parsed or executed. We delegate
+        the actual inlining to openeo_pg_parser_networkx's resolver, feeding it
+        a lookup into ``udp_store`` scoped to the authenticated user.
+
+        Returns the graph unchanged when there is no authenticated user, when
+        it references only predefined processes, or on any resolution failure —
+        so a genuinely unknown process still surfaces the normal
+        "not found in registry" error downstream instead of a 500.
+        """
+        if user is None or not process_graph:
+            return process_graph
+
+        # Nothing to do unless something isn't a predefined process.
+        predefined = set(self.process_registry[None].keys())
+        referenced = {
+            node.get("process_id")
+            for node in process_graph.values()
+            if isinstance(node, dict)
+        }
+        if referenced <= (predefined | {None}):
+            return process_graph
+
+        def get_udp_spec(process_id: str, namespace: str) -> Optional[dict]:
+            try:
+                return self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
+            except Exception:  # noqa: BLE001
+                return None
+
+        # Resolve against a throwaway registry that shares the predefined
+        # namespace for reads but keeps the resolver's per-user UDP writes off
+        # the shared registry — avoiding cross-request leakage and stale-UDP
+        # caching (the resolver only re-fetches a UDP it hasn't already cached).
+        scratch = ProcessRegistry(wrap_funcs=self.process_registry.wrap_funcs)
+        scratch.store = dict(self.process_registry.store)
+        scratch.aliases = self.process_registry.aliases
+        try:
+            return resolve_process_graph(
+                deepcopy(process_graph),
+                scratch,
+                get_udp_spec=get_udp_spec,
+                namespace=user.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            return process_graph
 
     def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
         """Validate that tile is within service extent if configured."""
@@ -769,6 +821,10 @@ class EndpointsFactory(BaseFactory):
 
             raw_pg = body.model_dump().get("process_graph") or {}
 
+            # Inline referenced UDPs so validation sees the fully-resolved graph
+            # (a graph that extends a stored UDP is valid).
+            raw_pg = self._resolve_udp_references(raw_pg, user)
+
             # Basic per-node validation against registry specs (structure and required params)
             for node_id, node in raw_pg.items():
                 node_dict = (
@@ -826,7 +882,7 @@ class EndpointsFactory(BaseFactory):
                 return {"errors": errors}
 
             try:
-                parsed_graph = OpenEOProcessGraph(pg_data=body.model_dump())
+                parsed_graph = OpenEOProcessGraph(pg_data={"process_graph": raw_pg})
             except Exception as err:  # noqa: BLE001
                 errors.append(
                     {
@@ -1021,6 +1077,16 @@ class EndpointsFactory(BaseFactory):
         ):
             """Creates a new secondary web service."""
             service_def = body.model_dump()
+
+            # Inline any referenced UDPs up front so the stored service graph is
+            # self-contained: XYZ tiles are rendered later without an
+            # authenticated user, so they can't look UDPs up themselves.
+            if isinstance(service_def.get("process"), dict) and service_def[
+                "process"
+            ].get("process_graph"):
+                service_def["process"]["process_graph"] = self._resolve_udp_references(
+                    service_def["process"]["process_graph"], user
+                )
 
             try:
                 # Parse and validate process graph structure
@@ -1316,6 +1382,12 @@ class EndpointsFactory(BaseFactory):
 
             """
             process = body.process.model_dump()
+
+            # Inline any referenced UDPs before executing.
+            if isinstance(process.get("process_graph"), dict):
+                process["process_graph"] = self._resolve_udp_references(
+                    process["process_graph"], user
+                )
 
             # Parse query parameters for dynamic parameter substitution
             query_params = self._parse_query_parameters(request)
