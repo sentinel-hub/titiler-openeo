@@ -126,6 +126,69 @@ class OpenEOReader(Reader):
         super().__attrs_post_init__()
 
 
+#: Extensions that are never the measurement raster itself (annotation XML,
+#: STAC-API tilejson, manifests, ...). Used only to skip pointless header
+#: opens in `_item_has_untrustworthy_proj` -- not a correctness filter.
+_NON_RASTER_HREF_SUFFIXES = (".xml", ".json", ".zip", ".txt", ".html")
+
+
+def _item_looks_like_sar(item: pystac.Item) -> bool:
+    """Cheap, no-I/O signal that ``item`` may carry GCP-referenced SAR-geometry assets.
+
+    ``sar:instrument_mode`` (SAR STAC extension) is present on Sentinel-1 GRD items
+    from every catalogue this project has checked -- CDSE, Earth Search, Planetary
+    Computer (docs/adr/0001-sar-backscatter.md S1.7) -- including the two that
+    fabricate a bbox-derived `proj:transform` for them (issue #338). This only gates
+    whether `_item_has_untrustworthy_proj` pays for a header open below: terrain
+    corrected/geocoded SAR products (e.g. RTC) can carry this same field and still
+    have genuinely valid `proj:*`, so presence alone is not treated as proof.
+    """
+    return "sar:instrument_mode" in (item.properties or {})
+
+
+def _is_asset_gcp_referenced(href: str) -> bool:
+    """Open ``href`` header-only and report whether it is GCP-referenced with no CRS.
+
+    A dataset in this state (Sentinel-1 GRD's SAR geometry is the known case) has no
+    valid affine transform, so any `proj:epsg`/`proj:transform` a catalogue advertises
+    for it cannot be correct. This is a plain ``rasterio.open`` -- metadata only, no
+    pixel data -- mirroring the header-only GCP read `OpenEOReader` and
+    `sar/geocode.get_gcps` already rely on elsewhere in this codebase.
+    """
+    try:
+        with rasterio.open(href) as dataset:
+            return dataset.crs is None and bool(dataset.gcps[0])
+    except Exception:
+        logger.debug(
+            "Could not open asset %r to check GCP georeferencing", href, exc_info=True
+        )
+        return False
+
+
+def _item_has_untrustworthy_proj(item: pystac.Item, assets: Sequence[str]) -> bool:
+    """Whether ``item``'s `proj:*` metadata should be ignored (issue #338).
+
+    Gated by `_item_looks_like_sar` so ordinary (non-SAR) items never pay for the
+    header open below -- this keeps the common case exactly as cheap as before.
+    """
+    if not _item_looks_like_sar(item):
+        return False
+
+    for asset_name in assets:
+        asset = item.assets.get(asset_name)
+        if asset is None:
+            continue
+
+        href = asset.get_absolute_href() or asset.href
+        if not href or href.lower().endswith(_NON_RASTER_HREF_SUFFIXES):
+            continue
+
+        if _is_asset_gcp_referenced(href):
+            return True
+
+    return False
+
+
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
     """Simplified STAC Reader."""
@@ -152,7 +215,18 @@ class SimpleSTACReader(MultiBaseReader):
                 "No valid asset found. Asset's media types not supported"
             )
 
-        if proj := _extract_proj_info(self.input, assets=self.assets):
+        proj = _extract_proj_info(self.input, assets=self.assets)
+        if proj and _item_has_untrustworthy_proj(self.input, self.assets):
+            logger.warning(
+                "Ignoring STAC `proj:*` metadata for item '%s': its assets are "
+                "GCP-referenced with no CRS (SAR geometry), so the catalogue's "
+                "advertised projection is not a valid affine transform for this "
+                "data. Falling back to the item's footprint bounding box.",
+                self.input.id,
+            )
+            proj = None
+
+        if proj:
             self.height = proj["height"]
             self.width = proj["width"]
             self.bounds = proj["bounds"]
