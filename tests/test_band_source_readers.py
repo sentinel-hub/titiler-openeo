@@ -61,23 +61,32 @@ class _FixtureFetcher:
 
 
 def _write_measurement_gcp_tiff(path: Path) -> None:
-    """A minimal GCP-referenced GeoTIFF, mirroring test_sar_process.py's.
+    """A minimal GCP-referenced GeoTIFF, mirroring test_sar_process.py's
+    corner mapping, but as a 4x4 grid rather than 4 corner points.
+
+    `OpenEOReader` fits an order-3 polynomial (`MAX_GCP_ORDER=3`), which
+    needs at least 10 points ((3+1)(3+2)/2 coefficients per axis); 4 points
+    are not enough on every GDAL build, and "not enough points" is a hard
+    GDAL error rather than a graceful fallback on some of them -- confirmed:
+    4 corners alone raised `CPLE_AppDefinedError: Failed to compute GCP
+    transform: Not enough points available` on Python 3.11/3.12 CI (GitHub
+    Actions), while the GDAL build behind Python 3.13 tolerated it (returning
+    an all-masked, all-zero result instead of raising). 16 points is
+    comfortably overdetermined on every GDAL version tested.
 
     The GCPs are chosen so a (0,0,1,1)-bounds destination grid lands within
     noise_ipf290.xml's real coordinate domain (line 0-~16000, pixel
     0-~23000). `get_gcps` only reads the header/tags, never pixel data, so
     the file's actual size/content is otherwise irrelevant to the oracle
-    test -- but at this tiny scale the *pixel* GCP-warp itself is
-    degenerate (confirmed: reading it through `OpenEOReader.part()` at
-    (0,0,1,1) returns an all-masked, all-zero result regardless of what is
-    written), which is deliberately exploited by the mask-inheritance test
-    below rather than worked around.
+    tests -- but the *pixel* GCP-warp a real "vv" read goes through needs a
+    well-determined fit to not raise at all, whatever it warps to.
     """
+    rows = np.linspace(0, 8000, 4)
+    cols = np.linspace(0, 12000, 4)
     gcps = [
-        GroundControlPoint(row=0, col=0, x=0, y=1),
-        GroundControlPoint(row=0, col=12000, x=1, y=1),
-        GroundControlPoint(row=8000, col=0, x=0, y=0),
-        GroundControlPoint(row=8000, col=12000, x=1, y=0),
+        GroundControlPoint(row=row, col=col, x=col / 12000, y=1 - row / 8000)
+        for row in rows
+        for col in cols
     ]
     with rasterio.open(
         path, "w", driver="GTiff", width=2, height=2, count=1, dtype="uint16"
