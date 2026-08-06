@@ -28,6 +28,7 @@ from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
 from rio_tiler.utils import cast_to_sequence, has_alpha_band, inherit_rasterio_env
 from typing_extensions import TypedDict
 
+from .bandsources import BAND_SOURCES, ResolvedBand, derive_bands, resolve_band
 from .errors import OutputLimitExceeded
 from .settings import ProcessingSettings
 
@@ -189,6 +190,23 @@ def _item_has_untrustworthy_proj(item: pystac.Item, assets: Sequence[str]) -> bo
     return False
 
 
+def _resolve_asset_href(asset: pystac.Asset) -> str:
+    """An asset's href, preferring the ``STAC_ALTERNATE_KEY`` variant if present.
+
+    Shared by real and derived (band-source) assets so both resolve the same
+    way for the same underlying file -- e.g. a Sentinel-1 measurement asset's
+    GCPs (read for a derived band's sibling) must come from the same href
+    variant its pixels are read from. Mirrors
+    ``titiler.openeo.processes.implementations.sar._asset_href``.
+    """
+    href = asset.get_absolute_href() or asset.href
+    extras = asset.extra_fields
+    if STAC_ALTERNATE_KEY and extras.get("alternate"):
+        if alternate := extras["alternate"].get(STAC_ALTERNATE_KEY):
+            href = alternate["href"]
+    return href
+
+
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
     """Simplified STAC Reader."""
@@ -207,6 +225,21 @@ class SimpleSTACReader(MultiBaseReader):
 
     ctx: Any = attr.ib(default=rasterio.Env)
 
+    #: Optional AssetFetcher override for derived (band-source) assets' own
+    #: non-raster fetches (e.g. Sentinel-1 annotation XML) -- a test/deployment
+    #: seam mirroring `sar_backscatter`'s `options["fetcher"]`, one level down;
+    #: not part of any user-facing contract. Real raster assets never see this
+    #: -- only `_get_derived_asset_info` reads it, per derived asset, so it
+    #: cannot leak into a real asset's `reader_options` (unlike `reader_options`
+    #: above, which is shared by every asset this reader constructs).
+    band_source_fetcher: Any = attr.ib(default=None)
+
+    #: Derived band names this item's own assets resolve to, precomputed once
+    #: (pure, no I/O -- regex matching over `self.input.assets`) so
+    #: `_get_asset_info` and the mask-inheritance post-step in `_reader()`
+    #: don't repeat it. See docs/adr/0002-band-sources.md S2.3.
+    _derived_bands: Dict[str, ResolvedBand] = attr.ib(init=False, factory=dict)
+
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
         self.assets = self.input.get_assets().keys()
@@ -214,6 +247,16 @@ class SimpleSTACReader(MultiBaseReader):
             raise MissingAssets(
                 "No valid asset found. Asset's media types not supported"
             )
+
+        item_asset_facts = [
+            (key, asset.media_type, asset.roles or [])
+            for key, asset in self.input.assets.items()
+        ]
+        collection_id = self.input.collection_id or ""
+        for name in derive_bands(collection_id, item_asset_facts, BAND_SOURCES):
+            resolved = resolve_band(collection_id, name, item_asset_facts, BAND_SOURCES)
+            if resolved is not None:
+                self._derived_bands[name] = resolved
 
         proj = _extract_proj_info(self.input, assets=self.assets)
         if proj and _item_has_untrustworthy_proj(self.input, self.assets):
@@ -245,6 +288,9 @@ class SimpleSTACReader(MultiBaseReader):
 
     def _get_reader(self, asset_info: AssetInfo) -> type[BaseReader]:
         """Get Asset Reader."""
+        resolved = self._derived_bands.get(asset_info["name"])
+        if resolved is not None:
+            return resolved.reader
         return self.reader
 
     def _get_options(
@@ -296,6 +342,37 @@ class SimpleSTACReader(MultiBaseReader):
 
         return reader_options, method_options
 
+    def _get_derived_asset_info(self, asset_name: str) -> AssetInfo:
+        """Build an ``AssetInfo`` for a band-source-derived (pseudo-asset) band.
+
+        Resolves to the annotation asset that produces it (e.g. `vv_noise_lut`'s
+        `schema-noise-vv`) and, if the band needs one, its sibling measurement
+        asset -- for `NoiseBandReader`/`CalibrationBandReader`, the sibling's
+        GCPs (docs/adr/0002-band-sources.md S2.3). Both hrefs go through
+        `_resolve_asset_href` so a derived band and its sibling's own pixels
+        resolve the same href variant for the same file.
+        """
+        resolved = self._derived_bands[asset_name]
+        annotation_asset = self.input.assets[resolved.asset_key]
+
+        reader_options: Dict[str, Any] = {"fetcher": self.band_source_fetcher}
+        if resolved.sibling_key:
+            sibling = self.input.assets.get(resolved.sibling_key)
+            if sibling is None:
+                raise InvalidAssetName(
+                    f"Band '{asset_name}' needs sibling asset '{resolved.sibling_key}', "
+                    f"which item '{self.input.id}' does not have"
+                )
+            reader_options["sibling_href"] = _resolve_asset_href(sibling)
+
+        return AssetInfo(
+            url=_resolve_asset_href(annotation_asset),
+            name=asset_name,
+            media_type=annotation_asset.media_type,
+            reader_options=reader_options,
+            method_options={},
+        )
+
     def _get_asset_info(self, asset: AssetType) -> AssetInfo:  # noqa: C901
         """Custom version of rio_tiler.io.stac.STACReader()._get_asset_info
         which add support for nodata.
@@ -308,9 +385,14 @@ class SimpleSTACReader(MultiBaseReader):
             raise ValueError("asset dictionary does not have `name` key")
 
         asset_name = asset["name"]
+
+        if asset_name in self._derived_bands:
+            return self._get_derived_asset_info(asset_name)
+
         if asset_name not in self.assets:
             raise InvalidAssetName(
-                f"'{asset_name}' is not valid, should be one of {self.assets}"
+                f"'{asset_name}' is not valid, should be one of "
+                f"{sorted(set(self.assets) | set(self._derived_bands))}"
             )
 
         asset_info = self.input.assets[asset_name]
@@ -321,7 +403,7 @@ class SimpleSTACReader(MultiBaseReader):
         asset_modified = "expression" in method_options
 
         info = AssetInfo(
-            url=asset_info.get_absolute_href() or asset_info.href,
+            url=_resolve_asset_href(asset_info),
             name=asset_name,
             media_type=asset_info.media_type,
             reader_options=reader_options,
@@ -330,10 +412,6 @@ class SimpleSTACReader(MultiBaseReader):
 
         if not asset_modified:
             info["metadata"] = extras
-
-        if STAC_ALTERNATE_KEY and extras.get("alternate"):
-            if alternate := extras["alternate"].get(STAC_ALTERNATE_KEY):
-                info["url"] = alternate["href"]
 
         # https://github.com/stac-extensions/file
         if head := extras.get("file:header_size"):
@@ -550,11 +628,34 @@ def _get_assets_resolutions(
     band_resolutions = {}
     assets_to_process = set(bands) if bands else set(item.get_assets().keys())
 
-    for band_name in assets_to_process:
-        if band_name not in item.assets:
-            continue
+    # Built lazily, only if a requested name turns out not to be a real asset
+    # -- the common (no derived bands requested) case pays nothing extra.
+    item_asset_facts: Optional[List[Tuple[str, Optional[str], Sequence[str]]]] = None
+    collection_id = item.collection_id or ""
 
-        asset = item.assets[band_name]
+    for band_name in assets_to_process:
+        resolution_asset_name = band_name
+
+        if band_name not in item.assets:
+            # Not a real asset -- maybe a band-source-derived name (ADR
+            # 0002 S2.4). A derived band shares its sibling raster asset's
+            # grid, so fall back to that asset's resolution rather than
+            # silently contributing none (which would leave a derived-only
+            # request's output dimensions defaulting to 1024x1024).
+            if item_asset_facts is None:
+                item_asset_facts = [
+                    (key, a.media_type, a.roles or []) for key, a in item.assets.items()
+                ]
+            resolved = resolve_band(
+                collection_id, band_name, item_asset_facts, BAND_SOURCES
+            )
+            if resolved is None or not resolved.sibling_key:
+                continue
+            resolution_asset_name = resolved.sibling_key
+            if resolution_asset_name not in item.assets:
+                continue
+
+        asset = item.assets[resolution_asset_name]
         asset_proj_ext = None
         if ProjectionExtension.has_extension(item):
             asset_proj_ext = ProjectionExtension.ext(asset)
@@ -569,6 +670,9 @@ def _get_assets_resolutions(
         if x_res is None or y_res is None:
             continue
 
+        # Keyed by the originally requested name, even when the resolution
+        # came from a sibling -- callers (e.g. pixel-limit accounting) count
+        # distinct requested bands, not distinct assets read.
         band_resolutions[band_name] = (x_res, y_res, asset_crs)
 
     return band_resolutions
@@ -1008,6 +1112,50 @@ def _apply_scale_offset(
     )
 
 
+def _inherit_derived_band_masks(
+    img: ImageData,
+    derived_bands: Dict[str, ResolvedBand],
+    requested: Sequence[str],
+) -> ImageData:
+    """Force each derived band's mask to match its sibling raster band's mask.
+
+    A derived (band-source) value is honestly defined over the whole grid --
+    unlike a raster band, it has no nodata region of its own. But
+    ``ImageData._mask`` is ``logical_or.reduce(~array.mask)``: a pixel counts
+    as valid if *any* band is unmasked. Left alone, an honestly-unmasked
+    derived band would make a slice's nodata region report as valid to
+    ``img.mask``, GeoTIFF nodata/alpha and ``save_result`` (this is the same
+    trap `sar_backscatter`'s own ``mask`` band documents, ADR
+    0002 S2.4). Values stay intact in ``array.data`` -- only the mask changes.
+
+    If a derived band's sibling was not itself requested, there is nothing to
+    inherit and that band's own mask (fully valid, as computed) is left alone
+    -- a derived-only request has no raster band to borrow a mask from.
+    """
+    if not derived_bands:
+        return img
+
+    index_by_name = {name: i for i, name in enumerate(requested)}
+    mask = numpy.ma.getmaskarray(img.array).copy()
+    changed = False
+
+    for band_name, idx in index_by_name.items():
+        resolved = derived_bands.get(band_name)
+        if resolved is None or not resolved.sibling_key:
+            continue
+        sibling_idx = index_by_name.get(resolved.sibling_key)
+        if sibling_idx is None:
+            continue
+        mask[idx] = mask[sibling_idx]
+        changed = True
+
+    if not changed:
+        return img
+
+    img.array = numpy.ma.MaskedArray(img.array.data, mask=mask)
+    return img
+
+
 def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
@@ -1042,6 +1190,16 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
         try:
             with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
+
+                requested = kwargs.get("assets")
+                if requested:
+                    # getattr, not a direct attribute access: some tests
+                    # substitute a minimal stand-in for SimpleSTACReader that
+                    # does not carry this (SimpleSTACReader-internal) attribute
+                    # -- treat that the same as "no derived bands".
+                    img = _inherit_derived_band_masks(
+                        img, getattr(src_dst, "_derived_bands", {}), requested
+                    )
 
                 # Apply STAC raster:scale/raster:offset (per band) so bands are
                 # returned as physical values (e.g. reflectance) instead of raw DN.
