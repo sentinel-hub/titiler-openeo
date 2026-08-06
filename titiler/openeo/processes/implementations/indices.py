@@ -2,9 +2,10 @@
 
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import numpy
+from rio_tiler.constants import MAX_THREADS
 
 from .data_model import ImageData, RasterStack
 from .math import normalized_difference
@@ -18,6 +19,43 @@ BandIdentifier = Union[int, str]
 # requested band ``B08_10m`` into a cube band ``B08_10m_b1``, so band-name
 # lookups must tolerate that trailing ``_b<n>`` suffix.
 _BAND_SUFFIX_RE = re.compile(r"_b\d+$")
+
+
+def _apply_per_slice(
+    data: RasterStack, fn: Callable[[ImageData], ImageData]
+) -> RasterStack:
+    """Apply ``fn`` to every slice and return a new stack.
+
+    When ``data`` has a single downstream consumer (tagged by the
+    reference-counted results cache), the source cube is streamed: slices are
+    read in concurrent windows and **released as soon as they are consumed**, so
+    the whole source cube and the whole result cube are never both fully resident
+    (the within-node peak that reference-counted eviction alone can't remove).
+    Otherwise the source might be needed by another node, so we fall back to the
+    plain non-mutating realization.
+    """
+    result: Dict[datetime, ImageData] = {}
+
+    if not getattr(data, "_single_consumer", False):
+        for key, img_data in data.items():
+            result[key] = fn(img_data)
+        return RasterStack.from_images(result)
+
+    keys = list(data.keys())
+    window = max(1, getattr(data, "_max_workers", MAX_THREADS))
+    for start in range(0, len(keys), window):
+        batch = keys[start : start + window]
+        data.prefetch(batch)  # load the window concurrently
+        for key in batch:
+            # Avoid re-executing tasks that failed during prefetch (prefetch skips
+            # allowed exceptions without caching).
+            with data._cache_lock:
+                img_data = data._data_cache.get(key)
+            if img_data is None:
+                continue
+            result[key] = fn(img_data)
+            data.release(key)  # safe: this stack has no other consumer
+    return RasterStack.from_images(result)
 
 
 def _resolve_band_index(data: ImageData, band: BandIdentifier) -> int:
@@ -130,12 +168,11 @@ def ndwi(
     Returns:
         RasterStack with NDWI results
     """
-    result: Dict[datetime, ImageData] = {}
-    for key, img_data in data.items():
-        result[key] = _normalized_difference_image(
-            img_data, nir, swir, "ndwi", target_band
-        )
-    return RasterStack.from_images(result)
+    # Apply NDWI to each item in the stack (streaming when sole consumer)
+    return _apply_per_slice(
+        data,
+        lambda img: _normalized_difference_image(img, nir, swir, "ndwi", target_band),
+    )
 
 
 def ndvi(
@@ -156,9 +193,8 @@ def ndvi(
     Returns:
         RasterStack (Dict[datetime, ImageData]) containing NDVI results
     """
-    result: Dict[datetime, ImageData] = {}
-    for key, img_data in data.items():
-        result[key] = _normalized_difference_image(
-            img_data, nir, red, "ndvi", target_band
-        )
-    return RasterStack.from_images(result)
+    # Apply NDVI to each item in the stack (streaming when sole consumer)
+    return _apply_per_slice(
+        data,
+        lambda img: _normalized_difference_image(img, nir, red, "ndvi", target_band),
+    )

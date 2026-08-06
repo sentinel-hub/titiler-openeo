@@ -79,6 +79,19 @@ def _release_value(value: Any) -> None:
         logger.debug("results_cache: release() failed, leaving value in place: %s", exc)
 
 
+def _tag_single_consumer(value: Any, is_single: bool) -> None:
+    """Mark a RasterStack result as having exactly one downstream consumer.
+
+    A sole consumer can stream-and-release the value slice-by-slice (no other node
+    will ever read it), which lets e.g. ``ndvi`` avoid holding the whole source
+    cube and the whole index cube at once.
+    """
+    from .processes.implementations.data_model import RasterStack
+
+    if isinstance(value, RasterStack):
+        value._single_consumer = is_single
+
+
 class EvictingResultsCache(dict):
     """``results_cache`` that frees a node's data once all consumers have run."""
 
@@ -108,6 +121,14 @@ class EvictingResultsCache(dict):
             # store represents this node consuming its parents.
             return
         self._stored.add(node)
+        # Tag whether this result has exactly one consumer (no consumer has run
+        # yet at store time, so _remaining[node] is the full consumer count). A
+        # sole consumer may stream-and-release this value safely. However, if the
+        # same object is reachable via multiple cache slots (identity passthrough),
+        # streaming would be unsafe, so disable the tag in that case.
+        is_single = self._remaining.get(node, 0) == 1
+        is_unique = sum(1 for v in self.values() if v is value) == 1
+        _tag_single_consumer(value, is_single and is_unique)
         for parent in self._parents.get(node, ()):
             self._remaining[parent] = self._remaining.get(parent, 0) - 1
             if self._remaining[parent] <= 0:
