@@ -70,17 +70,17 @@ def test_streaming_bounds_resident_slices_to_window():
     # Wrap the per-slice work to record how many slices are cached at once.
     import titiler.openeo.processes.implementations.indices as indices
 
-    real_apply = indices._apply_ndvi
+    real_apply = indices._normalized_difference_image
 
-    def spy(img, nir, red):
+    def spy(img, first, second, name, target_band):
         observed.append(len(stack._data_cache))
-        return real_apply(img, nir, red)
+        return real_apply(img, first, second, name, target_band)
 
-    indices._apply_ndvi = spy
+    indices._normalized_difference_image = spy
     try:
         ndvi(stack, nir=2, red=1)
     finally:
-        indices._apply_ndvi = real_apply
+        indices._normalized_difference_image = real_apply
 
     # Never more than the window (2) slices resident during processing.
     assert observed and max(observed) <= 2
