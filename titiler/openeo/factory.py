@@ -809,7 +809,7 @@ class EndpointsFactory(BaseFactory):
                     if param_name not in args or args.get(param_name) is None:
                         errors.append(
                             {
-                                "code": "ProcessParameterMissing",
+                                "code": "ProcessParameterRequired",
                                 "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
                             }
                         )

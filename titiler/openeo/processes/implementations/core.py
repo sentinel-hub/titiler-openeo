@@ -39,7 +39,7 @@ from openeo_pg_parser_networkx.pg_schema import (
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from ...errors import ProcessParameterMissing
+from ...errors import ProcessParameterInvalid, ProcessParameterRequired
 from .data_model import RasterStack
 
 # Union of all GeoJSON types for validation
@@ -103,13 +103,13 @@ def _resolve_positional_args(
         Tuple of resolved arguments (only those that were ParameterReferences)
 
     Raises:
-        ProcessParameterMissing: If a parameter reference cannot be resolved
+        ProcessParameterRequired: If a parameter reference cannot be resolved
     """
     resolved = []
     for arg in args:
         if isinstance(arg, ParameterReference):
             if arg.from_parameter not in named_parameters:
-                raise ProcessParameterMissing(
+                raise ProcessParameterRequired(
                     f"Parameter '{arg.from_parameter}' missing for process '{func_name}'"
                 )
             resolved.append(named_parameters[arg.from_parameter])
@@ -245,7 +245,7 @@ def _resolve_kwargs(
     non-existent parameters, as they will be removed later if not in the function signature.
 
     Raises:
-        ProcessParameterMissing: If a required parameter reference cannot be resolved
+        ProcessParameterRequired: If a required parameter reference cannot be resolved
     """
     resolved = {}
     for key, value in kwargs.items():
@@ -259,7 +259,7 @@ def _resolve_kwargs(
             # They will be removed later by _handle_special_args if not in signature
             if key in _SPECIAL_OPENEO_ARGS:
                 continue
-            raise ProcessParameterMissing(
+            raise ProcessParameterRequired(
                 f"Parameter '{ref_name}' missing for process '{func_name}'"
             )
 
@@ -423,7 +423,7 @@ def _validate_datacube_param(
         return
 
     if not _is_rasterstack_type_expected(param_type):
-        raise TypeError(
+        raise ProcessParameterInvalid(
             f"Parameter '{param_name}' in process '{func_name}': "
             f"expected '{_type_to_openeo_name(param_type)}' but got '{_value_to_openeo_name(param_value)}'"
         )
@@ -453,7 +453,7 @@ def _validate_with_pydantic(
     try:
         TypeAdapter(param_type).validate_python(param_value)
     except ValidationError as e:
-        raise TypeError(
+        raise ProcessParameterInvalid(
             f"Parameter '{param_name}' in process '{func_name}': "
             f"expected '{_type_to_openeo_name(param_type)}' but got '{_value_to_openeo_name(param_value)}'. "
             f"Details: {e}"
@@ -487,7 +487,7 @@ def _validate_parameter_types(
         if param_value is None:
             is_optional, _ = _is_optional_type(param_type)
             if not is_optional:
-                raise TypeError(
+                raise ProcessParameterInvalid(
                     f"Parameter '{param_name}' in process '{func_name}' cannot be None"
                 )
             continue
@@ -530,7 +530,7 @@ def _resolve_parameter_reference(
     ref_param = value.from_parameter
 
     if ref_param not in named_parameters:
-        raise ProcessParameterMissing(
+        raise ProcessParameterRequired(
             f"Parameter '{ref_param}' missing for process '{func_name}'"
         )
 

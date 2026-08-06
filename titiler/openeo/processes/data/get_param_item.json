@@ -32,7 +32,7 @@
     }
   },
   "exceptions": {
-    "ProcessParameterMissing": {
+    "ProcessParameterRequired": {
       "message": "Path not found in parameter",
       "http": 400
     },

@@ -236,7 +236,7 @@ def test_callback_scoped_parameter_reference_not_resolved():
     itself executes.
 
     Regression test for: load_collection with a properties filter containing
-    {"from_parameter": "value"} raised ProcessParameterMissing because _resolve_nested
+    {"from_parameter": "value"} raised ProcessParameterRequired because _resolve_nested
     tried to look up "value" in the outer named_parameters.
     """
     received = {}
@@ -254,7 +254,7 @@ def test_callback_scoped_parameter_reference_not_resolved():
         named_parameters={"indicator": 0},  # 'value' is intentionally absent
     )
 
-    # The ParameterReference must be left intact, not raise ProcessParameterMissing
+    # The ParameterReference must be left intact, not raise ProcessParameterRequired
     assert isinstance(
         received["properties"]["eo:cloud_cover"], ParameterReference
     ), "Callback-scoped ParameterReference should be passed through unchanged"

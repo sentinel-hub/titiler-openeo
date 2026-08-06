@@ -458,4 +458,4 @@ def test_validation_flags_missing_required_param(app_no_auth):
     resp = client.post("/validation", json=body)
     assert resp.status_code == 200
     errs = resp.json()["errors"]
-    assert any("ProcessParameterMissing" in e["code"] for e in errs)
+    assert any("ProcessParameterRequired" in e["code"] for e in errs)

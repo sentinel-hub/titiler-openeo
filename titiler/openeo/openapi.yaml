@@ -433,7 +433,7 @@ info:
     The value for the parameter MUST be resolved as follows:
     1. In general the most specific parameter value is used. This means the parameter value is resolved starting from the current scope and then checking each parent for a suitable parameter value until a parameter values is found or the "root" process graph has been reached.
     2. In case a parameter value is not available, the most unspecific default value from the process graph parameter definitions are used. For example, if default values are available for the root process graph and all children, the default value from the root process graph is used.
-    3. If no default values are available either, the error `ProcessParameterMissing` must be thrown.
+    3. If no default values are available either, the error `ProcessParameterRequired` must be thrown.
 
     ### Full example for an EVI computation
 

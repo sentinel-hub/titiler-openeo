@@ -18,6 +18,7 @@ import pytest
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from rio_tiler.models import ImageData
 
+from titiler.openeo.errors import ProcessParameterInvalid
 from titiler.openeo.processes import process_registry
 from titiler.openeo.processes.implementations.data_model import RasterStack
 
@@ -146,7 +147,9 @@ def test_max_rejects_non_boolean_ignore_nodata():
             "result": True,
         }
     }
-    with pytest.raises(TypeError, match="ignore_nodata.*expected 'boolean'"):
+    with pytest.raises(
+        ProcessParameterInvalid, match="ignore_nodata.*expected 'boolean'"
+    ):
         _run(pg, data=stack)
 
 
