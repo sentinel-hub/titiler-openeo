@@ -1,5 +1,79 @@
 # Changelog
 
+## 2.0.1 (2026-08-07)
+
+## What's Changed
+* fix: correct default image tag format in deployment.yaml by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/276
+* fix: remove deprecated load_collection_and_reduce process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/277
+* fix: add semver Docker tags on release (0.x.y, 0.x, 0, latest) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/278
+* feat: add filter_temporal openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/282
+* feat: add mask openEO process by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/283
+* chore(main): release 0.16.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/273
+* perf: concurrently prefetch in-interval slices by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/286
+* chore(main): release 0.16.1 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/287
+* fix: accept TemporalInterval extent from the graph parser by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/288
+* chore(main): release 0.16.2 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/289
+* fix: seed pixel-selection band count from the realized image by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/290
+* chore(main): release 0.16.3 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/291
+* fix: accept TemporalIntervals in aggregate_temporal by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/292
+* chore(main): release 0.16.4 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/293
+* fix: merge_cubes handles mixed tz-aware/naive datetime keys by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/294
+* chore(main): release 0.16.5 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/295
+* fix: save_result GTiff preserves data instead of uint8/RGB by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/297
+* fix: load_collection no longer silently caps items at 100 by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/302
+* fix: make /healthz async so liveness isn't starved under load by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/303
+* docs: add concurrency & memory usage audits for titiler-openeo by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/306
+* feat: implement array_apply function to apply processes to array elements by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/313
+* feat: array_apply over temporal dimension + thread pool by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/315
+* fix: evaluate callbacks exactly once + graph integration tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/316
+* perf: free process-graph intermediates during evaluation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/311
+* fix: forward enclosing scope to array_apply callbacks + realized arrays by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/317
+* fix: preserve nodata masks when stacking arrays by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/318
+* fix: aggregators reduce over the leading axis, not globally by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/319
+* perf: compute float math in float32 (promote integer inputs) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/309
+* fix: evaluate the bands callback once over a multi-temporal stack by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/320
+* feat: apply STAC raster:scale/offset (per band) on read by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/322
+* fix: validate ignore_nodata as boolean (clear error, not numpy crash) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/321
+* fix: bound & document GDAL/VSI native caches by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/310
+* fix: collapse temporal axis into bands for target_dimension by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/323
+* fix: recompute reducer per interval (fixes identical/grayscale periods) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/324
+* feat: add rename_labels by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/325
+* feat: add resample_cube_spatial; unify spatial resampling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/326
+* fix: normalize RasterStack timestamps to naive UTC at creation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/327
+* fix: set band_descriptions for type=bands/spectral by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/328
+* fix: sentinel key + band labels for multi-sensor feature fusion by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/329
+* fix: apply dimension target collapse by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/330
+* fix: accept band names and support target_band by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/332
+* fix: resolve band names against rio-tiler _b<n> suffix by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/333
+* chore(deps): bump the all group across 1 directory with 9 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/335
+* fix: drop stale band labels so single-band cubes merge by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/337
+* docs: sar backscatter design decision + Phase 0 prototype by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/339
+* docs: correct product-type finding; gate on capability not identity by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/341
+* feat: annotation parsing and asset fetching (Phase 1, increment 1/4) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/342
+* fix: warp GCP datasets from their real GCPs, not a collapsed affine by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/344
+* feat: geocode and calibration for sar_backscatter (Phase 1, increment 2/4) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/346
+* feat(processes): implement sar_backscatter (Phase 1, increment 3/4) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/347
+* docs: add SAR backscatter user docs and catalogue-contract test (increment 4/4) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/349
+* perf: stream ndvi/ndwi to bound the within-node peak by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/312
+* chore(deps): bump the all group with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/336
+* ci: make rebuild-release-images manual-only by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/350
+* fix: emit structured, spec-conformant openEO errors from process failures by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/351
+* fix: ignore fabricated proj:* metadata for GCP-referenced SAR items by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/352
+* docs(api): band sources — derive cube bands from non-raster STAC assets by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/353
+* feat(api): discover derived bands from non-raster STAC assets [1/N] by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/354
+* feat(api): noiseBandReader end to end [2/N] by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/356
+* feat(api): calibrationBandReader for the remaining bands [3/N] by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/357
+* docs(api): settle the reader-requirement channel unknowns (increment 4) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/358
+* feat(api): reader-requirement planner (increment 5) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/359
+* feat(api): sar_backscatter convergence (increment 6) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/360
+* docs(api): document calibration bands, close out ADR 0002 (increment 7) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/361
+* fix(api): enhance service access control and authorization checks by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/363
+* fix: add band summaries derivation from item_assets metadata by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/365
+* feat: enhance band summary generation to maintain unique asset names per resolution by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/366
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-chart-v2.0.0...titiler-openeo-chart-v2.0.1
+
 ## 2.0.0 (2026-06-15)
 
 ## What's Changed
