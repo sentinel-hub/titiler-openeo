@@ -86,7 +86,7 @@ class ServiceAuthorizationManager:
             auth_manager.authorize(service, current_user)
             ```
         """
-        configuration = service.get("configuration", {})
+        configuration = service.get("configuration") or {}
         scope = configuration.get("scope", "public")
 
         if scope == "private":
