@@ -124,9 +124,16 @@ class stacApiBackend:
         extension's cube:dimensions bands dimension that ``getdimensions``
         produces below. Until that parser fix lands
         (https://github.com/developmentseed/openeo-studio/pull/103), derive
-        the same per-band objects here from each item_asset's eo:bands (or
-        STAC 1.1 unprefixed bands) metadata, so collections with no
-        pre-existing summaries.bands still show their bands in the UI.
+        the same per-band objects here from item_assets band metadata, so
+        collections with no pre-existing summaries.bands still show their
+        bands in the UI.
+
+        Each item_asset becomes exactly one summaries.bands entry, named
+        after its item_assets key (e.g. "B02_10m", "B02_20m", "TCI_10m") --
+        the same identifier already used for the cube:dimensions "spectral"
+        values in ``getdimensions`` below. Asset keys are unique by
+        construction, so every asset shows up (including the same physical
+        band published at several resolutions) without name collisions.
         """
         summaries = collection.get("summaries")
         if not isinstance(summaries, dict):
@@ -143,11 +150,13 @@ class stacApiBackend:
                 continue
 
             description = asset.get("description") or asset.get("title") or key
-            for band in asset_bands:
-                entry: Dict[str, Any] = {
-                    "name": band.get("name", key),
-                    "description": description,
-                }
+            entry: Dict[str, Any] = {"name": key, "description": description}
+
+            # Per-band spectral metadata (common name, wavelength, ...) only
+            # unambiguously applies to single-band assets; composite assets
+            # (e.g. a true-colour image with 3 component bands) skip it.
+            if len(asset_bands) == 1:
+                band = asset_bands[0]
 
                 common_name = band.get("eo:common_name") or band.get("common_name")
                 if common_name:
@@ -165,7 +174,7 @@ class stacApiBackend:
                 if fwhm is not None:
                     entry["eo:full_width_half_max"] = fwhm
 
-                band_summaries.append(entry)
+            band_summaries.append(entry)
 
         if band_summaries:
             summaries["bands"] = band_summaries
