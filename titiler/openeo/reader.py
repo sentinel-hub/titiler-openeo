@@ -197,8 +197,7 @@ def _resolve_asset_href(asset: pystac.Asset) -> str:
     Shared by real and derived (band-source) assets so both resolve the same
     way for the same underlying file -- e.g. a Sentinel-1 measurement asset's
     GCPs (read for a derived band's sibling) must come from the same href
-    variant its pixels are read from. Mirrors
-    ``titiler.openeo.processes.implementations.sar._asset_href``.
+    variant its pixels are read from.
     """
     href = asset.get_absolute_href() or asset.href
     extras = asset.extra_fields

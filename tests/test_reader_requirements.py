@@ -1,5 +1,5 @@
 """Tests for the reader-requirement planner (issue #348, ADR 0002 §2.6,
-increment 5).
+increments 5-6).
 
 `titiler.openeo.reader_requirements` is the production module the increment-4
 spike (`tests/test_reader_requirement_channel_spike.py`) prototyped: a
@@ -8,10 +8,13 @@ node's own `(id, bands)` signature (not node identity -- proven
 indistinguishable at call time in increment 4), and a per-request process
 registry using the copy recipe increment 4 verified is the only safe one.
 
-`_REQUIREMENT_PROVIDERS` ships empty (no process has converged onto this
-mechanism yet -- that's increment 6, for `sar_backscatter`), so most of these
-tests register a synthetic provider via monkeypatch to exercise the
-mechanism, and one test pins down that the shipped default really is empty.
+`_REQUIREMENT_PROVIDERS` shipped empty in increment 5 and got its first (and
+so far only) entry in increment 6: `sar_backscatter`, registered as an import
+side effect of `processes/implementations/sar.py` -- imported explicitly
+below so that registration has happened regardless of what other test files
+did or didn't import first. Most of these tests still register their own
+*synthetic* provider via monkeypatch to exercise the mechanism in isolation
+from `sar_backscatter`'s real one.
 """
 
 from typing import Any, Dict
@@ -20,12 +23,15 @@ import pytest
 from openeo_pg_parser_networkx import OpenEOProcessGraph
 from openeo_pg_parser_networkx.process_registry import Process, ProcessRegistry
 
+import titiler.openeo.processes.implementations.sar  # noqa: F401 -- registers sar_backscatter
 from titiler.openeo import reader_requirements as rr
 
 _NEEDS_LUT = "__test_only_requiring_process__"
 
 
-def _needs_lut_provider(resolved_kwargs: Dict[str, Any]) -> rr.Requirement:
+def _needs_lut_provider(
+    resolved_kwargs: Dict[str, Any], load_collection_kwargs: Dict[str, Any]
+) -> rr.Requirement:
     return rr.Requirement(extra_bands=frozenset({"vv_sigma0_lut"}))
 
 
@@ -100,18 +106,22 @@ def _base_registry() -> ProcessRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Shipped default: the registry is empty, the mechanism is inert.
+# Shipped state: sar_backscatter is the one registered provider; anything
+# else is still a no-op.
 # ---------------------------------------------------------------------------
 
 
-def test_requirement_providers_empty_by_default():
-    """No process has converged onto this mechanism yet -- that's increment 6.
-    If this test breaks, it's because a provider was registered and this
-    comment (and the ADR's increment-5 status) needs updating deliberately."""
-    assert rr._REQUIREMENT_PROVIDERS == {}
+def test_requirement_providers_contains_exactly_sar_backscatter():
+    """sar_backscatter is increment 6's convergence -- the first and, as of
+    this writing, only registered provider. If this test breaks because a new
+    process was registered, update it deliberately rather than widen it
+    blindly."""
+    assert set(rr._REQUIREMENT_PROVIDERS) == {"sar_backscatter"}
 
 
-def test_resolve_requirements_is_empty_without_any_provider():
+def test_resolve_requirements_is_empty_when_no_registered_provider_matches():
+    """None of this synthetic graph's process ids (including sar_backscatter,
+    the one real registered provider) appear in it, so nothing matches."""
     graph = _two_load_collection_graph(same_collection=False)
     assert rr.resolve_requirements(graph) == {}
 
@@ -124,9 +134,9 @@ def test_build_per_request_registry_returns_the_same_object_when_nothing_to_inje
     assert rr.build_per_request_registry(base, {}) is base
 
 
-def test_plan_process_registry_is_a_noop_for_todays_graphs():
-    """End to end, with the shipped (empty) provider registry: planning never
-    changes the registry a request executes with."""
+def test_plan_process_registry_is_a_noop_for_graphs_sar_backscatter_never_touches():
+    """End to end, against the real (non-empty) provider registry: a graph
+    that never uses sar_backscatter still gets its registry back unchanged."""
     graph = _two_load_collection_graph(same_collection=False)
     base = _base_registry()
     assert rr.plan_process_registry(graph, base) is base

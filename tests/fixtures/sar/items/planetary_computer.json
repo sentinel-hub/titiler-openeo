@@ -46,22 +46,46 @@
   },
   "assets": {
     "hh": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hh.tiff"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hh.tiff",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
     },
     "hv": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hv.tiff"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/measurement/ew-hv.tiff",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
     },
     "schema-noise-hh": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hh.xml"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hh.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-noise-hv": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hv.xml"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/noise-ew-hv.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-calibration-hh": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hh.xml"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hh.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-calibration-hv": {
-      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hv.xml"
+      "href": "https://sentinel1euwest.blob.core.windows.net/s1-grd/GRD/2026/7/30/EW/DH/S1C_EW_GRDM_1SDH_20260730T181143_20260730T181243_008776_01164E_8A8A/annotation/calibration/calibration-ew-hv.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     }
   },
   "bbox": [
