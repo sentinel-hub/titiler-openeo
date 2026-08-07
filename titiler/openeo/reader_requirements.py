@@ -4,11 +4,15 @@ process graph itself changing (ADR 0002 §2.6, extending ADR 0001 §7.10(b)).
 
 Mechanism, mirroring :mod:`titiler.openeo.results_cache`'s shape:
 
-1. A **requirement registry** (:data:`_REQUIREMENT_PROVIDERS`), keyed by
-   process id like ``_RECOMPUTE_PROCESSES``, but valued by callables
-   ``resolved_kwargs -> Requirement`` rather than constants, because what a
-   process needs can depend on its own arguments (e.g. ``sar_backscatter``'s
-   required LUT depends on its ``coefficient``).
+1. A **requirement registry** (:data:`_REQUIREMENT_PROVIDERS`, populated via
+   :func:`register_requirement_provider`), keyed by process id like
+   ``_RECOMPUTE_PROCESSES``, but valued by callables
+   ``(resolved_kwargs, load_collection_kwargs) -> Requirement`` rather than
+   constants, because what a process needs can depend on its own arguments
+   (e.g. ``sar_backscatter``'s required LUT depends on its ``coefficient``)
+   *and* on the ancestor ``load_collection`` node's own arguments (e.g. which
+   polarisations were requested) -- the requiring process's own
+   ``resolved_kwargs`` alone doesn't carry that.
 2. A **pre-execution pass** (:func:`resolve_requirements`) over the parsed
    DAG: for each ``load_collection`` node, union the requirements of every
    process in its downstream cone (``nx.ancestors`` -- edges point from a
@@ -32,13 +36,18 @@ Increment 4 (``tests/test_reader_requirement_channel_spike.py``, ADR 0002
   applied unconditionally to every call regardless of signature (proven to
   contaminate an unrelated collection).
 
-:data:`_REQUIREMENT_PROVIDERS` is empty as of increment 5: no process has
-converged onto this mechanism yet (that's increment 6, ADR 0002 §4, for
-``sar_backscatter``). An empty registry makes :func:`resolve_requirements`
-return ``{}`` for every graph, which makes :func:`build_per_request_registry`
-return the *original* registry object, unchanged -- so "a graph with no
-requiring process must produce a byte-identical read" (increment 5's gate)
-holds unconditionally right now, not just as an aspiration.
+:data:`_REQUIREMENT_PROVIDERS` shipped empty in increment 5 (no process had
+converged onto this mechanism yet) and got its first entry in increment 6:
+``sar_backscatter`` (registered from ``processes/implementations/sar.py`` at
+import time, via :func:`register_requirement_provider` rather than reaching
+into this module's dict directly -- this module stays fully process-agnostic,
+per ADR 0002 §2.1's "never a band-source-specific plugin system" principle).
+A graph containing no process with a registered provider still produces
+``{}`` from :func:`resolve_requirements`, which still makes
+:func:`build_per_request_registry` return the *original* registry object,
+unchanged -- "a graph with no requiring process must produce a byte-identical
+read" (increment 5's gate) is a property of an empty match, not of an empty
+registry, so it keeps holding exactly as before.
 """
 
 import copy
@@ -79,10 +88,31 @@ class Requirement:
 _NO_REQUIREMENT = Requirement()
 
 #: Requirement providers, keyed by process id (mirrors
-#: ``results_cache._RECOMPUTE_PROCESSES``). Empty until increment 6 registers
-#: ``sar_backscatter`` here -- see the module docstring for why an empty
-#: registry is the correct, safe state for increment 5.
-_REQUIREMENT_PROVIDERS: Dict[str, Callable[[Dict[str, Any]], Requirement]] = {}
+#: ``results_cache._RECOMPUTE_PROCESSES``). Populated via
+#: :func:`register_requirement_provider` -- do not write to this dict
+#: directly from outside this module.
+_REQUIREMENT_PROVIDERS: Dict[
+    str, Callable[[Dict[str, Any], Dict[str, Any]], Requirement]
+] = {}
+
+
+def register_requirement_provider(
+    process_id: str,
+    provider: Callable[[Dict[str, Any], Dict[str, Any]], Requirement],
+) -> None:
+    """Declare what a process needs from the ``load_collection`` node(s) that
+    feed it. ``provider`` is called with that process node's own
+    ``resolved_kwargs`` first, then the specific ``load_collection`` node's
+    own ``resolved_kwargs`` second (e.g. its ``id``/``bands``) -- the second
+    argument exists because a process's requirement can depend on what was
+    already requested (e.g. which polarisations), which isn't visible on the
+    process's own arguments.
+
+    The extension point this module is designed around (ADR 0002 §2.1):
+    a process module registers itself here at import time rather than this
+    module knowing about any specific process.
+    """
+    _REQUIREMENT_PROVIDERS[process_id] = provider
 
 
 def _signature_key(collection_id: Any, bands: Any) -> Optional[SignatureKey]:
@@ -132,7 +162,8 @@ def resolve_requirements(graph: OpenEOProcessGraph) -> Dict[SignatureKey, Requir
             if provider is None:
                 continue
             node_requirement = node_requirement | provider(
-                graph.G.nodes[ancestor].get("resolved_kwargs") or {}
+                graph.G.nodes[ancestor].get("resolved_kwargs") or {},
+                resolved_kwargs,
             )
 
         if node_requirement:

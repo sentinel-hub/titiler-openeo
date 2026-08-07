@@ -46,22 +46,46 @@
   },
   "assets": {
     "schema-calibration-vh": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/calibration-iw-vh.xml"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/calibration-iw-vh.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-calibration-vv": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/calibration-iw-vv.xml"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/calibration-iw-vv.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-noise-vh": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/noise-iw-vh.xml"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/noise-iw-vh.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "schema-noise-vv": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/noise-iw-vv.xml"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/annotation/calibration/noise-iw-vv.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
     },
     "vh": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/measurement/iw-vh.tiff"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/measurement/iw-vh.tiff",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
     },
     "vv": {
-      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/measurement/iw-vv.tiff"
+      "href": "s3://sentinel-s1-l1c/GRD/2026/7/30/IW/DV/S1D_IW_GRDH_1SDV_20260730T185910_20260730T185937_003907_00710E_33E2/measurement/iw-vv.tiff",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ]
     }
   },
   "bbox": [

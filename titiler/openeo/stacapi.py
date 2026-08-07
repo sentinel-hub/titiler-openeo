@@ -851,6 +851,15 @@ class LoadCollection:
                     "buffer": float(tile_buffer)
                     if tile_buffer is not None
                     else tile_buffer,
+                    # Not just a stylistic default: FirstMethod picks its per-pixel
+                    # winner from masks alone, per band independently, and derived
+                    # (band-source) bands have their mask forced to match their
+                    # sibling raw band's (reader.py's mask-inheritance post-step,
+                    # ADR 0002 §2.4). So within one item's contribution, DN and its
+                    # calibration/noise LUT bands always share a winner here --
+                    # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
+                    # DN from one source item with LUT values from another. A
+                    # value-driven method (Highest/Lowest) would not preserve that.
                     "pixel_selection": PixelSelectionMethod["first"].value(),
                 }
 
