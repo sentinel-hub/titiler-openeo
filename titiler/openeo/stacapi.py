@@ -1,7 +1,7 @@
 """Stac API backend."""
 
 from threading import Lock
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import pyproj
 import pystac
@@ -27,6 +27,7 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
+from .bandsources import BAND_SOURCES, derive_bands
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -50,6 +51,13 @@ collections_cache: TTLCache = TTLCache(
 collection_cache: TTLCache = TTLCache(
     maxsize=cache_config.maxsize, ttl=cache_config.ttl
 )
+
+#: Media types that indicate a packaged archive rather than a single raster
+#: asset. CDSE's Sentinel-1 GRD ``Product`` asset has role ``data`` and media
+#: type ``application/zip``, which without this exclusion gets advertised as
+#: a spectral band even though it is not a raster (docs/adr/0002-band-sources.md
+#: S1.2, consequence 4).
+_ARCHIVE_MEDIA_TYPES = frozenset({"application/zip"})
 
 
 @define
@@ -184,15 +192,27 @@ class stacApiBackend:
         # bands
         if "item_assets" in collection.extra_fields:
             ia.ItemAssetsExtension.add_to(collection)
-            bands_name = set()
+
+            band_names: Set[str] = set()
+            asset_facts: List[Tuple[str, Optional[str], Sequence[str]]] = []
             for key, asset in collection.ext.item_assets.items():
-                if "data" in asset.properties.get("roles", []):
-                    bands_name.add(key)
-            if len(bands_name) > 0:
+                roles = asset.roles or []
+                asset_facts.append((key, asset.media_type, roles))
+                if "data" in roles and asset.media_type not in _ARCHIVE_MEDIA_TYPES:
+                    band_names.add(key)
+
+            # Bands derived from non-raster assets (e.g. Sentinel-1 GRD's
+            # calibration/noise annotation XML) -- see
+            # docs/adr/0002-band-sources.md.
+            band_names.update(derive_bands(collection.id, asset_facts, BAND_SOURCES))
+
+            if band_names:
                 dims["spectral"] = dc.Dimension.from_dict(
                     {
                         "type": "bands",
-                        "values": bands_name,
+                        # Sorted rather than left as a set for a deterministic
+                        # client-visible order (issue #280).
+                        "values": sorted(band_names),
                     }
                 )
 
