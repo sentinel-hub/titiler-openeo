@@ -1,0 +1,224 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "S2B_MSIL2A_20260807T081609_R121_T48XVR_20260807T101845",
+  "collection": "sentinel-2-l2a",
+  "properties": {
+    "datetime": "2026-08-07T08:16:09.024000Z",
+    "platform": "Sentinel-2B",
+    "s2:mean_solar_zenith": 67.6762388019727,
+    "s2:mean_solar_azimuth": 226.991747276542
+  },
+  "assets": {
+    "B02": {
+      "href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/48/X/VR/2026/08/07/S2B_MSIL2A_20260807T081609_N0512_R121_T48XVR_20260807T101845.SAFE/GRANULE/L2A_T48XVR_A049196_20260807T081603/IMG_DATA/R10m/T48XVR_20260807T081609_B02_10m.tif",
+      "proj:bbox": [
+        399960.0,
+        8990220.0,
+        509760.0,
+        9100020.0
+      ],
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10.0,
+        0.0,
+        399960.0,
+        0.0,
+        -10.0,
+        9100020.0
+      ],
+      "gsd": 10.0,
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ],
+      "title": "Band 2 - Blue - 10m",
+      "eo:bands": [
+        {
+          "name": "B02",
+          "common_name": "blue",
+          "description": "Band 2 - Blue",
+          "center_wavelength": 0.49,
+          "full_width_half_max": 0.098
+        }
+      ]
+    },
+    "B04": {
+      "href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/48/X/VR/2026/08/07/S2B_MSIL2A_20260807T081609_N0512_R121_T48XVR_20260807T101845.SAFE/GRANULE/L2A_T48XVR_A049196_20260807T081603/IMG_DATA/R10m/T48XVR_20260807T081609_B04_10m.tif",
+      "proj:bbox": [
+        399960.0,
+        8990220.0,
+        509760.0,
+        9100020.0
+      ],
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10.0,
+        0.0,
+        399960.0,
+        0.0,
+        -10.0,
+        9100020.0
+      ],
+      "gsd": 10.0,
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ],
+      "title": "Band 4 - Red - 10m",
+      "eo:bands": [
+        {
+          "name": "B04",
+          "common_name": "red",
+          "description": "Band 4 - Red",
+          "center_wavelength": 0.665,
+          "full_width_half_max": 0.038
+        }
+      ]
+    },
+    "B08": {
+      "href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/48/X/VR/2026/08/07/S2B_MSIL2A_20260807T081609_N0512_R121_T48XVR_20260807T101845.SAFE/GRANULE/L2A_T48XVR_A049196_20260807T081603/IMG_DATA/R10m/T48XVR_20260807T081609_B08_10m.tif",
+      "proj:bbox": [
+        399960.0,
+        8990220.0,
+        509760.0,
+        9100020.0
+      ],
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10.0,
+        0.0,
+        399960.0,
+        0.0,
+        -10.0,
+        9100020.0
+      ],
+      "gsd": 10.0,
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ],
+      "title": "Band 8 - NIR - 10m",
+      "eo:bands": [
+        {
+          "name": "B08",
+          "common_name": "nir",
+          "description": "Band 8 - NIR",
+          "center_wavelength": 0.842,
+          "full_width_half_max": 0.145
+        }
+      ]
+    },
+    "granule-metadata": {
+      "href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/48/X/VR/2026/08/07/S2B_MSIL2A_20260807T081609_N0512_R121_T48XVR_20260807T101845.SAFE/GRANULE/L2A_T48XVR_A049196_20260807T081603/MTD_TL.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ],
+      "title": "Granule metadata"
+    },
+    "safe-manifest": {
+      "href": "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/48/X/VR/2026/08/07/S2B_MSIL2A_20260807T081609_N0512_R121_T48XVR_20260807T101845.SAFE/manifest.safe",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ],
+      "title": "SAFE manifest"
+    }
+  },
+  "bbox": [
+    98.9235584,
+    80.9292576,
+    100.4965301,
+    81.476845
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          98.9235584,
+          81.476845
+        ],
+        [
+          99.2427656,
+          81.3781453
+        ],
+        [
+          99.2240835,
+          81.3768872
+        ],
+        [
+          99.7943334,
+          81.1908233
+        ],
+        [
+          99.7953193,
+          81.1908893
+        ],
+        [
+          99.7954074,
+          81.1908605
+        ],
+        [
+          99.7968906,
+          81.1909597
+        ],
+        [
+          99.7970199,
+          81.1909174
+        ],
+        [
+          99.7997253,
+          81.191098
+        ],
+        [
+          99.8007716,
+          81.1907558
+        ],
+        [
+          99.8098605,
+          81.1913625
+        ],
+        [
+          99.9821129,
+          81.1301076
+        ],
+        [
+          100.0748896,
+          81.0970812
+        ],
+        [
+          100.3988664,
+          80.9815176
+        ],
+        [
+          100.3832593,
+          80.9804781
+        ],
+        [
+          100.4965301,
+          80.937552
+        ],
+        [
+          99.3071609,
+          80.9292576
+        ],
+        [
+          98.9235584,
+          81.476845
+        ]
+      ]
+    ]
+  },
+  "links": []
+}

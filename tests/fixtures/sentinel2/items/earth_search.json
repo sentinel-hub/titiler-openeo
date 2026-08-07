@@ -1,0 +1,178 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "S2B_29VPG_20260807_0_L2A",
+  "collection": "sentinel-2-l2a",
+  "properties": {
+    "datetime": "2026-08-07T11:44:35.601000Z",
+    "platform": "sentinel-2b",
+    "constellation": "sentinel-2",
+    "view:azimuth": 102.96270254490969,
+    "view:incidence_angle": 8.396813497980254,
+    "view:sun_azimuth": 164.144626400169,
+    "view:sun_elevation": 45.6227021244566
+  },
+  "assets": {
+    "blue": {
+      "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/29/V/PG/2026/8/S2B_29VPG_20260807_0_L2A/B02.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "Blue - 10m",
+      "eo:bands": [
+        {
+          "name": "B02",
+          "common_name": "blue",
+          "center_wavelength": 0.49,
+          "full_width_half_max": 0.098
+        }
+      ],
+      "gsd": 10,
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10,
+        0,
+        600000,
+        0,
+        -10,
+        6700020
+      ],
+      "raster:bands": [
+        {
+          "nodata": 0,
+          "data_type": "uint16",
+          "spatial_resolution": 10,
+          "scale": 0.0001,
+          "offset": -0.1
+        }
+      ],
+      "roles": [
+        "data",
+        "reflectance"
+      ]
+    },
+    "red": {
+      "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/29/V/PG/2026/8/S2B_29VPG_20260807_0_L2A/B04.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "Red - 10m",
+      "eo:bands": [
+        {
+          "name": "B04",
+          "common_name": "red",
+          "center_wavelength": 0.665,
+          "full_width_half_max": 0.038
+        }
+      ],
+      "gsd": 10,
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10,
+        0,
+        600000,
+        0,
+        -10,
+        6700020
+      ],
+      "raster:bands": [
+        {
+          "nodata": 0,
+          "data_type": "uint16",
+          "spatial_resolution": 10,
+          "scale": 0.0001,
+          "offset": -0.1
+        }
+      ],
+      "roles": [
+        "data",
+        "reflectance"
+      ]
+    },
+    "nir": {
+      "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/29/V/PG/2026/8/S2B_29VPG_20260807_0_L2A/B08.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "title": "NIR 1 - 10m",
+      "eo:bands": [
+        {
+          "name": "B08",
+          "common_name": "nir",
+          "center_wavelength": 0.842,
+          "full_width_half_max": 0.145
+        }
+      ],
+      "gsd": 10,
+      "proj:shape": [
+        10980,
+        10980
+      ],
+      "proj:transform": [
+        10,
+        0,
+        600000,
+        0,
+        -10,
+        6700020
+      ],
+      "raster:bands": [
+        {
+          "nodata": 0,
+          "data_type": "uint16",
+          "spatial_resolution": 10,
+          "scale": 0.0001,
+          "offset": -0.1
+        }
+      ],
+      "roles": [
+        "data",
+        "reflectance"
+      ]
+    },
+    "granule_metadata": {
+      "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/29/V/PG/2026/8/S2B_29VPG_20260807_0_L2A/granule_metadata.xml",
+      "type": "application/xml",
+      "roles": [
+        "metadata"
+      ]
+    },
+    "tileinfo_metadata": {
+      "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/29/V/PG/2026/8/S2B_29VPG_20260807_0_L2A/tileinfo_metadata.json",
+      "type": "application/json",
+      "roles": [
+        "metadata"
+      ]
+    }
+  },
+  "bbox": [
+    -5.520981,
+    60.348012,
+    -5.193267,
+    60.390995
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -5.520981314125123,
+          60.39099506355671
+        ],
+        [
+          -5.197236050297846,
+          60.348012390692304
+        ],
+        [
+          -5.193267428481391,
+          60.38201699146717
+        ],
+        [
+          -5.520981314125123,
+          60.39099506355671
+        ]
+      ]
+    ]
+  },
+  "links": []
+}

@@ -29,7 +29,13 @@ from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
 from rio_tiler.utils import cast_to_sequence, has_alpha_band, inherit_rasterio_env
 from typing_extensions import TypedDict
 
-from .bandsources import BAND_SOURCES, ResolvedBand, derive_bands, resolve_band
+from .bandsources import (
+    BAND_SOURCES,
+    ResolvedBand,
+    SiblingCandidateFacts,
+    derive_bands,
+    resolve_band,
+)
 from .errors import OutputLimitExceeded
 from .settings import ProcessingSettings
 
@@ -268,9 +274,22 @@ class SimpleSTACReader(MultiBaseReader):
             (key, asset.media_type, asset.roles or [])
             for key, asset in self.input.assets.items()
         ]
+        # Richer than item_asset_facts (adds declared gsd) -- only consulted
+        # by a BandSource whose sibling has no name expressible as a fixed
+        # template (docs/adr/0004-sentinel2-view-sun-angle-bands.md S2.1).
+        sibling_candidates = [
+            (key, asset.media_type, asset.roles or [], asset.extra_fields.get("gsd"))
+            for key, asset in self.input.assets.items()
+        ]
         collection_id = self.input.collection_id or ""
         for name in derive_bands(collection_id, item_asset_facts, BAND_SOURCES):
-            resolved = resolve_band(collection_id, name, item_asset_facts, BAND_SOURCES)
+            resolved = resolve_band(
+                collection_id,
+                name,
+                item_asset_facts,
+                BAND_SOURCES,
+                sibling_candidates=sibling_candidates,
+            )
             if resolved is not None:
                 self._derived_bands[name] = resolved
 
@@ -652,6 +671,7 @@ def _get_assets_resolutions(
     # Built lazily, only if a requested name turns out not to be a real asset
     # -- the common (no derived bands requested) case pays nothing extra.
     item_asset_facts: Optional[List[Tuple[str, Optional[str], Sequence[str]]]] = None
+    sibling_candidates: Optional[List[SiblingCandidateFacts]] = None
     collection_id = item.collection_id or ""
 
     for band_name in assets_to_process:
@@ -667,8 +687,16 @@ def _get_assets_resolutions(
                 item_asset_facts = [
                     (key, a.media_type, a.roles or []) for key, a in item.assets.items()
                 ]
+                sibling_candidates = [
+                    (key, a.media_type, a.roles or [], a.extra_fields.get("gsd"))
+                    for key, a in item.assets.items()
+                ]
             resolved = resolve_band(
-                collection_id, band_name, item_asset_facts, BAND_SOURCES
+                collection_id,
+                band_name,
+                item_asset_facts,
+                BAND_SOURCES,
+                sibling_candidates=sibling_candidates,
             )
             if resolved is None or not resolved.sibling_key:
                 continue

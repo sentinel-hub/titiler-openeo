@@ -34,6 +34,7 @@ from cachetools import LRUCache, cached
 from cachetools.keys import hashkey
 from defusedxml import ElementTree as ET
 
+from ..grid2d import Grid2D
 from ..settings import SARSettings
 from .fetcher import AssetFetcher, get_default_fetcher
 
@@ -82,35 +83,6 @@ def _resample_row(
             f"{len(own_pixels)} pixel positions"
         )
     return np.interp(canonical_pixels, own_pixels, own_values)
-
-
-@dataclass(frozen=True)
-class Grid2D:
-    """A LUT sampled on a rectilinear (line, pixel) grid, bilinearly interpolable."""
-
-    lines: np.ndarray
-    pixels: np.ndarray
-    values: Dict[str, np.ndarray]
-
-    def interp(self, name: str, line: np.ndarray, pixel: np.ndarray) -> np.ndarray:
-        """Bilinear interpolation at arbitrary (line, pixel), clamped at the edges."""
-        v = self.values[name]
-        li = np.clip(np.searchsorted(self.lines, line) - 1, 0, len(self.lines) - 2)
-        pi = np.clip(np.searchsorted(self.pixels, pixel) - 1, 0, len(self.pixels) - 2)
-
-        l0, l1 = self.lines[li], self.lines[li + 1]
-        p0, p1 = self.pixels[pi], self.pixels[pi + 1]
-        tl = np.clip((line - l0) / np.maximum(l1 - l0, 1e-9), 0, 1)
-        tp = np.clip((pixel - p0) / np.maximum(p1 - p0, 1e-9), 0, 1)
-
-        v00, v01 = v[li, pi], v[li, pi + 1]
-        v10, v11 = v[li + 1, pi], v[li + 1, pi + 1]
-        return (
-            v00 * (1 - tl) * (1 - tp)
-            + v01 * (1 - tl) * tp
-            + v10 * tl * (1 - tp)
-            + v11 * tl * tp
-        )
 
 
 @dataclass(frozen=True)

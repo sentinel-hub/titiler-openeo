@@ -249,6 +249,24 @@ class SARSettings(BaseSettings):
     )
 
 
+class Sentinel2Settings(BaseSettings):
+    """Sentinel-2 view/sun angle band settings.
+
+    See docs/adr/0004-sentinel2-view-sun-angle-bands.md for the design this
+    configures.
+    """
+
+    # Max number of parsed MTD_TL.xml tile-metadata objects to keep cached,
+    # mirroring SARSettings.annotation_cache_maxsize -- one entry per granule.
+    tile_metadata_cache_maxsize: int = 128
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_SENTINEL2_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class HealthSettings(BaseSettings):
     """Settings for the /healthz and /readyz health endpoints."""
 

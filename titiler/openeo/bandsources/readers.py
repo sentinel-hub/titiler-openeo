@@ -6,11 +6,13 @@ These are the per-asset readers `SimpleSTACReader` dispatches a derived
 a real raster asset goes through -- so they compose with `multi_arrays` and
 mosaicking for free (docs/adr/0002-band-sources.md S2.3).
 
-Currently ties every reader to Sentinel-1 GRD's GCP-referenced geometry
+Every reader in this module ties to Sentinel-1 GRD's GCP-referenced geometry
 (`sar.geocode.build_inverse_map`, over the measurement asset's own GCPs, never
-item/asset `proj:*` -- issue #338): that is the only band-source family this
-codebase has today. A future non-GCP band source (e.g. a per-scene scalar
-property) would need its own base, not a speculative hook added here first.
+item/asset `proj:*` -- issue #338). Sentinel-2's view/sun angle bands
+(docs/adr/0004-sentinel2-view-sun-angle-bands.md) are the non-GCP band source
+this module's own docstring once anticipated needing its own base for -- see
+`sentinel2_readers.py`'s `Sentinel2AngleReader`, not a subclass of
+`BandReader` below.
 """
 
 from contextlib import nullcontext
