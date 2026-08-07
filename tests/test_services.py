@@ -420,6 +420,185 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
         ), f"Anonymous access failed for {scope_name} service"
 
 
+def test_get_service_anonymous_public(app_with_auth, app_no_auth):
+    """Public services must be readable via GET /services/{id} without auth (#362)."""
+    service_input = {
+        "process": {
+            "process_graph": {
+                "loadco1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "Public Service",
+        "configuration": {"scope": "public"},
+    }
+    create_response = app_with_auth.post("/services", json=service_input)
+    assert create_response.status_code == 201
+    service_id = create_response.headers["location"].split("/")[-1]
+
+    # Anonymous request against the metadata endpoint must succeed for a public service
+    response = app_no_auth.get(f"/services/{service_id}")
+    assert response.status_code == 200
+    assert response.json()["id"] == service_id
+
+
+def test_get_service_anonymous_private_denied(app_with_auth, app_no_auth):
+    """Private services must reject anonymous GET /services/{id} requests."""
+    service_input = {
+        "process": {
+            "process_graph": {
+                "loadco1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "Private Service",
+        "configuration": {"scope": "private"},
+    }
+    create_response = app_with_auth.post("/services", json=service_input)
+    assert create_response.status_code == 201
+    service_id = create_response.headers["location"].split("/")[-1]
+
+    response = app_no_auth.get(f"/services/{service_id}")
+    assert response.status_code == 401
+
+
+def test_service_ownership_checks(app_with_auth, store_path):
+    """Only the owner may PATCH or DELETE a service; other users get 403."""
+    from fastapi import HTTPException
+
+    class TestOwnerAuth(Auth):
+        def validate(self, authorization: str = Header(default=None)) -> User:
+            if not authorization:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            if "owner_token" in authorization:
+                return User(user_id="test_user")
+            elif "other_token" in authorization:
+                return User(user_id="other_user")
+            raise HTTPException(
+                status_code=401, detail="Invalid authentication credentials"
+            )
+
+        def validate_optional(
+            self, authorization: str = Header(default=None)
+        ) -> Union[User, None]:
+            if not authorization:
+                return None
+            try:
+                return self.validate(authorization)
+            except HTTPException:
+                return None
+
+        def login(self, authorization: str = Header()) -> Any:
+            return {"access_token": "mock_token"}
+
+    test_auth = TestOwnerAuth(store=get_store(f"{store_path}"))
+    app_with_auth.app.dependency_overrides[
+        app_with_auth.app.endpoints.auth.validate
+    ] = test_auth.validate
+    app_with_auth.app.dependency_overrides[
+        app_with_auth.app.endpoints.auth.validate_optional
+    ] = test_auth.validate_optional
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "loadco1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "Owned Service",
+        "configuration": {"scope": "public"},
+    }
+    create_response = app_with_auth.post(
+        "/services",
+        json=service_input,
+        headers={"Authorization": "Bearer basic//owner_token"},
+    )
+    assert create_response.status_code == 201
+    service_id = create_response.headers["location"].split("/")[-1]
+
+    # A different authenticated user cannot update the service
+    patch_response = app_with_auth.patch(
+        f"/services/{service_id}",
+        json={"title": "Hijacked"},
+        headers={"Authorization": "Bearer basic//other_token"},
+    )
+    assert patch_response.status_code == 403
+
+    # A different authenticated user cannot delete the service
+    delete_response = app_with_auth.delete(
+        f"/services/{service_id}",
+        headers={"Authorization": "Bearer basic//other_token"},
+    )
+    assert delete_response.status_code == 403
+
+    # The owner can still update the service
+    patch_response = app_with_auth.patch(
+        f"/services/{service_id}",
+        json={"title": "Updated by owner"},
+        headers={"Authorization": "Bearer basic//owner_token"},
+    )
+    assert patch_response.status_code == 204
+
+    # The owner can still delete the service
+    delete_response = app_with_auth.delete(
+        f"/services/{service_id}",
+        headers={"Authorization": "Bearer basic//owner_token"},
+    )
+    assert delete_response.status_code == 204
+
+
 def test_service_configuration(app_with_auth):
     """Test service with configuration."""
     service_input = {
