@@ -59,6 +59,7 @@ nav:
       - Manhattan Satellite Imagery: "notebooks/manhattan.ipynb"
       - NDVI Time Series Analysis: "notebooks/ndvi_time_series.ipynb"
       - Sentinel-1 SAR Backscatter RGB Composite: "notebooks/sar_backscatter_rgb.ipynb"
+      - Sentinel-1 Band Sources Live Validation: "notebooks/sar_band_sources_validation.ipynb"
   - Development:
     - Contributing: "contributing.md"
   - Migration:

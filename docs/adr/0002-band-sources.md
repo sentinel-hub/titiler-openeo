@@ -342,8 +342,11 @@ signature, spec or output band names; fixing item-provenance loss in the 30+
   GCPs and grid. The scope is per-(measurement href, bbox, width, height, dst_crs) —
   cleanly keyable here, unlike in a process — but a global LRU is a memory hazard
   (2 × H×W float64 = 64 MB at 2048²), so any cache needs a small maxsize, float32
-  storage, or both. Measure at the increment-2 gate; do not add a cache
-  speculatively.
+  storage, or both. Measured at the increment-2 gate (below) to be a real,
+  pre-existing cost — ~0.2 s at 256² and ~3.0 s at 1024² for a 440-GCP scene — but
+  not one decomposition makes worse, since increment 2 has exactly one derived
+  band. Do not add a cache speculatively; revisit once increment 3 makes the
+  duplication real.
 - **`sar.py:313` builds the inverse map inside the per-polarisation loop**, so
   dual-pol pays for it twice on identical geometry today. Increment 6 removes the
   loop. Whether VV and VH of one product actually share GCP sets is an unverified
@@ -360,7 +363,7 @@ Delivered as **stacked pull requests**, one per increment, based on this branch.
 | # | Increment | Gate / abandon condition |
 | --- | --- | --- |
 | 1 | **Discovery only.** Registry module + `getdimensions` pass. Bands advertised; requesting one still fails at read time. Ships the `Product` fix and #280. | Abandon if derived names collide with real asset keys on any target catalogue. |
-| 2 | **One reader end to end.** `NoiseBandReader` — the narrowest path exercising pseudo-asset resolution, `reader_options` injection, sibling GCP lookup, inverse map, grid alignment, mask inheritance and mosaicking. | **Gate:** per-tile wall time and peak RSS at 256² and 1024² vs. reading DN alone, recorded in the PR. Abandon if mask inheritance cannot hold or the mosaic case does not work — both invalidate §2.3. |
+| 2 | **One reader end to end.** `NoiseBandReader` — the narrowest path exercising pseudo-asset resolution, `reader_options` injection, sibling GCP lookup, inverse map, grid alignment, mask inheritance and mosaicking. | **Gate:** per-tile wall time at 256² and 1024², decomposed (independent DN + `NoiseBandReader` reads) vs. fused (`sar_backscatter`'s existing DN-read-then-geocode-then-evaluate body) — not vs. DN alone, since both decomposed and fused pay the same TPS inverse-map cost once; that comparison would measure the cost of wanting a LUT at all, not the cost of decomposition. **Measured:** 1.00× at both 256² and 1024² on the real 440-GCP polar fixture (0.20 s / 3.03 s respectively for both shapes) — decomposition adds no measurable overhead. Abandon if mask inheritance cannot hold or the mosaic case does not work — both invalidate §2.3. |
 | 3 | **The remaining bands.** `CalibrationBandReader` for the four vectors plus incidence angle. One asset yielding several bands maps onto the existing `bands`/`indexes` selection in `_get_options` (`reader.py:176-223`). | — |
 | 4 | **Spike the requirement channel.** Settle both §3.1 unknowns. Deliverable is a decision plus a failing-then-passing test, not production code. | — |
 | 5 | **Build the planner.** Requirement registry, DAG pass, per-request registry, resolved-requirement logging. | A graph with no requiring process must produce a byte-identical read. |
