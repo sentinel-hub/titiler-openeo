@@ -11,17 +11,17 @@ tag names (`sigmaNought`, `betaNought`, `gamma`, `dn`), and are polarisation-
 prefixed throughout -- a flat `sigma0_lut` would collide the moment an item
 has more than one polarisation, which every target catalogue's GRD items do.
 
-Increment 2 (issue #348) wires up the noise entry's `reader` -- `<pol>_noise_lut`
-is readable end to end. The calibration entry's `reader` stays `None` for now
-(increment 3): `derive_bands` already advertises its five bands in
-`cube:dimensions` (discovery, increment 1), but `resolve_band` cannot produce
-them yet, so requesting one still raises a clear error at read time rather
-than a wrong one.
+Increments 2 and 3 (issue #348) wire up both readers -- every band this
+registry describes is now readable end to end. Each `BandSource.bands` entry
+is a `(name_template, quantity)` pair: `quantity` is the method name to call
+on the reader's underlying LUT object (`CalibrationLUT`/`NoiseLUT` in
+`sar/annotation.py`), threaded through via the reader's `quantity`
+constructor kwarg (`CalibrationBandReader`/`BandReader.part`).
 """
 
 import re
 
-from .readers import NoiseBandReader
+from .readers import CalibrationBandReader, NoiseBandReader
 from .registry import BandSource
 
 __all__ = ["BAND_SOURCES"]
@@ -37,28 +37,30 @@ _METADATA = frozenset({"metadata"})
 BAND_SOURCES = [
     # One calibration annotation yields four LUT vectors plus the incidence
     # angle recovered from two of them (annotation.CalibrationLUT) -- ADR
-    # 0002 S2.5.
+    # 0002 S2.5. `quantity` is the CalibrationLUT method to call for each.
     BandSource(
         collection=_S1_GRD_COLLECTION,
         media_types=_XML,
         roles=_METADATA,
         asset=re.compile(r"schema-calibration-(?P<pol>[a-z]{2})"),
         bands=(
-            "{pol}_sigma0_lut",
-            "{pol}_beta0_lut",
-            "{pol}_gamma0_lut",
-            "{pol}_dn_lut",
-            "{pol}_ellipsoid_incidence_angle",
+            ("{pol}_sigma0_lut", "sigma_nought"),
+            ("{pol}_beta0_lut", "beta_nought"),
+            ("{pol}_gamma0_lut", "gamma"),
+            ("{pol}_dn_lut", "dn"),
+            ("{pol}_ellipsoid_incidence_angle", "ellipsoid_incidence_angle"),
         ),
         sibling="{pol}",
+        reader=CalibrationBandReader,
     ),
     # One noise annotation yields the thermal-noise LUT (annotation.NoiseLUT).
+    # NoiseBandReader has exactly one quantity, so it ignores `quantity`.
     BandSource(
         collection=_S1_GRD_COLLECTION,
         media_types=_XML,
         roles=_METADATA,
         asset=re.compile(r"schema-noise-(?P<pol>[a-z]{2})"),
-        bands=("{pol}_noise_lut",),
+        bands=(("{pol}_noise_lut", "noise"),),
         sibling="{pol}",
         reader=NoiseBandReader,
     ),

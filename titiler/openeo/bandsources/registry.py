@@ -62,9 +62,17 @@ class BandSource:
     :meth:`re.Pattern.fullmatch` against the whole asset key, since asset keys
     are exact tokens, not free text.
 
-    ``bands`` are name templates formatted with the ``asset`` match's named
-    groups (``str.format(**match.groupdict())``), so ``"{pol}_noise_lut"``
-    resolves to ``"vv_noise_lut"`` when ``asset`` matched with ``pol="vv"``.
+    ``bands`` are ``(name_template, quantity)`` pairs. ``name_template`` is
+    formatted with the ``asset`` match's named groups
+    (``str.format(**match.groupdict())``), so ``"{pol}_noise_lut"`` resolves
+    to ``"vv_noise_lut"`` when ``asset`` matched with ``pol="vv"``.
+    ``quantity`` is opaque to this module -- it is threaded through to
+    ``reader`` (as its ``quantity`` constructor kwarg) so one asset can
+    produce several distinctly-computed bands without needing a reader
+    subclass per quantity, e.g. one calibration annotation's four LUT
+    vectors plus the incidence angle (ADR 0002 S2.5) all share
+    ``CalibrationBandReader``, dispatching on ``quantity`` alone.
+
     ``sibling`` is the same kind of template for the raster asset a reader
     needs alongside the matched one (e.g. the measurement asset, for GCPs) --
     ``None`` if a band needs none.
@@ -72,7 +80,7 @@ class BandSource:
     ``reader`` is the ``BaseReader`` subclass that produces these bands at
     read time. Left ``None`` for a band that discovery should advertise
     before its reader exists (increment 1's shipped state for every band this
-    registry currently describes) -- ``resolve_band`` treats that the same as
+    registry currently described) -- ``resolve_band`` treats that the same as
     "no source matched".
     """
 
@@ -80,7 +88,7 @@ class BandSource:
     media_types: FrozenSet[str]
     roles: FrozenSet[str]
     asset: "re.Pattern[str]"
-    bands: Tuple[str, ...]
+    bands: Tuple[Tuple[str, str], ...]
     sibling: Optional[str] = None
     reader: Optional[Type[BaseReader]] = None
 
@@ -94,6 +102,10 @@ class ResolvedBand:
     #: The sibling raster asset's key a reader needs alongside it, e.g.
     #: ``"vv"`` -- ``None`` if the band needs no sibling.
     sibling_key: Optional[str]
+    #: Which quantity this specific band is, from the matching
+    #: ``BandSource.bands`` entry -- e.g. ``"sigma_nought"``. Opaque to this
+    #: module; passed straight through to ``reader``.
+    quantity: Optional[str]
     reader: Type[BaseReader]
 
 
@@ -120,7 +132,7 @@ def _iter_matches(
                 continue
 
             groups = match.groupdict()
-            band_names = [band.format(**groups) for band in source.bands]
+            band_names = [name.format(**groups) for name, _quantity in source.bands]
             yield source, asset_key, groups, band_names
 
 
@@ -191,9 +203,13 @@ def resolve_band(
         if source.reader is None:
             continue
 
+        quantity = source.bands[band_names.index(band_name)][1]
         sibling_key = source.sibling.format(**groups) if source.sibling else None
         return ResolvedBand(
-            asset_key=asset_key, sibling_key=sibling_key, reader=source.reader
+            asset_key=asset_key,
+            sibling_key=sibling_key,
+            quantity=quantity,
+            reader=source.reader,
         )
 
     return None

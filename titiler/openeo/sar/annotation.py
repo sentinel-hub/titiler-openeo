@@ -131,6 +131,13 @@ class CalibrationLUT:
         """Gamma calibration LUT, interpolated."""
         return self.grid.interp("gamma", line, pixel)
 
+    def dn(self, line: np.ndarray, pixel: np.ndarray) -> np.ndarray:
+        """Raw DN calibration LUT, interpolated (rarely used directly --
+        `sigma_nought`/`beta_nought`/`gamma` already have K folded in, per
+        the module docstring; exposed for parity with the other three
+        vectors this same annotation carries)."""
+        return self.grid.interp("dn", line, pixel)
+
     def ellipsoid_incidence_angle(
         self, line: np.ndarray, pixel: np.ndarray
     ) -> np.ndarray:

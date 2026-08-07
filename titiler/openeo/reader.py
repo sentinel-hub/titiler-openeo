@@ -3,6 +3,7 @@
 import logging
 import time
 import warnings
+from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
 
 import attr
@@ -240,6 +241,22 @@ class SimpleSTACReader(MultiBaseReader):
     #: don't repeat it. See docs/adr/0002-band-sources.md S2.3.
     _derived_bands: Dict[str, ResolvedBand] = attr.ib(init=False, factory=dict)
 
+    #: Shared, per-instance memo for band-source readers' inverse maps
+    #: (`BandReader.inverse_map_cache`). Every derived-band reader built for
+    #: this item's `part()` calls gets *this same dict*: reads sharing one
+    #: destination grid and one measurement asset's GCPs get an identical
+    #: fit, so it is computed once however many bands from that asset are
+    #: requested together (increment 3's calibration bands are the first
+    #: case where one item can carry several). Dies with this instance --
+    #: not a module-global cache, which would have no natural eviction.
+    _inverse_map_cache: Dict[Any, Any] = attr.ib(init=False, factory=dict)
+
+    #: Guards `_inverse_map_cache` (`BandReader.inverse_map_lock`) --
+    #: `RasterStack` reads assets via a thread pool, so several derived-band
+    #: readers for this item can build concurrently; without this, multiple
+    #: threads can all miss the cache before any stores a result.
+    _inverse_map_lock: Lock = attr.ib(init=False, factory=Lock)
+
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
         self.assets = self.input.get_assets().keys()
@@ -355,7 +372,12 @@ class SimpleSTACReader(MultiBaseReader):
         resolved = self._derived_bands[asset_name]
         annotation_asset = self.input.assets[resolved.asset_key]
 
-        reader_options: Dict[str, Any] = {"fetcher": self.band_source_fetcher}
+        reader_options: Dict[str, Any] = {
+            "fetcher": self.band_source_fetcher,
+            "quantity": resolved.quantity,
+            "inverse_map_cache": self._inverse_map_cache,
+            "inverse_map_lock": self._inverse_map_lock,
+        }
         if resolved.sibling_key:
             sibling = self.input.assets.get(resolved.sibling_key)
             if sibling is None:
