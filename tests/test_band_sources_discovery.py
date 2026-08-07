@@ -249,12 +249,18 @@ def test_spectral_dimension_values_are_sorted(fixture_name):
 def test_collection_matching_no_registry_entry_is_unaffected():
     """A collection with real raster assets but nothing matching any
     band-source entry must behave exactly as before this change: only its
-    role=data assets are advertised."""
+    role=data assets are advertised.
+
+    Uses a collection id matching neither the Sentinel-1 nor the Sentinel-2
+    registry entries -- an unrelated ``granule_metadata``-shaped asset is
+    included to also prove that an arbitrary XML/metadata asset does not
+    spuriously match a band source when the *collection* itself isn't a
+    registry target."""
     collection = pystac.Collection.from_dict(
         {
             "type": "Collection",
             "stac_version": "1.0.0",
-            "id": "sentinel-2-l2a",
+            "id": "some-other-optical-collection",
             "description": "test",
             "license": "proprietary",
             "extent": {

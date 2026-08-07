@@ -7,6 +7,13 @@
   and §7.10(b); supersedes the approach in PR #281
 - **Issue:** [#348](https://github.com/sentinel-hub/titiler-openeo/issues/348)
 
+> **2026-08-07 update:** this ADR's registry (§2.1) gained a second client
+> when [ADR 0004](0004-sentinel2-view-sun-angle-bands.md) generalized
+> `BandSource.sibling` to also accept a callable, for Sentinel-2 view/sun
+> angle bands whose logical sibling asset has no catalogue-stable name — see
+> ADR 0004 §2.1. No behavior described below changes for Sentinel-1, whose
+> `sibling` stays a plain string template.
+
 ---
 
 ## 1. Context

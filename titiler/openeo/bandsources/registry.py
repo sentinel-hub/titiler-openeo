@@ -31,6 +31,7 @@ Two questions are asked of this registry, from two different places:
 import re
 from dataclasses import dataclass
 from typing import (
+    Callable,
     FrozenSet,
     Iterable,
     Iterator,
@@ -40,15 +41,37 @@ from typing import (
     Set,
     Tuple,
     Type,
+    Union,
 )
 
 from rio_tiler.io.base import BaseReader
 
-__all__ = ["BandSource", "ResolvedBand", "derive_bands", "resolve_band"]
+__all__ = [
+    "BandSource",
+    "ResolvedBand",
+    "SiblingCandidateFacts",
+    "derive_bands",
+    "resolve_band",
+    "pick_nominal_sibling_by_resolution",
+]
 
 #: One (asset_key, media_type, roles) triple as found on a STAC item or
 #: collection's item_assets -- the common shape both entry points take.
 AssetFacts = Tuple[str, Optional[str], Sequence[str]]
+
+#: AssetFacts extended with a candidate's declared ground sample distance
+#: (metres, e.g. STAC's `gsd` field) -- used only when a BandSource's
+#: `sibling` is callable rather than a string template (ADR 0004 S2.1).
+#: Kept separate from AssetFacts itself so every existing derive_bands/
+#: resolve_band call site -- Sentinel-1's included -- is completely
+#: unaffected; only a source with a callable `sibling` ever looks at this.
+SiblingCandidateFacts = Tuple[str, Optional[str], Sequence[str], Optional[float]]
+
+#: Media types that are real files but not raster bands (e.g. a SAFE
+#: product zip) -- excluded from pick_nominal_sibling_by_resolution's
+#: candidate pool, mirroring stacapi.py's own `_ARCHIVE_MEDIA_TYPES` filter
+#: for the same reason.
+_ARCHIVE_MEDIA_TYPES = frozenset({"application/zip"})
 
 
 @dataclass(frozen=True)
@@ -73,9 +96,25 @@ class BandSource:
     vectors plus the incidence angle (ADR 0002 S2.5) all share
     ``CalibrationBandReader``, dispatching on ``quantity`` alone.
 
-    ``sibling`` is the same kind of template for the raster asset a reader
-    needs alongside the matched one (e.g. the measurement asset, for GCPs) --
-    ``None`` if a band needs none.
+    ``sibling`` names the raster asset a reader needs alongside the matched
+    one (e.g. the measurement asset, for GCPs) -- ``None`` if a band needs
+    none. Two shapes:
+
+    * a ``str`` template, formatted with the ``asset`` match's named groups
+      (``"{pol}"`` -> ``"vv"``) -- correct whenever the sibling's name is
+      itself a function of the matched asset key, as every Sentinel-1 entry
+      is today.
+    * a callable ``(sibling_candidates) -> Optional[str]``, for a source
+      whose logical sibling has no name expressible as a fixed template --
+      e.g. Sentinel-2's red-band-equivalent asset is spelled ``B04_10m``
+      (CDSE), ``red`` (Earth Search) and ``B04`` (Planetary Computer) for the
+      identical collection id (ADR 0004 S2.1). ``resolve_band`` calls it with
+      the item's own candidate assets (richer than ``AssetFacts`` -- see
+      ``SiblingCandidateFacts``) to pick a sibling key dynamically.
+
+    Every Sentinel-1 entry uses the ``str`` form, so this changes nothing for
+    them -- there is no third, blended case where one source needs both a
+    match group and the item's other assets.
 
     ``reader`` is the ``BaseReader`` subclass that produces these bands at
     read time. Left ``None`` for a band that discovery should advertise
@@ -89,7 +128,9 @@ class BandSource:
     roles: FrozenSet[str]
     asset: "re.Pattern[str]"
     bands: Tuple[Tuple[str, str], ...]
-    sibling: Optional[str] = None
+    sibling: Optional[
+        Union[str, Callable[[Sequence[SiblingCandidateFacts]], Optional[str]]]
+    ] = None
     reader: Optional[Type[BaseReader]] = None
 
 
@@ -173,6 +214,7 @@ def resolve_band(
     band_name: str,
     assets: Iterable[AssetFacts],
     sources: Sequence[BandSource],
+    sibling_candidates: Optional[Sequence[SiblingCandidateFacts]] = None,
 ) -> Optional[ResolvedBand]:
     """Find the asset (and reader) that produces ``band_name`` for one item.
 
@@ -189,6 +231,11 @@ def resolve_band(
             ``assets`` (not a collection's ``item_assets`` template -- these
             need real hrefs).
         sources: The registry entries to match against.
+        sibling_candidates: The item's own assets as ``SiblingCandidateFacts``
+            (adds declared ``gsd`` to each), passed to a matching source's
+            ``sibling`` when it is callable rather than a string template
+            (ADR 0004 S2.1). Optional and unused by every Sentinel-1 entry,
+            whose ``sibling`` is a string.
 
     Returns:
         ``None`` if no source matches, or if the matching source's ``reader``
@@ -204,7 +251,13 @@ def resolve_band(
             continue
 
         quantity = source.bands[band_names.index(band_name)][1]
-        sibling_key = source.sibling.format(**groups) if source.sibling else None
+        sibling_key: Optional[str]
+        if isinstance(source.sibling, str):
+            sibling_key = source.sibling.format(**groups)
+        elif callable(source.sibling) and sibling_candidates is not None:
+            sibling_key = source.sibling(sibling_candidates)
+        else:
+            sibling_key = None
         return ResolvedBand(
             asset_key=asset_key,
             sibling_key=sibling_key,
@@ -213,3 +266,29 @@ def resolve_band(
         )
 
     return None
+
+
+def pick_nominal_sibling_by_resolution(
+    candidates: Sequence[SiblingCandidateFacts],
+) -> Optional[str]:
+    """Pick a representative real raster asset to lend a band a resolution
+    and a mask to inherit (ADR 0002 S2.4 rules 2-3), for a source whose
+    sibling has no name expressible as a fixed template (ADR 0004 S2.1).
+
+    Picks the smallest declared ``gsd`` among ``role=data``, non-archive
+    candidates, tie-broken alphabetically by key; falls back to the
+    alphabetically-first eligible candidate if none declares ``gsd``.
+    ``None`` if there is no eligible candidate at all.
+    """
+    eligible = [
+        (key, gsd)
+        for key, media_type, roles, gsd in candidates
+        if "data" in (roles or ()) and media_type not in _ARCHIVE_MEDIA_TYPES
+    ]
+    if not eligible:
+        return None
+
+    with_gsd = [(key, gsd) for key, gsd in eligible if gsd is not None]
+    if with_gsd:
+        return min(with_gsd, key=lambda kv: (kv[1], kv[0]))[0]
+    return min(eligible, key=lambda kv: kv[0])[0]
