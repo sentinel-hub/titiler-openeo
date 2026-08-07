@@ -329,21 +329,58 @@ signature, spec or output band names; fixing item-provenance loss in the 30+
 
 ### 3.1 Open risks
 
-- **Injected bands are visible to a `load_collection` node's other consumers.** If
-  one node feeds both `sar_backscatter` and, say, `reduce_dimension`, the extra bands
-  change the second consumer's result. `results_cache._tag_single_consumer`
-  (`results_cache.py:82`) already computes single-consumer status from graph
-  topology and is reusable. Increment 4 decides whether to restrict injection to the
-  single-consumer case initially, or to strip injected bands for non-requiring
-  consumers.
-- **§7.10(b)'s channel does not obviously support per-node requirements.** It
-  rebinds **one shared** `load_collection` callable, yet asserts that multiple
-  `load_collection` nodes "are resolved independently". Those do not reconcile as
-  written. Candidate resolutions: dispatch on the incoming argument signature
-  (`resolved_kwargs` carries `id` and `bands`), or take a conservative union across
-  nodes. Settled by the increment-4 spike.
-- **Does registry rebinding survive `openeo_pg_parser_networkx`'s `Process`
-  wrapping?** §7.10(b) flags this as worth a spike; increment 4 does it.
+- **Resolved by increment 4 — registry rebinding survives `Process` wrapping, but
+  only if the copy is isolated deeper than the ADR text implies.** `to_callable`
+  looks up `process_registry[process_id].implementation` — `Process.__setitem__`
+  re-applies `wrap_funcs` to whatever implementation it's given, so a rebound
+  callable is wrapped exactly like any other registration
+  (`test_isolated_copy_rebinds_without_leaking`). But `copy.copy(registry)` — the
+  literal reading of "a shallow copy" — copies the `ProcessRegistry` object's
+  attributes by reference, so `registry.store` (a `dict[namespace, dict[process_id,
+  Process]]`) is **shared, not copied**. Rebinding `"load_collection"` on that
+  "copy" mutates the dict the real, application-lifetime registry also reads from
+  — every subsequent request, not just a concurrent one, would see the rebind
+  (`test_naive_copy_copy_leaks_rebind_into_shared_registry`, confirmed against the
+  real `openeo_pg_parser_networkx.process_registry.ProcessRegistry`). The correct
+  per-request recipe copies `store` one namespace-dict level deeper —
+  `{ns: dict(procs) for ns, procs in registry.store.items()}` — leaving untouched
+  `Process` entries shared (they're never mutated in place) while isolating the
+  one being rebound. Increment 5 must use this recipe, not `copy.copy` alone.
+- **Resolved by increment 4 — §7.10(b)'s channel cannot resolve per graph-node
+  identity, only per call-time signature.** `_map_node_to_callable`
+  (`graph.py:339-382`) bakes each node's own `resolved_kwargs` into that node's
+  `functools.partial` at graph-*construction* time, before rebinding is even
+  relevant to it; the rebound `load_collection` implementation, once installed,
+  receives only the kwargs a node happens to pass (`id`, `bands`, …), never a node
+  identifier. Two `load_collection` nodes with identical `id`/`bands` are
+  therefore provably indistinguishable at call time — proved directly against the
+  real parser, not inferred (`test_identical_signature_nodes_are_indistinguishable_at_call_time`).
+  "Dispatch on the incoming argument signature" is thus not one option among
+  several — it is the *only* information the channel exposes. The other candidate
+  named in the ADR, an unconditional single requirement applied to every call, is
+  actively wrong, not just imprecise: `test_naive_unconditional_dispatch_contaminates_unrelated_collection`
+  shows it injects a SAR-only band into an unrelated Sentinel-2 load that happens
+  to share the callable. The decision: increment 5's planner keys resolved
+  requirements by `(id, tuple(bands))` and unions across every `load_collection`
+  node sharing that key (`test_signature_keyed_dispatch_serves_both_nodes`). This
+  is a conservative union, not per-node precision — which sharpens the risk below
+  from a possible edge case into the channel's structural default.
+- **Sharpened by increment 4 — injected-band leakage to a signature-sharing
+  sibling is not an edge case, it is what the chosen channel does by
+  construction.** Two nodes with the same `id`/`bands` cannot be told apart (see
+  above), so if one needs an injected band and the other doesn't, the union
+  reaches both (`test_signature_keyed_dispatch_unions_same_signature_nodes`).
+  `results_cache._tag_single_consumer` (`results_cache.py:82`) already computes
+  single-consumer status from graph topology and is reusable. Increment 5 still
+  decides whether to restrict injection to the single-consumer case, or strip
+  injected bands post-mosaic for a signature-sharing consumer that didn't need
+  them — increment 4 only establishes that some such mitigation is now required,
+  not optional polish.
+
+  Proof for all three points: `tests/test_reader_requirement_channel_spike.py`.
+  Both fixes (the copy recipe and the signature-keyed dispatch) were confirmed
+  load-bearing by reverting each in turn and observing the corresponding test
+  fail before restoring the fix.
 - **Inverse-map duplication across readers — resolved in increment 3.** Two
   derived bands of the same polarisation are two assets, so each reader would
   build its own TPS map for the same GCPs and grid unless something shares it.
@@ -385,7 +422,7 @@ Delivered as **stacked pull requests**, one per increment, based on this branch.
 | 1 | **Discovery only.** Registry module + `getdimensions` pass. Bands advertised; requesting one still fails at read time. Ships the `Product` fix and #280. | Abandon if derived names collide with real asset keys on any target catalogue. |
 | 2 | **One reader end to end.** `NoiseBandReader` — the narrowest path exercising pseudo-asset resolution, `reader_options` injection, sibling GCP lookup, inverse map, grid alignment, mask inheritance and mosaicking. | **Gate:** per-tile wall time at 256² and 1024², decomposed (independent DN + `NoiseBandReader` reads) vs. fused (`sar_backscatter`'s existing DN-read-then-geocode-then-evaluate body) — not vs. DN alone, since both decomposed and fused pay the same TPS inverse-map cost once; that comparison would measure the cost of wanting a LUT at all, not the cost of decomposition. **Measured:** 1.00× at both 256² and 1024² on the real 440-GCP polar fixture (0.20 s / 3.03 s respectively for both shapes) — decomposition adds no measurable overhead. Abandon if mask inheritance cannot hold or the mosaic case does not work — both invalidate §2.3. |
 | 3 | **The remaining bands.** `CalibrationBandReader` for the four LUT vectors plus the incidence angle — one class, all five, dispatching on a `quantity` string (`BandSource.bands` became `(name_template, quantity)` pairs; `ResolvedBand` carries `quantity` through to the reader's constructor). Not, as originally planned here, "the existing `bands`/`indexes` selection in `_get_options`" — that mechanism resolves a real STAC asset's own declared `eo:bands`/`bands` metadata, which a calibration XML asset has none of; `quantity` is this increment's own, simpler answer to the same "one asset, several bands" question. Also added `CalibrationLUT.dn()` (`sar/annotation.py`, mirroring the other three accessors — `dn` was already parsed, just not exposed) and the `_inverse_map_cache`/`_inverse_map_lock` memo the increment-2 risk log anticipated (see above). | **Gate:** a concurrency bug, not a timing one — see the risk log above. Fixed with a lock; `tests/test_calibration_band_reader.py`'s call-count tests are the regression guard, run in this project's default single-worker pytest config, not proof against every possible scheduling. |
-| 4 | **Spike the requirement channel.** Settle both §3.1 unknowns. Deliverable is a decision plus a failing-then-passing test, not production code. | — |
+| 4 | **Spike the requirement channel.** Settle both §3.1 unknowns. Deliverable is a decision plus a failing-then-passing test, not production code. | **Decided:** rebinding survives `Process` wrapping, but only with a copy recipe that isolates `ProcessRegistry.store` per namespace — `copy.copy(registry)` alone aliases it and permanently corrupts the shared, app-lifetime registry (confirmed against the real dependency, then fixed). The channel exposes no per-node identity, only each call's own `resolved_kwargs`, so increment 5 must key resolved requirements by `(id, tuple(bands))` and union across nodes sharing a signature — not attempt per-node precision, and not apply one requirement unconditionally (shown to contaminate an unrelated collection). This also promotes §3.1's "injected bands visible to other consumers" risk from a possible edge case to the channel's structural default. See `tests/test_reader_requirement_channel_spike.py`. |
 | 5 | **Build the planner.** Requirement registry, DAG pass, per-request registry, resolved-requirement logging. | A graph with no requiring process must produce a byte-identical read. |
 | 6 | **Convergence.** `sar_backscatter` consumes injected bands; `calibrate` reduces to arithmetic; delete `_resolve_stack_assets`, `_resolve_polarisation_assets`, `_find_annotation_asset` and the `sar.py:212` rejection (~150 lines). | Abandon if increment 2's gate showed the decomposed read is materially more expensive. Then stop at 3, keep `sar_backscatter` fused, and record why here. |
 | 7 | **Document.** `docs/src/sar-backscatter.md` band table; update ADR 0001 §7.10(b)'s "deferred, no first client" caveat and §7.6's framing of `AssetFetcher`. | — |
