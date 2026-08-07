@@ -135,6 +135,87 @@ def test_add_band_summaries_noop_without_item_assets():
     assert "summaries" not in collection or "bands" not in collection["summaries"]
 
 
+def test_add_band_summaries_keeps_every_resolution_variant_by_asset_key():
+    """CDSE publishes one asset per band *per resolution* (B02_10m, B02_20m,
+    B02_60m all naming the physical band "B02" in eo:bands). Using the
+    physical band name as the summary "name" collapsed these into a single
+    duplicated/ambiguous entry -- the bug reported live on
+    https://openeo.ds.io/collections/sentinel-2-l2a. Every asset should show
+    up, named after its own item_assets key so names stay unique.
+    """
+    collection = {
+        "id": "sentinel-2-l2a",
+        "item_assets": {
+            "B02_10m": {
+                "roles": ["data", "reflectance", "sampling:original"],
+                "gsd": 10,
+                "description": "Blue (band 2) - 10m",
+                "eo:bands": [{"name": "B02", "common_name": "blue"}],
+            },
+            "B02_20m": {
+                "roles": ["data", "reflectance", "sampling:downsampled"],
+                "gsd": 20,
+                "description": "Blue (band 2) - 20m",
+                "eo:bands": [{"name": "B02", "common_name": "blue"}],
+            },
+            "B02_60m": {
+                "roles": ["data", "reflectance", "sampling:downsampled"],
+                "gsd": 60,
+                "description": "Blue (band 2) - 60m",
+                "eo:bands": [{"name": "B02", "common_name": "blue"}],
+            },
+        },
+    }
+
+    stacApiBackend._add_band_summaries(collection)
+
+    assert collection["summaries"]["bands"] == [
+        {
+            "name": "B02_10m",
+            "description": "Blue (band 2) - 10m",
+            "eo:common_name": "blue",
+        },
+        {
+            "name": "B02_20m",
+            "description": "Blue (band 2) - 20m",
+            "eo:common_name": "blue",
+        },
+        {
+            "name": "B02_60m",
+            "description": "Blue (band 2) - 60m",
+            "eo:common_name": "blue",
+        },
+    ]
+
+
+def test_add_band_summaries_skips_common_name_for_composite_assets():
+    """A true-colour composite asset (role "visual") lists its RGB
+    components (B04, B03, B02) in eo:bands. It still shows up (named after
+    its own asset key), but per-band metadata like eo:common_name is
+    ambiguous for a 3-band composite, so it's omitted."""
+    collection = {
+        "id": "sentinel-2-l2a",
+        "item_assets": {
+            "TCI_10m": {
+                "roles": ["visual"],
+                "gsd": 10,
+                "description": "True color image",
+                "eo:bands": [
+                    {"name": "B04"},
+                    {"name": "B03"},
+                    {"name": "B02"},
+                ],
+            },
+        },
+    }
+
+    stacApiBackend._add_band_summaries(collection)
+
+    assert collection["summaries"]["bands"] == [
+        {"name": "TCI_10m", "description": "True color image"},
+    ]
+
+
 def test_fix_collection_wires_band_summaries_in():
     collection = {
         "id": "sentinel-2-l2a",
