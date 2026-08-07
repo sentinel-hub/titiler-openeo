@@ -112,7 +112,63 @@ class stacApiBackend:
 
     def _fix_collection(self, collection: Dict) -> None:
         self._normalize_summaries(collection)
+        self._add_band_summaries(collection)
         return
+
+    @staticmethod
+    def _add_band_summaries(collection: Dict) -> None:
+        """Populate summaries.bands from item_assets band metadata.
+
+        openEO Studio's band parser currently only reads summaries.bands
+        (rich per-band objects); it does not yet fall back to the datacube
+        extension's cube:dimensions bands dimension that ``getdimensions``
+        produces below. Until that parser fix lands
+        (https://github.com/developmentseed/openeo-studio/pull/103), derive
+        the same per-band objects here from each item_asset's eo:bands (or
+        STAC 1.1 unprefixed bands) metadata, so collections with no
+        pre-existing summaries.bands still show their bands in the UI.
+        """
+        summaries = collection.get("summaries")
+        if not isinstance(summaries, dict):
+            summaries = {}
+            collection["summaries"] = summaries
+        if summaries.get("bands"):
+            return
+
+        item_assets = collection.get("item_assets") or {}
+        band_summaries: List[Dict] = []
+        for key, asset in item_assets.items():
+            asset_bands = asset.get("eo:bands") or asset.get("bands")
+            if not asset_bands:
+                continue
+
+            description = asset.get("description") or asset.get("title") or key
+            for band in asset_bands:
+                entry: Dict[str, Any] = {
+                    "name": band.get("name", key),
+                    "description": description,
+                }
+
+                common_name = band.get("eo:common_name") or band.get("common_name")
+                if common_name:
+                    entry["eo:common_name"] = common_name
+
+                center_wavelength = band.get("eo:center_wavelength") or band.get(
+                    "center_wavelength"
+                )
+                if center_wavelength is not None:
+                    entry["eo:center_wavelength"] = center_wavelength
+
+                fwhm = band.get("eo:full_width_half_max") or band.get(
+                    "full_width_half_max"
+                )
+                if fwhm is not None:
+                    entry["eo:full_width_half_max"] = fwhm
+
+                band_summaries.append(entry)
+
+        if band_summaries:
+            summaries["bands"] = band_summaries
 
     @staticmethod
     def _normalize_summaries(collection: Dict):
