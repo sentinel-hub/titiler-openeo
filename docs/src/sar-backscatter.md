@@ -20,6 +20,11 @@ across catalogues), only that the assets it needs actually resolve. It does reje
 `sar:product_type` values positively known to be unsupported (`SLC`, `OCN`) — the
 process assumes detected GRD amplitude data.
 
+Calibration happens per source item, before mosaicking, so a spatial extent whose
+acquisition datetime spans more than one item (e.g. adjacent orbit swaths captured at
+the same pass) calibrates correctly — each item's own calibration/noise LUTs are used
+for its own pixels, never blended with another item's.
+
 ## Supported parameters
 
 | Parameter | Phase 1 support |
@@ -39,8 +44,8 @@ Every unsupported parameter raises a clear error rather than silently approximat
 | `coefficient` is `sigma0-terrain` or `gamma0-terrain` | `ProcessParameterInvalid` |
 | `contributing_area=true` or `local_incidence_angle=true` | `FeatureUnsupported` |
 | `elevation_model` is not `null` | `DigitalElevationModelInvalid` |
-| `data` is not a STAC-item-backed `load_collection`/`load_stac` stack, or a slice mosaics several source items | `ProcessParameterInvalid` |
-| A requested polarisation's measurement/calibration/noise asset does not resolve | `ProcessParameterInvalid`, naming the polarisation and asset kind |
+| `data` is not a STAC-item-backed `load_collection`/`load_stac` stack | `ProcessParameterInvalid` |
+| An expected calibration/noise band (e.g. `vv_sigma0_lut`) is missing from `data` | `ProcessParameterInvalid`, naming the missing band |
 | `sar:product_type` is positively `SLC` or `OCN` | `ProcessParameterInvalid` |
 
 ## Scientific accuracy statement
@@ -182,6 +187,53 @@ notebook for an end-to-end run producing a VH/VV/VH:VV false-colour composite, a
 visual sanity check of a real calibrated product (water dark, vegetation reddish, urban
 bright).
 
+## Calibration and noise bands
+
+`sar_backscatter` calibrates by reading the calibration constant and thermal noise
+value from six bands per polarisation, derived directly from each item's own
+calibration/noise annotation XML. These are ordinary cube bands — `load_collection`
+can request any of them directly, independent of `sar_backscatter`, for building a
+coefficient this process does not itself provide.
+
+| Band | Description |
+| --- | --- |
+| `<pol>_sigma0_lut` | Sigma0 (`σ⁰`) calibration constant `A` |
+| `<pol>_beta0_lut` | Beta0 (`β⁰`) calibration constant `A` |
+| `<pol>_gamma0_lut` | Gamma0 (`γ⁰`) calibration constant `A` |
+| `<pol>_dn_lut` | Raw-DN calibration constant (rarely needed directly — the other three already have the absolute calibration constant folded in, per the accuracy statement above) |
+| `<pol>_ellipsoid_incidence_angle` | Ellipsoid incidence angle in degrees, recovered from the sigma0/gamma0 LUTs alone |
+| `<pol>_noise_lut` | Thermal noise, in DN² |
+
+`<pol>` is the polarisation code (`vv`, `vh`, `hh`, `hv`). Calling `sar_backscatter`
+with a given `coefficient` requests the matching LUT band (and the noise band, if
+`noise_removal` is true) on your behalf automatically — you only need to request one of
+these bands yourself if you want its value directly, e.g. to inspect the calibration
+constant independent of any DN:
+
+```json
+{
+  "process_graph": {
+    "load1": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": "sentinel-1-grd",
+        "spatial_extent": {"west": 139.5, "south": 35.2, "east": 140.2, "north": 35.8},
+        "temporal_extent": ["2026-07-08T20:42:00Z", "2026-07-08T20:44:00Z"],
+        "bands": ["vv", "vv_sigma0_lut", "vv_ellipsoid_incidence_angle"]
+      }
+    },
+    "save1": {
+      "process_id": "save_result",
+      "arguments": {
+        "data": {"from_node": "load1"},
+        "format": "GTiff"
+      },
+      "result": true
+    }
+  }
+}
+```
+
 ## Need CARD4L or terrain-corrected gamma0?
 
 This backend does not produce terrain-corrected (`gamma0-terrain`/`sigma0-terrain`)
@@ -197,5 +249,8 @@ registering `ard_normalized_radar_backscatter`) is on the roadmap but not built 
 
 The full design rationale, empirical findings, and phased implementation plan live in
 [ADR 0001](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0001-sar-backscatter.md).
-ADRs are repo-only documentation (like `docs/audits/`) and are not published on this
-site — follow the link on GitHub.
+The calibration/noise bands documented above — how they are discovered, read per item
+before mosaicking, and how `sar_backscatter` consumes them — are
+[ADR 0002](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0002-band-sources.md)'s
+subject. ADRs are repo-only documentation (like `docs/audits/`) and are not published
+on this site — follow the links on GitHub.

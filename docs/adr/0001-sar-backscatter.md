@@ -941,6 +941,15 @@ the LUTs itself with the already-configured credentials. It still performs no th
 noise removal and does not generalise to the other catalogues (§1.6f), so it is a
 fallback, not the design.
 
+**Update (2026-08-07).** `AssetFetcher` as designed here shipped, but its home moved:
+[ADR 0002](0002-band-sources.md) demoted it from `sar_backscatter`'s own top-level
+subsystem to a band reader's private dependency (`bandsources/readers.py`'s
+`BandReader`, not `sar.py`) — the fetching mechanism this section designed (obstore,
+the credential-mechanism gap, the `boto3` fallback) is unchanged, only who owns the
+fetch call. `sar_backscatter` itself no longer calls `AssetFetcher`, or anything else
+in this section, at all — it reads the already-fetched, already-parsed calibration/
+noise values as ordinary cube bands. See ADR 0002 §1.3 and its increment 6 row.
+
 ### 7.7 Dependencies
 
 rasterio (GCPs, TPS transformer, reproject) and numpy — both already present. Plus:
@@ -1064,6 +1073,21 @@ per-band. So `raw_values` is moot for SAR today, (b) has no first client, and it
 deferred rather than built speculatively. Increment 2 proceeds unchanged: `calibration.py`
 plus a `geocode.py` that only builds the TPS inverse map for LUT coordinates, with no
 reader-requirement plumbing.
+
+**Update (2026-08-07).** (b) was eventually built — under [ADR 0002](0002-band-sources.md),
+not here — with a different first client than anticipated above: not `raw_values` for
+`raster:scale`/`raster:offset` (still moot, unchanged), but injecting the calibration/
+noise LUT bands `sar_backscatter` itself needs (ADR 0002 §2.6, increments 4-6). The
+mechanism this section designed carried over largely as sketched — a requirement
+registry keyed by process id, a pre-execution DAG pass, a per-request process registry
+with `load_collection` rebound — with two refinements ADR 0002's own spike (increment 4)
+found necessary that this section did not anticipate: the "shallow copy" above must
+isolate the registry's storage one level deeper than a literal `copy.copy()` reaches, or
+rebinding "the copy" mutates the real, shared registry for every later request; and the
+channel exposes no per-graph-node identity at call time, only each call's own arguments,
+so multiple `load_collection` nodes sharing a signature have their resolved requirements
+unioned rather than "resolved independently" as originally put above. See ADR 0002 §3.1
+and its increment 4-6 rows for the full account.
 
 ---
 
