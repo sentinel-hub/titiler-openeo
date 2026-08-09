@@ -33,6 +33,28 @@ from .stacapi import stacApiBackend
 STAC_VERSION = "1.0.0"
 
 
+def _strip_falsy_result_keys(process_graph) -> None:
+    """Drop ``result`` keys that aren't ``True`` from every node of a (possibly
+    nested) process graph, in place.
+
+    openeo_pg_parser_networkx's resolver treats the first node that merely *has*
+    a ``result`` key as the graph's output, so the explicit ``result: false``
+    titiler writes on non-output nodes would misdirect it to the wrong node.
+    """
+    if not isinstance(process_graph, dict):
+        return
+    for node in process_graph.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("result") is not True:
+            node.pop("result", None)
+        arguments = node.get("arguments")
+        if isinstance(arguments, dict):
+            for arg in arguments.values():
+                if isinstance(arg, dict) and "process_graph" in arg:
+                    _strip_falsy_result_keys(arg["process_graph"])
+
+
 @define(kw_only=True)
 class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
@@ -142,9 +164,17 @@ class EndpointsFactory(BaseFactory):
 
         def get_udp_spec(process_id: str, namespace: str) -> Optional[dict]:
             try:
-                return self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
+                udp = self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
             except Exception:  # noqa: BLE001
                 return None
+            # titiler stores UDP nodes with an explicit `result: false`, but the
+            # resolver identifies a graph's output as the first node that merely
+            # *has* a `result` key — so it would wire the reference to the wrong
+            # node. Drop falsy `result` keys so only the true output node is
+            # detected.
+            if isinstance(udp, dict):
+                _strip_falsy_result_keys(udp.get("process_graph"))
+            return udp
 
         # Resolve against a throwaway registry that shares the predefined
         # namespace for reads but keeps the resolver's per-user UDP writes off

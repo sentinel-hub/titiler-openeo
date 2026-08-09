@@ -71,6 +71,78 @@ def test_service_create_resolves_udp_reference(app_with_auth):
     assert "save_result" in process_ids
 
 
+# A multi-node UDP whose output is NOT its first node. titiler stores every
+# node with an explicit `result` key (false on non-output nodes), so a resolver
+# that keys on mere key-presence would wire the reference to `loadco1` instead
+# of the real output `reduce1`.
+MULTI_NODE_UDP = {
+    "loadco1": {
+        "process_id": "load_collection",
+        "arguments": {
+            "id": "S2",
+            "spatial_extent": {
+                "west": 16.1,
+                "east": 16.6,
+                "north": 48.6,
+                "south": 47.2,
+            },
+            "temporal_extent": ["2017-01-01", "2017-02-01"],
+        },
+    },
+    "reduce1": {
+        "process_id": "reduce_dimension",
+        "arguments": {
+            "data": {"from_node": "loadco1"},
+            "dimension": "t",
+            "reducer": {
+                "process_graph": {
+                    "first1": {
+                        "process_id": "first",
+                        "arguments": {"data": {"from_parameter": "data"}},
+                        "result": True,
+                    }
+                }
+            },
+        },
+        "result": True,
+    },
+}
+
+
+def test_reference_wires_to_udp_output_node(app_with_auth):
+    """The external reference to a multi-node UDP resolves to the UDP's *output*
+    node, not merely its first node."""
+    _store_udp(app_with_auth, "reduce_udp", MULTI_NODE_UDP)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "u1": {"process_id": "reduce_udp", "arguments": {}},
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "multi-node UDP",
+    }
+
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 201, create.text
+
+    service_id = create.headers["OpenEO-Identifier"]
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    save = [n for n in graph.values() if n["process_id"] == "save_result"][0]
+    source = save["arguments"]["data"]["from_node"]
+    # save_result must read from the UDP's output (reduce_dimension), not the
+    # first inlined node (load_collection).
+    assert graph[source]["process_id"] == "reduce_dimension"
+
+
 def test_service_create_binds_udp_parameters(app_with_auth):
     """A parameter passed to a referenced UDP is bound into the inlined graph."""
     parameterized = {
