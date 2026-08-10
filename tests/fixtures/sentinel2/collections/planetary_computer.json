@@ -1,0 +1,41 @@
+{
+  "type": "Collection",
+  "stac_version": "1.0.0",
+  "id": "sentinel-2-l2a",
+  "description": "Sentinel-2 L2A (Planetary Computer) -- trimmed collection fixture, item_assets only.",
+  "license": "proprietary",
+  "extent": {
+    "spatial": {"bbox": [[-180, -90, 180, 90]]},
+    "temporal": {"interval": [["2015-06-27T00:00:00Z", null]]}
+  },
+  "links": [],
+  "item_assets": {
+    "B02": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"],
+      "gsd": 10.0
+    },
+    "B04": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"],
+      "gsd": 10.0
+    },
+    "B08": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"],
+      "gsd": 10.0
+    },
+    "granule-metadata": {
+      "type": "application/xml",
+      "roles": ["metadata"]
+    },
+    "safe-manifest": {
+      "type": "application/xml",
+      "roles": ["metadata"]
+    },
+    "preview": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["thumbnail"]
+    }
+  }
+}

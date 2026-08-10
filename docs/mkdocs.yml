@@ -44,6 +44,7 @@ nav:
       - Service Authorization: "authorization.md"
       - Tile Assignment: "tile-assignment.md"
       - SAR Backscatter: "sar-backscatter.md"
+      - Sentinel-2 View/Sun Angle Bands: "sentinel2-view-angles.md"
   - Administrator Guide:
     - Overview: "admin-guide.md"
     - OpenID Connect: "openid-connect.md"

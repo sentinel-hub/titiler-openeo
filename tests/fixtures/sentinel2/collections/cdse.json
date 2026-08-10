@@ -1,0 +1,45 @@
+{
+  "type": "Collection",
+  "stac_version": "1.0.0",
+  "id": "sentinel-2-l2a",
+  "description": "Sentinel-2 L2A (CDSE) -- trimmed collection fixture, item_assets only.",
+  "license": "proprietary",
+  "extent": {
+    "spatial": {"bbox": [[-180, -90, 180, 90]]},
+    "temporal": {"interval": [["2015-06-27T00:00:00Z", null]]}
+  },
+  "links": [],
+  "item_assets": {
+    "B02_10m": {
+      "type": "image/jp2",
+      "roles": ["data", "reflectance", "sampling:original", "gsd:10m"],
+      "gsd": 10
+    },
+    "B04_10m": {
+      "type": "image/jp2",
+      "roles": ["data", "reflectance", "sampling:original", "gsd:10m"],
+      "gsd": 10
+    },
+    "B08_10m": {
+      "type": "image/jp2",
+      "roles": ["data", "reflectance", "sampling:original", "gsd:10m"],
+      "gsd": 10
+    },
+    "Product": {
+      "type": "application/zip",
+      "roles": ["data", "metadata", "archive"]
+    },
+    "safe_manifest": {
+      "type": "application/xml",
+      "roles": ["metadata"]
+    },
+    "granule_metadata": {
+      "type": "application/xml",
+      "roles": ["metadata"]
+    },
+    "thumbnail": {
+      "type": "image/jpeg",
+      "roles": ["thumbnail", "overview"]
+    }
+  }
+}
