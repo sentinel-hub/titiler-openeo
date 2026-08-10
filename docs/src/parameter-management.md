@@ -423,6 +423,33 @@ The `from_parameter` references inside `context` are resolved against the UDP's 
 
 > **Note**: If you used a Python closure to capture `Parameter` objects from the openeo-python-client and referenced them directly inside a callback without passing through `context`, those references would not resolve correctly. Always use `context` to thread outer parameters into callbacks.
 
+## Referencing a Stored UDP
+
+A process graph can extend another graph by referencing a stored user-defined process by its `process_id`, exactly as it would reference a predefined process. Given a UDP saved as `true_color` through `PUT /process_graphs/true_color`:
+
+```json
+{
+  "process_graph": {
+    "rendered": {
+      "process_id": "true_color",
+      "arguments": {
+        "bbox": { "west": -74.02, "east": -73.94, "south": 40.70, "north": 40.80 }
+      },
+      "result": true
+    }
+  }
+}
+```
+
+The reference is inlined — with its arguments bound to the UDP's parameters — before the graph is parsed, so the executed graph is the UDP's own nodes. This happens on `POST /validation`, `POST /result` and `POST /services`.
+
+A few properties worth knowing:
+
+- **UDPs are per-user.** A reference resolves only against process graphs stored by the authenticated user; there is no shared or public UDP namespace.
+- **Services are resolved once, at creation.** `POST /services` inlines the reference into the stored service definition, because XYZ tiles are rendered later without an authenticated user and cannot look the UDP up themselves. Updating a UDP therefore does not change services created from it — recreate the service to pick up the new definition.
+- **Bind either all of the UDP's parameters, or none of them.** Arguments passed to the reference are bound into the inlined graph. If you pass no arguments at all, the UDP's `from_parameter` references are left in place and resolved later by the usual [parameter machinery](#parameter-resolution-priority) — query parameters and defaults still apply. Passing *some* arguments but not others is not currently supported: the unbound parameter has nothing to bind to, and the reference fails to resolve with `Process '<id>' not found in registry`.
+- **Unknown processes still error.** A `process_id` that matches neither a predefined process nor one of your stored UDPs fails with `ProcessUnsupported`, as before.
+
 ## Troubleshooting
 
 ### Common Issues
