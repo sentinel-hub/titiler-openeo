@@ -446,6 +446,7 @@ The reference is inlined — with its arguments bound to the UDP's parameters �
 A few properties worth knowing:
 
 - **UDPs are per-user.** A reference resolves only against process graphs stored by the authenticated user; there is no shared or public UDP namespace.
+- **References work inside callbacks too.** A UDP referenced from a `reducer`, `process` or any other callback graph is inlined just like a top-level one, at any nesting depth.
 - **Services are resolved once, at creation.** `POST /services` inlines the reference into the stored service definition, because XYZ tiles are rendered later without an authenticated user and cannot look the UDP up themselves. Updating a UDP therefore does not change services created from it — recreate the service to pick up the new definition.
 - **Bind either all of the UDP's parameters, or none of them.** Arguments passed to the reference are bound into the inlined graph. If you pass no arguments at all, the UDP's `from_parameter` references are left in place and resolved later by the usual [parameter machinery](#parameter-resolution-priority) — query parameters and defaults still apply. Passing *some* arguments but not others is not currently supported: the unbound parameter has nothing to bind to, and the reference fails to resolve with `Process '<id>' not found in registry`.
 - **Unknown processes still error.** A `process_id` that matches neither a predefined process nor one of your stored UDPs fails with `ProcessUnsupported`, as before.

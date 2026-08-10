@@ -1,6 +1,7 @@
 """titiler.openeo endpoint Factory."""
 
 import json
+import logging
 from copy import deepcopy
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -13,7 +14,6 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
-from openeo_pg_parser_networkx.resolving_utils import resolve_process_graph
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -29,30 +29,11 @@ from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
 from .stacapi import stacApiBackend
+from .udp_resolution import resolve_udp_references
+
+logger = logging.getLogger(__name__)
 
 STAC_VERSION = "1.0.0"
-
-
-def _strip_falsy_result_keys(process_graph) -> None:
-    """Drop ``result`` keys that aren't ``True`` from every node of a (possibly
-    nested) process graph, in place.
-
-    openeo_pg_parser_networkx's resolver treats the first node that merely *has*
-    a ``result`` key as the graph's output, so the explicit ``result: false``
-    titiler writes on non-output nodes would misdirect it to the wrong node.
-    """
-    if not isinstance(process_graph, dict):
-        return
-    for node in process_graph.values():
-        if not isinstance(node, dict):
-            continue
-        if node.get("result") is not True:
-            node.pop("result", None)
-        arguments = node.get("arguments")
-        if isinstance(arguments, dict):
-            for arg in arguments.values():
-                if isinstance(arg, dict) and "process_graph" in arg:
-                    _strip_falsy_result_keys(arg["process_graph"])
 
 
 @define(kw_only=True)
@@ -137,61 +118,36 @@ class EndpointsFactory(BaseFactory):
     def _resolve_udp_references(self, process_graph: dict, user) -> dict:
         """Inline any user-defined process (UDP) references in a flat graph.
 
-        A process graph may reference a stored UDP by ``process_id`` — a
-        "graph that extends another graph". The process registry only holds
-        predefined processes, so such references must be inlined (with their
-        parameters bound) before the graph is parsed or executed. We delegate
-        the actual inlining to openeo_pg_parser_networkx's resolver, feeding it
-        a lookup into ``udp_store`` scoped to the authenticated user.
-
-        Returns the graph unchanged when there is no authenticated user, when
-        it references only predefined processes, or on any resolution failure —
-        so a genuinely unknown process still surfaces the normal
-        "not found in registry" error downstream instead of a 500.
+        Looks UDPs up in ``udp_store``, scoped to the authenticated user, and
+        hands the graph transform itself to :mod:`titiler.openeo.udp_resolution`.
+        Returns the graph unchanged when there is no authenticated user — an
+        unauthenticated request has no UDPs to resolve against.
         """
         if user is None or not process_graph:
             return process_graph
 
-        # Nothing to do unless something isn't a predefined process.
-        predefined = set(self.process_registry[None].keys())
-        referenced = {
-            node.get("process_id")
-            for node in process_graph.values()
-            if isinstance(node, dict)
-        }
-        if referenced <= (predefined | {None}):
-            return process_graph
-
         def get_udp_spec(process_id: str, namespace: str) -> Optional[dict]:
             try:
-                udp = self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
+                return self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
             except Exception:  # noqa: BLE001
+                # The store contract signals "no such UDP" with a `None` return,
+                # so an exception here is always an infrastructure failure. Both
+                # end up as "unresolved" for the caller, so log it — otherwise a
+                # store outage is indistinguishable from a mistyped process_id.
+                logger.warning(
+                    "UDP store lookup failed for process_id=%r user_id=%r",
+                    process_id,
+                    namespace,
+                    exc_info=True,
+                )
                 return None
-            # titiler stores UDP nodes with an explicit `result: false`, but the
-            # resolver identifies a graph's output as the first node that merely
-            # *has* a `result` key — so it would wire the reference to the wrong
-            # node. Drop falsy `result` keys so only the true output node is
-            # detected.
-            if isinstance(udp, dict):
-                _strip_falsy_result_keys(udp.get("process_graph"))
-            return udp
 
-        # Resolve against a throwaway registry that shares the predefined
-        # namespace for reads but keeps the resolver's per-user UDP writes off
-        # the shared registry — avoiding cross-request leakage and stale-UDP
-        # caching (the resolver only re-fetches a UDP it hasn't already cached).
-        scratch = ProcessRegistry(wrap_funcs=self.process_registry.wrap_funcs)
-        scratch.store = dict(self.process_registry.store)
-        scratch.aliases = self.process_registry.aliases
-        try:
-            return resolve_process_graph(
-                deepcopy(process_graph),
-                scratch,
-                get_udp_spec=get_udp_spec,
-                namespace=user.user_id,
-            )
-        except Exception:  # noqa: BLE001
-            return process_graph
+        return resolve_udp_references(
+            process_graph,
+            self.process_registry,
+            get_udp_spec=get_udp_spec,
+            namespace=user.user_id,
+        )
 
     def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
         """Validate that tile is within service extent if configured."""

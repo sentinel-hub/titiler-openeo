@@ -6,6 +6,8 @@ the graph is validated / turned into a service, since the process registry only
 holds predefined processes.
 """
 
+import logging
+
 
 def _store_udp(client, udp_id, process_graph, parameters=None):
     body = {"id": udp_id, "process_graph": process_graph}
@@ -239,3 +241,159 @@ def test_unknown_process_still_errors(app_with_auth):
     }
     create = app_with_auth.post("/services", json=service_input)
     assert create.status_code >= 400
+
+
+# The outer graph that *references* a UDP carries titiler's explicit
+# `result: false` on every non-output node too — so a resolver keying on mere
+# key-presence picks a source node as the graph's root and strips `result` from
+# the real `save_result` output.
+def test_outer_graph_keeps_its_own_result_node(app_with_auth):
+    """Resolution must not move the outer graph's result node when the
+    referencing node isn't the first one in the graph."""
+    _store_udp(app_with_auth, "base_s2_outer", BASE_UDP)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "load1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "u1": {"process_id": "base_s2_outer", "arguments": {}},
+                "merge1": {
+                    "process_id": "merge_cubes",
+                    "arguments": {
+                        "cube1": {"from_node": "load1"},
+                        "cube2": {"from_node": "u1"},
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "merge1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "UDP referenced from a non-first node",
+    }
+
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 201, create.text
+
+    service_id = create.headers["OpenEO-Identifier"]
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    results = [n for n in graph.values() if n.get("result")]
+    assert len(results) == 1, "exactly one node must be the result node"
+    assert results[0]["process_id"] == "save_result"
+
+
+# A UDP referenced from inside a callback (`reduce_dimension`'s reducer) rather
+# than from a top-level node: openeo_pg_parser_networkx only descends into a
+# node's `process` argument, so this needs titiler's own callback recursion.
+CALLBACK_UDP = {
+    "first1": {
+        "process_id": "first",
+        "arguments": {"data": {"from_parameter": "data"}},
+        "result": True,
+    },
+}
+
+
+def test_udp_referenced_from_a_callback_is_resolved(app_with_auth):
+    """A UDP referenced only from a reducer callback is inlined too."""
+    _store_udp(app_with_auth, "cb_first", CALLBACK_UDP)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "load1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "reduce1": {
+                    "process_id": "reduce_dimension",
+                    "arguments": {
+                        "data": {"from_node": "load1"},
+                        "dimension": "t",
+                        "reducer": {
+                            "process_graph": {
+                                "cb1": {
+                                    "process_id": "cb_first",
+                                    "arguments": {},
+                                    "result": True,
+                                }
+                            }
+                        },
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "reduce1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "UDP referenced from a callback",
+    }
+
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 201, create.text
+
+    service_id = create.headers["OpenEO-Identifier"]
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    reduce_node = [n for n in graph.values() if n["process_id"] == "reduce_dimension"][
+        0
+    ]
+    callback = reduce_node["arguments"]["reducer"]["process_graph"]
+    assert {n["process_id"] for n in callback.values()} == {"first"}
+
+
+def test_udp_store_failure_is_logged(app_with_auth, monkeypatch, caplog):
+    """A store outage and a mistyped process_id both end up "unresolved" for the
+    caller, so the store failure must at least be logged."""
+    store = app_with_auth.app.endpoints.udp_store
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("udp store is down")
+
+    monkeypatch.setattr(type(store), "get_udp", boom)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "u1": {"process_id": "some_udp", "arguments": {}, "result": True},
+            }
+        },
+        "type": "xyz",
+        "title": "service hitting a broken store",
+    }
+
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.factory"):
+        create = app_with_auth.post("/services", json=service_input)
+
+    assert create.status_code >= 400
+    assert "UDP store lookup failed" in caplog.text
