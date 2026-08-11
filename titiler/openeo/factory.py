@@ -21,7 +21,7 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
-from .errors import InvalidProcessGraph
+from .errors import InvalidProcessGraph, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
@@ -129,18 +129,21 @@ class EndpointsFactory(BaseFactory):
         def get_udp_spec(process_id: str, namespace: str) -> Optional[dict]:
             try:
                 return self.udp_store.get_udp(user_id=namespace, udp_id=process_id)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 # The store contract signals "no such UDP" with a `None` return,
-                # so an exception here is always an infrastructure failure. Both
-                # end up as "unresolved" for the caller, so log it — otherwise a
-                # store outage is indistinguishable from a mistyped process_id.
+                # so an exception here is always an infrastructure failure, not a
+                # mistyped process_id. Reporting it as one would tell the client
+                # its graph is bad and that retrying is pointless, so surface the
+                # outage as a 503 instead.
                 logger.warning(
                     "UDP store lookup failed for process_id=%r user_id=%r",
                     process_id,
                     namespace,
                     exc_info=True,
                 )
-                return None
+                raise ServiceUnavailable(
+                    "Could not reach the user-defined process store"
+                ) from exc
 
         return resolve_udp_references(
             process_graph,

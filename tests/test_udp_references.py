@@ -372,9 +372,9 @@ def test_udp_referenced_from_a_callback_is_resolved(app_with_auth):
     assert {n["process_id"] for n in callback.values()} == {"first"}
 
 
-def test_udp_store_failure_is_logged(app_with_auth, monkeypatch, caplog):
-    """A store outage and a mistyped process_id both end up "unresolved" for the
-    caller, so the store failure must at least be logged."""
+def test_udp_store_failure_is_a_503_not_a_bad_graph(app_with_auth, monkeypatch, caplog):
+    """A store outage must not be reported as a missing UDP: the caller gets a
+    503 rather than a "not found in registry" error blaming their graph."""
     store = app_with_auth.app.endpoints.udp_store
 
     def boom(*args, **kwargs):
@@ -395,5 +395,6 @@ def test_udp_store_failure_is_logged(app_with_auth, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="titiler.openeo.factory"):
         create = app_with_auth.post("/services", json=service_input)
 
-    assert create.status_code >= 400
+    assert create.status_code == 503
+    assert create.json()["code"] == "ServiceUnavailable"
     assert "UDP store lookup failed" in caplog.text

@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Set
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.resolving_utils import resolve_process_graph
 
+from .errors import ServiceUnavailable
 from .reader_requirements import _isolated_copy
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,9 @@ def resolve_udp_references(
 
     Returns the graph unchanged when it references only predefined processes, or
     on any resolution failure, so a genuinely unknown process still surfaces the
-    normal "not found in registry" error downstream instead of a 500.
+    normal "not found in registry" error downstream instead of a 500. A store
+    outage is not a resolution failure and propagates instead -- treating it as
+    one would report an infrastructure problem as a bad graph.
     """
     if not process_graph:
         return process_graph
@@ -172,7 +175,16 @@ def resolve_udp_references(
     strip_falsy_result_keys(graph)
     try:
         return _resolve(graph, scratch, fetch_udp_spec, namespace, predefined)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        # The resolver rewraps whatever ``fetch_udp_spec`` raises into a generic
+        # ValueError, chaining the original as ``__cause__``, so a store outage
+        # is only distinguishable by walking that chain.
+        store_failure = _store_failure_in(exc)
+        if store_failure is not None:
+            # No `from exc`: `store_failure` already carries the original store
+            # error as its cause, and chaining it to its own wrapper would make
+            # the cause chain circular.
+            raise store_failure  # noqa: B904
         logger.warning(
             "Could not resolve user-defined process references for namespace %r; "
             "leaving the graph unresolved.",
@@ -180,3 +192,15 @@ def resolve_udp_references(
             exc_info=True,
         )
         return process_graph
+
+
+def _store_failure_in(exc: BaseException) -> Optional[ServiceUnavailable]:
+    """Return the ``ServiceUnavailable`` in ``exc``'s cause chain, if any."""
+    seen: Set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, ServiceUnavailable):
+            return current
+        seen.add(id(current))
+        current = current.__cause__
+    return None
