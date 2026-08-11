@@ -943,7 +943,10 @@ class EndpointsFactory(BaseFactory):
                     "process_graph is required and must not be empty",
                 )
 
-            # Validate processes exist in registry and required params are present
+            # Validate processes exist -- as a predefined process or as one of the
+            # user's own stored UDPs -- and required params are present. A UDP
+            # reference is left as-is here (see below): only its existence and
+            # required parameters are checked, not its shape.
             for node_id, node in data["process_graph"].items():
                 node_dict = (
                     node
@@ -961,17 +964,43 @@ class EndpointsFactory(BaseFactory):
                 if not process_id:
                     raise InvalidProcessGraph("Process node missing process_id")
 
-                if process_id not in self.process_registry[None]:
-                    raise InvalidProcessGraph(
-                        f"Process '{process_id}' not found in registry"
-                    )
+                if process_id in self.process_registry[None]:
+                    spec = self.process_registry[process_id].spec
+                    required_params = [
+                        p["name"]
+                        for p in spec.get("parameters", [])
+                        if not p.get("optional", False)
+                    ]
+                else:
+                    try:
+                        referenced_udp = self.udp_store.get_udp(
+                            user_id=user.user_id, udp_id=process_id
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "UDP store lookup failed for process_id=%r user_id=%r",
+                            process_id,
+                            user.user_id,
+                            exc_info=True,
+                        )
+                        raise ServiceUnavailable(
+                            "Could not reach the user-defined process store"
+                        ) from exc
+                    if not referenced_udp:
+                        raise InvalidProcessGraph(
+                            f"Process '{process_id}' not found in registry"
+                        )
+                    # A UDP parameter is required iff it has no default -- see
+                    # the `default` property in the openEO API spec's
+                    # `parameter` schema ("Required parameters SHOULD NOT
+                    # specify a default value. Optional parameters SHOULD
+                    # always specify a default value.").
+                    required_params = [
+                        p["name"]
+                        for p in referenced_udp.get("parameters") or []
+                        if "default" not in p
+                    ]
 
-                spec = self.process_registry[process_id].spec
-                required_params = [
-                    p["name"]
-                    for p in spec.get("parameters", [])
-                    if not p.get("optional", False)
-                ]
                 args = node_dict.get("arguments", {}) or {}
                 for param_name in required_params:
                     if param_name not in args or args.get(param_name) is None:
@@ -979,10 +1008,22 @@ class EndpointsFactory(BaseFactory):
                             f"Required parameter '{param_name}' missing for process '{process_id}'"
                         )
 
-            # Validate argument schema (will raise InvalidProcessGraph on failure)
+            # Validate argument schema against a resolved copy, so a reference to
+            # another stored UDP doesn't fail here for lack of a predefined
+            # implementation. The graph is still stored as submitted, below --
+            # not this resolved copy -- so the reference stays live: edits to
+            # the referenced UDP keep propagating instead of being frozen in at
+            # store time (see resolve_udp_references' module docstring).
             try:
-                parsed_graph = OpenEOProcessGraph(pg_data=data)
+                resolved_for_validation = self._resolve_udp_references(
+                    deepcopy(data["process_graph"]), user
+                )
+                parsed_graph = OpenEOProcessGraph(
+                    pg_data={"process_graph": resolved_for_validation}
+                )
                 parsed_graph.to_callable(process_registry=self.process_registry)
+            except ServiceUnavailable:
+                raise
             except Exception as err:  # noqa: BLE001
                 raise InvalidProcessGraph(f"Invalid process graph: {str(err)}") from err
 
