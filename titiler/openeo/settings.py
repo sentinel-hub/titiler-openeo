@@ -19,6 +19,22 @@ class OIDCConfig(BaseSettings):
     title: str = "OIDC"
     description: str = "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
 
+    # Additional accepted `aud` values, space-separated, beyond `client_id`.
+    # Needed for providers that issue *access* tokens audienced at an API
+    # rather than at the client -- Microsoft Entra uses the application ID URI
+    # (`api://<client_id>`). Empty by default, which accepts exactly what this
+    # backend accepted before the setting existed.
+    # See docs/adr/0006-microsoft-entra-oidc.md S2.2 change 6.
+    audiences: list[str] = []
+
+    # Which token claim becomes `User.user_id`. Services, UDPs and tile
+    # assignments are all keyed on it, so changing this on a running deployment
+    # orphans everything already stored. `sub` is the specification's answer and
+    # the default; Entra's `sub` is pairwise (stable per user *per application
+    # registration*), so a deployment that expects to re-register its app may
+    # prefer the tenant-stable `oid`. See ADR 0006 S2.4.
+    user_id_claim: str = "sub"
+
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
         env_file=".env",
@@ -81,8 +97,8 @@ class OIDCConfig(BaseSettings):
             Returns:
                 Processed value for the field
             """
-            # allow space-separated list parsing for scopes
-            if field_name == "scopes":
+            # allow space-separated list parsing for scopes and audiences
+            if field_name in ("scopes", "audiences"):
                 return value.split(" ") if value else None
 
             return super().prepare_field_value(
@@ -116,15 +132,35 @@ class AuthSettings(BaseSettings):
     )
 
     def __init__(self, *args, **kwargs):
-        """Initialize settings."""
-        kwargs["oidc"] = OIDCConfig()
+        """Initialize settings, defaulting `oidc` from the environment.
+
+        `setdefault`, not an unconditional assignment: overwriting `kwargs`
+        made `AuthSettings(oidc=...)` silently ignored, which in turn made
+        `validate_oidc_config` below and the `if not settings.oidc` guards in
+        `auth.py` dead code (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
+        """
+        kwargs.setdefault("oidc", OIDCConfig())
         super().__init__(*args, **kwargs)
 
     @model_validator(mode="after")
     def validate_oidc_config(self):
-        """Validate OIDC configuration when method is oidc."""
-        if self.method == "oidc" and not self.oidc:
+        """Fail at startup, not at the first request, on incomplete OIDC config."""
+        if self.method != "oidc":
+            return self
+
+        if not self.oidc:
             raise ValueError("OIDC configuration required when method is 'oidc'")
+
+        missing = [
+            f"TITILER_OPENEO_AUTH_OIDC_{name.upper()}"
+            for name in ("client_id", "wk_url")
+            if not getattr(self.oidc, name)
+        ]
+        if missing:
+            raise ValueError(
+                "OIDC authentication is enabled but incompletely configured. "
+                f"Missing: {', '.join(missing)}."
+            )
         return self
 
 
