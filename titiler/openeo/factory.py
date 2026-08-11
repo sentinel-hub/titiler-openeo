@@ -1258,6 +1258,19 @@ class EndpointsFactory(BaseFactory):
 
                 # Update with any new values provided
                 update_data.update(body_data)
+
+                # A PATCH can introduce a UDP reference that wasn't there at
+                # creation time, so resolve it here too -- same reason as in
+                # openeo_service_create: XYZ tiles render without an
+                # authenticated user and can't look the UDP up themselves.
+                if isinstance(body_data.get("process"), dict) and body_data[
+                    "process"
+                ].get("process_graph"):
+                    update_data["process"]["process_graph"] = (
+                        self._resolve_udp_references(
+                            update_data["process"]["process_graph"], user
+                        )
+                    )
             else:
                 update_data = existing
                 if "id" in update_data:

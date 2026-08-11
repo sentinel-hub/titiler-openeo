@@ -541,7 +541,10 @@ def test_upsert_udp_still_rejects_a_genuinely_unknown_process(app_with_auth):
             "result": True,
         },
     }
-    resp = app_with_auth.put("/process_graphs/bad_wrapper", json={"id": "bad_wrapper", "process_graph": graph})
+    resp = app_with_auth.put(
+        "/process_graphs/bad_wrapper",
+        json={"id": "bad_wrapper", "process_graph": graph},
+    )
     assert resp.status_code >= 400
 
 
@@ -599,3 +602,65 @@ def test_upsert_udp_surfaces_store_outage_as_503(app_with_auth, monkeypatch, cap
             json={"id": "wrapper_store_down", "process_graph": graph},
         )
     assert resp.status_code == 503
+
+
+def test_service_update_resolves_udp_reference(app_with_auth):
+    """A PATCH can introduce a UDP reference into a service that didn't have one
+    at creation time, so it must be inlined too -- otherwise the reference is
+    persisted raw and every later anonymous XYZ tile request fails on it."""
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+
+    plain_service = {
+        "process": {
+            "process_graph": {
+                "loadco1": {
+                    "process_id": "load_collection",
+                    "arguments": {
+                        "id": "S2",
+                        "spatial_extent": {
+                            "west": 16.1,
+                            "east": 16.6,
+                            "north": 48.6,
+                            "south": 47.2,
+                        },
+                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                    },
+                },
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "plain service",
+    }
+    create = app_with_auth.post("/services", json=plain_service)
+    assert create.status_code == 201, create.text
+    service_id = create.headers["OpenEO-Identifier"]
+
+    patch = app_with_auth.patch(
+        f"/services/{service_id}",
+        json={
+            "process": {
+                "process_graph": {
+                    "u1": {"process_id": "base_s2", "arguments": {}},
+                    "save1": {
+                        "process_id": "save_result",
+                        "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+                        "result": True,
+                    },
+                }
+            }
+        },
+    )
+    assert patch.status_code == 204, patch.text
+
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    process_ids = {node["process_id"] for node in graph.values()}
+    assert "base_s2" not in process_ids
+    assert "load_collection" in process_ids
+    assert "save_result" in process_ids
