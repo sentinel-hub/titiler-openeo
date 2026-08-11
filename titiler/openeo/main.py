@@ -19,9 +19,12 @@ from .middleware import DynamicCacheControlMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
 from .settings import ApiSettings, AuthSettings, BackendSettings
+from .signing import rules_for_catalogue, set_default_rules
 from .stacapi import LoadCollection, LoadStac, stacApiBackend
 
 STAC_VERSION = "1.0.0"
+
+logger = logging.getLogger(__name__)
 
 api_settings = ApiSettings()
 auth_settings = AuthSettings()
@@ -47,6 +50,12 @@ tile_store = (
     else None
 )
 auth = get_auth(auth_settings, store=service_store)
+
+# Which asset hrefs this deployment must attach a credential to, decided once
+# from the configured catalogue (docs/adr/0005-asset-href-signing.md S2.3).
+# Empty for every catalogue that needs none, which is the unchanged path.
+signer_rules = rules_for_catalogue(str(backend_settings.stac_api_url))
+set_default_rules(signer_rules)
 
 
 def create_app():
@@ -102,13 +111,23 @@ def create_app():
         ],
     )
 
+    # The activation rule is derived, not configured, so say out loud which
+    # rules are live -- otherwise a deployment pointing at a Planetary Computer
+    # mirror on another hostname silently gets none (ADR 0005 S3.1).
+    if signer_rules:
+        logger.info(
+            "Asset href signing enabled for %s: %s",
+            backend_settings.stac_api_url,
+            ", ".join(rule.host.pattern for rule in signer_rules),
+        )
+
     # Register backend specific load_collection methods
-    loaders = LoadCollection(stac_client)  # type: ignore
+    loaders = LoadCollection(stac_client, signer_rules=signer_rules)  # type: ignore
     process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
         implementation=loaders.load_collection,
     )
-    loaders = LoadStac()  # type: ignore
+    loaders = LoadStac(signer_rules=signer_rules)  # type: ignore
     process_registry["load_stac"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_stac"],
         implementation=loaders.load_stac,

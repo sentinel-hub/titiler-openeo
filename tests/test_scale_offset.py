@@ -156,7 +156,10 @@ def s2_item():
 def test_reader_applies_scale_offset(monkeypatch, s2_item):
     img = _img([[[2000, 0]], [[4, 0]]], mask=[[[False, True]], [[False, True]]])
     fake = _FakeSrc(img)
-    monkeypatch.setattr(reader, "SimpleSTACReader", lambda item: fake)
+    # `**kwargs` so the stub tolerates SimpleSTACReader's construction kwargs
+    # (`signer`, `band_source_fetcher`, ...) without asserting on them -- this
+    # test is about scale/offset, not about how the reader is built.
+    monkeypatch.setattr(reader, "SimpleSTACReader", lambda item, **kwargs: fake)
     monkeypatch.setattr(reader.processing_settings, "apply_scale_offset", True)
 
     out = reader._reader(s2_item, (0, 0, 1, 1), assets=["B02_10m", "SCL_20m"])
@@ -167,7 +170,9 @@ def test_reader_applies_scale_offset(monkeypatch, s2_item):
 
 def test_reader_flag_off_returns_raw_dn(monkeypatch, s2_item):
     img = _img([[[2000, 0]], [[4, 0]]])
-    monkeypatch.setattr(reader, "SimpleSTACReader", lambda item: _FakeSrc(img))
+    monkeypatch.setattr(
+        reader, "SimpleSTACReader", lambda item, **kwargs: _FakeSrc(img)
+    )
     monkeypatch.setattr(reader.processing_settings, "apply_scale_offset", False)
 
     out = reader._reader(s2_item, (0, 0, 1, 1), assets=["B02_10m", "SCL_20m"])
@@ -186,7 +191,9 @@ def test_scale_offset_is_lazy(monkeypatch, s2_item):
 
     def task():
         calls["n"] += 1
-        monkeypatch.setattr(reader, "SimpleSTACReader", lambda item: _FakeSrc(img))
+        monkeypatch.setattr(
+            reader, "SimpleSTACReader", lambda item, **kwargs: _FakeSrc(img)
+        )
         return reader._reader(s2_item, (0, 0, 1, 1), assets=["B02_10m", "SCL_20m"])
 
     dt = datetime(2024, 6, 14)

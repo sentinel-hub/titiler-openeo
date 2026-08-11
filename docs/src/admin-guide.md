@@ -26,6 +26,19 @@ TITILER_OPENEO_STORE_URL="path-to-services-config"
 TITILER_OPENEO_TILE_STORE_URL="optional-tile-store-url"
 ```
 
+#### Planetary Computer Settings ([`PlanetaryComputerSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
+
+Only consulted when `TITILER_OPENEO_STAC_API_URL` points at Microsoft Planetary
+Computer, which is what activates asset signing. All optional — the defaults
+work with no credentials. See [Microsoft Planetary Computer](planetary-computer.md).
+
+```bash
+TITILER_OPENEO_PC_SUBSCRIPTION_KEY=""  # Optional; raises SAS API rate limits
+TITILER_OPENEO_PC_SAS_URL="https://planetarycomputer.microsoft.com/api/sas/v1"
+TITILER_OPENEO_PC_EXPIRY_MARGIN=300  # Seconds before expiry to mint a new token
+TITILER_OPENEO_PC_TIMEOUT=10  # Per-request timeout when minting a token
+```
+
 #### Processing Settings ([`ProcessingSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L182))
 
 ```bash
