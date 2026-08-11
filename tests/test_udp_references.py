@@ -398,3 +398,204 @@ def test_udp_store_failure_is_a_503_not_a_bad_graph(app_with_auth, monkeypatch, 
     assert create.status_code == 503
     assert create.json()["code"] == "ServiceUnavailable"
     assert "UDP store lookup failed" in caplog.text
+
+
+def test_upsert_udp_accepts_a_reference_to_another_udp(app_with_auth):
+    """Storing a UDP whose graph references another of the user's stored UDPs
+    must succeed -- composing UDPs from other UDPs is explicitly allowed by
+    the spec ("a user-defined process can ... be constructed from ... other
+    user-defined processes"), not just from predefined ones."""
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+
+    wrapper = {
+        "u1": {
+            "process_id": "base_s2",
+            "arguments": {},
+            "result": True,
+        },
+    }
+    resp = _store_udp(app_with_auth, "wrapper", wrapper)
+    assert resp.status_code in (200, 201), resp.text
+
+
+def test_upsert_udp_stores_the_reference_not_a_resolved_copy(app_with_auth):
+    """The stored graph must keep the live reference (`process_id: base_s2`),
+    not an inlined/resolved copy -- otherwise editing `base_s2` later would
+    never affect `wrapper`, defeating the point of referencing it at all."""
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+
+    wrapper = {
+        "u1": {
+            "process_id": "base_s2",
+            "arguments": {},
+            "result": True,
+        },
+    }
+    _store_udp(app_with_auth, "wrapper", wrapper)
+
+    stored = app_with_auth.get("/process_graphs/wrapper").json()
+    process_ids = {n["process_id"] for n in stored["process_graph"].values()}
+    assert process_ids == {"base_s2"}
+
+
+def test_udp_referencing_a_udp_resolves_through_both_levels(app_with_auth):
+    """A graph referencing `wrapper` (which itself references `base_s2`) must
+    resolve all the way down to predefined processes, not stop after one
+    level."""
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+    _store_udp(
+        app_with_auth,
+        "wrapper",
+        {"u1": {"process_id": "base_s2", "arguments": {}, "result": True}},
+    )
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "u1": {"process_id": "wrapper", "arguments": {}},
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "UDP referencing a UDP",
+    }
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 201, create.text
+
+    service_id = create.headers["OpenEO-Identifier"]
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    process_ids = {n["process_id"] for n in graph.values()}
+    assert "wrapper" not in process_ids
+    assert "base_s2" not in process_ids
+    assert "load_collection" in process_ids
+    assert "save_result" in process_ids
+
+
+def test_updating_the_referenced_udp_propagates_to_the_wrapper(app_with_auth):
+    """Editing `base_s2` after `wrapper` was stored must change what `wrapper`
+    resolves to on its *next* use -- the reference stays live, it isn't
+    captured once at `wrapper`'s own store time."""
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+    _store_udp(
+        app_with_auth,
+        "wrapper",
+        {"u1": {"process_id": "base_s2", "arguments": {}, "result": True}},
+    )
+
+    updated_base = {
+        "loadco1": {
+            "process_id": "load_collection",
+            "arguments": {
+                "id": "S2_UPDATED",
+                "spatial_extent": {
+                    "west": 16.1,
+                    "east": 16.6,
+                    "north": 48.6,
+                    "south": 47.2,
+                },
+                "temporal_extent": ["2017-01-01", "2017-02-01"],
+            },
+            "result": True,
+        },
+    }
+    _store_udp(app_with_auth, "base_s2", updated_base)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "u1": {"process_id": "wrapper", "arguments": {}},
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "propagation check",
+    }
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 201, create.text
+
+    service_id = create.headers["OpenEO-Identifier"]
+    graph = app_with_auth.get(f"/services/{service_id}").json()["process"][
+        "process_graph"
+    ]
+    load_node = [n for n in graph.values() if n["process_id"] == "load_collection"][0]
+    assert load_node["arguments"]["id"] == "S2_UPDATED"
+
+
+def test_upsert_udp_still_rejects_a_genuinely_unknown_process(app_with_auth):
+    """A process_id that is neither predefined nor one of the user's own UDPs
+    must still be rejected at store time, same as before this change."""
+    graph = {
+        "u1": {
+            "process_id": "does_not_exist_anywhere",
+            "arguments": {},
+            "result": True,
+        },
+    }
+    resp = app_with_auth.put("/process_graphs/bad_wrapper", json={"id": "bad_wrapper", "process_graph": graph})
+    assert resp.status_code >= 400
+
+
+def test_upsert_udp_requires_the_referenced_udps_required_parameters(app_with_auth):
+    """A referenced UDP's parameter without a default is required; omitting it
+    must fail at store time, same as it would for a predefined process."""
+    _store_udp(
+        app_with_auth,
+        "param_load",
+        {
+            "loadco1": {
+                "process_id": "load_collection",
+                "arguments": {
+                    "id": {"from_parameter": "collection"},
+                    "spatial_extent": {
+                        "west": 16.1,
+                        "east": 16.6,
+                        "north": 48.6,
+                        "south": 47.2,
+                    },
+                    "temporal_extent": ["2017-01-01", "2017-02-01"],
+                },
+                "result": True,
+            },
+        },
+        parameters=[{"name": "collection", "schema": {"type": "string"}}],
+    )
+
+    wrapper = {
+        "u1": {"process_id": "param_load", "arguments": {}, "result": True},
+    }
+    resp = app_with_auth.put(
+        "/process_graphs/wrapper_missing_param",
+        json={"id": "wrapper_missing_param", "process_graph": wrapper},
+    )
+    assert resp.status_code >= 400
+
+
+def test_upsert_udp_surfaces_store_outage_as_503(app_with_auth, monkeypatch, caplog):
+    """A store outage hit while checking a referenced process_id must surface
+    as a 503, not a misleading 400 blaming the graph."""
+    store = app_with_auth.app.endpoints.udp_store
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("udp store is down")
+
+    monkeypatch.setattr(type(store), "get_udp", boom)
+
+    graph = {
+        "u1": {"process_id": "some_other_udp", "arguments": {}, "result": True},
+    }
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.factory"):
+        resp = app_with_auth.put(
+            "/process_graphs/wrapper_store_down",
+            json={"id": "wrapper_store_down", "process_graph": graph},
+        )
+    assert resp.status_code == 503
