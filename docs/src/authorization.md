@@ -1,18 +1,18 @@
 # Service Authorization
 
-TiTiler OpenEO implements a flexible service authorization mechanism that controls access to services based on their configuration. Each service can be configured with different access levels through the `scope` parameter.
+TiTiler OpenEO implements a flexible service authorization mechanism that controls access to the **served instance** of a secondary web service (the XYZ/WMTS/WMS tile endpoint published as the service's `url`). Each service can be configured with different access levels for that instance through the `scope` parameter.
 
-**Note on the openEO spec:** the openEO API specification does not define any access-control property for secondary web services today. `configuration.scope` is a TiTiler OpenEO extension. A subset of this model — `private` vs `public` — is proposed for standardization as an openEO API extension under a new top-level `access` property; see [ADR 0003](../adr/0003-service-access-control.md) for the rationale and upstream tracking status. Once that lands, `access` will become the preferred property here, with `configuration.scope` kept as a deprecated alias. `restricted` and `authorized_users` will remain TiTiler OpenEO-specific either way, since openEO has no portable way to resolve a user ID across back-ends.
+**Important scope of this feature:** `scope` governs only the tile-serving endpoint (`GET /services/xyz/{service_id}/tiles/{z}/{x}/{y}`, i.e. what `service.url` points to). It does **not** apply to `GET /services/{service_id}` or any other `/services*` management endpoint — those always require Bearer authentication, matching the openEO spec exactly (`security: [Bearer: []]`, with no anonymous variant, unlike `GET /service_types`). This distinction between the always-private control plane (`/services/{service_id}`) and the back-end-defined data plane (`service.url`) is intentional in the spec, not an oversight — see [ADR 0003](../adr/0003-service-access-control.md) for the full writeup, including an earlier, incorrect attempt to make the metadata endpoint follow `scope` as well (reverted).
+
+**Note on the openEO spec:** the openEO API specification does not define any access-control property for secondary web services at all — `configuration.scope` is entirely a TiTiler OpenEO extension governing only how titiler-openeo happens to serve tiles. Whether this is worth proposing upstream, and if so in what form, is an open question currently being discussed with the openEO maintainers; see [ADR 0003](../adr/0003-service-access-control.md) for the current status.
 
 ## Scopes
 
 Services can be configured with one of three scopes:
 
-- `private`: Only the service owner can access the service
-- `restricted`: Any authenticated user can access, with optional user-specific restrictions. Not part of the upstream spec proposal — see the note above.
-- `public` (current default — see the note below): No authentication required, anyone can access the service
-
-`private` and `public` are the two values proposed for upstream standardization.
+- `private`: Only the service owner can fetch tiles from the service
+- `restricted`: Any authenticated user can fetch tiles, with optional user-specific restrictions
+- `public` (current default — see the note below): No authentication required to fetch tiles
 
 **Note on the default:** the current default is `public`, which contradicts the "use `private` by default" guidance in [Best Practices](#best-practices) below. This is a known inconsistency, tracked in [ADR 0003](../adr/0003-service-access-control.md#5-consequences); flipping the default is a deployment-visible behaviour change and will ship as an explicit, settings-controlled opt-in rather than silently.
 

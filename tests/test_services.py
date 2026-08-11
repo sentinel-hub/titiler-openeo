@@ -420,80 +420,56 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
         ), f"Anonymous access failed for {scope_name} service"
 
 
-def test_get_service_anonymous_public(app_with_auth, app_no_auth):
-    """Public services must be readable via GET /services/{id} without auth (#362)."""
-    service_input = {
-        "process": {
-            "process_graph": {
-                "loadco1": {
-                    "process_id": "load_collection",
-                    "arguments": {
-                        "id": "S2",
-                        "spatial_extent": {
-                            "west": 16.1,
-                            "east": 16.6,
-                            "north": 48.6,
-                            "south": 47.2,
+def test_get_service_requires_auth_regardless_of_scope(app_with_auth, app_no_auth):
+    """GET /services/{id} is a control-plane resource and stays Bearer-only.
+
+    Per the openEO spec, `/services/{service_id}` is `security: [Bearer: []]`
+    unconditionally -- unlike `GET /service_types`, which explicitly allows
+    anonymous access. `configuration.scope` only governs the served
+    XYZ/WMTS/WMS instance (the `url` property), not the metadata endpoint
+    itself. See docs/adr/0003-service-access-control.md for the corrected
+    understanding (a previous version of this fix incorrectly made this
+    endpoint anonymous-accessible for public-scoped services).
+    """
+    for scope in ("public", "private"):
+        service_input = {
+            "process": {
+                "process_graph": {
+                    "loadco1": {
+                        "process_id": "load_collection",
+                        "arguments": {
+                            "id": "S2",
+                            "spatial_extent": {
+                                "west": 16.1,
+                                "east": 16.6,
+                                "north": 48.6,
+                                "south": 47.2,
+                            },
+                            "temporal_extent": ["2017-01-01", "2017-02-01"],
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"],
                     },
-                },
-                "save1": {
-                    "process_id": "save_result",
-                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
-                    "result": True,
-                },
-            }
-        },
-        "type": "xyz",
-        "title": "Public Service",
-        "configuration": {"scope": "public"},
-    }
-    create_response = app_with_auth.post("/services", json=service_input)
-    assert create_response.status_code == 201
-    service_id = create_response.headers["location"].split("/")[-1]
-
-    # Anonymous request against the metadata endpoint must succeed for a public service
-    response = app_no_auth.get(f"/services/{service_id}")
-    assert response.status_code == 200
-    assert response.json()["id"] == service_id
-
-
-def test_get_service_anonymous_private_denied(app_with_auth, app_no_auth):
-    """Private services must reject anonymous GET /services/{id} requests."""
-    service_input = {
-        "process": {
-            "process_graph": {
-                "loadco1": {
-                    "process_id": "load_collection",
-                    "arguments": {
-                        "id": "S2",
-                        "spatial_extent": {
-                            "west": 16.1,
-                            "east": 16.6,
-                            "north": 48.6,
-                            "south": 47.2,
+                    "save1": {
+                        "process_id": "save_result",
+                        "arguments": {
+                            "data": {"from_node": "loadco1"},
+                            "format": "png",
                         },
-                        "temporal_extent": ["2017-01-01", "2017-02-01"],
+                        "result": True,
                     },
-                },
-                "save1": {
-                    "process_id": "save_result",
-                    "arguments": {"data": {"from_node": "loadco1"}, "format": "png"},
-                    "result": True,
-                },
-            }
-        },
-        "type": "xyz",
-        "title": "Private Service",
-        "configuration": {"scope": "private"},
-    }
-    create_response = app_with_auth.post("/services", json=service_input)
-    assert create_response.status_code == 201
-    service_id = create_response.headers["location"].split("/")[-1]
+                }
+            },
+            "type": "xyz",
+            "title": f"{scope.title()} Service",
+            "configuration": {"scope": scope},
+        }
+        create_response = app_with_auth.post("/services", json=service_input)
+        assert create_response.status_code == 201
+        service_id = create_response.headers["location"].split("/")[-1]
 
-    response = app_no_auth.get(f"/services/{service_id}")
-    assert response.status_code == 401
+        response = app_no_auth.get(f"/services/{service_id}")
+        assert (
+            response.status_code == 401
+        ), f"Anonymous GET /services/{{id}} should be rejected for scope={scope}"
 
 
 def test_service_ownership_checks(app_with_auth, store_path):
