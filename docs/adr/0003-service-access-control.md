@@ -1,11 +1,21 @@
 # ADR 0003 — Service access control (`access` / `configuration.scope`)
 
-- **Status:** Proposed
+- **Status:** Amended (2026-08-11) — see [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug)
 - **Date:** 2026-08-07
 - **Deciders:** @emmanuelmathot
 - **Supersedes / superseded by:** —
 
 ---
+
+> **2026-08-11 update:** the openEO PSC chair ([openeo-api#85 discussion](https://github.com/Open-EO/openeo-api/issues/85#issuecomment-5231834617))
+> corrected a mistake in this ADR's original decision: `GET /services/{service_id}`
+> was never supposed to honor `scope` — the spec's `/services*` control plane is
+> unconditionally Bearer-only by design, and only the served instance (`service.url`)
+> is meant to vary. The corresponding code change shipped in
+> [titiler-openeo#363](https://github.com/sentinel-hub/titiler-openeo/pull/363) has
+> been reverted. Sections 1-6 below are left as originally written for the historical
+> record of the (partially mistaken) reasoning; **read [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug)
+> for what's actually true.**
 
 ## 1. Context
 
@@ -150,9 +160,9 @@ Adopt **Option C (naming)** and **Option B (scope of standardization)**:
 Fix the enforcement gaps found along the way immediately and independently of the
 naming question:
 
-- `GET /services/{service_id}` now uses `validate_optional` and calls
+- ~~`GET /services/{service_id}` now uses `validate_optional` and calls
   `ServiceAuthorizationManager.authorize`, so it agrees with the tile endpoint about
-  what `public` means (closes #362).
+  what `public` means (closes #362).~~ **Reverted, see [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug) — this was wrong.**
 - `DELETE /services/{service_id}` and `PATCH /services/{service_id}` now check
   `service["user_id"] == user.user_id` before acting, returning `403` otherwise.
 - `ServiceAuthorizationManager.authorize` read `service.get("configuration", {})`,
@@ -166,8 +176,10 @@ naming question:
 
 - No breaking change for existing deployments: `access` is additive, `configuration.scope`
   keeps working.
-- `GET /services/{service_id}` and the XYZ tile endpoint now enforce the same policy;
-  a client can no longer observe one as public and the other as private.
+- ~~`GET /services/{service_id}` and the XYZ tile endpoint now enforce the same policy;
+  a client can no longer observe one as public and the other as private.~~ **Superseded
+  by [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug): they are
+  supposed to differ.**
 - Cross-user `DELETE`/`PATCH` on a service now correctly returns `403` instead of
   succeeding. This is a behaviour change for any deployment that was relying on the
   absence of the check (unlikely, and not a supported use case), so it ships flagged
@@ -206,3 +218,71 @@ naming question:
 - Existing openEO API extensions for structural precedent: `federation`,
   `commercial-data`, `processing-parameters`, `remote-process-definition`,
   `workspaces` — `Open-EO/openeo-api/extensions/`.
+
+---
+
+## 7. Amendment (2026-08-11) — `GET /services/{service_id}` was not a bug
+
+Section 1.2 correctly established that every `/services*` endpoint is unconditionally
+`security: [Bearer: []]`, with no anonymous variant. Section 4's decision then treated
+that fact as a **gap** — an inconsistency between the metadata endpoint and the tile
+endpoint that titiler-openeo should paper over locally, ahead of any spec change, by
+making `GET /services/{service_id}` also honor `scope`. That was wrong.
+
+[m-mohr (openEO PSC chair) explained why](https://github.com/Open-EO/openeo-api/issues/85#issuecomment-5231834617),
+in response to the comment posted from this ADR's findings:
+
+> The `/services` endpoints are private, but the actual web services (e.g. the titiler
+> endpoint) get expose via the `url` property and those can be public or restricted,
+> depends on how the API implementation needs it. The openEO API doesn't specify how
+> you expose the services you link to via the `url` property.
+
+The spec draws a deliberate line between two things this ADR had conflated:
+
+- **Control plane** — `/services/{service_id}` and its siblings. This is the API
+  implementation's own bookkeeping about a service (who owns it, its process graph,
+  its budget, ...). Always Bearer-protected, no exceptions. Not meant to vary with
+  anything the owner configures.
+- **Data plane** — `service.url`, the actual instance a non-openEO client (QGIS,
+  Leaflet, a browser) consumes. The spec explicitly disclaims any control over this
+  ("does not necessarily need to be located within the API") — its auth is entirely
+  the back-end's call.
+
+titiler-openeo's XYZ tile endpoint (`GET /services/xyz/{service_id}/tiles/{z}/{x}/{y}`,
+what `service.url` points to) is the data plane, and it already correctly implemented
+`scope`-based public/private access **before this investigation started** — that part
+was never broken. [titiler-openeo#362](https://github.com/sentinel-hub/titiler-openeo/issues/362)
+observed that the control-plane endpoint didn't match the data-plane endpoint's
+openness, and this ADR misdiagnosed that mismatch as the defect. It is the intended
+design: the two are supposed to differ.
+
+### What changed as a result
+
+- [titiler-openeo#363](https://github.com/sentinel-hub/titiler-openeo/pull/363)'s
+  change to `GET /services/{service_id}` (using `validate_optional` and calling
+  `ServiceAuthorizationManager.authorize`) has been **reverted**. The endpoint is back
+  to unconditional `Depends(self.auth.validate)`, matching the spec and every sibling
+  `/services*` endpoint.
+- The other two things that PR did are **unaffected and were kept**: the ownership
+  checks on `DELETE`/`PATCH /services/{service_id}` (a real security fix, orthogonal to
+  the scope question) and the `configuration.get(...) or {}` `None`-safety fix in
+  `ServiceAuthorizationManager.authorize` (still needed by the tile endpoint's call).
+- [`docs/src/authorization.md`](../src/authorization.md) has been corrected to state
+  plainly that `scope` governs the served tile instance only, never the metadata
+  endpoint.
+
+### What this means for the upstream proposal
+
+The core premise of Sections 3-4 — "propose a top-level `access` property so
+`GET /services/{service_id}` can become optionally anonymous" — no longer holds; that
+would ask the spec to bless exactly the behavior m-mohr says is a misunderstanding of
+its own design. The narrower, still-open question is whether *anonymous discovery of a
+public service's metadata* (title, description, extent — the actual thing a client like
+openEO Studio wants when rendering an unauthenticated preview) has any sanctioned answer
+today, given that `/services/{service_id}` is off the table for that by design. That
+question has been put back to m-mohr on #85, asking specifically for guidance on how
+scope should be managed across a service's lifecycle (creation, listing, consumption)
+rather than re-proposing a specific mechanism. The draft extension issue prepared
+earlier (`docs/adr/upstream/openeo-api-service-access-issue.md`) has been withdrawn
+pending that answer — it proposed changing `/services/{service_id}`'s security
+definition, which is the part now known to be wrong.
