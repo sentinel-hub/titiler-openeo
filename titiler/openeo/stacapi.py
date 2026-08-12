@@ -40,6 +40,7 @@ from .processes.implementations.data_model import RasterStack
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
+from .signing import HrefSigner, SignerRule, get_href_signer
 
 pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
@@ -363,6 +364,26 @@ class LoadCollection:
     """Backend Specific Collection loaders."""
 
     stac_api: stacApiBackend = field()
+
+    #: Href-signing rules for this deployment's catalogue, injected by
+    #: `main.py` rather than read from a module global so this class stays
+    #: constructible in tests. Empty -- the default -- means every href is
+    #: opened exactly as the catalogue published it
+    #: (docs/adr/0005-asset-href-signing.md S2.2).
+    signer_rules: Sequence[SignerRule] = field(factory=tuple)
+
+    def _signer_for(
+        self, named_parameters: Optional[dict] = None
+    ) -> Optional[HrefSigner]:
+        """Build the href signer for the user this graph is running as.
+
+        The authenticated `User` arrives as the `_openeo_user` named parameter,
+        injected by `factory.py`'s executing endpoints. It is `None` for an
+        unauthenticated request, which is fine: the shipped signer ignores it
+        (ADR 0005 S2.5).
+        """
+        user = (named_parameters or {}).get("_openeo_user")
+        return get_href_signer(self.signer_rules, user)
 
     def _resolve_parameter_reference(
         self,
@@ -861,9 +882,17 @@ class LoadCollection:
         if bands is None and items and items[0].assets:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
+        signer = self._signer_for(named_parameters)
+
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height, target_crs=target_crs
+            items,
+            spatial_extent,
+            bands,
+            width,
+            height,
+            target_crs=target_crs,
+            signer=signer,
         )
 
         # Extract values from the result
@@ -901,6 +930,7 @@ class LoadCollection:
             width: int,
             height: int,
             tile_buffer: Optional[float],
+            signer: Optional[HrefSigner],
         ):
             """Create a closure that loads data for a date group."""
 
@@ -908,6 +938,12 @@ class LoadCollection:
                 # Build kwargs for mosaic_reader
                 mosaic_kwargs = {
                     "threads": 0,
+                    # Consumed by `_reader`, not forwarded to `part()`. Captured
+                    # in this closure at graph-evaluation time, while the user
+                    # is still in scope -- the task itself runs lazily, and on
+                    # a worker thread that no request context reaches
+                    # (ADR 0005 S2.5).
+                    "signer": signer,
                     "bounds_crs": bounds_crs,
                     "assets": bands,
                     "dst_crs": output_crs,
@@ -950,6 +986,7 @@ class LoadCollection:
                 width,
                 height,
                 tile_buffer,
+                signer,
             )
             # Collect all geometries from items for cutline mask computation (union of footprints)
             geometries = [
@@ -989,6 +1026,18 @@ class LoadCollection:
 class LoadStac:
     """Backend Specific STAC loaders."""
 
+    #: See `LoadCollection.signer_rules`. `load_stac` reads a user-supplied
+    #: catalogue rather than the configured one, so a rule only fires when the
+    #: asset host matches -- the URL the user passed does not widen it.
+    signer_rules: Sequence[SignerRule] = field(factory=tuple)
+
+    def _signer_for(
+        self, named_parameters: Optional[dict] = None
+    ) -> Optional[HrefSigner]:
+        """Build the href signer for the user this graph is running as."""
+        user = (named_parameters or {}).get("_openeo_user")
+        return get_href_signer(self.signer_rules, user)
+
     def _load_stac_object(self, url: str) -> pystac.STACObject:
         """Load a STAC object from a URL.
 
@@ -1016,6 +1065,7 @@ class LoadStac:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
+        named_parameters: Optional[dict] = None,
     ) -> RasterStack:
         """Handle a STAC Collection or Catalog.
 
@@ -1028,13 +1078,19 @@ class LoadStac:
             width: Optional width of the output image in pixels
             height: Optional height of the output image in pixels
             tile_buffer: Optional buffer around the tile in pixels
+            named_parameters: Named parameters for process graph evaluation
 
         Returns:
             A RasterStack containing the loaded data
         """
         collection_id = stac_obj.id
         stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
-        load_collection = LoadCollection(stac_api=stac_api)
+        # The delegate inherits this instance's rules: signing is decided by the
+        # asset host, so handing off to a LoadCollection for a user-supplied
+        # catalogue must not silently drop the credential path.
+        load_collection = LoadCollection(
+            stac_api=stac_api, signer_rules=self.signer_rules
+        )
 
         return load_collection.load_collection(
             id=collection_id,
@@ -1045,6 +1101,7 @@ class LoadStac:
             width=width,
             height=height,
             tile_buffer=tile_buffer,
+            named_parameters=named_parameters,
         )
 
     def _filter_by_temporal_extent(
@@ -1122,6 +1179,7 @@ class LoadStac:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
+        signer: Optional[HrefSigner] = None,
     ) -> RasterStack:
         """Process spatial extent and create tasks.
 
@@ -1132,6 +1190,7 @@ class LoadStac:
             width: Optional width of the output image in pixels
             height: Optional height of the output image in pixels
             tile_buffer: Optional buffer around the tile in pixels
+            signer: Optional href signer, consumed by `_reader`
 
         Returns:
             A RasterStack containing the tasks
@@ -1159,6 +1218,7 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            signer=signer,
         )
 
         return RasterStack(
@@ -1184,6 +1244,7 @@ class LoadStac:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
+        named_parameters: Optional[dict] = None,
     ) -> RasterStack:
         """Load data from a STAC catalog or API.
 
@@ -1196,6 +1257,8 @@ class LoadStac:
             width: Optional width of the output image in pixels
             height: Optional height of the output image in pixels
             tile_buffer: Optional buffer around the tile in pixels
+            named_parameters: Named parameters for process graph evaluation.
+                Carries `_openeo_user`, from which the href signer is built.
 
         Returns:
             A RasterStack containing the loaded data
@@ -1205,6 +1268,8 @@ class LoadStac:
             TemporalExtentEmpty: If the temporal extent is empty
             NotImplementedError: If spatial_extent is not provided
         """
+        signer = self._signer_for(named_parameters)
+
         # Load the STAC catalog or item from the URL
         stac_obj = self._load_stac_object(url)
 
@@ -1219,6 +1284,7 @@ class LoadStac:
                 width=width,
                 height=height,
                 tile_buffer=tile_buffer,
+                named_parameters=named_parameters,
             )
 
         # For a single item, use it directly
@@ -1250,11 +1316,12 @@ class LoadStac:
                 width=width,
                 height=height,
                 tile_buffer=tile_buffer,
+                signer=signer,
             )
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height
+            items, spatial_extent, bands, width, height, signer=signer
         )
 
         # Extract values from the result
@@ -1273,5 +1340,6 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            signer=signer,
         )
         return img

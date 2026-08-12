@@ -50,6 +50,7 @@ nav:
     - OpenID Connect: "openid-connect.md"
   - Deployment:
     - Local Setup: "local-setup.md"
+    - Microsoft Planetary Computer: "planetary-computer.md"
     - Kubernetes Guide: "kubernetes.md"
     - Production PostgreSQL (CloudNativePG): "kubernetes-cloudnativepg.md"
     - Memory Tuning & Native Caches: "memory-tuning.md"

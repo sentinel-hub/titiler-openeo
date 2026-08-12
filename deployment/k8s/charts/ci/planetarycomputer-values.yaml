@@ -1,0 +1,60 @@
+# Microsoft Planetary Computer flavor.
+#
+# Asset signing needs no configuration: it switches on because stac.apiUrl
+# points at Planetary Computer, and the SAS tokens it mints are anonymous.
+# See docs/adr/0005-asset-href-signing.md and docs/src/planetary-computer.md.
+replicaCount: 1
+
+image:
+  repository: titiler-openeo
+  tag: dev
+
+stac:
+  apiUrl: "https://planetarycomputer.microsoft.com/api/stac/v1"
+
+env:
+  # `noaa-c-cap` advertises a provider url with no colon after the scheme,
+  # which fails openEO response validation and takes the whole GET /collections
+  # response with it. Verified upstream 2026-08-10.
+  TITILER_OPENEO_EXCLUDE_COLLECTIONS: "noaa-c-cap"
+  CPL_TMPDIR: /tmp
+  GDAL_CACHEMAX: "200"
+  VSI_CACHE: "TRUE"
+  VSI_CACHE_SIZE: "5000000"
+  CPL_VSIL_CURL_CACHE_SIZE: "67108864"
+  # Required, not merely a tuning knob: signed hrefs carry a query string, and
+  # a directory listing on every open would be both wrong and expensive.
+  GDAL_DISABLE_READDIR_ON_OPEN: "EMPTY_DIR"
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"
+  GDAL_HTTP_MULTIPLEX: "YES"
+  GDAL_HTTP_VERSION: 2
+  PYTHONWARNINGS: "ignore"
+
+# Microsoft Entra ID. A single-tenant well-known URL is required: the
+# multi-tenant `common` endpoint returns a templated issuer that cannot be
+# validated against a token's `iss` (docs/adr/0006-microsoft-entra-oidc.md S2.3).
+auth:
+  method: "basic"
+  basic:
+    enabled: true
+    users:
+      - username: "test"
+        password: "password"
+  oidc:
+    enabled: false
+    clientId: ""
+    wellKnownUrl: ""  # https://login.microsoftonline.com/<tenant_id>/v2.0/.well-known/openid-configuration
+    redirectUrl: ""
+    scopes: "openid email profile"
+    nameClaim: "preferred_username"
+    title: "Microsoft Entra ID"
+    description: "Sign in with your Microsoft work or school account"
+
+# Optional: raises Planetary Computer SAS API rate limits. Supply it from a
+# Secret rather than inline.
+envVars:
+  fromSecret: []
+  # - name: TITILER_OPENEO_PC_SUBSCRIPTION_KEY
+  #   secretName: planetary-computer
+  #   secretKey: subscription-key
+  fromConfigMap: []

@@ -14,6 +14,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
+from ...signing import get_default_href_signer
 from .data_model import RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
@@ -35,6 +36,16 @@ def load_url(
     Raises:
         ValueError: If the URL is invalid
     """
+    # Unlike every other read path, this one has no user in scope: `load_url`
+    # is a plain process implementation running inside an already-evaluating
+    # graph. It therefore uses the process-wide rules resolved at startup
+    # (docs/adr/0005-asset-href-signing.md S2.6). The signer still only fires
+    # when the URL's host matches a rule, so a user-supplied URL cannot widen
+    # what gets signed.
+    signer = get_default_href_signer()
+    if signer is not None:
+        url = signer(url)
+
     # Create a dummy STAC item for the COG
     item: Dict[str, Any] = {
         "type": "Feature",

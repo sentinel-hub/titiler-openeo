@@ -4,7 +4,12 @@ from typing import Annotated, Any, Dict, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic.fields import FieldInfo
-from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    EnvSettingsSource,
+    NoDecode,
+    SettingsConfigDict,
+)
 
 
 class OIDCConfig(BaseSettings):
@@ -169,7 +174,12 @@ class BackendSettings(BaseSettings):
     default_services_file: Optional[str] = (
         None  # Path to default services configuration file
     )
-    exclude_collections: list[str] = Field(
+    # `NoDecode` so `parse_exclude_collections` below actually gets a chance to
+    # run. Without it pydantic-settings treats a `list[str]` as complex and
+    # JSON-decodes the environment value first, so the documented
+    # comma-separated form raised `SettingsError` instead of parsing -- i.e.
+    # this setting could not be set from the environment at all.
+    exclude_collections: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         description="List of collection IDs to exclude from the API (e.g. non-compliant STAC collections).",
     )
@@ -262,6 +272,37 @@ class Sentinel2Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_SENTINEL2_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
+class PlanetaryComputerSettings(BaseSettings):
+    """Microsoft Planetary Computer asset-signing settings.
+
+    See docs/adr/0005-asset-href-signing.md for the design this configures.
+    """
+
+    # Base URL of the Planetary Computer Data Authentication API. Only the
+    # `/token/{account}/{container}` shape is used -- `/sign?href=` costs one
+    # round-trip per asset, which a mosaic read cannot afford (ADR 0005 S2.4).
+    sas_url: str = "https://planetarycomputer.microsoft.com/api/sas/v1"
+
+    # Optional subscription key, sent as `Ocp-Apim-Subscription-Key`. It has no
+    # observable effect on the minted token's scope or duration (ADR 0005 S1.2)
+    # but is the documented rate-limit lever.
+    subscription_key: str = ""
+
+    # How long before a token's stated expiry to mint a replacement. Tokens
+    # last ~45 minutes, so this trades a little freshness for never handing a
+    # nearly-dead token to a read that is about to start.
+    expiry_margin: Annotated[float, Field(ge=0.0)] = 300.0
+
+    # Per-request timeout, in seconds, for minting a token.
+    timeout: Annotated[float, Field(gt=0.0)] = 10.0
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_PC_",
         env_file=".env",
         extra="ignore",
     )
