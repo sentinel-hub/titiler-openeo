@@ -72,6 +72,15 @@ jobs:
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           echo "version=${TAG_NAME}" >> $GITHUB_OUTPUT
 
+      - name: Determine whether this run can push
+        # GITHUB_TOKEN is read-only for pull_request runs triggered by a fork,
+        # regardless of the `permissions:` requested above -- pushing would
+        # fail there no matter what, so skip it instead of failing CI on
+        # every external contribution.
+        id: can-push
+        run: |
+          echo "value=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event.pull_request.head.repo.full_name == github.repository }}" >> $GITHUB_OUTPUT
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -89,6 +98,7 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: log in to github container registry
+        if: steps.can-push.outputs.value == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
@@ -99,7 +109,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          push: true
+          push: ${{ steps.can-push.outputs.value == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
