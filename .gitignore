@@ -179,3 +179,6 @@ docs/src/notebooks/sar_backscatter_vv_vh_mask.tif
 docs/src/notebooks/band_sources_*.tif
 docs/src/notebooks/_tmp_decomposed_*.tif
 docs/src/notebooks/_tmp_fused_*.tif
+
+# local PyPI token used for break-glass publishing
+pypi.txt
