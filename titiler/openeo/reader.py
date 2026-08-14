@@ -29,6 +29,7 @@ from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
 from rio_tiler.utils import cast_to_sequence, has_alpha_band, inherit_rasterio_env
 from typing_extensions import TypedDict
 
+from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
 from .bandsources import (
     BAND_SOURCES,
     ResolvedBand,
@@ -277,6 +278,14 @@ class SimpleSTACReader(MultiBaseReader):
     #: don't repeat it. See docs/adr/0002-band-sources.md S2.3.
     _derived_bands: Dict[str, ResolvedBand] = attr.ib(init=False, factory=dict)
 
+    #: Bands published *inside* one of this item's own assets (e.g. EOPF's
+    #: Sentinel-2 `reflectance` asset, holding all twelve bands), precomputed
+    #: once from the item's own `bands` metadata -- no registry, no I/O. See
+    #: titiler/openeo/assetbands.py. Checked in `_get_asset_info` after
+    #: `_derived_bands`: a band-source rule already matched a specific asset,
+    #: so it must not be shadowed by a same-named inner band.
+    _inner_bands: Dict[str, ResolvedAssetBand] = attr.ib(init=False, factory=dict)
+
     #: Shared, per-instance memo for band-source readers' inverse maps
     #: (`BandReader.inverse_map_cache`). Every derived-band reader built for
     #: this item's `part()` calls gets *this same dict*: reads sharing one
@@ -328,6 +337,8 @@ class SimpleSTACReader(MultiBaseReader):
             )
             if resolved is not None:
                 self._derived_bands[name] = resolved
+
+        self._inner_bands = resolve_asset_bands(asset_band_facts(self.input.assets))
 
         proj = _extract_proj_info(self.input, assets=self.assets)
         if proj and _item_has_untrustworthy_proj(self.input, self.assets, self.signer):
@@ -471,10 +482,20 @@ class SimpleSTACReader(MultiBaseReader):
             return self._get_derived_asset_info(asset_name)
 
         if asset_name not in self.assets:
-            raise InvalidAssetName(
-                f"'{asset_name}' is not valid, should be one of "
-                f"{sorted(set(self.assets) | set(self._derived_bands))}"
-            )
+            # Not a real asset key -- maybe a band published *inside* one
+            # (titiler/openeo/assetbands.py), e.g. EOPF's `reflectance` holding
+            # `b01`..`b12`. Rewritten to the owning asset plus a `bands` option,
+            # which `_get_options` below already knows how to turn into
+            # `indexes` -- the same mechanism a caller-supplied `bands` list
+            # uses today, just reached from a bare name instead.
+            resolved = self._inner_bands.get(asset_name)
+            if resolved is None:
+                raise InvalidAssetName(
+                    f"'{asset_name}' is not valid, should be one of "
+                    f"{sorted(set(self.assets) | set(self._derived_bands) | set(self._inner_bands))}"
+                )
+            asset = {**asset, "name": resolved.asset_key, "bands": [resolved.band_name]}
+            asset_name = resolved.asset_key
 
         asset_info = self.input.assets[asset_name]
         extras = asset_info.extra_fields
@@ -688,6 +709,15 @@ def _get_asset_resolution(
     if src_dst.transform:
         return abs(src_dst.transform.a), abs(src_dst.transform.e)
 
+    # Last resort: the asset's own declared ground sample distance (STAC common
+    # metadata `gsd`), in the asset CRS's ground units. Catches an asset that
+    # carries neither `proj:transform`/`proj:shape` nor a usable item-level
+    # transform -- e.g. EOPF's `AOT_10m`/`SCL_20m`/`WVP_10m`, which declare only
+    # `gsd`. Without this, such an asset contributes no resolution at all and
+    # `_estimate_output_dimensions` silently ignores it.
+    if gsd := asset.extra_fields.get("gsd"):
+        return abs(float(gsd)), abs(float(gsd))
+
     return None, None
 
 
@@ -717,33 +747,49 @@ def _get_assets_resolutions(
 
     for band_name in assets_to_process:
         resolution_asset_name = band_name
+        # Set only for a band resolved via `_inner_bands` below: its own
+        # declared ground sample distance, which overrides the owning asset's
+        # (a multi-band asset's own metadata describes just its finest band --
+        # EOPF's `reflectance` declares 10m even though `b01` is native 20m).
+        band_gsd: Optional[float] = None
 
         if band_name not in item.assets:
-            # Not a real asset -- maybe a band-source-derived name (ADR
-            # 0002 S2.4). A derived band shares its sibling raster asset's
-            # grid, so fall back to that asset's resolution rather than
-            # silently contributing none (which would leave a derived-only
-            # request's output dimensions defaulting to 1024x1024).
-            if item_asset_facts is None:
-                item_asset_facts = [
-                    (key, a.media_type, a.roles or []) for key, a in item.assets.items()
-                ]
-                sibling_candidates = [
-                    (key, a.media_type, a.roles or [], a.extra_fields.get("gsd"))
-                    for key, a in item.assets.items()
-                ]
-            resolved = resolve_band(
-                collection_id,
-                band_name,
-                item_asset_facts,
-                BAND_SOURCES,
-                sibling_candidates=sibling_candidates,
-            )
-            if resolved is None or not resolved.sibling_key:
-                continue
-            resolution_asset_name = resolved.sibling_key
-            if resolution_asset_name not in item.assets:
-                continue
+            # Not a real asset key. Prefer a band published *inside* one of
+            # this item's own assets (titiler/openeo/assetbands.py) over a
+            # band-source-derived name below: `src_dst._inner_bands` is
+            # precomputed for this exact item, so this costs nothing extra to
+            # check first, and the two mechanisms cannot both match one name.
+            resolved_inner = src_dst._inner_bands.get(band_name)
+            if resolved_inner is not None:
+                resolution_asset_name = resolved_inner.asset_key
+                band_gsd = resolved_inner.metadata.get("gsd")
+            else:
+                # Maybe a band-source-derived name instead (ADR 0002 S2.4). A
+                # derived band shares its sibling raster asset's grid, so fall
+                # back to that asset's resolution rather than silently
+                # contributing none (which would leave a derived-only
+                # request's output dimensions defaulting to 1024x1024).
+                if item_asset_facts is None:
+                    item_asset_facts = [
+                        (key, a.media_type, a.roles or [])
+                        for key, a in item.assets.items()
+                    ]
+                    sibling_candidates = [
+                        (key, a.media_type, a.roles or [], a.extra_fields.get("gsd"))
+                        for key, a in item.assets.items()
+                    ]
+                resolved = resolve_band(
+                    collection_id,
+                    band_name,
+                    item_asset_facts,
+                    BAND_SOURCES,
+                    sibling_candidates=sibling_candidates,
+                )
+                if resolved is None or not resolved.sibling_key:
+                    continue
+                resolution_asset_name = resolved.sibling_key
+                if resolution_asset_name not in item.assets:
+                    continue
 
         asset = item.assets[resolution_asset_name]
         asset_proj_ext = None
@@ -753,8 +799,13 @@ def _get_assets_resolutions(
         # Get asset CRS or fall back to item CRS
         asset_crs = _get_asset_crs(item, asset, asset_proj_ext) or src_dst.crs
 
-        # Get asset resolution
-        x_res, y_res = _get_asset_resolution(item, asset, asset_proj_ext, src_dst)
+        # Get resolution: the band's own gsd when known, else the asset's.
+        x_res: Optional[float]
+        y_res: Optional[float]
+        if band_gsd is not None:
+            x_res, y_res = float(band_gsd), float(band_gsd)
+        else:
+            x_res, y_res = _get_asset_resolution(item, asset, asset_proj_ext, src_dst)
 
         # Skip if we couldn't determine resolution
         if x_res is None or y_res is None:

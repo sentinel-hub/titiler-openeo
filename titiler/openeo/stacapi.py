@@ -27,6 +27,7 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
+from .assetbands import asset_band_facts, resolve_asset_bands
 from .bandsources import BAND_SOURCES, derive_bands
 from .errors import (
     ItemsLimitExceeded,
@@ -135,6 +136,12 @@ class stacApiBackend:
         values in ``getdimensions`` below. Asset keys are unique by
         construction, so every asset shows up (including the same physical
         band published at several resolutions) without name collisions.
+
+        The exception is an asset publishing several bands at once, which
+        becomes one entry *per band*, named as ``getdimensions`` names it
+        (titiler/openeo/assetbands.py). These must agree: a band advertised
+        here that ``load_collection`` cannot resolve is worse than one that is
+        never advertised.
         """
         summaries = collection.get("summaries")
         if not isinstance(summaries, dict):
@@ -144,36 +151,64 @@ class stacApiBackend:
             return
 
         item_assets = collection.get("item_assets") or {}
+        inner_bands = resolve_asset_bands(asset_band_facts(item_assets))
+        multi_band_assets = {r.asset_key for r in inner_bands.values()}
+
+        def _spectral(band: Dict[str, Any]) -> Dict[str, Any]:
+            """The eo:* fields a band entry carries, under their prefixed names."""
+            fields: Dict[str, Any] = {}
+
+            common_name = band.get("eo:common_name") or band.get("common_name")
+            if common_name:
+                fields["eo:common_name"] = common_name
+
+            center_wavelength = band.get("eo:center_wavelength") or band.get(
+                "center_wavelength"
+            )
+            if center_wavelength is not None:
+                fields["eo:center_wavelength"] = center_wavelength
+
+            fwhm = band.get("eo:full_width_half_max") or band.get("full_width_half_max")
+            if fwhm is not None:
+                fields["eo:full_width_half_max"] = fwhm
+
+            return fields
+
         band_summaries: List[Dict] = []
+
+        # One entry per band for assets holding several, named exactly as
+        # `getdimensions` names them. Each band carries its own spectral
+        # metadata and gsd, so unlike the composite case below there is no
+        # ambiguity about which band the fields describe.
+        for name, resolved in inner_bands.items():
+            band = dict(resolved.metadata)
+            entry: Dict[str, Any] = {
+                "name": name,
+                "description": band.get("description")
+                or band.get("title")
+                or f"{resolved.asset_key} band {resolved.band_name}",
+                **_spectral(band),
+            }
+            if band.get("gsd") is not None:
+                entry["gsd"] = band["gsd"]
+            band_summaries.append(entry)
+
         for key, asset in item_assets.items():
+            if key in multi_band_assets:
+                continue  # already expanded, band by band, above
+
             asset_bands = asset.get("eo:bands") or asset.get("bands")
             if not asset_bands:
                 continue
 
             description = asset.get("description") or asset.get("title") or key
-            entry: Dict[str, Any] = {"name": key, "description": description}
+            entry = {"name": key, "description": description}
 
             # Per-band spectral metadata (common name, wavelength, ...) only
             # unambiguously applies to single-band assets; composite assets
             # (e.g. a true-colour image with 3 component bands) skip it.
             if len(asset_bands) == 1:
-                band = asset_bands[0]
-
-                common_name = band.get("eo:common_name") or band.get("common_name")
-                if common_name:
-                    entry["eo:common_name"] = common_name
-
-                center_wavelength = band.get("eo:center_wavelength") or band.get(
-                    "center_wavelength"
-                )
-                if center_wavelength is not None:
-                    entry["eo:center_wavelength"] = center_wavelength
-
-                fwhm = band.get("eo:full_width_half_max") or band.get(
-                    "full_width_half_max"
-                )
-                if fwhm is not None:
-                    entry["eo:full_width_half_max"] = fwhm
+                entry.update(_spectral(asset_bands[0]))
 
             band_summaries.append(entry)
 
@@ -261,11 +296,24 @@ class stacApiBackend:
 
             band_names: Set[str] = set()
             asset_facts: List[Tuple[str, Optional[str], Sequence[str]]] = []
+            data_assets: Dict[str, Any] = {}
             for key, asset in collection.ext.item_assets.items():
                 roles = asset.roles or []
                 asset_facts.append((key, asset.media_type, roles))
                 if "data" in roles and asset.media_type not in _ARCHIVE_MEDIA_TYPES:
+                    # `.to_dict()`, not the `AssetDefinition` itself: it has no
+                    # `.extra_fields` (unlike `pystac.Asset`), so `bands` is
+                    # otherwise invisible to `assetbands.asset_band_facts`.
+                    data_assets[key] = asset.to_dict()
                     band_names.add(key)
+
+            # Assets publishing several bands at once advertise the bands, not
+            # the asset key -- see titiler/openeo/assetbands.py. Single-band and
+            # band-less assets are absent from this mapping and keep their key
+            # above, which is what stops existing catalogues being renamed.
+            inner_bands = resolve_asset_bands(asset_band_facts(data_assets))
+            band_names.difference_update(r.asset_key for r in inner_bands.values())
+            band_names.update(inner_bands)
 
             # Bands derived from non-raster assets (e.g. Sentinel-1 GRD's
             # calibration/noise annotation XML) -- see
