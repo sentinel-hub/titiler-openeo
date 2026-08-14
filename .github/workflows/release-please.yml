@@ -4,6 +4,16 @@ on:
   push:
     branches:
       - main
+  # Break-glass: build an existing tag and publish it to PyPI when the
+  # automatic run failed. PyPI trusted publishing is bound to this workflow
+  # file name and to the pypi-release environment, so the manual path must
+  # stay in this file to use the same credentials.
+  workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: "Existing tag to build and publish to PyPI (for example v0.17.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,6 +22,7 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -27,12 +38,26 @@ jobs:
   build_package:
     needs: release-please
     runs-on: ubuntu-latest
-    if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
-    
+    # On push: run only when release-please cut a release for the root
+    # package. On workflow_dispatch: always run, for the tag given as input.
+    # release-please is skipped on workflow_dispatch, and a skipped dependency
+    # skips this job whatever the condition says, so the condition needs
+    # !cancelled() to stay reachable.
+    if: >-
+      ${{ !cancelled() && (
+        github.event_name == 'workflow_dispatch'
+        || (needs.release-please.result == 'success'
+            && needs.release-please.outputs.paths_released
+            && contains(fromJSON(needs.release-please.outputs.paths_released), '.'))
+      ) }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-      
+        with:
+          # Empty on push, which checks out the default ref.
+          ref: ${{ inputs.publish_tag }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -42,6 +67,21 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # Guards against publishing a tag whose code carries a different
+      # version. Runs through `uv run` so it uses the project environment.
+      - name: Check that the tag matches the package version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PUBLISH_TAG: ${{ inputs.publish_tag }}
+        run: |
+          expected="${PUBLISH_TAG#v}"
+          actual="$(uv run python -c 'import titiler.openeo; print(titiler.openeo.__version__)')"
+          echo "tag=${expected} module=${actual}"
+          if [ "${expected}" != "${actual}" ]; then
+            echo "::error::Tag ${PUBLISH_TAG} holds version ${actual}"
+            exit 1
+          fi
 
       - name: Build package
         run: uv build

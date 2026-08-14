@@ -113,43 +113,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  publish:
-    needs: [tests]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.9.*" 
-          enable-cache: true
-          python-version: ${{ env.LATEST_PY_VERSION}}
-
-      - name: Install dependencies
-        run: |
-          uv sync
-
-      - name: Set tag version
-        id: tag
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/*/}"
-          VERSION="${TAG_NAME#v}"
-          echo "version=${VERSION}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Set module version
-        id: module
-        run: |
-          echo version=$(python -c'import titiler.openeo; print(titiler.openeo.__version__)') >> $GITHUB_OUTPUT
-
-      - name: Build and publish
-        if: steps.tag.outputs.version == steps.module.outputs.version
-        env:
-          UV_PUBLISH_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-        run: |
-          rm -rf dist
-          uv build
-          uv publish dist/*
+# PyPI publishing lives in release-please.yml. It ran here on tag pushes, but
+# release-please creates tags with GITHUB_TOKEN, which does not start
+# workflows, so this job never ran. Use the `publish_tag` input of the
+# Release Please workflow to publish a tag by hand.
