@@ -12,12 +12,16 @@ import pytest
 from titiler.openeo import signing
 from titiler.openeo.settings import PlanetaryComputerSettings
 from titiler.openeo.signing import (
-    PLANETARY_COMPUTER,
+    ITEM_SIGNER_KEY,
+    SIGNERS,
     PlanetaryComputerSigner,
     SigningError,
-    get_href_signer,
-    rules_for_catalogue,
+    get_signer,
+    signer_for_item,
+    stamp_signer_key,
 )
+
+PC_KEY = "planetary-computer"
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -31,10 +35,16 @@ TILEJSON_HREF = (
 
 @pytest.fixture(autouse=True)
 def clear_token_cache():
-    """The token cache is module-level; keep tests independent of each other."""
+    """Both caches are module-level; keep tests independent of each other.
+
+    `get_signer` is memoised, so a signer built from one test's settings would
+    otherwise leak into the next.
+    """
     signing._TOKEN_CACHE.clear()
+    get_signer.cache_clear()
     yield
     signing._TOKEN_CACHE.clear()
+    get_signer.cache_clear()
 
 
 def _sas_response(token: str = "st=X&se=Y&sig=abc%3D", minutes: int = 45):
@@ -59,36 +69,67 @@ def _sas_response(token: str = "st=X&se=Y&sig=abc%3D", minutes: int = 45):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        PC_STAC_API,
-        "https://planetarycomputer.microsoft.com/api/stac/v1/",
-        "https://PLANETARYCOMPUTER.microsoft.com/api/stac/v1",
-    ],
-)
-def test_rules_for_catalogue_matches_planetary_computer(url):
-    assert rules_for_catalogue(url) == (PLANETARY_COMPUTER,)
+def test_no_key_means_no_signer():
+    """The gate: no key -> None, so call sites run their unchanged path."""
+    assert get_signer(None) is None
+    assert get_signer("") is None
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://stac.dataspace.copernicus.eu/v1",
-        "https://earth-search.aws.element84.com/v1",
-        "https://stac.eoapi.dev",
-        "https://planetarycomputer.microsoft.com.evil.example/api/stac/v1",
-        "",
-    ],
-)
-def test_rules_for_catalogue_ignores_other_catalogues(url):
-    assert rules_for_catalogue(url) == ()
+def test_a_registered_key_resolves_to_its_signer():
+    assert isinstance(get_signer(PC_KEY), PlanetaryComputerSigner)
+    assert PC_KEY in SIGNERS
 
 
-def test_no_rules_means_no_signer():
-    """The gate: no rules -> None, so call sites run their unchanged path."""
-    assert get_href_signer(()) is None
-    assert get_href_signer([]) is None
+def test_an_unknown_key_raises_rather_than_silently_disabling_signing():
+    """A typo must not read as "signing off" -- that surfaces as an opaque 409
+    from blob storage, which is what SigningError exists to prevent."""
+    with pytest.raises(SigningError, match="planetary-computer"):
+        get_signer("planetray-computer")
+
+
+def test_activation_no_longer_depends_on_the_catalogue_hostname():
+    """Issue #377: a Planetary Computer URL does not by itself turn signing on,
+    and no hostname decides anything -- only the configured key does."""
+    assert not hasattr(signing, "rules_for_catalogue")
+    assert not hasattr(signing, "_PC_STAC_HOST")
+
+
+# ---------------------------------------------------------------------------
+# The item stamp (ADR 0005 S2.2)
+# ---------------------------------------------------------------------------
+
+
+def test_stamping_without_a_key_leaves_the_item_untouched():
+    item = {"type": "Feature", "id": "x", "properties": {}}
+    assert stamp_signer_key(item, None) == {
+        "type": "Feature",
+        "id": "x",
+        "properties": {},
+    }
+    assert signer_for_item(item) is None
+
+
+@pytest.mark.parametrize("as_dict", [True, False], ids=["dict", "pystac.Item"])
+def test_a_stamped_item_resolves_its_signer(as_dict):
+    """Both shapes reach the read path: load_collection carries pystac.Items,
+    load_stac hands `_reader` the output of `Item.to_dict()`."""
+    item = pystac.Item.from_dict(
+        json.loads((FIXTURES / "sentinel2/items/planetary_computer.json").read_text())
+    )
+    stamp_signer_key(item, PC_KEY)
+
+    subject = item.to_dict() if as_dict else item
+    assert isinstance(signer_for_item(subject), PlanetaryComputerSigner)
+
+
+def test_the_stamp_survives_a_dict_round_trip():
+    """The stamp is a plain string precisely so `to_dict()` preserves it."""
+    item = pystac.Item.from_dict(
+        json.loads((FIXTURES / "sentinel2/items/planetary_computer.json").read_text())
+    )
+    stamp_signer_key(item, PC_KEY)
+
+    assert item.to_dict()["properties"][ITEM_SIGNER_KEY] == PC_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +140,7 @@ def test_no_rules_means_no_signer():
 def test_signs_blob_href():
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="st=A&se=B&sig=zzz")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         signed = signer(BLOB_HREF)
 
     assert signed == f"{BLOB_HREF}?st=A&se=B&sig=zzz"
@@ -108,7 +149,7 @@ def test_signs_blob_href():
 def test_leaves_non_blob_hosts_untouched():
     """PC's own tilejson/rendered_preview assets are not on blob storage."""
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(TILEJSON_HREF) == TILEJSON_HREF
         assert (
             signer("https://sentinel-cogs.s3.us-west-2.amazonaws.com/x.tif")
@@ -123,7 +164,7 @@ def test_signing_is_idempotent():
     """An already-signed href is never given a second token."""
     already = f"{BLOB_HREF}?st=A&se=B&sig=existing"
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(already) == already
 
     urlopen.assert_not_called()
@@ -132,7 +173,7 @@ def test_signing_is_idempotent():
 def test_preserves_an_existing_query_string():
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=zzz")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         signed = signer(f"{BLOB_HREF}?versionid=2")
 
     assert signed == f"{BLOB_HREF}?versionid=2&sig=zzz"
@@ -141,7 +182,7 @@ def test_preserves_an_existing_query_string():
 def test_blob_url_without_a_container_is_untouched():
     href = "https://sentinel2l2a01.blob.core.windows.net/"
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(href) == href
 
     urlopen.assert_not_called()
@@ -205,15 +246,15 @@ def test_token_is_reused_outside_the_expiry_margin():
     assert urlopen.call_count == 1
 
 
-def test_cache_is_shared_across_users():
-    """Public PC tokens are identity-blind, so one entry per container is right."""
-    from titiler.openeo.models.auth import User
-
-    rules = rules_for_catalogue(PC_STAC_API)
+def test_cache_is_shared_across_independently_resolved_signers():
+    """Public PC tokens are identity-blind, so one entry per container is right
+    however many readers resolve a signer for the same container (ADR 0005 S2.5).
+    """
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response()
-        get_href_signer(rules, User(user_id="alice"))(BLOB_HREF)
-        get_href_signer(rules, User(user_id="bob"))(BLOB_HREF)
+        get_signer(PC_KEY)(BLOB_HREF)
+        get_signer.cache_clear()  # as if a separate reader resolved it afresh
+        get_signer(PC_KEY)(BLOB_HREF)
 
     assert urlopen.call_count == 1
 
@@ -303,7 +344,7 @@ def test_signs_every_blob_asset_of_a_real_item(fixture):
 
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=tok")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         results = {
             key: signer(asset.get_absolute_href() or asset.href)
             for key, asset in item.assets.items()
@@ -326,7 +367,7 @@ def test_sar_annotation_assets_are_signed():
 
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=tok")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         annotation = {
             key: signer(asset.href)
             for key, asset in item.assets.items()
@@ -337,12 +378,16 @@ def test_sar_annotation_assets_are_signed():
     assert all(href.endswith("?sig=tok") for href in annotation.values())
 
 
-def test_default_signer_is_none_until_rules_are_set():
-    signing.set_default_rules(())
-    assert signing.get_default_href_signer() is None
+def test_signing_is_off_by_default_and_on_only_when_configured(monkeypatch):
+    """The `load_url` path reads the deployment's choice straight from settings,
+    since it has no catalogue behind it to stamp an item (ADR 0005 S2.6)."""
+    from titiler.openeo.settings import SigningSettings
 
-    signing.set_default_rules(rules_for_catalogue(PC_STAC_API))
-    try:
-        assert signing.get_default_href_signer() is not None
-    finally:
-        signing.set_default_rules(())
+    monkeypatch.delenv("TITILER_OPENEO_ASSET_SIGNER", raising=False)
+    assert SigningSettings().asset_signer == ""
+    assert get_signer(SigningSettings().asset_signer or None) is None
+
+    monkeypatch.setenv("TITILER_OPENEO_ASSET_SIGNER", PC_KEY)
+    assert isinstance(
+        get_signer(SigningSettings().asset_signer or None), PlanetaryComputerSigner
+    )

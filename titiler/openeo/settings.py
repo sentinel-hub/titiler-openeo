@@ -313,8 +313,37 @@ class Sentinel2Settings(BaseSettings):
     )
 
 
+class SigningSettings(BaseSettings):
+    """Which signer this deployment's assets need.
+
+    Deliberately a setting rather than something the application infers. An
+    earlier version turned signing on when the configured STAC API URL happened
+    to be `planetarycomputer.microsoft.com`, which put a cloud provider's
+    hostname in the application's decision logic (issue #377). A deployment
+    knows its own data provider; the application should not guess.
+
+    Empty -- the default -- means no signing, which is the behaviour every
+    deployment had before signing existed. Valid values are the keys of
+    `signing.SIGNERS`; an unknown one fails loudly at first use rather than
+    reading as "signing off" (see `signing.get_signer`).
+
+    See docs/adr/0005-asset-href-signing.md for the design this configures.
+    """
+
+    asset_signer: str = ""
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+
 class PlanetaryComputerSettings(BaseSettings):
     """Microsoft Planetary Computer asset-signing settings.
+
+    Only consulted when `SigningSettings.asset_signer` names
+    `"planetary-computer"`.
 
     See docs/adr/0005-asset-href-signing.md for the design this configures.
     """

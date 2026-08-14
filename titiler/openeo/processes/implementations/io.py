@@ -14,7 +14,8 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import create_tasks
 
 from ...reader import _reader
-from ...signing import get_default_href_signer
+from ...settings import SigningSettings
+from ...signing import get_signer, stamp_signer_key
 from .data_model import RasterStack
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
@@ -36,21 +37,22 @@ def load_url(
     Raises:
         ValueError: If the URL is invalid
     """
-    # Unlike every other read path, this one has no user in scope: `load_url`
-    # is a plain process implementation running inside an already-evaluating
-    # graph. It therefore uses the process-wide rules resolved at startup
-    # (docs/adr/0005-asset-href-signing.md S2.6). The signer still only fires
-    # when the URL's host matches a rule, so a user-supplied URL cannot widen
-    # what gets signed.
-    signer = get_default_href_signer()
-    if signer is not None:
-        url = signer(url)
+    # Unlike every other read path, this one has no catalogue behind it:
+    # `load_url` is a plain process implementation running inside an
+    # already-evaluating graph, so there is no ingest step to stamp its item and
+    # no `LoadCollection` holding the deployment's choice. It reads that choice
+    # straight from settings instead (docs/adr/0005-asset-href-signing.md S2.6).
+    # The signer still returns any href it has nothing to add to untouched, so a
+    # user-supplied URL cannot widen what gets signed.
+    signer_key = SigningSettings().asset_signer or None
 
-    # Create a dummy STAC item for the COG
+    # Create a dummy STAC item for the COG, stamped so the read path resolves
+    # the same credential the metadata open below uses.
     item: Dict[str, Any] = {
         "type": "Feature",
         "id": "cog",
         "bbox": None,  # Will be set from the COG metadata
+        "properties": {},
         "assets": {
             "data": {
                 "href": url,
@@ -58,9 +60,12 @@ def load_url(
             }
         },
     }
+    stamp_signer_key(item, signer_key)
 
-    # Get metadata from COG to set bbox, dimensions, and CRS
-    with COGReader(url) as cog:
+    # Get metadata from COG to set bbox, dimensions, and CRS. This open is
+    # outside any reader, so it signs the href itself.
+    signer = get_signer(signer_key)
+    with COGReader(signer(url) if signer else url) as cog:
         item["bbox"] = [float(x) for x in cog.bounds]
         cog_width = cog.dataset.width
         cog_height = cog.dataset.height

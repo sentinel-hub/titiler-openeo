@@ -31,21 +31,35 @@ from.
 
 ## How signing switches on
 
-There is no enable flag. Signing activates when `TITILER_OPENEO_STAC_API_URL`
-names `planetarycomputer.microsoft.com`, and the rule only ever fires for hrefs
-on `*.blob.core.windows.net`. Any other catalogue, and any asset served from
-somewhere else, is untouched.
+Set the signer your catalogue needs:
+
+```bash
+TITILER_OPENEO_ASSET_SIGNER=planetary-computer
+```
+
+Signing is off unless you set it. Once set, the signer only ever fires for hrefs
+on `*.blob.core.windows.net`; any asset served from somewhere else is untouched,
+including Planetary Computer's own `tilejson` and `rendered_preview`, which come
+from the API host.
 
 At startup the log says so:
 
 ```text
-Asset href signing enabled for https://planetarycomputer.microsoft.com/api/stac/v1: \.blob\.core\.windows\.net$
+Asset href signing enabled for https://planetarycomputer.microsoft.com/api/stac/v1: planetary-computer
 ```
 
-If you point at a Planetary Computer **mirror on a different hostname**, that
-line will be absent and reads will fail with HTTP 409. That is the known cost of
-deriving activation instead of configuring it — see
-[ADR 0005](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0005-asset-href-signing.md) §3.1.
+If that line is absent and your reads fail with HTTP 409, the variable is not
+set. A mistyped value fails loudly at first use rather than reading as "signing
+off".
+
+> **Changed in 0.18.0.** Earlier versions had no setting: signing switched on by
+> itself when `TITILER_OPENEO_STAC_API_URL` named
+> `planetarycomputer.microsoft.com`. That put a cloud provider's hostname in the
+> application's decision logic, and it left Planetary Computer **mirrors on other
+> hostnames** with no way to turn signing on at all
+> ([#377](https://github.com/sentinel-hub/titiler-openeo/issues/377)).
+> Deployments upgrading from 0.17.x must now set the variable above — see
+> [ADR 0005](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0005-asset-href-signing.md) §2.3.
 
 Tokens are container-scoped, read-only, and last about 45 minutes. One token is
 minted per storage container and reused for every asset in it, refreshed five

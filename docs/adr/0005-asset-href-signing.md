@@ -73,9 +73,20 @@ every user.
 
 ## 2. Decision
 
-Add one narrow protocol and a shipped in-code registry, keyed on an observable
-fact of the href — its host. Thread the resulting signer explicitly down the
-read path.
+Add one narrow protocol and a shipped in-code registry. A deployment names the
+signer it needs; ingest stamps that name onto every item; the read path resolves
+the name to a signer when it opens an href.
+
+> **Revised 2026-08-14 (issue #377).** As first implemented, §2.2–§2.3 and §2.6
+> said something different: activation was **derived** from the catalogue
+> hostname, and the resulting signer was **threaded** as a parameter through
+> `_reader`, `_get_target_crs_bbox`, `_get_cube_resolutions`,
+> `_estimate_output_dimensions` and `SimpleSTACReader`. Review rejected both
+> halves — the first put a cloud provider's hostname in the application's
+> decision logic, the second spread a deployment concern across the generic read
+> path. Those sections now describe the revision; §2.5 records what it cost. §1,
+> §2.1 and §2.4 are unchanged: the problem, the "no hand-written per-collection
+> configuration" rule and the signer itself all survived.
 
 ### 2.1 Why this is not the plugin system ADR 0002 rejected
 
@@ -88,52 +99,80 @@ configuration**, so the same catalogue served from two deployments could behave
 differently.
 
 This design keeps that rule. There is no configuration binding a signer to a
-collection. A rule matches on the href's host, which is a fact of the data, and
-the registry ships in code. Adding a catalogue means adding a rule and a test
-fixture, exactly as `bandsources/sources.py` does for band sources.
+*collection*. A deployment names one signer for its whole catalogue, the
+registry of implementations ships in code, and each signer decides per href
+whether it has anything to add. Adding a catalogue means adding a signer and a
+test fixture, exactly as `bandsources/sources.py` does for band sources.
 
 ### 2.2 The seam
 
 ```python
 HrefSigner = Callable[[str], str]        # href -> href
 
-@dataclass(frozen=True)
-class SignerRule:
-    host: "re.Pattern[str]"                          # matched against urlparse(href).netloc
-    factory: Callable[[Optional[User]], HrefSigner]
+ITEM_SIGNER_KEY = "titiler:sign"         # STAC property carrying the choice
+SIGNERS: Dict[str, Callable[[], HrefSigner]]
 
-def rules_for_catalogue(stac_api_url: str) -> Tuple[SignerRule, ...]: ...
-def get_href_signer(rules, user=None) -> Optional[HrefSigner]: ...
+def stamp_signer_key(item, key) -> item             # at ingest, once per item
+def signer_for_item(item) -> Optional[HrefSigner]   # at open, once per reader
+def get_signer(key) -> Optional[HrefSigner]         # memoised key -> signer
 ```
 
-`get_href_signer` returns `None` when `rules` is empty. `None` is threaded as
-the default everywhere, and `_resolve_asset_href` returns exactly the string it
-returns today when it receives `None`. This mirrors
+**The item is the channel.** The readers that open hrefs are built at three
+fixed points inside the mosaic (`_reader`, `_get_target_crs_bbox`,
+`_get_cube_resolutions`) and run on a `ThreadPoolExecutor` the request context
+does not reach. rio-tiler creates that pool without `contextvars.copy_context()`
+(`rio_tiler/tasks.py`), so a contextvar cannot carry the decision either. The
+item already travels to every one of those points, and is the task argument, so
+it is the one channel that works without threading a parameter.
+
+**The stamp is a key, never a signed href.** A SAS token minted at ingest would
+be reused by every lazily-evaluated task and every retry, so a graph outliving
+its ~45-minute token would fail. Resolving the key at open time means the retry
+loop in `_reader`, which rebuilds the reader, re-signs (§3.1). It also keeps the
+stamp a plain string, which is what lets it survive the `Item.to_dict()` that
+`load_stac` performs.
+
+`get_signer` returns `None` for an unstamped item, and `_resolve_asset_href`
+then returns exactly the string it returned before signing existed. This mirrors
 `build_per_request_registry`'s "return the base object unchanged" gate
 (`reader_requirements.py:216-217`, ADR 0002 §4 increment 5): the strongest form
 of "a deployment that does not need this must produce a byte-identical read" is
 no wrapper at all, not a wrapper that happens to be a no-op.
 
-The returned signer leaves any href whose host matches no rule untouched. This
-is what keeps PC's own `tilejson` and `rendered_preview` assets (§1.2) unsigned.
+Each signer leaves any href it has nothing to add to untouched. That is what
+keeps PC's own `tilejson` and `rendered_preview` assets (§1.2) unsigned, and it
+is why the stamp is applied to every item rather than only to items that look
+like they need it — one judgement, in one place.
 
-### 2.3 Activation is scoped to the configured catalogue
+### 2.3 Activation is configured, not derived
 
-`rules_for_catalogue` returns the PC rule only when
-`TITILER_OPENEO_STAC_API_URL` names `planetarycomputer.microsoft.com`, and `()`
-otherwise. No new setting is introduced for enablement.
+`TITILER_OPENEO_ASSET_SIGNER` names a key of `SIGNERS`; empty — the default —
+means no signing. An unknown key raises `SigningError` at first use rather than
+reading as "signing off", which would surface only as an opaque HTTP 409.
 
-Two alternatives were considered and rejected:
+The original decision derived activation instead: the PC signer switched on when
+`TITILER_OPENEO_STAC_API_URL` named `planetarycomputer.microsoft.com`. The
+argument was that it "keeps *point at PC and it works* true" without adding a
+knob whose only correct value is derivable. Review rejected it (#377) on two
+grounds:
 
-- **Match on host alone, always.** A deployment reading its own Azure blob
-  containers would then make an outbound call to `planetarycomputer.microsoft.com`
-  carrying its href. Leaking an href to a third party as a side effect of a
-  registry default is not acceptable.
-- **A dedicated `TITILER_OPENEO_ASSET_SIGNERS` setting.** More explicit, but it
-  adds a knob whose only correct value is derivable from a setting the operator
-  already provides. Deriving it keeps "point at PC and it works" true.
+- **It is provider knowledge in the application's decision logic.** A hostname
+  belonging to one cloud vendor decided application behaviour.
+- **It was not actually derivable.** A PC mirror on another hostname could not
+  turn signing on at all, and a deployment reading PC-hosted blobs through a
+  different catalogue could not either — the cost §3.1 had already recorded as
+  an open risk.
 
-The trade-off accepted is that the activation rule is implicit. §3 records this.
+The alternative rejected in the original — matching on href host alone, always —
+stands rejected, and for the same reason: a deployment reading its own Azure
+blob containers must never make an outbound call to
+`planetarycomputer.microsoft.com` carrying its href as a side effect of a
+registry default. Configuration, not the shipped registry, is what turns a
+signer on.
+
+**Migration.** Deployments on 0.17.x that read Planetary Computer must now set
+`TITILER_OPENEO_ASSET_SIGNER=planetary-computer`. Without it, reads of private
+blob assets fail with HTTP 409. The startup log states which signer is active.
 
 ### 2.4 `PlanetaryComputerSigner`
 
@@ -159,43 +198,50 @@ The cache is **not** keyed by user. That is correct precisely because §1.2 show
 tokens are identity-blind; a delegated signer must key its own cache by user,
 and the code says so at the cache definition.
 
-### 2.5 The per-user seam
+### 2.5 The per-user seam, and its removal
 
-`SignerRule.factory` takes the authenticated `User` even though
-`PlanetaryComputerSigner` ignores it, and the signer is built per request rather
-than once per process. This is deliberate, and it is the one piece of this ADR
-built ahead of a shipped consumer.
+The original design threaded the authenticated `User` to a `factory(user)` on
+each rule, building the signer per request even though `PlanetaryComputerSigner`
+ignores its user. It was the one piece of this ADR built ahead of a shipped
+consumer: the argument was that the plumbing, not the signer, is the expensive
+part, and that a delegated backend — Planetary Computer Pro, or private Azure
+containers reached by an on-behalf-of exchange — would need that channel later.
 
-The justification is that the expensive and risky part is not the signer — it is
-the plumbing. Threading a per-request object from the authenticated endpoint,
-through `load_collection`, into a lazily-evaluated closure, and across a
-`ThreadPoolExecutor` boundary touches six call sites in three modules. A
-genuinely delegated backend does exist as a near-term target — Planetary
-Computer Pro, and private Azure containers reached by an on-behalf-of token
-exchange — and for those the caller's identity does determine access. Building
-the channel once, while the read path is already being changed, avoids doing the
-same surgery twice.
+**That channel is gone.** It was the same threading §2.3's revision removed, and
+keeping it would have meant keeping the parameter on every function purely for a
+hypothetical consumer. `SIGNERS` maps a key to a signer with no user involved.
 
-`contextvars` were considered for this and rejected: `create_tasks` and
-`mosaic_reader` submit to a `ThreadPoolExecutor`, which does not propagate
-context. This is the same constraint that makes rio-tiler need
-`@inherit_rasterio_env`.
+The limit this accepts, recorded rather than solved: **signing is now
+user-independent.** That is correct for every shipped case, because §1.2 proves
+public PC's tokens are identity-blind — anonymous, bearer-token and
+subscription-key calls all return the same token, so there is no entitlement to
+delegate. A genuinely delegated backend would need the caller's identity inside
+the worker thread, which neither an item stamp (it must stay JSON-serialisable)
+nor a contextvar (§2.2: the pool does not propagate context) can carry. Designing
+that is deferred until such a backend exists, when its real requirements are
+known — rather than guessed, which is what the removed seam did.
 
-### 2.6 Threading
+The token cache is likewise **not** keyed by user, for the same §1.2 reason; a
+delegated signer must key its own cache by user, and the code says so at the
+cache definition.
+
+### 2.6 Where the decision is applied
 
 | Site | Change |
 | --- | --- |
-| `reader.py::_resolve_asset_href` | `signer=None` parameter, applied after the `STAC_ALTERNATE_KEY` branch |
-| `reader.py::_item_has_untrustworthy_proj` | `signer=None`; use `_resolve_asset_href` instead of the raw href (§1.1) |
-| `reader.py::SimpleSTACReader` | `signer` attrs field, default `None` |
-| `reader.py::_estimate_output_dimensions` and its two helpers | `signer=None`, forwarded to the `SimpleSTACReader` constructions |
-| `reader.py::_reader` | `kwargs.pop("signer", None)` before `part()` |
-| `stacapi.py::LoadCollection`, `LoadStac` | `signer_rules` field; build the signer from `named_parameters["_openeo_user"]` |
-| `processes/implementations/io.py::load_url` | process-wide unbound signer — the one path with no user context |
-| `main.py` | build the rules once from `backend_settings.stac_api_url` |
+| `signing.py` | `SIGNERS` key→signer registry; `stamp_signer_key` / `signer_for_item`; `get_signer` memoised |
+| `settings.py::SigningSettings` | `TITILER_OPENEO_ASSET_SIGNER`, empty by default |
+| `stacapi.py::LoadCollection._get_items` | stamps every item — the single funnel for `load_collection` |
+| `stacapi.py::LoadStac` | `signer_key` field; stamps its single-item path, which bypasses `_get_items`; passes the key to its `LoadCollection` delegate |
+| `reader.py::SimpleSTACReader` | `signer` resolved in `__attrs_post_init__` from the item; `init=False` |
+| `reader.py::_resolve_asset_href` | unchanged — still takes the signer, now from `self.signer` |
+| `reader.py::_item_has_untrustworthy_proj` | unchanged — uses `_resolve_asset_href` rather than the raw href (§1.1) |
+| `processes/implementations/io.py::load_url` | reads the key from settings: no catalogue behind it, so no ingest step to stamp its synthetic item |
+| `main.py` | reads the key once from settings and injects it |
 
-`mosaic_reader` and `create_tasks` already forward `**kwargs` to the reader
-callable, so no rio-tiler change is needed.
+`_reader`, `_get_target_crs_bbox`, `_get_cube_resolutions` and
+`_estimate_output_dimensions` take **no** signing parameter. That is the point of
+the revision.
 
 ---
 
@@ -208,48 +254,62 @@ view/sun angle bands work there. `_item_has_untrustworthy_proj`'s
 `STAC_ALTERNATE_KEY` inconsistency is fixed. Deployments not pointing at PC get
 `None` and are unchanged.
 
-**Accepted costs.** A new module, and a `signer` parameter on six functions that
-did not need one. One outbound dependency on `planetarycomputer.microsoft.com`
-in the read path, whose availability now gates reads that would otherwise only
-need blob storage. Signed hrefs carry a query string that changes every time the
-token is refreshed, so GDAL's `/vsicurl/` chunk cache is keyed on a URL with a
-roughly forty-minute lifetime; reads immediately after a refresh start cold.
+**Accepted costs.** A new module, and a convention — a namespaced STAC property
+— that a reader must know to look for. One outbound dependency on
+`planetarycomputer.microsoft.com` in the read path, whose availability now gates
+reads that would otherwise only need blob storage. Signed hrefs carry a query
+string that changes every time the token is refreshed, so GDAL's `/vsicurl/`
+chunk cache is keyed on a URL with a roughly forty-minute lifetime; reads
+immediately after a refresh start cold. Since the revision: one more environment
+variable, and a breaking change for 0.17.x deployments that read PC (§2.3).
 
 **Deliberately not done.** Delegated per-user SAS minting, which §1.2 proves is
-not expressible against public PC. Signing based on anything other than the
-href's host. A configuration file or environment variable binding signers to
-collections (ADR 0002 §2.1). Use of the `/api/sas/v1/sign` endpoint. Write or
-delete SAS permissions — the minted token is read+list, and nothing in this
-backend writes to a catalogue.
+not expressible against public PC (§2.5). A configuration file or environment
+variable binding signers to *collections* (ADR 0002 §2.1) — the setting names one
+signer for the deployment, not a mapping. Use of the `/api/sas/v1/sign` endpoint.
+Write or delete SAS permissions — the minted token is read+list, and nothing in
+this backend writes to a catalogue.
 
 ### 3.1 Open risks
 
-- **The activation rule is implicit.** A deployment pointing at a PC *mirror* on
-  another hostname gets no signing and reads fail with HTTP 409, with nothing in
-  the configuration explaining why. Mitigated by logging once, at startup, which
-  rules are active. If a second catalogue ever needs signing under a hostname
-  that cannot be recognised, §2.3's rejected explicit setting should be
-  revisited rather than special-cased.
+- ~~**The activation rule is implicit.**~~ **Resolved by the §2.3 revision.** The
+  risk as recorded — a PC *mirror* on another hostname getting no signing, "with
+  nothing in the configuration explaining why" — was what #377 called in. There
+  is now a setting; the mirror sets it like any other deployment. The startup log
+  still names the active signer, and an unknown key now fails loudly instead of
+  reading as "off".
 - **A short read may outlive its token.** The five-minute margin covers ordinary
   tile reads. A long mosaic that expires mid-read raises `RasterioIOError`,
-  which `_reader`'s existing ten-attempt retry loop (`reader.py:1286-1301`)
-  handles: each attempt reconstructs `SimpleSTACReader`, which re-resolves and
-  therefore re-signs every href. The recovery path is real but incidental, so it
-  is asserted by a test rather than left to chance.
-- **The per-user seam has no consumer.** §2.5 argues the plumbing is worth
-  building early. If a delegated backend does not materialise, the `user`
-  parameter on `SignerRule.factory` is dead weight — small, but dead. The
-  abandon condition is explicit: if no delegated signer exists by the time a
-  third catalogue needs signing, collapse `factory` to take no argument.
+  which `_reader`'s existing ten-attempt retry loop handles: each attempt
+  reconstructs `SimpleSTACReader`, whose `__attrs_post_init__` re-resolves the
+  signer and therefore re-signs every href. This is now load-bearing rather than
+  incidental — it is the reason §2.2 stamps a key rather than a signed href —
+  and is asserted directly by
+  `test_every_retry_rebuilds_the_reader_so_an_expired_token_is_reminted`.
+- ~~**The per-user seam has no consumer.**~~ **Closed by removing it** (§2.5).
+  The abandon condition recorded here — "collapse `factory` to take no argument"
+  — is what happened, earlier than anticipated and for an unrelated reason. The
+  replacement risk is that signing is user-independent with no channel to make it
+  otherwise; §2.5 states what a delegated backend would have to build.
 - **Rate limits are unmeasured.** §1.2 shows a subscription key changes nothing
   about the token itself, but a single probe cannot measure a rate limit. A
   deployment minting one token per container per forty minutes is far below any
   plausible threshold; a deployment that somehow defeats the cache is not. The
   cache is therefore the mechanism that keeps this safe, not an optimisation.
+- **The stamp is a convention.** Nothing validates that an item carrying
+  `titiler:sign` came from this backend's own ingest. A catalogue that published
+  the property itself would be believed. The blast radius is bounded by `SIGNERS`
+  — an unknown key raises rather than doing anything — so the worst case is a
+  catalogue selecting a signer this deployment already ships, which then still
+  only signs hrefs it recognises. Worth revisiting if the stamp ever carries
+  something richer than a key.
 
 ---
 
 ## 4. Implementation plan
+
+Kept as the record of how this shipped in 0.17.0. Increments 3 and 4 were undone
+by the §2.3/§2.6 revision — the threading they describe no longer exists.
 
 | # | Increment | Gate / abandon condition |
 | --- | --- | --- |

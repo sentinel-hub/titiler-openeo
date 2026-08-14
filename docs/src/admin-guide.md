@@ -26,11 +26,27 @@ TITILER_OPENEO_STORE_URL="path-to-services-config"
 TITILER_OPENEO_TILE_STORE_URL="optional-tile-store-url"
 ```
 
+#### Asset Signing ([`SigningSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
+
+Which signer this deployment's private assets need. Empty — the default — means
+no signing. Setting an unregistered name fails loudly at first use.
+
+```bash
+TITILER_OPENEO_ASSET_SIGNER=""  # "planetary-computer" for Microsoft Planetary Computer
+```
+
+> **Changed in 0.18.0.** Signing used to switch on by itself when
+> `TITILER_OPENEO_STAC_API_URL` named `planetarycomputer.microsoft.com`. It is
+> now configured explicitly
+> ([#377](https://github.com/sentinel-hub/titiler-openeo/issues/377)), so
+> deployments upgrading from 0.17.x must set this variable or their private asset
+> reads will fail with HTTP 409.
+
 #### Planetary Computer Settings ([`PlanetaryComputerSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
 
-Only consulted when `TITILER_OPENEO_STAC_API_URL` points at Microsoft Planetary
-Computer, which is what activates asset signing. All optional — the defaults
-work with no credentials. See [Microsoft Planetary Computer](planetary-computer.md).
+Only consulted when `TITILER_OPENEO_ASSET_SIGNER` is `"planetary-computer"`. All
+optional — the defaults work with no credentials. See
+[Microsoft Planetary Computer](planetary-computer.md).
 
 ```bash
 TITILER_OPENEO_PC_SUBSCRIPTION_KEY=""  # Optional; raises SAS API rate limits

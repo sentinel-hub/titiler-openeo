@@ -13,6 +13,10 @@ stac:
   apiUrl: "https://planetarycomputer.microsoft.com/api/stac/v1"
 
 env:
+  # Turns SAS signing on for this deployment's blob assets. Required since
+  # 0.18.0, where signing stopped being inferred from the STAC API hostname
+  # (issue #377, docs/adr/0005-asset-href-signing.md S2.3).
+  TITILER_OPENEO_ASSET_SIGNER: "planetary-computer"
   # `noaa-c-cap` advertises a provider url with no colon after the scheme,
   # which fails openEO response validation and takes the whole GET /collections
   # response with it. Verified upstream 2026-08-10.

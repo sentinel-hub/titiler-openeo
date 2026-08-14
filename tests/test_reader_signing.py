@@ -1,33 +1,51 @@
 """The href-signing seam inside reader.py (docs/adr/0005-asset-href-signing.md S2.6).
 
 `titiler.openeo.signing` is unit-tested on its own in `test_signing.py`. These
-tests are about the *threading*: that a signer handed to `SimpleSTACReader`
-reaches every href the reader opens, and -- more importantly -- that `None`
-leaves every one of those hrefs exactly as it was before signing existed.
+tests are about how the reader *gets* its signer: from the key the item was
+stamped with at ingest, resolved at construction time -- and -- more importantly
+-- that an unstamped item leaves every href exactly as it was before signing
+existed.
 """
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy
 import pystac
 import pytest
 from pystac import Item
+from rasterio.errors import RasterioIOError
 
-from titiler.openeo import reader
+from titiler.openeo import reader, signing
 from titiler.openeo.reader import (
     SimpleSTACReader,
     _item_has_untrustworthy_proj,
     _resolve_asset_href,
 )
+from titiler.openeo.signing import get_signer, stamp_signer_key
 
 HREF = "https://example.com/B02.tif"
 ALTERNATE = "s3://bucket/B02.tif"
+
+#: Key the tests below stamp items with, registered by the fixture.
+TEST_KEY = "test-signer"
 
 
 def _tag(href: str) -> str:
     """A signer that is obvious in an assertion."""
     return f"{href}?signed=1"
+
+
+@pytest.fixture(autouse=True)
+def register_test_signer():
+    """Make `TEST_KEY` resolvable, and keep the memoised resolver clean."""
+    signing.SIGNERS[TEST_KEY] = lambda: _tag
+    get_signer.cache_clear()
+    yield
+    signing.SIGNERS.pop(TEST_KEY, None)
+    get_signer.cache_clear()
 
 
 def _item(assets: dict, properties: dict | None = None) -> Item:
@@ -125,14 +143,24 @@ def test_untrustworthy_proj_check_still_skips_non_sar_items():
 
 
 def test_reader_defaults_to_no_signer():
+    """An unstamped item -- every deployment that needs no signing."""
     with SimpleSTACReader(_item({"B02": {"href": HREF}})) as src:
         assert src.signer is None
         assert src._get_asset_info("B02")["url"] == HREF
 
 
 def test_reader_signs_a_real_asset_url():
-    with SimpleSTACReader(_item({"B02": {"href": HREF}}), signer=_tag) as src:
+    item = stamp_signer_key(_item({"B02": {"href": HREF}}), TEST_KEY)
+    with SimpleSTACReader(item) as src:
         assert src._get_asset_info("B02")["url"] == f"{HREF}?signed=1"
+
+
+def test_reader_takes_no_signer_argument():
+    """The signer is derived from the item, never passed in (issue #377). A
+    caller that still tries to hand one over should fail loudly rather than
+    have it silently ignored."""
+    with pytest.raises(TypeError):
+        SimpleSTACReader(_item({"B02": {"href": HREF}}), signer=_tag)
 
 
 def test_reader_signs_derived_band_and_sibling_hrefs():
@@ -146,9 +174,11 @@ def test_reader_signs_derived_band_and_sibling_hrefs():
     raw = json.loads(
         (Path("tests/fixtures/sar/items/planetary_computer.json")).read_text()
     )
-    item = pystac.Item.from_dict({**raw, "collection": "sentinel-1-grd"})
+    item = stamp_signer_key(
+        pystac.Item.from_dict({**raw, "collection": "sentinel-1-grd"}), TEST_KEY
+    )
 
-    with SimpleSTACReader(item, signer=_tag) as src:
+    with SimpleSTACReader(item) as src:
         assert src._derived_bands, "fixture should resolve band-source bands"
         band = next(iter(src._derived_bands))
         info = src._get_derived_asset_info(band)
@@ -158,12 +188,12 @@ def test_reader_signs_derived_band_and_sibling_hrefs():
 
 
 # ---------------------------------------------------------------------------
-# _reader -- the kwargs boundary
+# _reader -- the kwargs boundary and the retry contract (ADR 0005 S3.1)
 # ---------------------------------------------------------------------------
 
 
 class _FakeSrc:
-    """Records the kwargs `part()` was given."""
+    """Records the kwargs it was built with and the ones `part()` was given."""
 
     def __init__(self, item, **kwargs):
         self.kwargs = kwargs
@@ -180,8 +210,9 @@ class _FakeSrc:
         raise RuntimeError("stop here")
 
 
-@pytest.mark.parametrize("signer", [None, _tag])
-def test_reader_consumes_signer_and_does_not_forward_it_to_part(monkeypatch, signer):
+def test_reader_passes_no_signer_to_the_reader_or_to_part(monkeypatch):
+    """`signer` is gone from this boundary entirely: the reader reads it off the
+    item, and `part()` never saw it in the first place."""
     built = {}
 
     def factory(item, **kwargs):
@@ -193,7 +224,45 @@ def test_reader_consumes_signer_and_does_not_forward_it_to_part(monkeypatch, sig
 
     item = {"id": "x", "properties": {"datetime": "2025-01-01T00:00:00Z"}}
     with pytest.raises(RuntimeError, match="stop here"):
-        reader._reader(item, (0, 0, 1, 1), assets=["B02"], signer=signer)
+        reader._reader(item, (0, 0, 1, 1), assets=["B02"])
 
-    assert built["src"].kwargs == {"signer": signer}
+    assert built["src"].kwargs == {}
     assert built["src"].part_kwargs == {"assets": ["B02"]}
+
+
+def test_every_retry_rebuilds_the_reader_so_an_expired_token_is_reminted(monkeypatch):
+    """The regression guard for stamping a *key* rather than a signed href.
+
+    A credential resolved once at ingest would be reused by every retry; because
+    the retry loop rebuilds the reader, and construction is what resolves the
+    signer, an attempt after a `RasterioIOError` signs afresh (ADR 0005 S3.1).
+    """
+    constructions = []
+    img = SimpleNamespace(
+        width=1, height=1, count=1, data=numpy.zeros((1, 1, 1), dtype="uint8")
+    )
+
+    class _FlakySrc(_FakeSrc):
+        def part(self, bbox, **kwargs):
+            constructions.append(self.signer_at_build)
+            if len(constructions) < 3:
+                raise RasterioIOError("transient")
+            return img
+
+    def factory(item, **kwargs):
+        src = _FlakySrc(item, **kwargs)
+        # What the real reader does in __attrs_post_init__, per construction.
+        src.signer_at_build = signing.signer_for_item(item)
+        return src
+
+    monkeypatch.setattr(reader, "SimpleSTACReader", factory)
+    monkeypatch.setattr(reader.time, "sleep", lambda _: None)
+
+    item = stamp_signer_key(
+        {"id": "x", "properties": {"datetime": "2025-01-01T00:00:00Z"}}, TEST_KEY
+    )
+    assert reader._reader(item, (0, 0, 1, 1)) is img
+
+    # Three attempts, each having resolved the signer for itself.
+    assert len(constructions) == 3
+    assert all(signer is _tag for signer in constructions)
