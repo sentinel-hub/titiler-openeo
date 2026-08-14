@@ -383,11 +383,16 @@ class SimpleSTACReader(MultiBaseReader):
             # There is no standard for precedence between 'eo:common_name' and 'name'
             # in STAC specification, so we will use 'eo:common_name' if it exists,
             # otherwise fallback to 'name', and if not exist use the band index as last resource.
+            # The positional fallback key is stringified: `bands` values arrive as
+            # strings (the openEO `bands` argument, and rio-tiler's asset options),
+            # so an int key here can never be matched and the fallback was dead --
+            # requesting band "1" raised "not found in asset metadata" instead of
+            # selecting index 1.
             common_to_variable = {
                 b.get("eo:common_name")
                 or b.get("common_name")
                 or b.get("name")
-                or ix: ix
+                or str(ix): ix
                 for ix, b in enumerate(stac_bands, 1)
             }
             band_indexes: list[int] = []
