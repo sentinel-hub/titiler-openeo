@@ -604,6 +604,82 @@ def test_upsert_udp_surfaces_store_outage_as_503(app_with_auth, monkeypatch, cap
     assert resp.status_code == 503
 
 
+def _store_cycle(client):
+    """Store `cycle_a` and `cycle_b` referencing each other.
+
+    Neither `PUT` can be rejected on its own: `cycle_a` is valid when written,
+    `cycle_b` references the valid `cycle_a`, and re-writing `cycle_a` to
+    reference `cycle_b` closes the loop only once the write lands.
+    """
+    _store_udp(client, "cycle_a", BASE_UDP)
+    _store_udp(
+        client,
+        "cycle_b",
+        {"u1": {"process_id": "cycle_a", "arguments": {}, "result": True}},
+    )
+    resp = _store_udp(
+        client,
+        "cycle_a",
+        {"u1": {"process_id": "cycle_b", "arguments": {}, "result": True}},
+    )
+    assert resp.status_code in (200, 201), resp.text
+
+
+def test_cyclic_udp_reference_fails_with_the_cycle_named(app_with_auth):
+    """Using a UDP that (indirectly) references itself must fail with the cycle
+    spelled out, instead of recursing until Python's limit stops it and blaming
+    a process for being missing."""
+    _store_cycle(app_with_auth)
+
+    service_input = {
+        "process": {
+            "process_graph": {
+                "u1": {"process_id": "cycle_a", "arguments": {}},
+                "save1": {
+                    "process_id": "save_result",
+                    "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+                    "result": True,
+                },
+            }
+        },
+        "type": "xyz",
+        "title": "cyclic service",
+    }
+
+    create = app_with_auth.post("/services", json=service_input)
+    assert create.status_code == 422, create.text
+    message = create.json()["message"]
+    assert "cycle" in message
+    assert "cycle_a -> cycle_b -> cycle_a" in message
+
+
+def test_validation_reports_a_cycle_as_an_error_not_an_http_failure(app_with_auth):
+    """POST /validation answers 200 with a list of what's wrong — a cycle
+    belongs in that list, like every other finding."""
+    from titiler.openeo.auth import User
+
+    app = app_with_auth.app
+    app.dependency_overrides[app.endpoints.auth.validate_optional] = lambda: User(
+        user_id="test_user"
+    )
+
+    _store_cycle(app_with_auth)
+
+    resp = app_with_auth.post(
+        "/validation",
+        json={
+            "process_graph": {
+                "u1": {"process_id": "cycle_a", "arguments": {}, "result": True}
+            }
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    errors = resp.json()["errors"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == "ProcessGraphInvalid"
+    assert "cycle_a -> cycle_b -> cycle_a" in errors[0]["message"]
+
+
 def test_service_update_resolves_udp_reference(app_with_auth):
     """A PATCH can introduce a UDP reference into a service that didn't have one
     at creation time, so it must be inlined too -- otherwise the reference is

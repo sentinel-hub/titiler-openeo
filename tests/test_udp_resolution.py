@@ -3,9 +3,11 @@ transform, exercised directly (no app, no store, no HTTP)."""
 
 from copy import deepcopy
 
+import pytest
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.process_registry import Process
 
+from titiler.openeo.errors import CyclicUdpReference
 from titiler.openeo.udp_resolution import (
     references_only_predefined,
     resolve_udp_references,
@@ -241,3 +243,115 @@ def test_graph_of_only_predefined_processes_is_returned_as_is():
     # Untouched — same object, `result: false` keys still intact.
     assert resolved is graph
     assert resolved["load1"]["result"] is False
+
+
+def _udp(process_id: str) -> dict:
+    """A UDP whose single node references `process_id`."""
+    return {
+        "id": "wrapper",
+        "process_graph": {
+            "n1": {"process_id": process_id, "arguments": {}, "result": True}
+        },
+    }
+
+
+def _counting_store(udps: dict):
+    """A `get_udp_spec` over `udps`, plus the per-process_id lookup counts."""
+    calls: dict = {}
+
+    def get_udp_spec(process_id, namespace):
+        calls[process_id] = calls.get(process_id, 0) + 1
+        return deepcopy(udps.get(process_id))
+
+    return get_udp_spec, calls
+
+
+def test_reference_cycle_is_reported_by_name():
+    """Two UDPs referencing each other can be stored one `PUT` at a time (each
+    is valid at the moment it's written), so resolution has to expect a cycle —
+    and name it, rather than recursing until Python stops it."""
+    get_udp_spec, calls = _counting_store({"a": _udp("b"), "b": _udp("a")})
+
+    with pytest.raises(CyclicUdpReference) as excinfo:
+        resolve_udp_references(
+            {"u1": {"process_id": "a", "arguments": {}, "result": True}},
+            _registry("load_collection", "save_result"),
+            get_udp_spec=get_udp_spec,
+            namespace="alice",
+        )
+
+    assert excinfo.value.cycle == ["a", "b", "a"]
+    assert "a -> b -> a" in excinfo.value.message
+    assert excinfo.value.status_code == 422
+    # Fails on the reference walk, not by exhausting the recursion limit: each
+    # UDP in the cycle is looked up exactly once.
+    assert calls == {"a": 1, "b": 1}
+
+
+def test_self_referencing_udp_is_reported_as_a_cycle():
+    get_udp_spec, _ = _counting_store({"a": _udp("a")})
+
+    with pytest.raises(CyclicUdpReference) as excinfo:
+        resolve_udp_references(
+            {"u1": {"process_id": "a", "arguments": {}, "result": True}},
+            _registry("load_collection", "save_result"),
+            get_udp_spec=get_udp_spec,
+            namespace="alice",
+        )
+
+    assert excinfo.value.cycle == ["a", "a"]
+
+
+def test_a_udp_reached_twice_is_not_a_cycle():
+    """A UDP referenced from two branches is a diamond, not a loop — and it is
+    fetched once, not once per path to it."""
+    leaf = {
+        "id": "leaf",
+        "process_graph": {
+            "l1": {
+                "process_id": "load_collection",
+                "arguments": {"id": "S2"},
+                "result": True,
+            }
+        },
+    }
+    get_udp_spec, calls = _counting_store(
+        {"leaf": leaf, "left": _udp("leaf"), "right": _udp("leaf")}
+    )
+    graph = {
+        "a1": {"process_id": "left", "arguments": {}, "result": False},
+        "b1": {"process_id": "right", "arguments": {}, "result": False},
+        "m1": {
+            "process_id": "merge_cubes",
+            "arguments": {"cube1": {"from_node": "a1"}, "cube2": {"from_node": "b1"}},
+            "result": True,
+        },
+    }
+
+    resolved = resolve_udp_references(
+        graph,
+        _registry("load_collection", "merge_cubes"),
+        get_udp_spec=get_udp_spec,
+        namespace="alice",
+    )
+
+    assert {n["process_id"] for n in resolved.values()} == {
+        "load_collection",
+        "merge_cubes",
+    }
+    assert calls == {"left": 1, "right": 1, "leaf": 1}
+
+
+def test_each_udp_is_fetched_once_across_check_and_resolution():
+    """The cycle check walks the same references the resolver then inlines —
+    it must not double every store lookup to do so."""
+    get_udp_spec, calls = _counting_store({"my_udp": deepcopy(STORED_UDP)})
+
+    resolve_udp_references(
+        _referencing_graph(),
+        _registry("load_collection", "reduce_dimension", "save_result"),
+        get_udp_spec=get_udp_spec,
+        namespace="alice",
+    )
+
+    assert calls == {"my_udp": 1}
