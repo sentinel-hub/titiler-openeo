@@ -9,6 +9,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 ORG = os.environ["GITHUB_REPO_OWNER"]
@@ -17,6 +18,7 @@ VERSION_PATTERN = re.compile(
     os.environ.get("VERSION_PATTERN", r"^(v\d+\.\d+\.\d+.*|latest)$")
 )
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
+FORCE_TAG = os.environ.get("FORCE_TAG", "").strip()
 
 MANIFEST_ACCEPT = ",".join(
     [
@@ -102,9 +104,26 @@ def rebuild_and_push(tag: str) -> None:
         ["git", "worktree", "add", "--detach", worktree, tag], check=True
     )
     try:
+        revision = subprocess.run(
+            ["git", "-C", worktree, "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        repo_url = f"https://github.com/{ORG}/{PACKAGE}"
         image = f"ghcr.io/{ORG}/{PACKAGE}:{tag}"
         subprocess.run(
-            ["docker", "buildx", "build", "--push", "-t", image, worktree],
+            [
+                "docker", "buildx", "build", "--push", "-t", image,
+                "--label", f"org.opencontainers.image.title={PACKAGE}",
+                "--label", f"org.opencontainers.image.url={repo_url}",
+                "--label", f"org.opencontainers.image.source={repo_url}",
+                "--label", f"org.opencontainers.image.version={tag.lstrip('v')}",
+                "--label", f"org.opencontainers.image.revision={revision}",
+                "--label", f"org.opencontainers.image.created={created}",
+                worktree,
+            ],
             check=True,
         )
     finally:
@@ -114,6 +133,24 @@ def rebuild_and_push(tag: str) -> None:
 
 
 def main() -> int:
+    if FORCE_TAG:
+        force_tags = [t.strip() for t in FORCE_TAG.split(",") if t.strip()]
+        print(f"Forcing rebuild of {len(force_tags)} tag(s) (dry_run={DRY_RUN})")
+        for tag in force_tags:
+            verify = subprocess.run(
+                ["git", "rev-parse", "--verify", "-q", f"refs/tags/{tag}"],
+                capture_output=True,
+            )
+            if verify.returncode != 0:
+                print(f"  ! no git tag named {tag!r} found - aborting")
+                return 1
+        for tag in force_tags:
+            action = "[dry-run] would rebuild and push" if DRY_RUN else "Rebuilding and pushing"
+            print(f"{action} {tag} from its git ref")
+            if not DRY_RUN:
+                rebuild_and_push(tag)
+        return 0
+
     print(
         f"Fixing broken release images for {ORG}/{PACKAGE} (dry_run={DRY_RUN})"
     )

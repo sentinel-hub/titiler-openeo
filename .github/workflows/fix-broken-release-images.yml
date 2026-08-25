@@ -7,6 +7,10 @@ on:
         description: 'Dry run mode'
         type: boolean
         default: true
+      tag:
+        description: 'Force-rebuild and replace these version tags (comma-separated, e.g. v0.1.0,v0.16.5), skipping the broken-tag scan'
+        type: string
+        default: ''
 
 jobs:
   fix:
@@ -36,4 +40,5 @@ jobs:
           GITHUB_REPO_OWNER: sentinel-hub
           REPOSITORY_NAME: titiler-openeo
           DRY_RUN: ${{ inputs.dry_run }}
+          FORCE_TAG: ${{ inputs.tag }}
         run: python3 .github/scripts/fix_broken_release_images.py
