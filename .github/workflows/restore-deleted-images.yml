@@ -1,0 +1,26 @@
+name: Restore Deleted Release Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode'
+        type: boolean
+        default: true
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Restore images deleted by the pre-v0.2.2 cleanup bug
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO_OWNER: sentinel-hub
+          REPOSITORY_NAME: titiler-openeo
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 .github/scripts/restore_deleted_images.py
