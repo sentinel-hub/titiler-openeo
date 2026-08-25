@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
-"""Restore GHCR image manifests wrongly deleted by the pre-v0.2.2 cleanup bug.
-
-developmentseed/container-registry-cleanup < v0.2.2 authenticated GHCR
-distribution-API manifest fetches (ghcr.io/v2/...) with the raw GitHub API
-token. That token is not valid there, so every manifest fetch failed, and the
-tool could never discover which untagged child manifests belonged to a
-tagged multi-arch image index. It then deleted those children as if they
-were orphaned. The tag itself survives (e.g. v0.17.0, latest) but `docker
-pull` fails because the platform-specific manifest it points to is gone.
-See https://github.com/developmentseed/container-registry-cleanup/pull/40.
-
-This script re-derives the same "protected digest" set the fixed tool now
-computes (manifests reachable from a currently tagged release), finds which
-of those digests are unreachable, and restores them from GHCR's 30-day
-soft-delete via the package-version restore API. It only ever restores
-digests that are still referenced by a currently active release tag, so it
-cannot resurrect anything that was correctly deleted.
-"""
+"""Fix broken release image tags broken."""
 
 import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -105,15 +89,41 @@ def fetch_manifest(registry_token: str, digest: str) -> dict | None:
         raise
 
 
+def restore_version(version_id: int) -> None:
+    gh_api(
+        f"/orgs/{ORG}/packages/container/{PACKAGE}/versions/{version_id}/restore",
+        method="POST",
+    )
+
+
+def rebuild_and_push(tag: str) -> None:
+    worktree = f"/tmp/rebuild-{tag}"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", worktree, tag], check=True
+    )
+    try:
+        image = f"ghcr.io/{ORG}/{PACKAGE}:{tag}"
+        subprocess.run(
+            ["docker", "buildx", "build", "--push", "-t", image, worktree],
+            check=True,
+        )
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree], check=True
+        )
+
+
 def main() -> int:
-    print(f"Restoring missing release images for {ORG}/{PACKAGE} (dry_run={DRY_RUN})")
+    print(
+        f"Fixing broken release images for {ORG}/{PACKAGE} (dry_run={DRY_RUN})"
+    )
 
     active = list_package_versions("active")
     deleted = list_package_versions("deleted")
     deleted_by_digest = {v["name"]: v for v in deleted}
     print(f"{len(active)} active version(s), {len(deleted)} deleted version(s)")
 
-    release_tags = {}
+    release_tags: dict[str, str] = {}
     for v in active:
         for tag in v.get("metadata", {}).get("container", {}).get("tags", []):
             if VERSION_PATTERN.match(tag):
@@ -125,46 +135,63 @@ def main() -> int:
     print(f"Release tags to check: {sorted(release_tags)}")
 
     registry_token = get_registry_token()
+    reachable_cache: dict[str, bool] = {}
+
+    def is_reachable(digest: str) -> bool:
+        if digest not in reachable_cache:
+            reachable_cache[digest] = (
+                fetch_manifest(registry_token, digest) is not None
+            )
+        return reachable_cache[digest]
 
     to_restore: dict[str, tuple[str, int]] = {}
-    unrecoverable: list[str] = []
+    to_rebuild: list[str] = []
+
     for tag, digest in sorted(release_tags.items()):
         manifest = fetch_manifest(registry_token, digest)
         if manifest is None:
-            print(f"  ! could not fetch manifest for tag {tag} ({digest}) - skipping")
+            print(
+                f"  ! could not fetch top-level manifest for tag {tag} ({digest}) - skipping"
+            )
             continue
         children = [m["digest"] for m in manifest.get("manifests", [])]
+        needs_rebuild = False
         for child in [digest, *children]:
-            if child in to_restore or child in unrecoverable:
+            if is_reachable(child):
                 continue
-            if fetch_manifest(registry_token, child) is not None:
-                continue  # still reachable, nothing to do
             deleted_version = deleted_by_digest.get(child)
             if deleted_version is None:
-                unrecoverable.append(child)
+                needs_rebuild = True
                 print(
-                    f"  ! {child} (referenced by {tag}) is unreachable and "
-                    "not present among deleted versions - cannot auto-restore"
+                    f"  ! {child} (tag {tag}) is unreachable and gone from "
+                    "GHCR's deleted-version list - will rebuild from source"
                 )
                 continue
-            to_restore[child] = (tag, deleted_version["id"])
-
-    if not to_restore:
-        print("Nothing to restore.")
-        return 1 if unrecoverable else 0
+            to_restore.setdefault(child, (tag, deleted_version["id"]))
+        if needs_rebuild:
+            to_rebuild.append(tag)
 
     for digest, (tag, version_id) in to_restore.items():
         action = "[dry-run] would restore" if DRY_RUN else "Restoring"
-        print(f"{action} {digest} (referenced by tag {tag}, version_id={version_id})")
+        print(f"{action} {digest} (tag {tag}, version_id={version_id})")
         if not DRY_RUN:
-            gh_api(
-                f"/orgs/{ORG}/packages/container/{PACKAGE}/versions/{version_id}/restore",
-                method="POST",
-            )
+            restore_version(version_id)
 
-    verb = "Would restore" if DRY_RUN else "Restored"
-    print(f"Done. {verb} {len(to_restore)} image(s).")
-    return 1 if unrecoverable else 0
+    for tag in to_rebuild:
+        action = (
+            "[dry-run] would rebuild and push"
+            if DRY_RUN
+            else "Rebuilding and pushing"
+        )
+        print(f"{action} {tag} from its git ref")
+        if not DRY_RUN:
+            rebuild_and_push(tag)
+
+    print(
+        f"Done. {'Would restore' if DRY_RUN else 'Restored'} {len(to_restore)} "
+        f"image(s), {'would rebuild' if DRY_RUN else 'rebuilt'} {len(to_rebuild)} tag(s)."
+    )
+    return 0
 
 
 if __name__ == "__main__":
