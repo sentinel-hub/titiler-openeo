@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.18.0 (2026-08-25)
+
+## What's Changed
+* fix(api): keep GET /services/{service_id} Bearer-only per spec by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/373
+* fix(ci): skip docker push for fork PRs instead of failing by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/376
+* feat: resolve user-defined process references at execution time by @arjxn-py in https://github.com/sentinel-hub/titiler-openeo/pull/370
+* feat(api): mediated asset access for Microsoft Planetary Computer by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/371
+* feat(auth): harden OIDC so Microsoft Entra ID works by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/372
+* chore(deps): bump the all group across 1 directory with 3 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/369
+* ci: replace dead PyPI publish job with break-glass manual publish by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/380
+* fix: make the positional bands fallback reachable by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/378
+* fix(deps): relax starlette-cramjam upper bound to <1.0 by @arjxn-py in https://github.com/sentinel-hub/titiler-openeo/pull/388
+* chore(deps): bump the all group with 2 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/386
+* refactor!: sign asset hrefs at ingest instead of threading a signer by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/382
+* feat(api): resolve bands published inside one STAC asset by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/384
+* ci: bump container-registry-cleanup to v0.2.2, restore images it wrongly deleted by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/390
+* ci: run restore images for all release images. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/391
+* ci: add tags their containers to be rebuilt. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/392
+* ci: formatting fixes for rebuild script. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/393
+
+## New Contributors
+* @arjxn-py made their first contribution in https://github.com/sentinel-hub/titiler-openeo/pull/370
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.17.0...v0.18.0
+
 ## 0.17.0 (2026-08-10)
 
 ## What's Changed
