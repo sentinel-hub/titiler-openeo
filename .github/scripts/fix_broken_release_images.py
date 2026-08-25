@@ -100,9 +100,7 @@ def restore_version(version_id: int) -> None:
 
 def rebuild_and_push(tag: str) -> None:
     worktree = f"/tmp/rebuild-{tag}"
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", worktree, tag], check=True
-    )
+    subprocess.run(["git", "worktree", "add", "--detach", worktree, tag], check=True)
     try:
         revision = subprocess.run(
             ["git", "-C", worktree, "rev-parse", "HEAD"],
@@ -115,70 +113,63 @@ def rebuild_and_push(tag: str) -> None:
         image = f"ghcr.io/{ORG}/{PACKAGE}:{tag}"
         subprocess.run(
             [
-                "docker", "buildx", "build", "--push", "-t", image,
-                "--label", f"org.opencontainers.image.title={PACKAGE}",
-                "--label", f"org.opencontainers.image.url={repo_url}",
-                "--label", f"org.opencontainers.image.source={repo_url}",
-                "--label", f"org.opencontainers.image.version={tag.lstrip('v')}",
-                "--label", f"org.opencontainers.image.revision={revision}",
-                "--label", f"org.opencontainers.image.created={created}",
+                "docker",
+                "buildx",
+                "build",
+                "--push",
+                "-t",
+                image,
+                "--label",
+                f"org.opencontainers.image.title={PACKAGE}",
+                "--label",
+                f"org.opencontainers.image.url={repo_url}",
+                "--label",
+                f"org.opencontainers.image.source={repo_url}",
+                "--label",
+                f"org.opencontainers.image.version={tag.lstrip('v')}",
+                "--label",
+                f"org.opencontainers.image.revision={revision}",
+                "--label",
+                f"org.opencontainers.image.created={created}",
                 worktree,
             ],
             check=True,
         )
     finally:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", worktree], check=True
+        subprocess.run(["git", "worktree", "remove", "--force", worktree], check=True)
+
+
+def force_rebuild_tags(tags: list[str]) -> int:
+    print(f"Forcing rebuild of {len(tags)} tag(s) (dry_run={DRY_RUN})")
+    for tag in tags:
+        verify = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", f"refs/tags/{tag}"],
+            capture_output=True,
         )
+        if verify.returncode != 0:
+            print(f"  ! no git tag named {tag!r} found - aborting")
+            return 1
+
+    for tag in tags:
+        action = (
+            "[dry-run] would rebuild and push" if DRY_RUN else "Rebuilding and pushing"
+        )
+        print(f"{action} {tag} from its git ref")
+        if not DRY_RUN:
+            rebuild_and_push(tag)
+    return 0
 
 
-def main() -> int:
-    if FORCE_TAG:
-        force_tags = [t.strip() for t in FORCE_TAG.split(",") if t.strip()]
-        print(f"Forcing rebuild of {len(force_tags)} tag(s) (dry_run={DRY_RUN})")
-        for tag in force_tags:
-            verify = subprocess.run(
-                ["git", "rev-parse", "--verify", "-q", f"refs/tags/{tag}"],
-                capture_output=True,
-            )
-            if verify.returncode != 0:
-                print(f"  ! no git tag named {tag!r} found - aborting")
-                return 1
-        for tag in force_tags:
-            action = "[dry-run] would rebuild and push" if DRY_RUN else "Rebuilding and pushing"
-            print(f"{action} {tag} from its git ref")
-            if not DRY_RUN:
-                rebuild_and_push(tag)
-        return 0
-
-    print(
-        f"Fixing broken release images for {ORG}/{PACKAGE} (dry_run={DRY_RUN})"
-    )
-
-    active = list_package_versions("active")
-    deleted = list_package_versions("deleted")
-    deleted_by_digest = {v["name"]: v for v in deleted}
-    print(f"{len(active)} active version(s), {len(deleted)} deleted version(s)")
-
-    release_tags: dict[str, str] = {}
-    for v in active:
-        for tag in v.get("metadata", {}).get("container", {}).get("tags", []):
-            if VERSION_PATTERN.match(tag):
-                release_tags[tag] = v["name"]  # digest
-
-    if not release_tags:
-        print("No release tags found, nothing to check.")
-        return 0
-    print(f"Release tags to check: {sorted(release_tags)}")
-
-    registry_token = get_registry_token()
+def find_broken_tags(
+    release_tags: dict[str, str],
+    deleted_by_digest: dict[str, dict],
+    registry_token: str,
+) -> tuple[dict[str, tuple[str, int]], list[str]]:
     reachable_cache: dict[str, bool] = {}
 
     def is_reachable(digest: str) -> bool:
         if digest not in reachable_cache:
-            reachable_cache[digest] = (
-                fetch_manifest(registry_token, digest) is not None
-            )
+            reachable_cache[digest] = fetch_manifest(registry_token, digest) is not None
         return reachable_cache[digest]
 
     to_restore: dict[str, tuple[str, int]] = {}
@@ -208,6 +199,33 @@ def main() -> int:
         if needs_rebuild:
             to_rebuild.append(tag)
 
+    return to_restore, to_rebuild
+
+
+def scan_and_fix() -> int:
+    print(f"Fixing broken release images for {ORG}/{PACKAGE} (dry_run={DRY_RUN})")
+
+    active = list_package_versions("active")
+    deleted = list_package_versions("deleted")
+    deleted_by_digest = {v["name"]: v for v in deleted}
+    print(f"{len(active)} active version(s), {len(deleted)} deleted version(s)")
+
+    release_tags: dict[str, str] = {}
+    for v in active:
+        for tag in v.get("metadata", {}).get("container", {}).get("tags", []):
+            if VERSION_PATTERN.match(tag):
+                release_tags[tag] = v["name"]  # digest
+
+    if not release_tags:
+        print("No release tags found, nothing to check.")
+        return 0
+    print(f"Release tags to check: {sorted(release_tags)}")
+
+    registry_token = get_registry_token()
+    to_restore, to_rebuild = find_broken_tags(
+        release_tags, deleted_by_digest, registry_token
+    )
+
     for digest, (tag, version_id) in to_restore.items():
         action = "[dry-run] would restore" if DRY_RUN else "Restoring"
         print(f"{action} {digest} (tag {tag}, version_id={version_id})")
@@ -216,9 +234,7 @@ def main() -> int:
 
     for tag in to_rebuild:
         action = (
-            "[dry-run] would rebuild and push"
-            if DRY_RUN
-            else "Rebuilding and pushing"
+            "[dry-run] would rebuild and push" if DRY_RUN else "Rebuilding and pushing"
         )
         print(f"{action} {tag} from its git ref")
         if not DRY_RUN:
@@ -229,6 +245,13 @@ def main() -> int:
         f"image(s), {'would rebuild' if DRY_RUN else 'rebuilt'} {len(to_rebuild)} tag(s)."
     )
     return 0
+
+
+def main() -> int:
+    if FORCE_TAG:
+        force_tags = [t.strip() for t in FORCE_TAG.split(",") if t.strip()]
+        return force_rebuild_tags(force_tags)
+    return scan_and_fix()
 
 
 if __name__ == "__main__":
