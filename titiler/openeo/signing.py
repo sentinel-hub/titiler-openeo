@@ -11,15 +11,22 @@ the *href*, so no environment variable can express it.
 This module is that mechanism, kept behind a narrow protocol so it is swappable
 and testable -- see docs/adr/0005-asset-href-signing.md.
 
-Two things keep this from becoming the plugin system ADR 0002 S2.1 rejects.
-Rules match on the href's **host**, which is a fact of the data rather than
-hand-written per-collection configuration, and the registry ships in code. A new
-catalogue means a new rule and a fixture, exactly as ``bandsources/sources.py``
-does for band sources.
+**Which signer applies is deployment configuration, not something this module
+infers.** An earlier version activated signing when the configured STAC API URL
+happened to be ``planetarycomputer.microsoft.com``; that put a cloud provider's
+hostname in the application's decision logic (issue #377). Now a deployment names
+a signer key, core maps the key to an implementation, and nothing here knows
+which catalogue a deployment reads.
 
-``get_href_signer`` returns ``None`` when no rule applies, and ``None`` is what
-every threading site defaults to, so a deployment that needs no signing runs the
-identical code path it ran before this module existed.
+The key travels to the read path on the **item**, stamped once at ingest
+(``ITEM_SIGNER_KEY``), because the readers that open hrefs are constructed deep
+inside the mosaic and run on worker threads no parameter or contextvar reaches.
+The key is resolved to a signer at *open* time, per read and per retry, so a
+token that expires mid-graph is re-minted rather than reused (ADR 0005 S3.1) --
+which is why the stamp carries a key and never a signed href.
+
+``get_signer`` returns ``None`` for an unstamped item, so a deployment that needs
+no signing runs the identical code path it ran before this module existed.
 """
 
 import json
@@ -27,25 +34,23 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from threading import Lock
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
-from .models.auth import User
 from .settings import PlanetaryComputerSettings
 
 __all__ = [
     "HrefSigner",
-    "SignerRule",
     "SigningError",
     "PlanetaryComputerSigner",
-    "PLANETARY_COMPUTER",
-    "rules_for_catalogue",
-    "get_href_signer",
-    "set_default_rules",
-    "get_default_href_signer",
+    "ITEM_SIGNER_KEY",
+    "SIGNERS",
+    "get_signer",
+    "stamp_signer_key",
+    "signer_for_item",
 ]
 
 logger = logging.getLogger(__name__)
@@ -62,25 +67,6 @@ class SigningError(RuntimeError):
     read that would follow fails with an opaque HTTP 409 from blob storage,
     which tells an operator nothing about the real cause.
     """
-
-
-@dataclass(frozen=True)
-class SignerRule:
-    """One rule: which hrefs need signing, and what signs them.
-
-    ``host`` is pre-compiled and matched with :meth:`re.Pattern.search` against
-    the href's hostname, so a registry with many entries does not recompile per
-    lookup.
-
-    ``factory`` takes the authenticated user, even though the only shipped
-    signer ignores it. See ADR 0005 S2.5: the per-request channel is built now
-    because threading it is the expensive part, and a genuinely delegated
-    backend (Planetary Computer Pro, private Azure containers reached by an
-    on-behalf-of exchange) would otherwise need the same surgery a second time.
-    """
-
-    host: "re.Pattern[str]"
-    factory: Callable[[Optional[User]], HrefSigner]
 
 
 # ---------------------------------------------------------------------------
@@ -147,17 +133,19 @@ class PlanetaryComputerSigner:
 
     def __init__(
         self,
-        user: Optional[User] = None,
         settings: Optional[PlanetaryComputerSettings] = None,
     ) -> None:
-        """Bind a signer to ``user``, which public Planetary Computer ignores.
+        """Build a signer for this deployment's Planetary Computer settings.
 
-        ``user`` is stored but never read: PC grants every caller the same
+        Deliberately takes no ``User``. PC grants every caller the same
         container-scoped, read+list token regardless of identity (ADR 0005
-        S1.2), so there is no entitlement to delegate. It is kept so the seam
-        has a real shape for a backend where identity does decide access.
+        S1.2), so there is no entitlement to delegate, and the item stamp that
+        selects this signer cannot carry a live user into the worker threads
+        that open assets. A genuinely delegated backend (PC Pro, private Azure
+        via on-behalf-of) needs a per-user channel that does not exist here --
+        see ADR 0005 S2.5, which records this as an accepted limit rather than
+        a solved problem.
         """
-        self.user = user
         self.settings = settings or PlanetaryComputerSettings()
 
     def __call__(self, href: str) -> str:
@@ -229,72 +217,91 @@ class PlanetaryComputerSigner:
         ) from last_error
 
 
-#: The shipped registry. One entry today; a new catalogue adds a rule here and a
-#: fixture, per ADR 0005 S2.1.
-PLANETARY_COMPUTER = SignerRule(
-    host=re.compile(r"\.blob\.core\.windows\.net$", re.IGNORECASE),
-    factory=PlanetaryComputerSigner,
-)
+#: The STAC property an item carries to say which signer its assets need.
+#: Written once at ingest (`stacapi.py`), read at open time by
+#: `reader._signer_for_item`. Namespaced like a STAC extension field so it reads
+#: as metadata rather than folklore, and a plain string so it survives
+#: `Item.to_dict()` -- `load_stac` hands `_reader` dicts, and a callable would
+#: not make that round trip (ADR 0005 S2.2).
+ITEM_SIGNER_KEY = "titiler:sign"
 
-#: Host of the Planetary Computer STAC API, which is what activates the rule
-#: above (ADR 0005 S2.3). Signing is scoped to the configured catalogue so a
-#: deployment reading its own Azure blob containers never makes an outbound call
-#: to microsoft.com as a side effect of a registry default.
-_PC_STAC_HOST = "planetarycomputer.microsoft.com"
-
-
-def rules_for_catalogue(stac_api_url: str) -> Tuple[SignerRule, ...]:
-    """Return the signing rules that apply to a deployment's STAC API."""
-    host = (urlsplit(stac_api_url).hostname or "").lower()
-    if host == _PC_STAC_HOST or host.endswith(f".{_PC_STAC_HOST}"):
-        return (PLANETARY_COMPUTER,)
-    return ()
+#: The shipped signers, by key. A deployment names one of these keys; core never
+#: infers it from a hostname. A new catalogue adds an entry here and a fixture.
+SIGNERS: Dict[str, Callable[[], HrefSigner]] = {
+    "planetary-computer": PlanetaryComputerSigner,
+}
 
 
-def get_href_signer(
-    rules: Sequence[SignerRule],
-    user: Optional[User] = None,
-) -> Optional[HrefSigner]:
-    """Build a signer for ``user`` from ``rules``, or ``None`` if there are none.
+@lru_cache(maxsize=None)
+def get_signer(key: Optional[str]) -> Optional[HrefSigner]:
+    """Return the signer registered under ``key``, or ``None`` for no key.
 
-    Returning ``None`` rather than an identity function is the point: it is what
-    lets every call site keep ``signer=None`` as its default and run byte-identical
-    code when nothing needs signing, mirroring ``build_per_request_registry``'s
-    "return the base object unchanged" gate (ADR 0005 S2.2).
+    Returning ``None`` rather than an identity function is the point: it lets
+    every call site keep signing off by default and run byte-identical code when
+    no item is stamped (ADR 0005 S2.2).
 
-    An href whose host matches no rule is returned untouched -- which is how
-    Planetary Computer's own ``tilejson`` and ``rendered_preview`` assets, served
-    from the API host rather than blob storage, stay unsigned.
+    Memoised because this is now resolved per href opened, not once per request:
+    building a signer constructs a pydantic settings object, which reads the
+    environment. The signers themselves hold no per-request state -- the SAS
+    token cache above is module-level and already shared.
+
+    Unknown keys raise rather than silently returning ``None``: a typo'd key
+    would otherwise read as "signing off" and surface as an opaque HTTP 409 from
+    blob storage, which is exactly what `SigningError` exists to prevent.
     """
-    if not rules:
+    if not key:
         return None
 
-    signers = [(rule.host, rule.factory(user)) for rule in rules]
+    factory = SIGNERS.get(key)
+    if factory is None:
+        raise SigningError(
+            f"No signer registered under '{key}'. Known signers: "
+            f"{', '.join(sorted(SIGNERS)) or '(none)'}."
+        )
 
-    def sign(href: str) -> str:
-        host = urlsplit(href).hostname or ""
-        for pattern, signer in signers:
-            if pattern.search(host):
-                return signer(href)
-        return href
-
-    return sign
+    return factory()
 
 
-_default_rules: Tuple[SignerRule, ...] = ()
+def stamp_signer_key(item: Any, key: Optional[str]) -> Any:
+    """Record on ``item`` which signer its assets need, and return it.
 
+    Called once per item at ingest. A falsy ``key`` leaves the item untouched,
+    so a deployment with no signer configured produces items indistinguishable
+    from those this backend produced before signing existed.
 
-def set_default_rules(rules: Sequence[SignerRule]) -> None:
-    """Record the process-wide rules, resolved once from settings at startup.
+    Accepts a ``pystac.Item`` or a plain STAC dict because both reach the read
+    path: `load_collection` carries `pystac.Item`s while `load_stac` hands
+    `_reader` the output of `Item.to_dict()`.
 
-    Only ``load_url`` needs this. Every other read path carries a signer bound
-    to the authenticated user; ``load_url`` takes a user-supplied URL from
-    inside an already-evaluating process graph and has no user in scope.
+    The stamp is deliberately **not** scoped to hrefs that look like they need
+    signing. Each signer already returns an href untouched when it has nothing
+    to add -- which is how Planetary Computer's own `tilejson` and
+    `rendered_preview` assets, served from the API host rather than blob
+    storage, stay unsigned -- so narrowing here would duplicate that judgement
+    in a second place and let the two disagree.
     """
-    global _default_rules
-    _default_rules = tuple(rules)
+    if not key:
+        return item
+
+    if isinstance(item, dict):
+        item.setdefault("properties", {})[ITEM_SIGNER_KEY] = key
+    else:
+        item.properties[ITEM_SIGNER_KEY] = key
+
+    return item
 
 
-def get_default_href_signer() -> Optional[HrefSigner]:
-    """Return an unbound signer built from the process-wide rules."""
-    return get_href_signer(_default_rules)
+def signer_for_item(item: Any) -> Optional[HrefSigner]:
+    """Return the signer ``item`` was stamped with at ingest, if any.
+
+    Resolved per call rather than cached on the item: this runs at *open* time,
+    once per reader construction, so a retry after a `RasterioIOError` re-mints
+    an expired token instead of reusing the one the first attempt used
+    (ADR 0005 S3.1). Resolution itself is memoised in `get_signer`.
+    """
+    if isinstance(item, dict):
+        properties = item.get("properties") or {}
+    else:
+        properties = getattr(item, "properties", None) or {}
+
+    return get_signer(properties.get(ITEM_SIGNER_KEY))

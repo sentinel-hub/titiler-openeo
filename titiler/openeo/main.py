@@ -18,8 +18,7 @@ from .health import register_health_endpoints
 from .middleware import DynamicCacheControlMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
-from .settings import ApiSettings, AuthSettings, BackendSettings
-from .signing import rules_for_catalogue, set_default_rules
+from .settings import ApiSettings, AuthSettings, BackendSettings, SigningSettings
 from .stacapi import LoadCollection, LoadStac, stacApiBackend
 
 STAC_VERSION = "1.0.0"
@@ -51,11 +50,11 @@ tile_store = (
 )
 auth = get_auth(auth_settings, store=service_store)
 
-# Which asset hrefs this deployment must attach a credential to, decided once
-# from the configured catalogue (docs/adr/0005-asset-href-signing.md S2.3).
-# Empty for every catalogue that needs none, which is the unchanged path.
-signer_rules = rules_for_catalogue(str(backend_settings.stac_api_url))
-set_default_rules(signer_rules)
+# Which signer this deployment's assets need, read once from configuration --
+# not inferred from the catalogue's hostname (docs/adr/0005-asset-href-signing.md
+# S2.3, issue #377). `None` for every deployment that needs none, which is the
+# unchanged path.
+signer_key = SigningSettings().asset_signer or None
 
 
 def create_app():
@@ -111,23 +110,23 @@ def create_app():
         ],
     )
 
-    # The activation rule is derived, not configured, so say out loud which
-    # rules are live -- otherwise a deployment pointing at a Planetary Computer
-    # mirror on another hostname silently gets none (ADR 0005 S3.1).
-    if signer_rules:
+    # Say out loud whether signing is on: a deployment that reads private assets
+    # but forgot the setting otherwise finds out through an opaque HTTP 409 from
+    # the storage host (ADR 0005 S3.1).
+    if signer_key:
         logger.info(
             "Asset href signing enabled for %s: %s",
             backend_settings.stac_api_url,
-            ", ".join(rule.host.pattern for rule in signer_rules),
+            signer_key,
         )
 
     # Register backend specific load_collection methods
-    loaders = LoadCollection(stac_client, signer_rules=signer_rules)  # type: ignore
+    loaders = LoadCollection(stac_client, signer_key=signer_key)  # type: ignore
     process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
         implementation=loaders.load_collection,
     )
-    loaders = LoadStac(signer_rules=signer_rules)  # type: ignore
+    loaders = LoadStac(signer_key=signer_key)  # type: ignore
     process_registry["load_stac"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_stac"],
         implementation=loaders.load_stac,

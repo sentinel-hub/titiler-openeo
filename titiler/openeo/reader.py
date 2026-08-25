@@ -38,7 +38,7 @@ from .bandsources import (
 )
 from .errors import OutputLimitExceeded
 from .settings import ProcessingSettings
-from .signing import HrefSigner
+from .signing import HrefSigner, signer_for_item
 
 logger = logging.getLogger(__name__)
 
@@ -258,13 +258,18 @@ class SimpleSTACReader(MultiBaseReader):
     #: above, which is shared by every asset this reader constructs).
     band_source_fetcher: Any = attr.ib(default=None)
 
-    #: Optional href signer, bound to the authenticated user by the process
-    #: that built this reader. Applied by `_resolve_asset_href` to every href
-    #: this reader opens -- real assets, band-source annotation assets and
-    #: their sibling measurement hrefs alike, which is why one seam covers all
-    #: three (docs/adr/0005-asset-href-signing.md S2.6). `None` means "this
-    #: deployment needs no credential on its hrefs", and is the default.
-    signer: Optional[HrefSigner] = attr.ib(default=None)
+    #: Optional href signer, resolved in `__attrs_post_init__` from the key the
+    #: item was stamped with at ingest -- never passed in. Applied by
+    #: `_resolve_asset_href` to every href this reader opens: real assets,
+    #: band-source annotation assets and their sibling measurement hrefs alike,
+    #: which is why one seam covers all three
+    #: (docs/adr/0005-asset-href-signing.md S2.6).
+    #:
+    #: Resolving here rather than receiving it is what makes the credential
+    #: fresh: `_reader` rebuilds this reader on every retry, so an expired token
+    #: is re-minted rather than reused (ADR 0005 S3.1). `None` -- an unstamped
+    #: item -- means "this deployment needs no credential on its hrefs".
+    signer: Optional[HrefSigner] = attr.ib(init=False, default=None)
 
     #: Derived band names this item's own assets resolve to, precomputed once
     #: (pure, no I/O -- regex matching over `self.input.assets`) so
@@ -290,6 +295,11 @@ class SimpleSTACReader(MultiBaseReader):
 
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
+        # Before anything that resolves an href: `_item_has_untrustworthy_proj`
+        # below opens an asset for real, and must see the same credential the
+        # pixels will be read with (ADR 0005 S1.1).
+        self.signer = signer_for_item(self.input)
+
         self.assets = self.input.get_assets().keys()
         if not self.assets:
             raise MissingAssets(
@@ -906,7 +916,6 @@ def _get_target_crs_bbox(
     items: List[pystac.Item],
     spatial_extent: Optional[BoundingBox],
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
-    signer: Optional[HrefSigner] = None,
 ) -> Tuple[rasterio.crs.CRS, rasterio.crs.CRS, List[float]]:
     """Get bounds CRS, target CRS, and bbox from items and spatial extent.
 
@@ -914,7 +923,6 @@ def _get_target_crs_bbox(
         items: List of STAC items
         spatial_extent: Optional bounding box for the output
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
-        signer: Optional href signer for the readers this builds
 
     Returns:
         Tuple of (bounds_crs, target_crs, bbox) where:
@@ -945,7 +953,7 @@ def _get_target_crs_bbox(
 
     # Process each item to update bbox and find native CRS
     for item in items:
-        with SimpleSTACReader(item, signer=signer) as src_dst:
+        with SimpleSTACReader(item) as src_dst:
             item_bbox = src_dst.bounds
             if item_bbox:
                 if not spatial_extent:
@@ -991,13 +999,12 @@ def _get_cube_resolutions(
     target_crs: rasterio.crs.CRS,
     target_bbox: List[float],
     bands: Optional[list[str]],
-    signer: Optional[HrefSigner] = None,
 ) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
     """Get resolutions for each datetime and band combination."""
     cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
 
     for item in items:
-        with SimpleSTACReader(item, signer=signer) as src_dst:
+        with SimpleSTACReader(item) as src_dst:
             asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
             for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
                 if x_res is None or y_res is None:
@@ -1041,7 +1048,6 @@ def _estimate_output_dimensions(
     height: Optional[int] = None,
     check_max_pixels: bool = True,
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
-    signer: Optional[HrefSigner] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -1054,9 +1060,6 @@ def _estimate_output_dimensions(
         height: Optional user-specified height
         check_max_pixels: Whether to check pixel count limit
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
-        signer: Optional href signer for the readers this builds. Needed here
-            too, not only on the read path: estimating dimensions opens assets
-            to read their projection metadata.
 
     Returns:
         Dictionary containing:
@@ -1065,10 +1068,15 @@ def _estimate_output_dimensions(
             - bounds_crs: CRS of the input bounding box
             - crs: Target CRS to use for output
             - bbox: Bounding box as a list [west, south, east, north]
+
+    Note:
+        This path opens assets to read their projection metadata, so it needs the
+        same credential the read path does. It gets it the same way: from the key
+        the item was stamped with at ingest (ADR 0005 S2.2).
     """
     # Get bounds CRS, target CRS, and bbox
     bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
-        items, spatial_extent, target_crs, signer=signer
+        items, spatial_extent, target_crs
     )
 
     # Reproject bbox to output CRS for resolution/dimension calculations
@@ -1080,9 +1088,7 @@ def _estimate_output_dimensions(
         output_bbox = target_bbox
 
     # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(
-        items, output_crs, output_bbox, bands, signer=signer
-    )
+    cube_resolutions = _get_cube_resolutions(items, output_crs, output_bbox, bands)
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -1252,20 +1258,17 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     Args:
         item: STAC item dictionary (converted to pystac.Item by SimpleSTACReader)
         bbox: Bounding box to read
-        **kwargs: Additional keyword arguments to pass to the reader. ``signer``
-            is consumed here rather than forwarded to ``part()``; it reaches
-            this function through ``mosaic_reader``/``create_tasks``, which
-            forward their own ``**kwargs`` to the reader callable.
+        **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
         ImageData object with cutline_mask set from item geometry if available
-    """
-    # Popped before the retry loop: the signer belongs to the reader's
-    # construction, not to the read call, and every retry below rebuilds the
-    # reader -- which is what re-signs hrefs whose token expired mid-read
-    # (docs/adr/0005-asset-href-signing.md S3.1).
-    signer: Optional[HrefSigner] = kwargs.pop("signer", None)
 
+    Note:
+        Any credential these hrefs need comes from ``item`` itself, stamped at
+        ingest and resolved inside ``SimpleSTACReader``. Because the retry loop
+        below rebuilds the reader, a token that expired mid-read is re-minted
+        rather than reused (docs/adr/0005-asset-href-signing.md S3.1).
+    """
     max_retries = 10
     retry_delay = 1.0  # seconds
     retries = 0
@@ -1286,7 +1289,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
 
     while True:
         try:
-            with SimpleSTACReader(item, signer=signer) as src_dst:
+            with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")

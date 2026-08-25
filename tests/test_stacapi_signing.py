@@ -1,26 +1,27 @@
-"""The signer's journey from the authenticated request to the read path.
+"""The signing decision's journey from configuration to the read path.
 
 `test_signing.py` covers the signer itself and `test_reader_signing.py` covers
-`reader.py`'s end of the seam. This file covers the middle: that
-`load_collection`/`load_stac` build a signer from the `_openeo_user` named
-parameter, and that it survives into the lazily-evaluated mosaic task, which
-runs on a worker thread no request context reaches
-(docs/adr/0005-asset-href-signing.md S2.5).
+`reader.py`'s end of the seam. This file covers the middle: that ingest stamps
+the deployment's signer key onto every item, and that the stamp -- not a
+threaded parameter -- is what survives into the lazily-evaluated mosaic task,
+which runs on a worker thread no request context reaches
+(docs/adr/0005-asset-href-signing.md S2.2).
 """
 
-import re
 from unittest.mock import patch
 
+import pystac
 import pytest
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.models.auth import User
-from titiler.openeo.signing import SignerRule, rules_for_catalogue
+from titiler.openeo.signing import ITEM_SIGNER_KEY
 from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
 PC_STAC_API = "https://planetarycomputer.microsoft.com/api/stac/v1"
+PC_KEY = "planetary-computer"
 
 ITEM = {
     "type": "Feature",
@@ -50,49 +51,39 @@ ITEM = {
 
 
 # ---------------------------------------------------------------------------
-# _signer_for
+# Ingest stamps the items
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("loader_cls", [LoadCollection, LoadStac])
-def test_no_rules_means_no_signer(loader_cls):
-    loader = (
-        loader_cls(stac_api=stacApiBackend(url="https://example.com"))
-        if loader_cls is LoadCollection
-        else loader_cls()
-    )
-    assert loader._signer_for({"_openeo_user": User(user_id="alice")}) is None
-    assert loader._signer_for(None) is None
-
-
-def test_signer_is_built_from_the_authenticated_user():
-    """The user reaches the factory. Uses a synthetic rule rather than the
-    shipped one -- `SignerRule.factory` is a direct reference captured at import,
-    so the registry is passed in, exactly as `derive_bands` takes its own."""
-    seen = []
-
-    rule = SignerRule(
-        host=re.compile(r"example\.com$"),
-        factory=lambda user: (seen.append(user), lambda href: href)[1],
+@pytest.mark.parametrize("signer_key", [PC_KEY, None], ids=["configured", "unset"])
+def test_get_items_stamps_every_item_with_the_configured_key(monkeypatch, signer_key):
+    """`_get_items` is the single funnel every `load_collection` read passes
+    through, so the deployment's decision is applied there and nowhere below."""
+    monkeypatch.setattr(
+        stacApiBackend, "get_items", lambda *a, **k: [Item.from_dict(ITEM)]
     )
     loader = LoadCollection(
-        stac_api=stacApiBackend(url="https://example.com"), signer_rules=(rule,)
+        stac_api=stacApiBackend(url=PC_STAC_API), signer_key=signer_key
     )
 
-    user = User(user_id="alice")
-    assert loader._signer_for({"_openeo_user": user}) is not None
+    items = loader._get_items("test")
 
-    assert seen == [user]
+    assert len(items) == 1
+    if signer_key:
+        assert items[0].properties[ITEM_SIGNER_KEY] == signer_key
+    else:
+        assert ITEM_SIGNER_KEY not in items[0].properties
 
 
-def test_signer_is_still_built_for_an_unauthenticated_request():
-    """Public Planetary Computer needs no user; a missing one is not an error."""
-    loader = LoadCollection(
-        stac_api=stacApiBackend(url=PC_STAC_API),
-        signer_rules=rules_for_catalogue(PC_STAC_API),
+def test_an_unstamped_item_is_indistinguishable_from_before_signing_existed(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        stacApiBackend, "get_items", lambda *a, **k: [Item.from_dict(ITEM)]
     )
-    assert loader._signer_for(None) is not None
-    assert loader._signer_for({}) is not None
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+
+    assert loader._get_items("test")[0].to_dict()["properties"] == ITEM["properties"]
 
 
 # ---------------------------------------------------------------------------
@@ -109,17 +100,16 @@ def _mock_image(*args, **kwargs):
     )
 
 
-@pytest.mark.parametrize("with_rules", [True, False])
-def test_signer_reaches_the_mosaic_task(monkeypatch, with_rules):
-    """The task runs lazily on a worker thread, so the signer must be captured
-    in its closure -- not looked up when it runs."""
+@pytest.mark.parametrize("signer_key", [PC_KEY, None], ids=["configured", "unset"])
+def test_the_stamp_reaches_the_mosaic_task(monkeypatch, signer_key):
+    """The task runs lazily on a worker thread, so what it needs must travel on
+    the items themselves -- and `signer` must be gone from the kwargs, or a
+    credential resolved at ingest would be reused past its expiry."""
     monkeypatch.setattr(
-        LoadCollection, "_get_items", lambda *a, **k: [Item.from_dict(ITEM)]
+        stacApiBackend, "get_items", lambda *a, **k: [Item.from_dict(ITEM)]
     )
-
-    rules = rules_for_catalogue(PC_STAC_API) if with_rules else ()
     loader = LoadCollection(
-        stac_api=stacApiBackend(url=PC_STAC_API), signer_rules=rules
+        stac_api=stacApiBackend(url=PC_STAC_API), signer_key=signer_key
     )
 
     with patch(
@@ -138,38 +128,67 @@ def test_signer_reaches_the_mosaic_task(monkeypatch, with_rules):
         # RasterStack is lazy; force the task to run.
         dict(stack)
 
-    signer = mosaic.call_args.kwargs["signer"]
-    if with_rules:
-        assert callable(signer)
+    assert "signer" not in mosaic.call_args.kwargs
+
+    (mosaic_items,) = (mosaic.call_args.args[0],)
+    if signer_key:
+        assert all(i.properties[ITEM_SIGNER_KEY] == signer_key for i in mosaic_items)
     else:
-        assert signer is None
+        assert all(ITEM_SIGNER_KEY not in i.properties for i in mosaic_items)
+
+
+# ---------------------------------------------------------------------------
+# load_stac
+# ---------------------------------------------------------------------------
 
 
 def test_load_stac_accepts_named_parameters():
-    """`load_stac` had no `named_parameters` before this seam; the process
-    registry passes it positionally by name, so the signature must carry it."""
+    """The process registry passes it positionally by name, so the signature
+    must carry it."""
     import inspect
 
     assert "named_parameters" in inspect.signature(LoadStac().load_stac).parameters
 
 
-def test_load_stac_passes_its_rules_to_the_delegate():
+def test_load_stac_stamps_a_single_item(monkeypatch):
+    """This path never passes through `LoadCollection._get_items`, so it does
+    its own stamping -- otherwise a single-item URL would silently read
+    unsigned."""
+    loader = LoadStac(signer_key=PC_KEY)
+    monkeypatch.setattr(
+        LoadStac, "_load_stac_object", lambda self, url: Item.from_dict(ITEM)
+    )
+
+    captured = {}
+
+    def _capture(self, items, *a, **k):
+        captured["items"] = items
+        return "stack"
+
+    monkeypatch.setattr(LoadStac, "_process_spatial_extent", _capture)
+
+    loader.load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+    )
+
+    assert captured["items"][0]["properties"][ITEM_SIGNER_KEY] == PC_KEY
+
+
+def test_load_stac_passes_its_signer_to_the_delegate():
     """A Collection/Catalog URL hands off to LoadCollection -- which must not
     silently lose the credential path."""
-    rules = rules_for_catalogue(PC_STAC_API)
-    loader = LoadStac(signer_rules=rules)
+    loader = LoadStac(signer_key=PC_KEY)
 
     captured = {}
 
     class _Delegate:
-        def __init__(self, stac_api, signer_rules=()):
-            captured["rules"] = signer_rules
+        def __init__(self, stac_api, signer_key=None):
+            captured["signer_key"] = signer_key
 
         def load_collection(self, **kwargs):
             captured["named_parameters"] = kwargs.get("named_parameters")
             return "stack"
-
-    import pystac
 
     collection = pystac.Collection(
         id="c",
@@ -189,5 +208,5 @@ def test_load_stac_passes_its_rules_to_the_delegate():
             == "stack"
         )
 
-    assert captured["rules"] == rules
+    assert captured["signer_key"] == PC_KEY
     assert captured["named_parameters"] == user
