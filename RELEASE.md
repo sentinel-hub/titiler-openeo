@@ -143,21 +143,24 @@ The Helm chart version is managed separately and should be incremented manually 
 ## Helm Chart Publishing
 
 When a chart release PR (`chore(main): release titiler-openeo-chart …`) is merged,
-the chart is published to **two** locations in parallel:
+the chart is published to the **OCI registry** at
+`oci://ghcr.io/developmentseed/charts/titiler-openeo`, so downstream GitOps
+repos (e.g. ArgoCD) can pin a specific version:
 
-1. **GitHub Pages (chart-releaser)** — kept for backward compatibility with
-   existing consumers using `helm repo add`. `chart-releaser` (`cr`) needs its
-   own GitHub release to host the packaged `.tgz` for `index.yaml`; [cr.yaml](cr.yaml)
-   names that release `chart-<version>` (instead of the default
-   `titiler-openeo-<version>`, easy to mistake for a main-package release),
-   and `mark_as_latest: false` in the `publish-helm-chart` job keeps it from
-   outranking the real "Latest" release-please release.
-2. **OCI registry** at `oci://ghcr.io/developmentseed/charts/titiler-openeo`,
-   so downstream GitOps repos (e.g. ArgoCD) can pin a specific version:
+```bash
+helm pull oci://ghcr.io/developmentseed/charts/titiler-openeo --version <chart-version>
+```
 
-   ```bash
-   helm pull oci://ghcr.io/developmentseed/charts/titiler-openeo --version <chart-version>
-   ```
+Previously the chart was also published to a GitHub Pages Helm repo via
+`helm/chart-releaser-action` (`cr`), for `helm repo add` consumers. That path
+was dropped: `cr` has no way to publish without creating its own GitHub
+release for every chart version, separate from and alongside
+release-please's own `titiler-openeo-chart-vX.Y.Z` release — on the releases
+page this showed up as a confusing extra `titiler-openeo-<version>` release
+that could even outrank the real "Latest" release. The `gh-pages` branch's
+existing `index.yaml` is now frozen at the last version chart-releaser
+published; any remaining `helm repo add` consumers should migrate to
+`helm pull oci://ghcr.io/developmentseed/charts/titiler-openeo`.
 
 ### Required repository secret
 

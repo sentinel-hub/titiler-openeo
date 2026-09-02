@@ -1,9 +1,0 @@
-# Config for helm/chart-releaser (cr), used by the publish-helm-chart job
-# in .github/workflows/release-please.yml.
-#
-# cr creates its own GitHub release to host the packaged chart .tgz for the
-# GitHub Pages Helm repo. Left at its default, that release is named
-# "{{ .Name }}-{{ .Version }}" (e.g. "titiler-openeo-3.0.0"), which is easy to
-# mistake for a main-package release (those are tagged "vX.Y.Z"). Prefixing
-# it keeps it clearly scoped to the chart.
-release-name-template: "chart-{{ .Version }}"
