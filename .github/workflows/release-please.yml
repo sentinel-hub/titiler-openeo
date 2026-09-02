@@ -189,6 +189,11 @@ jobs:
         uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f # v1.7.0
         with:
           charts_dir: deployment/k8s
+          config: cr.yaml
+          # cr's own release is only an asset host for the GitHub Pages Helm
+          # repo (see RELEASE.md); it must not outrank the real "Latest"
+          # release-please release on the repo's releases page.
+          mark_as_latest: false
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 

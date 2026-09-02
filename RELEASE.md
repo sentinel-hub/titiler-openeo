@@ -146,7 +146,12 @@ When a chart release PR (`chore(main): release titiler-openeo-chart …`) is mer
 the chart is published to **two** locations in parallel:
 
 1. **GitHub Pages (chart-releaser)** — kept for backward compatibility with
-   existing consumers using `helm repo add`.
+   existing consumers using `helm repo add`. `chart-releaser` (`cr`) needs its
+   own GitHub release to host the packaged `.tgz` for `index.yaml`; [cr.yaml](cr.yaml)
+   names that release `chart-<version>` (instead of the default
+   `titiler-openeo-<version>`, easy to mistake for a main-package release),
+   and `mark_as_latest: false` in the `publish-helm-chart` job keeps it from
+   outranking the real "Latest" release-please release.
 2. **OCI registry** at `oci://ghcr.io/developmentseed/charts/titiler-openeo`,
    so downstream GitOps repos (e.g. ArgoCD) can pin a specific version:
 
