@@ -5,7 +5,7 @@ See: https://api.openeo.org/#section/API-Principles/Error-Handling
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Sequence
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -201,6 +201,20 @@ class InvalidProcessGraph(OpenEOException):
             message=message,
             code="InvalidProcessGraph",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+
+
+class CyclicUdpReference(InvalidProcessGraph):
+    """A chain of user-defined process references that loops back on itself."""
+
+    def __init__(self, cycle: Sequence[str]):
+        """Initialize error with the cycle, as the chain of process_ids that closes it."""
+        self.cycle = list(cycle)
+        super().__init__(
+            message=(
+                "User-defined processes reference each other in a cycle: "
+                + " -> ".join(self.cycle)
+            )
         )
 
 
