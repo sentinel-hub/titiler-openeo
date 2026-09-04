@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1 (2026-09-04)
+
+## What's Changed
+* ci: drop GitHub Pages chart publishing, keep OCI only by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/395
+* fix: resolve a multi-band asset's own STAC name, not just its common name by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/398
+* chore(main): release 0.18.1 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/394
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-chart-v3.0.0...titiler-openeo-chart-v3.0.1
+
 ## 3.0.0 (2026-08-31)
 
 ## What's Changed
