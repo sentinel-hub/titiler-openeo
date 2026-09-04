@@ -128,9 +128,12 @@ def test_a_rendering_role_asset_is_absent():
 
 
 def test_multi_band_cube_expands_every_band():
+    """Each band's own STAC `name` (`b02`/`b01`) resolves alongside its
+    display name (`blue`/`coastal`) -- issue #397."""
     resolved = resolve_asset_bands(_facts(MULTI_BAND_CUBE))
 
-    assert set(resolved) == {"blue", "coastal"}
+    assert set(resolved) == {"blue", "b02", "coastal", "b01"}
+    assert resolved["blue"] is resolved["b02"]
     assert resolved["blue"].asset_key == "reflectance"
     assert resolved["blue"].band_name == "blue"
     assert resolved["blue"].metadata["gsd"] == 10
@@ -139,7 +142,7 @@ def test_multi_band_cube_expands_every_band():
 
 def test_a_mix_of_shapes_only_expands_the_multi_band_cube():
     resolved = resolve_asset_bands(_facts(MULTI_BAND_CUBE, SINGLE_BAND, NO_BANDS))
-    assert set(resolved) == {"blue", "coastal"}
+    assert set(resolved) == {"blue", "b02", "coastal", "b01"}
 
 
 def test_colliding_band_names_across_two_assets_are_qualified():
@@ -160,6 +163,38 @@ def test_colliding_band_names_across_two_assets_are_qualified():
     assert resolved["b01"].asset_key == "reflectance_a"
 
 
+def test_a_raw_name_colliding_elsewhere_is_qualified_independently():
+    """A band's own `name` and its display name are collision-checked
+    separately: one colliding with another asset's alias does not force its
+    sibling alias to qualify too, and vice versa (issue #397)."""
+    resolved = resolve_asset_bands(
+        _facts(
+            # Its raw name "b02" collides with reflectance_b's own alias
+            # below, but its display name "blue" is unique across the item.
+            (
+                "reflectance_a",
+                [
+                    {"name": "b02", "eo:common_name": "blue"},
+                    {"name": "b01", "eo:common_name": "coastal"},
+                ],
+            ),
+            ("reflectance_b", [{"name": "b02"}, {"name": "b03"}]),
+        )
+    )
+
+    assert set(resolved) == {
+        "blue",
+        "reflectance_a_b02",
+        "coastal",
+        "b01",
+        "reflectance_b_b02",
+        "b03",
+    }
+    assert resolved["blue"].asset_key == "reflectance_a"
+    assert resolved["reflectance_a_b02"] is resolved["blue"]
+    assert resolved["reflectance_b_b02"].asset_key == "reflectance_b"
+
+
 def test_resolve_asset_band_singular_matches_the_plural_result():
     resolved = resolve_asset_band("blue", _facts(MULTI_BAND_CUBE))
     assert resolved is not None
@@ -174,7 +209,11 @@ def test_resolve_asset_band_singular_matches_the_plural_result():
 # ---------------------------------------------------------------------------
 
 
-def test_eo_common_name_wins_over_name():
+def test_eo_common_name_and_raw_name_both_resolve():
+    """A band with both a display name and its own, different `name` is
+    addressable either way (issue #397) -- both point at the same resolved
+    object, and `.band_name` stays the precedence winner (`_get_options` can
+    only look that one back up)."""
     resolved = resolve_asset_bands(
         _facts(
             (
@@ -184,10 +223,13 @@ def test_eo_common_name_wins_over_name():
         )
     )
     assert "blue" in resolved
-    assert "b02" not in resolved
+    assert "b02" in resolved
+    assert resolved["blue"] is resolved["b02"]
+    assert resolved["blue"].band_name == "blue"
+    assert resolved["b02"].band_name == "blue"
 
 
-def test_legacy_common_name_wins_over_name_when_no_eo_prefix():
+def test_legacy_common_name_and_raw_name_both_resolve():
     resolved = resolve_asset_bands(
         _facts(
             (
@@ -197,7 +239,9 @@ def test_legacy_common_name_wins_over_name_when_no_eo_prefix():
         )
     )
     assert "blue" in resolved
-    assert "b02" not in resolved
+    assert "b02" in resolved
+    assert resolved["blue"] is resolved["b02"]
+    assert resolved["blue"].band_name == "blue"
 
 
 def test_name_is_the_fallback_when_no_common_name_is_declared():

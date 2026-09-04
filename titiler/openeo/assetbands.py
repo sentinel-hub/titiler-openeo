@@ -9,7 +9,9 @@ This module is the one place that maps such a band name back to
 ``(asset key, band within it)``. It is deliberately shared by all four callers
 that need the mapping -- collection discovery, band summaries, the read path and
 resolution estimation -- because a backend that advertises a band name it cannot
-read is worse than one that advertises nothing.
+read is worse than one that advertises nothing. A band carrying both a display
+name (``eo:common_name``/``common_name``) and its own, different STAC ``name``
+is addressable by either -- see `resolve_asset_bands`.
 
 Unlike :mod:`titiler.openeo.bandsources`, which matches hand-written rules
 against collection ids, everything here is derived from the item's own metadata.
@@ -73,7 +75,10 @@ class ResolvedAssetBand:
     #: (`SimpleSTACReader._get_options`/`_get_asset_info`), so this must be
     #: resolved with the identical precedence that function uses to look a name
     #: back up -- see `_band_display_name`. Using anything else here would
-    #: advertise a name `_get_options` cannot itself resolve.
+    #: advertise a name `_get_options` cannot itself resolve. This is always
+    #: the precedence-winning display name, even when a caller reached this
+    #: entry through the band's other alias (its own STAC ``name`` -- see
+    #: `resolve_asset_bands`), so `_get_options` can look it back up either way.
     band_name: str
     #: The band's own entry from the asset's ``bands`` array. Carries the
     #: per-band ``gsd`` and spectral fields that discovery advertises and
@@ -135,10 +140,22 @@ def resolve_asset_bands(
     result, so a caller's ``band_name in resolved`` is exactly the question "is
     this name something other than an asset key".
 
-    When two multi-band assets publish the same band name, every occurrence of
-    that name is qualified as ``{asset_key}_{band_name}`` rather than one of
-    them silently winning. Names unique across the item are left bare, so the
-    common case reads as the catalogue wrote it.
+    A band with **both** a display name (``eo:common_name``/``common_name``)
+    and its own, different STAC ``name`` is registered under *both* -- e.g.
+    EOPF's ``{"name": "b04", "eo:common_name": "red"}`` becomes resolvable as
+    either ``"red"`` or ``"b04"``, both mapping to the same
+    `ResolvedAssetBand` (whose `.band_name` stays ``"red"``, the one
+    `_get_options` can itself resolve -- see `ResolvedAssetBand.band_name`).
+    A band with no separate ``name`` (the display name already came from
+    ``name``) is registered once, as before.
+
+    When two multi-band assets publish the same alias -- a display name, a
+    raw ``name``, or one of each -- every occurrence of that alias is
+    qualified as ``{asset_key}_{alias}`` rather than one of them silently
+    winning. Each alias is qualified independently, so a band's raw name
+    colliding elsewhere does not force its display name to qualify too, and
+    vice versa. Aliases unique across the item are left bare, so the common
+    case reads as the catalogue wrote it.
     """
     candidates: List[Tuple[str, ResolvedAssetBand]] = []
     seen: Dict[str, int] = {}
@@ -151,14 +168,17 @@ def resolve_asset_bands(
             name = _band_display_name(band)
             if not name:
                 continue
-            candidates.append(
-                (name, ResolvedAssetBand(asset_key, name, band)),
-            )
-            seen[name] = seen.get(name, 0) + 1
+            resolved = ResolvedAssetBand(asset_key, name, band)
+            aliases = {name}
+            if raw_name := band.get("name"):
+                aliases.add(raw_name)
+            for alias in aliases:
+                candidates.append((alias, resolved))
+                seen[alias] = seen.get(alias, 0) + 1
 
     return {
-        (name if seen[name] == 1 else f"{resolved.asset_key}_{name}"): resolved
-        for name, resolved in candidates
+        (alias if seen[alias] == 1 else f"{resolved.asset_key}_{alias}"): resolved
+        for alias, resolved in candidates
     }
 
 

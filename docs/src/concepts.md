@@ -159,6 +159,8 @@ The reduce process includes a parameter to choose the [pixel selection method](h
 
 openEO by TiTiler integrates with external STAC API services to provide collections. It uses [`pystac-client`](https://github.com/stac-utils/pystac-client) to proxy the STAC API, configured through the `TITILER_OPENEO_STORE_URL` environment variable.
 
+Most catalogues give each band its own STAC asset, so a `load_collection` band name is always an asset key. Some catalogues instead publish several bands inside one asset (e.g. a Zarr asset holding a whole reflectance cube) — see [Multi-band STAC Assets](multiband-assets.md) for how those bands are resolved and, where a band declares more than one name, made addressable by either.
+
 ### OpenEO Process Graph to CQL2-JSON Conversion
 
 The backend automatically converts OpenEO process graphs to CQL2-JSON format for STAC API filtering. Supported operators include:

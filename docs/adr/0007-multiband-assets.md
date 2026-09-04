@@ -182,7 +182,31 @@ the resolver already reaches every call site that needs it, so a hook would
 only add a second answer that has to agree with the first. Any change to
 `_get_options`'s existing precedence itself.
 
-## 4. Related
+## 4. Amendment (2026-09-04, issue #397)
+
+`resolve_asset_bands` originally registered only the precedence-winning
+display name (§2's "naming precedence" rule). When a band carried both a
+display name and its own, different STAC `name` (EOPF's
+`{"name": "b04", "eo:common_name": "red"}`), only `"red"` was resolvable —
+`load_collection(bands=["b04"])` raised `InvalidAssetName` even though `b04`
+is the band's own declared identifier in the same catalogue metadata.
+
+`resolve_asset_bands` now registers **both** aliases when they differ, both
+mapping to the same `ResolvedAssetBand` — whose `.band_name` stays the
+precedence winner regardless of which alias reached it, so `_get_options`
+(§1.1) can still resolve it. Collision qualification (§2's "name
+collisions are qualified") now applies per alias rather than per band: an
+asset's raw `name` colliding with another multi-band asset's own alias is
+qualified independently of whether its display name also collides.
+
+No call site other than `assetbands.py` itself changed. Discovery
+(`getdimensions`, `_add_band_summaries`) now advertises both aliases too, as
+a direct consequence of sharing one resolver (§2.1) rather than a separate
+decision — the same "a band the read path accepts should be advertised, and
+vice versa" property `test_every_advertised_band_is_actually_readable`
+already enforced continues to hold for both names.
+
+## 5. Related
 
 - [ADR 0002 — Band sources](0002-band-sources.md) — the registry shape this
   reuses, and the precedence rule in §2.2.

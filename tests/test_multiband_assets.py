@@ -37,6 +37,13 @@ EXPECTED_BANDS = {
     "nir08": 20,
 }
 
+#: Each band's own STAC `name`, keyed by its eo:common_name above -- resolves
+#: alongside it (issue #397), read straight from the fixture rather than
+#: hand-transcribed so the two stay honest with each other.
+_reflectance_bands = json.loads(FIXTURE.read_text())["assets"]["reflectance"]["bands"]
+EXPECTED_RAW_NAMES = {b["eo:common_name"]: b["name"] for b in _reflectance_bands}
+assert set(EXPECTED_RAW_NAMES) == set(EXPECTED_BANDS)
+
 #: The item's other assets: single-band or band-less, so unaffected by any of
 #: this -- kept as their own asset key.
 UNCHANGED_ASSET_KEYS = {"AOT_10m", "SCL_20m", "WVP_10m"}
@@ -72,12 +79,18 @@ def eopf_collection(eopf_item: pystac.Item) -> pystac.Collection:
 
 
 def test_getdimensions_expands_reflectance_into_its_bands(eopf_collection):
+    """Both a band's display name and its own STAC `name` are advertised
+    (issue #397) -- a name the read path accepts but discovery does not
+    advertise would be just as inconsistent as the reverse."""
     backend = stacApiBackend.__new__(stacApiBackend)
     dims = backend.getdimensions(eopf_collection)
 
     spectral = set(dims["spectral"].to_dict()["values"])
 
-    assert spectral == set(EXPECTED_BANDS) | UNCHANGED_ASSET_KEYS
+    assert (
+        spectral
+        == set(EXPECTED_BANDS) | set(EXPECTED_RAW_NAMES.values()) | UNCHANGED_ASSET_KEYS
+    )
     assert "reflectance" not in spectral, "the asset key must not itself be advertised"
 
 
@@ -102,6 +115,12 @@ def test_add_band_summaries_expands_reflectance_with_spectral_metadata(
 
     coastal = summaries["coastal"]
     assert coastal["gsd"] == 20
+
+    # Its own STAC name gets an entry too (issue #397), with the same
+    # metadata as its display name's entry.
+    assert set(EXPECTED_RAW_NAMES.values()) <= set(summaries)
+    assert summaries["b02"]["eo:common_name"] == "blue"
+    assert summaries["b02"]["gsd"] == 10
 
 
 def test_add_band_summaries_leaves_bandless_assets_out(eopf_collection):
@@ -133,6 +152,21 @@ def test_get_asset_info_resolves_every_expanded_band(eopf_item):
                 if (b.get("eo:common_name") or b.get("common_name") or b.get("name"))
                 == name
             ]
+
+
+def test_get_asset_info_resolves_raw_stac_names_too(eopf_item):
+    """The literal repro from issue #397: `load_collection(bands=["b04"])`
+    must resolve, the same way `bands=["red"]` already did, since `b04` is
+    the band's own declared `name` in the same catalogue metadata."""
+    with SimpleSTACReader(eopf_item) as src:
+        for common_name, raw_name in EXPECTED_RAW_NAMES.items():
+            by_common_name = src._get_asset_info(common_name)
+            by_raw_name = src._get_asset_info(raw_name)
+            assert by_raw_name["name"] == "reflectance"
+            assert (
+                by_raw_name["method_options"]["indexes"]
+                == by_common_name["method_options"]["indexes"]
+            )
 
 
 def test_get_asset_info_still_serves_real_asset_keys_directly(eopf_item):
