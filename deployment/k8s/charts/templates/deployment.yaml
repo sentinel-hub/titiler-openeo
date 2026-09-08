@@ -22,6 +22,10 @@ spec:
       {{- if and .Values.database.persistence.enabled (eq .Values.database.type "json") }}
         - name: init-store
           image: busybox
+          {{- with .Values.initContainerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
