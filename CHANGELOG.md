@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.2 (2026-09-11)
+
+## What's Changed
+* chore(deps): bump developmentseed/container-registry-cleanup from 0.2.2 to 0.2.3 in the all group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/400
+* fix(helm): security context. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/402
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.1...v0.18.2
+
 ## 0.18.1 (2026-09-04)
 
 ## What's Changed
