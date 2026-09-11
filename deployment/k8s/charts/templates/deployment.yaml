@@ -22,16 +22,21 @@ spec:
       {{- if and .Values.database.persistence.enabled (eq .Values.database.type "json") }}
         - name: init-store
           image: busybox
+          {{- with .Values.initContainerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
             - |
+              set -e
               if [ -f "/config/init_store.json" ]; then
                 echo "Initializing JSON store from init_store.json..."
                 mkdir -p "$(dirname {{ .Values.database.json.path }})"
                 cp /config/init_store.json {{ .Values.database.json.path }}
                 chown 65532:65532 {{ .Values.database.json.path }}
-                chmod 664 {{ .Values.database.json.path }}
+                chmod 660 {{ .Values.database.json.path }}
                 echo "JSON store initialization complete."
               else
                 echo "No init_store.json found in configmap, skipping initialization."

@@ -17,3 +17,34 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: ghcr.io/sentinel-hub/titiler-openeo:1.2.3
+
+  - it: should not set init-store securityContext by default
+    set:
+      database.persistence.enabled: true
+      database.type: json
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers[0].securityContext
+
+  - it: should apply initContainerSecurityContext to the init-store container
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initContainerSecurityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: init-store
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
