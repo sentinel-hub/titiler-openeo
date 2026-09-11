@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.3 (2026-09-11)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 3.0.1 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/399
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.2...v0.18.3
+
 ## 0.18.2 (2026-09-11)
 
 ## What's Changed
