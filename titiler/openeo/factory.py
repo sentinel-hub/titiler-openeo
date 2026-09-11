@@ -21,7 +21,7 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
-from .errors import InvalidProcessGraph, ServiceUnavailable
+from .errors import CyclicUdpReference, InvalidProcessGraph, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
@@ -151,6 +151,66 @@ class EndpointsFactory(BaseFactory):
             get_udp_spec=get_udp_spec,
             namespace=user.user_id,
         )
+
+    def _node_validation_errors(self, process_graph: dict) -> List[Dict[str, Any]]:
+        """Check each node of a (resolved) flat graph against the registry spec.
+
+        Reports structural problems and missing required arguments as openEO
+        error objects, in the shape ``POST /validation`` returns them.
+        """
+        errors: List[Dict[str, Any]] = []
+        for node_id, node in process_graph.items():
+            node_dict = (
+                node
+                if isinstance(node, dict)
+                else node.model_dump()
+                if hasattr(node, "model_dump")
+                else None
+            )
+            if not isinstance(node_dict, dict):
+                errors.append(
+                    {
+                        "code": "ProcessGraphInvalid",
+                        "message": f"Process node '{node_id}' must be an object",
+                    }
+                )
+                continue
+
+            process_id = node_dict.get("process_id")
+            if not process_id:
+                errors.append(
+                    {
+                        "code": "ProcessGraphInvalid",
+                        "message": f"Process node '{node_id}' missing process_id",
+                    }
+                )
+                continue
+
+            if process_id not in self.process_registry[None]:
+                errors.append(
+                    {
+                        "code": "ProcessUnsupported",
+                        "message": f"Process '{process_id}' not found in registry",
+                    }
+                )
+                continue
+
+            spec = self.process_registry[process_id].spec
+            required_params = [
+                p["name"]
+                for p in spec.get("parameters", [])
+                if not p.get("optional", False)
+            ]
+            args = node_dict.get("arguments", {}) or {}
+            for param_name in required_params:
+                if param_name not in args or args.get(param_name) is None:
+                    errors.append(
+                        {
+                            "code": "ProcessParameterRequired",
+                            "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
+                        }
+                    )
+        return errors
 
     def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
         """Validate that tile is within service extent if configured."""
@@ -806,66 +866,22 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate_optional),
         ):
             """Validate a process graph without executing it."""
-            errors: List[Dict[str, Any]] = []
-
             raw_pg = body.model_dump().get("process_graph") or {}
 
             # Inline referenced UDPs so validation sees the fully-resolved graph
             # (a graph that extends a stored UDP is valid).
-            raw_pg = self._resolve_udp_references(raw_pg, user)
+            try:
+                raw_pg = self._resolve_udp_references(raw_pg, user)
+            except CyclicUdpReference as err:
+                # This endpoint reports what's wrong with a graph in its `errors`
+                # list, not as an HTTP error -- a cycle is a finding like any
+                # other, and there is no resolved graph left to validate.
+                return {
+                    "errors": [{"code": "ProcessGraphInvalid", "message": err.message}]
+                }
 
             # Basic per-node validation against registry specs (structure and required params)
-            for node_id, node in raw_pg.items():
-                node_dict = (
-                    node
-                    if isinstance(node, dict)
-                    else node.model_dump()
-                    if hasattr(node, "model_dump")
-                    else None
-                )
-                if not isinstance(node_dict, dict):
-                    errors.append(
-                        {
-                            "code": "ProcessGraphInvalid",
-                            "message": f"Process node '{node_id}' must be an object",
-                        }
-                    )
-                    continue
-
-                process_id = node_dict.get("process_id")
-                if not process_id:
-                    errors.append(
-                        {
-                            "code": "ProcessGraphInvalid",
-                            "message": f"Process node '{node_id}' missing process_id",
-                        }
-                    )
-                    continue
-
-                if process_id not in self.process_registry[None]:
-                    errors.append(
-                        {
-                            "code": "ProcessUnsupported",
-                            "message": f"Process '{process_id}' not found in registry",
-                        }
-                    )
-                    continue
-
-                spec = self.process_registry[process_id].spec
-                required_params = [
-                    p["name"]
-                    for p in spec.get("parameters", [])
-                    if not p.get("optional", False)
-                ]
-                args = node_dict.get("arguments", {}) or {}
-                for param_name in required_params:
-                    if param_name not in args or args.get(param_name) is None:
-                        errors.append(
-                            {
-                                "code": "ProcessParameterRequired",
-                                "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
-                            }
-                        )
+            errors = self._node_validation_errors(raw_pg)
 
             if errors:
                 return {"errors": errors}
@@ -1022,7 +1038,10 @@ class EndpointsFactory(BaseFactory):
                     pg_data={"process_graph": resolved_for_validation}
                 )
                 parsed_graph.to_callable(process_registry=self.process_registry)
-            except ServiceUnavailable:
+            except (ServiceUnavailable, CyclicUdpReference):
+                # Both already say precisely what went wrong; rewrapping would
+                # bury a store outage, or the named cycle, under "Invalid
+                # process graph: ...".
                 raise
             except Exception as err:  # noqa: BLE001
                 raise InvalidProcessGraph(f"Invalid process graph: {str(err)}") from err
