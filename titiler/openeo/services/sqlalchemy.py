@@ -19,6 +19,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
@@ -57,6 +58,22 @@ class UserTracking(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uix_user_provider"),
+    )
+
+
+class UserSession(Base):
+    """SQLAlchemy User Session Model: one row per session start."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("provider", "session_id", name="uix_provider_session"),
     )
 
 
@@ -244,11 +261,26 @@ class SQLAlchemyStore(ServicesStore):
 
         return item_id
 
-    def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity."""
+    def record_session(self, user: User, provider: str, session_id: str) -> bool:
+        """Record the start of a user session."""
         now = datetime.now(timezone.utc)
 
         with Session(self._engine) as session:
+            # Idempotent across replicas: the unique constraint decides.
+            session.add(
+                UserSession(
+                    user_id=user.user_id,
+                    provider=provider,
+                    session_id=session_id,
+                    started_at=now,
+                )
+            )
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                return False
+
             tracking: Optional[UserTracking] = session.execute(
                 select(UserTracking).where(
                     UserTracking.user_id == user.user_id,
@@ -276,6 +308,27 @@ class SQLAlchemyStore(ServicesStore):
                 session.add(tracking)
 
             session.commit()
+        return True
+
+    def get_user_sessions(
+        self, user_id: str, provider: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List the recorded sessions of a user, oldest first."""
+        query = select(UserSession).where(UserSession.user_id == user_id)
+        if provider is not None:
+            query = query.where(UserSession.provider == provider)
+
+        with Session(self._engine) as session:
+            rows = session.execute(query.order_by(UserSession.id)).scalars().all()
+            return [
+                {
+                    "user_id": row.user_id,
+                    "provider": row.provider,
+                    "session_id": row.session_id,
+                    "started_at": row.started_at,
+                }
+                for row in rows
+            ]
 
     def get_user_tracking(
         self, user_id: str, provider: str

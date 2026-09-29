@@ -286,12 +286,31 @@ class ServicesStore(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity.
+    def record_session(self, user: User, provider: str, session_id: str) -> bool:
+        """Record the start of a user session.
+
+        Called once per session, never per request. Appends a session event and
+        updates the per-user summary (`login_count` counts sessions). Recording
+        the same `(provider, session_id)` again is a no-op, so replicas that see
+        the same session do not double count.
 
         Args:
             user: The user that authenticated
             provider: The authentication provider (e.g. 'basic', 'oidc')
+            session_id: Identifier of the session, unique within the provider
+
+        Returns:
+            True if the session was new, False if it was already recorded
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_user_sessions(
+        self, user_id: str, provider: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List the recorded sessions of a user, oldest first.
+
+        Each item has `user_id`, `provider`, `session_id` and `started_at`.
         """
         ...
 

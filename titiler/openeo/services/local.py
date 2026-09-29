@@ -74,6 +74,7 @@ class LocalServiceStore(ServicesStore):
 
     store: Dict = field()
     tracking_store: Dict = field(factory=dict)
+    sessions_store: Dict = field(factory=dict)
     path: Optional[str] = field(default=None, kw_only=True)
 
     def get_service(self, service_id: str) -> Optional[Dict]:
@@ -140,9 +141,17 @@ class LocalServiceStore(ServicesStore):
         self._persist()
         return item_id
 
-    def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity."""
+    def record_session(self, user: User, provider: str, session_id: str) -> bool:
+        """Record the start of a user session."""
         now = datetime.now(timezone.utc)
+        if (provider, session_id) in self.sessions_store:
+            return False
+        self.sessions_store[(provider, session_id)] = {
+            "user_id": user.user_id,
+            "provider": provider,
+            "session_id": session_id,
+            "started_at": now,
+        }
         key = (user.user_id, provider)
 
         if key in self.tracking_store:
@@ -161,6 +170,18 @@ class LocalServiceStore(ServicesStore):
                 "name": user.name,
             }
         self._persist()
+        return True
+
+    def get_user_sessions(
+        self, user_id: str, provider: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List the recorded sessions of a user, oldest first."""
+        return [
+            dict(session)
+            for session in self.sessions_store.values()
+            if session["user_id"] == user_id
+            and (provider is None or session["provider"] == provider)
+        ]
 
     def get_user_tracking(
         self, user_id: str, provider: str
