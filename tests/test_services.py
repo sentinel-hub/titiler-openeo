@@ -707,3 +707,19 @@ def test_xyz_service_query_parameters(app_with_auth):
     # Check that we get a proper error message about invalid JSON
     error_msg = str(invalid_response.content)
     assert "Invalid JSON in query parameter" in error_msg
+
+
+def test_store_returns_user_id(store_path):
+    """Every store must expose the service owner (#409).
+
+    The ``app_*`` fixtures cannot cover this: ``titiler.openeo.main`` builds its
+    store at import time, so only the first parametrized store is ever used.
+    """
+    from titiler.openeo.services import get_store
+
+    store = get_store(f"{store_path}")
+    service_id = store.add_service("owner", {"type": "XYZ", "enabled": True})
+
+    assert store.get_service(service_id)["user_id"] == "owner"
+    assert store.get_user_services("owner")[0]["user_id"] == "owner"
+    assert store.get_services()[0]["user_id"] == "owner"
