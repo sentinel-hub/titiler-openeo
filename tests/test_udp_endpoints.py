@@ -37,7 +37,13 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
         udp_store.upsert_udp(
             user_id="test_user",
             udp_id=f"udp-{idx}",
-            process_graph={"i": idx},
+            process_graph={
+                "n": {
+                    "process_id": "constant",
+                    "arguments": {"x": idx},
+                    "result": True,
+                }
+            },
             exceptions={"err": {"message": "nope"}},
             examples=[{"title": "sample"}],
             links=[{"href": "https://example.com"}],
@@ -47,7 +53,9 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
     udp_store.upsert_udp(
         user_id="other_user",
         udp_id="udp-other",
-        process_graph={"i": 99},
+        process_graph={
+            "n": {"process_id": "constant", "arguments": {"x": 99}, "result": True}
+        },
     )
 
     resp = client.get("/process_graphs", params={"limit": 2, "offset": 1})

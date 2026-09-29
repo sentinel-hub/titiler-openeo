@@ -63,36 +63,41 @@ def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
 
 
 @pytest.fixture
-def app_with_auth(monkeypatch, store_path, store_type) -> TestClient:
-    """Create App with authentication for testing."""
+def main_module(monkeypatch, store_path, store_type):
+    """Import ``titiler.openeo.main`` afresh for the current ``store_type``.
+
+    The module builds its stores at import time from the environment, so it must
+    be reloaded for the ``store_type`` parametrization to take effect. Being one
+    fixture, apps built in the same test share the same stores.
+    """
+    import importlib
+
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
 
-    from titiler.openeo.main import create_app
-    from titiler.openeo.services import get_store
+    import titiler.openeo.main as module
 
-    app = create_app()
+    return importlib.reload(module)
 
-    # Get the store from the path and type
-    store = get_store(f"{store_path}")
 
-    # Override the auth dependency with the mock auth using the store
-    mock_auth = MockAuth(store=store)
+@pytest.fixture
+def app_with_auth(main_module) -> TestClient:
+    """Create App with authentication for testing."""
+    app = main_module.create_app()
+
+    # Override the auth dependency with the mock auth using the app's own store
+    mock_auth = MockAuth(store=main_module.service_store)
     app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
 
     return TestClient(app)
 
 
 @pytest.fixture
-def app_no_auth(monkeypatch, store_path, store_type) -> TestClient:
+def app_no_auth(monkeypatch, main_module) -> TestClient:
     """Create App without authentication for testing."""
-    monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
-    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
     monkeypatch.setenv("TITILER_OPENEO_REQUIRE_AUTH", "false")
 
-    from titiler.openeo.main import create_app
-
-    return TestClient(create_app())
+    return TestClient(main_module.create_app())
 
 
 class MockAuth(Auth):
