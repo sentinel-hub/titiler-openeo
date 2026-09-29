@@ -40,8 +40,7 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
 
     assert "processes" in body
     # We seeded 4 entries for test_user; offset=1, limit=2 should yield 2
-    # but local stores may be empty when instantiated outside app context. Just ensure no crash and user scoping.
-    assert len(body["processes"]) <= 2
+    assert len(body["processes"]) == 2
 
     for proc in body["processes"]:
         assert proc["id"] in {f"udp-{i}" for i in range(4)}

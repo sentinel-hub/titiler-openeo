@@ -80,9 +80,17 @@ class DynamicCacheControlMiddleware:
             if message["type"] == "http.response.start":
                 headers = dict(message["headers"])
                 if b"cache-control" not in (h.lower() for h in headers.keys()):
+                    # Only successful responses get the path-based policy: an
+                    # error (for example a 401 on a private tile) is never
+                    # cacheable.
+                    header = (
+                        cache_header
+                        if 200 <= message["status"] < 300
+                        else self.settings.cache_default
+                    )
                     message["headers"] = [
                         *message["headers"],
-                        [b"cache-control", cache_header.encode()],
+                        [b"cache-control", header.encode()],
                     ]
 
             await send(message)

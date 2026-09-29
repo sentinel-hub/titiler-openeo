@@ -47,6 +47,7 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
+    cache_tiles_private: str = "private, max-age=3600"
     load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
 
     def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
@@ -88,6 +89,40 @@ class EndpointsFactory(BaseFactory):
         load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
+
+    def _prepare_service_process(self, process: Dict[str, Any], user) -> None:
+        """Validate a service process graph and prepare it for storage, in place.
+
+        Shared by service creation and update so both apply the same checks.
+        """
+        # Inline any referenced UDPs up front so the stored service graph is
+        # self-contained: XYZ tiles are rendered later without an
+        # authenticated user, so they can't look UDPs up themselves.
+        if process.get("process_graph"):
+            process["process_graph"] = self._resolve_udp_references(
+                process["process_graph"], user
+            )
+
+        try:
+            # Parse and validate process graph structure
+            parsed_graph = OpenEOProcessGraph(pg_data=process)
+
+            # Check if all processes exist in registry
+            for node in parsed_graph.nodes:
+                process_id = node[1].get("process_id")
+                if process_id and process_id not in self.process_registry[None]:
+                    raise InvalidProcessGraph(
+                        f"Process '{process_id}' not found in registry"
+                    )
+
+            # Try to create callable to validate parameter types
+            parsed_graph.to_callable(process_registry=self.process_registry)
+
+        except Exception as e:
+            raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+
+        for node in self.get_load_nodes(process["process_graph"]):
+            self.overwrite_spatial_extent_without_parameters(node)
 
     def _parse_query_parameters(self, request: Request) -> dict:
         """Parse query parameters from request, handling JSON and simple types."""
@@ -671,9 +706,19 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Lists all information about a secondary web service."""
+            from titiler.openeo.services.auth import get_scope
+
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # Other users can read the metadata of public services only (for
+            # example to show a shared service). Bearer auth is still required.
+            if (
+                service.get("user_id") != user.user_id
+                and get_scope(service.get("configuration")) != "public"
+            ):
+                raise HTTPException(403, "User not authorized to read this service")
 
             return {
                 **service,
@@ -1108,34 +1153,6 @@ class EndpointsFactory(BaseFactory):
             """Creates a new secondary web service."""
             service_def = body.model_dump()
 
-            # Inline any referenced UDPs up front so the stored service graph is
-            # self-contained: XYZ tiles are rendered later without an
-            # authenticated user, so they can't look UDPs up themselves.
-            if isinstance(service_def.get("process"), dict) and service_def[
-                "process"
-            ].get("process_graph"):
-                service_def["process"]["process_graph"] = self._resolve_udp_references(
-                    service_def["process"]["process_graph"], user
-                )
-
-            try:
-                # Parse and validate process graph structure
-                parsed_graph = OpenEOProcessGraph(pg_data=service_def["process"])
-
-                # Check if all processes exist in registry
-                for node in parsed_graph.nodes:
-                    process_id = node[1].get("process_id")
-                    if process_id and process_id not in self.process_registry[None]:
-                        raise InvalidProcessGraph(
-                            f"Process '{process_id}' not found in registry"
-                        )
-
-                # Try to create callable to validate parameter types
-                parsed_graph.to_callable(process_registry=self.process_registry)
-
-            except Exception as e:
-                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
-
             # Check process and type are present
             if not body.process or not body.type:
                 raise HTTPException(
@@ -1143,8 +1160,7 @@ class EndpointsFactory(BaseFactory):
                     detail="Both 'process' and 'type' fields are required.",
                 )
 
-            for node in self.get_load_nodes(service_def["process"]["process_graph"]):
-                self.overwrite_spatial_extent_without_parameters(node)
+            self._prepare_service_process(service_def["process"], user)
 
             service_id = self.services_store.add_service(user.user_id, service_def)
             service = self.services_store.get_service(service_id)
@@ -1244,37 +1260,33 @@ class EndpointsFactory(BaseFactory):
             if existing.get("user_id") != user.user_id:
                 raise HTTPException(403, "User not authorized to update this service")
 
-            # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
-            if body:
-                update_data = {}
-                # Only include non-None fields from the update
-                body_data = body.model_dump(exclude_none=True)
+            # Start from the stored service. `id` and `user_id` are record
+            # fields added by get_service, not part of the service definition.
+            update_data = {
+                k: v for k, v in existing.items() if k not in ("id", "user_id")
+            }
 
-                # Start with existing service data
-                update_data = existing.copy()
-                # Remove id since it's a special field from get_service
-                if "id" in update_data:
-                    del update_data["id"]
+            # Only fields present in the request change the stored service.
+            body_data = body.model_dump(exclude_none=True) if body else {}
 
-                # Update with any new values provided
-                update_data.update(body_data)
+            # `configuration` is merged key by key, so a partial update does
+            # not drop keys it does not repeat (for example `scope`). A key
+            # set to null is removed.
+            if "configuration" in body_data:
+                configuration = {
+                    **(existing.get("configuration") or {}),
+                    **body_data.pop("configuration"),
+                }
+                update_data["configuration"] = {
+                    k: v for k, v in configuration.items() if v is not None
+                }
 
-                # A PATCH can introduce a UDP reference that wasn't there at
-                # creation time, so resolve it here too -- same reason as in
-                # openeo_service_create: XYZ tiles render without an
-                # authenticated user and can't look the UDP up themselves.
-                if isinstance(body_data.get("process"), dict) and body_data[
-                    "process"
-                ].get("process_graph"):
-                    update_data["process"]["process_graph"] = (
-                        self._resolve_udp_references(
-                            update_data["process"]["process_graph"], user
-                        )
-                    )
-            else:
-                update_data = existing
-                if "id" in update_data:
-                    del update_data["id"]
+            # A new process gets the same checks and preparation as on
+            # creation (UDP inlining, validation, spatial extent rewrite).
+            if "process" in body_data:
+                self._prepare_service_process(body_data["process"], user)
+
+            update_data.update(body_data)
 
             self.services_store.update_service(user.user_id, service_id, update_data)
             return Response(status_code=204)
@@ -1516,7 +1528,10 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate_optional),
         ):
             """Create map tile."""
-            from titiler.openeo.services.auth import ServiceAuthorizationManager
+            from titiler.openeo.services.auth import (
+                ServiceAuthorizationManager,
+                get_scope,
+            )
 
             service = self.services_store.get_service(service_id)
             if service is None:
@@ -1525,6 +1540,9 @@ class EndpointsFactory(BaseFactory):
             # Authorize service access
             auth_manager = ServiceAuthorizationManager()
             auth_manager.authorize(service, user)
+
+            if service.get("enabled") is False:
+                raise HTTPException(404, f"Service is disabled: {service_id}")
 
             # Get service configuration
             configuration = service.get("configuration") or {}
@@ -1609,4 +1627,10 @@ class EndpointsFactory(BaseFactory):
             )
 
             img = pg_callable(named_parameters=parameters)
-            return Response(img.data, media_type=media_type)
+
+            # Tiles of a non-public service must not be stored by shared caches.
+            headers = {}
+            if get_scope(configuration) != "public":
+                headers["Cache-Control"] = self.cache_tiles_private
+
+            return Response(img.data, media_type=media_type, headers=headers)

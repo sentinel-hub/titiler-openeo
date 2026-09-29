@@ -26,6 +26,57 @@ from fastapi import HTTPException
 
 from ..models.auth import User
 
+#: Accepted values of `configuration.scope`, compared case-insensitively.
+VALID_SCOPES = ("private", "restricted", "public")
+
+
+def get_scope(configuration: Optional[Dict[str, Any]]) -> str:
+    """Return the normalized access scope of a service configuration.
+
+    A missing scope is `public` (the documented default). A stored value that
+    is not one of `VALID_SCOPES` is treated as `private`, so a malformed row
+    fails closed instead of exposing the service.
+    """
+    scope = (configuration or {}).get("scope")
+    if scope is None:
+        return "public"
+    if isinstance(scope, str) and scope.strip().lower() in VALID_SCOPES:
+        return scope.strip().lower()
+    return "private"
+
+
+def validate_access_configuration(
+    configuration: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Validate and normalize the access keys of a service configuration.
+
+    `scope` must be one of `VALID_SCOPES` (any case) and is stored lowercase.
+    `authorized_users` must be a list of user ID strings. A `None` value is
+    left as is: on PATCH it means "remove this key".
+
+    Raises:
+        ValueError: if `scope` or `authorized_users` is invalid.
+    """
+    if not configuration:
+        return configuration
+
+    scope = configuration.get("scope")
+    if scope is not None:
+        if not isinstance(scope, str) or scope.strip().lower() not in VALID_SCOPES:
+            raise ValueError(
+                f"Invalid scope {scope!r}: must be one of {', '.join(VALID_SCOPES)}"
+            )
+        configuration = {**configuration, "scope": scope.strip().lower()}
+
+    authorized_users = configuration.get("authorized_users")
+    if authorized_users is not None and not (
+        isinstance(authorized_users, list)
+        and all(isinstance(u, str) for u in authorized_users)
+    ):
+        raise ValueError("authorized_users must be a list of user ID strings")
+
+    return configuration
+
 
 @define
 class ServiceAuthorizationManager:
@@ -87,7 +138,7 @@ class ServiceAuthorizationManager:
             ```
         """
         configuration = service.get("configuration") or {}
-        scope = configuration.get("scope", "public")
+        scope = get_scope(configuration)
 
         if scope == "private":
             if not user or user.user_id != service.get("user_id"):
@@ -100,7 +151,10 @@ class ServiceAuthorizationManager:
                 )
 
             authorized_users = configuration.get("authorized_users")
-            if authorized_users is not None and user.user_id not in authorized_users:
+            if authorized_users is not None and (
+                not isinstance(authorized_users, list)
+                or user.user_id not in authorized_users
+            ):
                 raise HTTPException(403, "User not authorized to access this service")
 
         # For scope == "public", no authentication needed

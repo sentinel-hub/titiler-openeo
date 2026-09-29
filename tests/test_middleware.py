@@ -21,6 +21,10 @@ def tile_endpoint(request):
     return PlainTextResponse("Tile data")
 
 
+def tile_error_endpoint(request):
+    return PlainTextResponse("Unauthorized", status_code=401)
+
+
 def services_endpoint(request):
     return PlainTextResponse("Services list")
 
@@ -36,6 +40,7 @@ def app():
         Route("/", homepage),
         Route("/static/file.js", static_file),
         Route("/services/xyz/123/tiles/0/0/0", tile_endpoint),
+        Route("/services/xyz/401/tiles/0/0/0", tile_error_endpoint),
         Route("/services/", services_endpoint),
         Route("/collections/", collections_endpoint),
     ]
@@ -52,6 +57,12 @@ def client(app):
 
 class TestCacheControlMiddleware:
     """Tests for DynamicCacheControlMiddleware."""
+
+    def test_error_response_not_cacheable(self, client):
+        """An error on a cacheable path gets the default (no-store) policy."""
+        response = client.get("/services/xyz/401/tiles/0/0/0")
+        assert response.status_code == 401
+        assert response.headers["cache-control"] == "no-store"
 
     def test_static_path_caching(self, client):
         """Static paths should get static caching headers."""

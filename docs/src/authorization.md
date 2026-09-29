@@ -4,6 +4,8 @@ TiTiler OpenEO implements a flexible service authorization mechanism that contro
 
 **Important scope of this feature:** `scope` governs only the tile-serving endpoint (`GET /services/xyz/{service_id}/tiles/{z}/{x}/{y}`, i.e. what `service.url` points to). It does **not** apply to `GET /services/{service_id}` or any other `/services*` management endpoint — those always require Bearer authentication, matching the openEO spec exactly (`security: [Bearer: []]`, with no anonymous variant, unlike `GET /service_types`). This distinction between the always-private control plane (`/services/{service_id}`) and the back-end-defined data plane (`service.url`) is intentional in the spec, not an oversight — see [ADR 0003](../adr/0003-service-access-control.md) for the full writeup, including an earlier, incorrect attempt to make the metadata endpoint follow `scope` as well (reverted).
 
+`GET /services/{service_id}` also checks ownership: the owner can always read the service; another authenticated user can read it only if its scope is `public` (for example, to show a shared service). Other users get `403`. Anonymous requests still get `401` for every scope ([ADR 0003 §8](../adr/0003-service-access-control.md#8-amendment-2026-09-29--ownership-check-on-get-servicesservice_id)). `PATCH` and `DELETE` are for the owner only.
+
 **Note on the openEO spec:** the openEO API specification does not define any access-control property for secondary web services at all — `configuration.scope` is entirely a TiTiler OpenEO extension governing only how titiler-openeo happens to serve tiles. Whether this is worth proposing upstream, and if so in what form, is an open question currently being discussed with the openEO maintainers; see [ADR 0003](../adr/0003-service-access-control.md) for the current status.
 
 ## Scopes
@@ -35,6 +37,24 @@ Authorization is configured through the service configuration object when creati
 |-----------|------|-------------|
 | `scope` | string | Access scope: `private`, `restricted`, or `public` |
 | `authorized_users` | array | Optional list of user IDs allowed to access a restricted service |
+
+### Validation
+
+- `scope` is case-insensitive and is stored in lowercase (`"Private"` is stored as `"private"`).
+- A `scope` that is not `private`, `restricted` or `public` is refused with `400`. The same applies to an `authorized_users` value that is not a list of strings.
+- If a stored service has a `scope` value that is not valid (for example, a row written outside the API), the service is treated as `private`.
+
+### Updates (`PATCH`)
+
+`configuration` is merged key by key. The keys in the request replace the stored keys, and all other stored keys stay. For example, `{"configuration": {"tile_size": 512}}` keeps the stored `scope`. To remove a key, set it to `null`. A new `process` gets the same validation as on creation.
+
+### Disabled services
+
+A service with `"enabled": false` serves no tiles: the tile endpoint returns `404`.
+
+### Caching
+
+Tiles of a `public` service use the `TITILER_OPENEO_API_CACHE_TILES` policy (default `public, max-age=3600`). Tiles of a `private` or `restricted` service use `TITILER_OPENEO_API_CACHE_TILES_PRIVATE` (default `private, max-age=3600`), so shared caches do not store them. Error responses are never cacheable (`no-store`).
 
 ## Implementation
 

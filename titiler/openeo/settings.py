@@ -180,6 +180,8 @@ class ApiSettings(BaseSettings):
     cache_tiles: str = (
         "public, max-age=3600"  # For XYZ tile endpoints (browser cacheable)
     )
+    # For XYZ tiles of private/restricted services (never in shared caches)
+    cache_tiles_private: str = "private, max-age=3600"
     cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
     cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""

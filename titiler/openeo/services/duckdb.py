@@ -120,7 +120,7 @@ class DuckDBStore(ServicesStore):
                 INSERT INTO services (service_id, user_id, service)
                 VALUES (?, ?, ?)
                 """,
-                [service_id, user_id, service],
+                [service_id, user_id, _serialize_json(service)],
             )
         return service_id
 
@@ -175,7 +175,7 @@ class DuckDBStore(ServicesStore):
                 SET service = ?
                 WHERE service_id = ?
                 """,
-                [service, item_id],
+                [_serialize_json(service), item_id],
             )
 
         return item_id
