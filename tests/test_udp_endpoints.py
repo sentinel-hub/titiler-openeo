@@ -1,36 +1,12 @@
 """Tests for UDP listing endpoint."""
 
 import pytest
-from fastapi import Header
-from starlette.testclient import TestClient
-
-from titiler.openeo.auth import Auth, User
-from titiler.openeo.services import get_udp_store
-
-
-class MockAuth(Auth):
-    """Mock authentication class for testing."""
-
-    def __init__(self, store):
-        """Initialize auth with store."""
-        self.store = store
-
-    def login(self, authorization: str = Header(default=None)):
-        """Mock login method."""
-        return {"access_token": "mock_token"}
-
-    def validate(self, authorization: str = Header(default=None)) -> User:
-        """Mock validate method."""
-        return User(user_id="test_user")
 
 
 def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store_type):
     """List returns user-scoped UDPs with pagination and trimmed fields."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
-    udp_store = get_udp_store(str(store_path))
+    udp_store = client.app.endpoints.udp_store
 
     # Seed UDPs for the authenticated user
     for idx in range(4):
@@ -83,9 +59,6 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     """List should not crash when created_at mixes datetime and string."""
     from titiler.openeo.services.local import LocalUdpStore
 
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -118,26 +91,9 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     assert "udpdt" in ids and "udpstr" in ids
 
 
-@pytest.fixture
-def app_with_auth_sqlalchemy(monkeypatch) -> TestClient:
-    """App configured with SQLAlchemy store to reproduce whitespace ID bug."""
-    store_url = "sqlite:///:memory:"
-    monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
-    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", store_url)
-
-    from titiler.openeo.main import create_app
-    from titiler.openeo.services import get_store
-
-    app = create_app()
-    store = get_store(store_url)
-    mock_auth = MockAuth(store=store)
-    app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
-    return TestClient(app)
-
-
-def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
+def test_udp_list_rejects_whitespace_ids(app_with_auth):
     """Creation accepts whitespace IDs but listing fails validation (current bug)."""
-    client = app_with_auth_sqlalchemy
+    client = app_with_auth
 
     udp_id = "Cyanobacteria Chlorophyll-a Detection with NDCI"
     body = {
@@ -165,9 +121,6 @@ def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
 
 def test_udp_get_returns_full_metadata(app_with_auth, store_path, store_type):
     """Detail endpoint returns full UDP including optional fields."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     # Use the same store instance the app is using to avoid isolation across stores
     udp_store = client.app.endpoints.udp_store
@@ -219,9 +172,6 @@ def test_udp_get_missing_or_wrong_user_returns_404(
     app_with_auth, store_path, store_type
 ):
     """Detail endpoint returns 404 for missing UDP or wrong user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -249,9 +199,6 @@ def test_udp_get_missing_or_wrong_user_returns_404(
 
 def test_udp_delete_success(app_with_auth, store_path, store_type):
     """Delete endpoint removes UDP for authenticated user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -282,9 +229,6 @@ def test_udp_delete_missing_or_wrong_user_returns_404(
     app_with_auth, store_path, store_type
 ):
     """Delete returns 404 for missing UDP or wrong user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -366,9 +310,6 @@ def test_validation_ignores_unresolvable_parameters(app_no_auth):
 
 def test_udp_put_creates_or_replaces(app_with_auth, store_path, store_type):
     """PUT should create or replace a UDP with ID from path."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -410,9 +351,6 @@ def test_udp_put_creates_or_replaces(app_with_auth, store_path, store_type):
 
 def test_udp_put_rejects_unknown_process(app_with_auth, store_path, store_type):
     """PUT returns 422 for invalid process graph (unknown process)."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     body = {
         "id": "udp-bad",
@@ -431,9 +369,6 @@ def test_udp_put_rejects_unknown_process(app_with_auth, store_path, store_type):
 
 def test_udp_put_rejects_missing_required_param(app_with_auth, store_path, store_type):
     """PUT returns 422 when required parameter is missing."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     body = {
         "id": "udp-missing",
