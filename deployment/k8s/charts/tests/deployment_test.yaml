@@ -48,3 +48,25 @@ tests:
             capabilities:
               drop:
                 - ALL
+
+  - it: should expose the database pool settings as environment variables
+    set:
+      database.pool.size: 3
+      database.pool.maxOverflow: 4
+      database.pool.prePing: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_SIZE
+            value: "3"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_MAX_OVERFLOW
+            value: "4"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_PRE_PING
+            value: "true"

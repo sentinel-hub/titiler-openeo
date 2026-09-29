@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any, Dict, List, Optional
 
 from attrs import define, field
@@ -21,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
+from ..settings import StoreSettings
 from .base import ServicesStore, UdpStore
 
 
@@ -88,6 +90,39 @@ class UdpDefinition(Base):
     )
 
 
+_engines: Dict[str, Any] = {}
+_engines_lock = Lock()
+
+
+def _get_engine(store: str) -> Any:
+    """Return the engine for a store URL.
+
+    Server databases get one engine per URL and process, shared by the services
+    and UDP stores, so the two do not each hold a connection pool against the
+    same database. SQLite gets a fresh engine each time: an in-memory database
+    exists only within its connection, so sharing would leak data between
+    stores.
+    """
+    if store == "sqlite:///:memory:":
+        # the same connection object must be shared among threads,
+        # since the database exists only within the scope of that connection.
+        return create_engine(
+            store,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    if store.startswith("sqlite"):
+        return create_engine(store)
+
+    with _engines_lock:
+        engine = _engines.get(store)
+        if engine is None:
+            engine = _engines[store] = create_engine(
+                store, **StoreSettings().engine_kwargs()
+            )
+        return engine
+
+
 @define(kw_only=True)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
@@ -98,16 +133,7 @@ class SQLAlchemyStore(ServicesStore):
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
-        # Check if the store is a sqlite in memory database
-        kwargs = {}
-        if self.store == "sqlite:///:memory:":
-            # the same connection object must be shared among threads,
-            # since the database exists only within the scope of that connection.
-            kwargs = {
-                "connect_args": {"check_same_thread": False},
-                "poolclass": StaticPool,
-            }
-        self._engine = create_engine(self.store, **kwargs)
+        self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
 
         # Create tables if they don't exist
@@ -286,13 +312,7 @@ class SQLAlchemyUdpStore(UdpStore):
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
-        kwargs = {}
-        if self.store == "sqlite:///:memory:":
-            kwargs = {
-                "connect_args": {"check_same_thread": False},
-                "poolclass": StaticPool,
-            }
-        self._engine = create_engine(self.store, **kwargs)
+        self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
         Base.metadata.create_all(self._engine)
 
