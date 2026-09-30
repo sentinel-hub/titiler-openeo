@@ -64,20 +64,27 @@ def store_path(tmp_path, store_type: StoreType) -> Union[Path, str]:
 
 @pytest.fixture
 def main_module(monkeypatch, store_path, store_type):
-    """Import ``titiler.openeo.main`` afresh for the current ``store_type``.
+    """``titiler.openeo.main`` wired to a fresh store of the current ``store_type``.
 
-    The module builds its stores at import time from the environment, so it must
-    be reloaded for the ``store_type`` parametrization to take effect. Being one
-    fixture, apps built in the same test share the same stores.
+    The module builds its stores once, at import time, from the environment, so
+    the ``store_type`` parametrization would never take effect. Patch them on the
+    imported module instead of reloading it, which would run ``create_app()``
+    again. Being one fixture, apps built in the same test share the same stores.
     """
-    import importlib
-
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
 
     import titiler.openeo.main as module
+    from titiler.openeo.auth import get_auth
+    from titiler.openeo.services import get_store, get_udp_store
 
-    return importlib.reload(module)
+    service_store = get_store(f"{store_path}")
+    monkeypatch.setattr(module, "service_store", service_store)
+    monkeypatch.setattr(module, "udp_store", get_udp_store(f"{store_path}"))
+    monkeypatch.setattr(
+        module, "auth", get_auth(module.auth_settings, store=service_store)
+    )
+    return module
 
 
 @pytest.fixture
@@ -88,6 +95,11 @@ def app_with_auth(main_module) -> TestClient:
     # Override the auth dependency with the mock auth using the app's own store
     mock_auth = MockAuth(store=main_module.service_store)
     app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
+    # Tiles authenticate through `validate_optional`; without this override a
+    # private-scope tile test gets a 401 even when the code is right.
+    app.dependency_overrides[app.endpoints.auth.validate_optional] = (
+        mock_auth.validate_optional
+    )
 
     return TestClient(app)
 
@@ -114,6 +126,12 @@ class MockAuth(Auth):
     def validate(self, authorization: str = Header(default=None)) -> User:
         """Mock validate method."""
         return User(user_id="test_user")
+
+    def validate_optional(
+        self, authorization: str = Header(default=None)
+    ) -> Union[User, None]:
+        """Mock optional validation: anonymous without a header."""
+        return self.validate(authorization) if authorization else None
 
 
 @pytest.fixture

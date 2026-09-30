@@ -724,3 +724,14 @@ def test_store_returns_user_id(store_path):
     assert store.get_service(service_id)["user_id"] == "owner"
     assert store.get_user_services("owner")[0]["user_id"] == "owner"
     assert store.get_services()[0]["user_id"] == "owner"
+
+
+def test_store_is_chosen_by_scheme_before_file_suffix(tmp_path):
+    """`sqlite:///x.db` is SQLite, not DuckDB (review of #411)."""
+    from titiler.openeo.services import get_store, get_udp_store
+    from titiler.openeo.services.sqlalchemy import SQLAlchemyStore, SQLAlchemyUdpStore
+
+    url = f"sqlite:///{tmp_path / 'services.db'}"
+
+    assert isinstance(get_store(url), SQLAlchemyStore)
+    assert isinstance(get_udp_store(url), SQLAlchemyUdpStore)
