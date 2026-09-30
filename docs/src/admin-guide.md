@@ -139,14 +139,20 @@ Configure cache control headers:
 ```bash
 TITILER_OPENEO_API_CACHE_STATIC="public, max-age=3600"
 TITILER_OPENEO_API_CACHE_TILES="public, max-age=3600"
+# TITILER_OPENEO_API_CACHE_TILES_PRIVATE="private, max-age=3600"  # default: derived from CACHE_TILES
+TITILER_OPENEO_API_CACHE_TILE_ERRORS="private, max-age=60"
 TITILER_OPENEO_API_CACHE_DYNAMIC="no-cache"
 TITILER_OPENEO_API_CACHE_DEFAULT="no-store"
 ```
 
 - `CACHE_STATIC`: For static resources like CSS, JS files
-- `CACHE_TILES`: For XYZ tile endpoints (`/services/xyz/`), allowing browsers to cache tiles
+- `CACHE_TILES`: For XYZ tiles (`/services/xyz/`) of `public` services, allowing browsers and shared caches to cache tiles
+- `CACHE_TILES_PRIVATE`: For XYZ tiles that shared caches must not store: tiles of `private` and `restricted` services, and tiles whose process graph reads the caller (`_openeo_user`, `_openeo_tile_store`). **This replaces `CACHE_TILES` for these tiles.** When not set, it is `CACHE_TILES` with `public` changed to `private` (so `public, max-age=3600` gives `private, max-age=3600`, and `no-store` stays `no-store`)
+- `CACHE_TILE_ERRORS`: For XYZ tile `400` and `404` responses that do not depend on the caller (zoom level out of range, no data). Keep it short and `private`
 - `CACHE_DYNAMIC`: For dynamic API endpoints that need fresh data
-- `CACHE_DEFAULT`: Default policy for other endpoints
+- `CACHE_DEFAULT`: Default policy for other successful responses
+
+Other error responses (`401`, `403`, `5xx`, and a missing or disabled service) always get `no-store`, whatever these settings are.
 
 ## Troubleshooting
 

@@ -34,10 +34,15 @@ def get_scope(configuration: Optional[Dict[str, Any]]) -> str:
     """Return the normalized access scope of a service configuration.
 
     A missing scope is `public` (the documented default). A stored value that
-    is not one of `VALID_SCOPES` is treated as `private`, so a malformed row
-    fails closed instead of exposing the service.
+    is not one of `VALID_SCOPES`, or a configuration that is not a mapping, is
+    treated as `private`, so a malformed row fails closed instead of exposing
+    the service.
     """
-    scope = (configuration or {}).get("scope")
+    if configuration is None:
+        return "public"
+    if not isinstance(configuration, dict):
+        return "private"
+    scope = configuration.get("scope")
     if scope is None:
         return "public"
     if isinstance(scope, str) and scope.strip().lower() in VALID_SCOPES:
@@ -51,8 +56,9 @@ def validate_access_configuration(
     """Validate and normalize the access keys of a service configuration.
 
     `scope` must be one of `VALID_SCOPES` (any case) and is stored lowercase.
-    `authorized_users` must be a list of user ID strings. A `None` value is
-    left as is: on PATCH it means "remove this key".
+    It cannot be `None`: a missing scope means `public`, so removing it would
+    open the service. `authorized_users` must be a list of user ID strings;
+    a `None` value is left as is (on PATCH it means "remove this key").
 
     Raises:
         ValueError: if `scope` or `authorized_users` is invalid.
@@ -60,8 +66,8 @@ def validate_access_configuration(
     if not configuration:
         return configuration
 
-    scope = configuration.get("scope")
-    if scope is not None:
+    if "scope" in configuration:
+        scope = configuration["scope"]
         if not isinstance(scope, str) or scope.strip().lower() not in VALID_SCOPES:
             raise ValueError(
                 f"Invalid scope {scope!r}: must be one of {', '.join(VALID_SCOPES)}"
@@ -76,6 +82,24 @@ def validate_access_configuration(
         raise ValueError("authorized_users must be a list of user ID strings")
 
     return configuration
+
+
+def check_authorized_users_scope(configuration: Optional[Dict[str, Any]]) -> None:
+    """Refuse `authorized_users` on a service that is not `restricted`.
+
+    The list has an effect only on restricted services. Anywhere else it
+    would suggest a restriction that does not exist.
+
+    Raises:
+        ValueError: if `authorized_users` is set and the scope is not
+            `restricted`.
+    """
+    if (
+        configuration
+        and configuration.get("authorized_users") is not None
+        and get_scope(configuration) != "restricted"
+    ):
+        raise ValueError('authorized_users requires "scope": "restricted"')
 
 
 @define
@@ -137,12 +161,17 @@ class ServiceAuthorizationManager:
             auth_manager.authorize(service, current_user)
             ```
         """
+        # The owner always has access to their own service.
+        if user and user.user_id == service.get("user_id"):
+            return
+
         configuration = service.get("configuration") or {}
         scope = get_scope(configuration)
 
         if scope == "private":
-            if not user or user.user_id != service.get("user_id"):
+            if not user:
                 raise HTTPException(401, "Authentication required for private service")
+            raise HTTPException(403, "User not authorized to access this service")
 
         elif scope == "restricted":
             if not user:
@@ -156,5 +185,9 @@ class ServiceAuthorizationManager:
                 or user.user_id not in authorized_users
             ):
                 raise HTTPException(403, "User not authorized to access this service")
+
+        elif scope != "public":
+            # get_scope only returns known scopes; refuse anything else.
+            raise HTTPException(403, "User not authorized to access this service")
 
         # For scope == "public", no authentication needed

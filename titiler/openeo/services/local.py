@@ -5,6 +5,8 @@ NOTE: This should be used only for Testing Purposes.
 """
 
 import json
+import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +25,23 @@ def load_local_store_data(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         return {}, {}
 
     return data.get("services", {}), data.get("udp_definitions", {})
+
+
+def _write_store_file(path: str, data: Dict[str, Any]) -> None:
+    """Write the store file atomically.
+
+    The data is written to a temporary file in the same directory, then moved
+    over the store file. If serialization fails, the store file is unchanged.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, default=_json_default)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def _json_default(value: Any) -> Any:
@@ -139,8 +158,7 @@ class LocalServiceStore(ServicesStore):
 
         _, udp_definitions = load_local_store_data(self.path)
         data = {"services": self.store, "udp_definitions": udp_definitions}
-        with open(self.path, "w") as f:
-            json.dump(data, f, default=_json_default)
+        _write_store_file(self.path, data)
 
     def ping(self) -> None:
         """Verify the backing JSON file is readable. Raises on failure."""
@@ -274,8 +292,7 @@ class LocalUdpStore(UdpStore):
 
         services, _ = load_local_store_data(self.path)
         data = {"services": services, "udp_definitions": self.store}
-        with open(self.path, "w") as f:
-            json.dump(data, f, default=_json_default)
+        _write_store_file(self.path, data)
 
     @staticmethod
     def _parse_dt(value: Any) -> datetime:

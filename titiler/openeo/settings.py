@@ -180,8 +180,14 @@ class ApiSettings(BaseSettings):
     cache_tiles: str = (
         "public, max-age=3600"  # For XYZ tile endpoints (browser cacheable)
     )
-    # For XYZ tiles of private/restricted services (never in shared caches)
-    cache_tiles_private: str = "private, max-age=3600"
+    # For XYZ tiles that shared caches must not store: tiles of private or
+    # restricted services, and tiles that depend on the caller. When not set,
+    # it is `cache_tiles` with `public` changed to `private` (see
+    # `tiles_private_policy`).
+    cache_tiles_private: Optional[str] = None
+    # For 400/404 XYZ tile responses (zoom out of range, no data). Short and
+    # private: the same tile gives the same answer, but it can change.
+    cache_tile_errors: str = "private, max-age=60"
     cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
     cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""
@@ -191,6 +197,14 @@ class ApiSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_API_", env_file=".env", extra="ignore"
     )
+
+    @property
+    def tiles_private_policy(self) -> str:
+        """Cache-Control for tiles that shared caches must not store."""
+        if self.cache_tiles_private:
+            return self.cache_tiles_private
+        directives = [d.strip() for d in self.cache_tiles.split(",") if d.strip()]
+        return ", ".join("private" if d == "public" else d for d in directives)
 
     @field_validator("cors_origins")
     def parse_cors_origin(cls, v):

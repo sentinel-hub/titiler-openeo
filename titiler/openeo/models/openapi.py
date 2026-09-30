@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pydantic import AnyUrl, BaseModel, Field, RootModel, field_validator
 
-from ..services.auth import validate_access_configuration
+from ..services.auth import check_authorized_users_scope, validate_access_configuration
 
 OPENEO_VERSION = "1.2.0"
 
@@ -1630,7 +1630,7 @@ class ServiceInput(BaseModel):
         None,
         description="A description for the service.",
     )
-    enabled: Optional[bool] = Field(
+    enabled: bool = Field(
         True,
         description="Indicates whether the service is enabled or not.",
     )
@@ -1642,7 +1642,9 @@ class ServiceInput(BaseModel):
     @field_validator("configuration")
     @classmethod
     def _check_access_configuration(cls, value):
-        return validate_access_configuration(value)
+        value = validate_access_configuration(value)
+        check_authorized_users_scope(value)
+        return value
 
 
 class ServiceUpdateInput(BaseModel):

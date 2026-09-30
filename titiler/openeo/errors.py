@@ -98,6 +98,7 @@ class ExceptionHandler:
                 "code": "Internal" if exc.status_code >= 500 else "InvalidRequest",
                 "message": exc.detail,
             },
+            headers=getattr(exc, "headers", None),
         )
 
     def general_exception_handler(
@@ -113,6 +114,9 @@ class ExceptionHandler:
         https://github.com/Open-EO/openeo-api/blob/master/errors.json).
         """
         self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
+        # This handler runs outside the app middleware, so the cache-control
+        # middleware does not see its responses: set the header here.
+        headers = {"Cache-Control": "no-store"}
         if isinstance(exc, (ValueError, TypeError)):
             return JSONResponse(
                 status_code=400,
@@ -120,6 +124,7 @@ class ExceptionHandler:
                     "code": "InvalidRequest",
                     "message": str(exc),
                 },
+                headers=headers,
             )
         return JSONResponse(
             status_code=500,
@@ -127,6 +132,7 @@ class ExceptionHandler:
                 "code": "Internal",
                 "message": f"Server error: {exc}",
             },
+            headers=headers,
         )
 
 

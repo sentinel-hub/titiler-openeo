@@ -299,7 +299,9 @@ ownership; `GET` did not.
 
 - The owner can always read the service.
 - Another authenticated user can read it only if its scope is `public`. Otherwise the
-  endpoint returns `403`.
+  endpoint returns `403`. This includes the users that a `restricted` service lets
+  fetch tiles: tile access does not give access to the service definition.
+- A non-owner never sees `configuration.authorized_users`.
 
 This is not "the control plane follows `scope`" in the sense §7 rejects: nothing
 becomes anonymous. `scope` only decides whether a non-owner may read the record. We
@@ -309,10 +311,15 @@ shared public service owned by another user; an owner-only check would break tha
 ### Related hardening in the same change
 
 - `configuration.scope` is validated on create and update (case-insensitive, stored
-  lowercase; unknown values are refused). A stored value that is not valid is treated
-  as `private` (fail closed). `authorized_users` must be a list of strings.
+  lowercase; unknown values and `null` are refused). A stored value that is not valid
+  is treated as `private` (fail closed). `authorized_users` must be a list of strings,
+  and is accepted only on `restricted` services.
 - `PATCH` merges `configuration` key by key, so a partial update no longer drops
-  `scope`. A new `process` gets the same validation as on creation.
-- Tiles of non-public services are sent with `Cache-Control: private`, and error
-  responses are sent with `no-store`, so shared caches do not store them.
+  `scope`, and writes only the fields in the request. A new `process` gets the same
+  validation as on creation.
+- The owner always has access to their own service's tiles. An authenticated
+  non-owner who is refused gets `403`; `401` is only for anonymous requests.
+- Tiles of non-public services, and tiles whose graph reads the caller, are sent
+  with a private Cache-Control policy. Authentication errors and server errors are
+  sent with `no-store`, so shared caches do not store them.
 - The tile endpoint refuses a service with `"enabled": false`.
