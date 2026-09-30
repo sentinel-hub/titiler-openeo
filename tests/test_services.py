@@ -1,5 +1,6 @@
 """Test titiler.openeo services."""
 
+from copy import deepcopy
 from typing import Any, Union
 
 from fastapi import Header
@@ -315,7 +316,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
     scope_configs = {
         "private": {
             "scope": "private",
-            "expected_status": {"owner": 200, "authenticated": 401, "anonymous": 401},
+            "expected_status": {"owner": 200, "authenticated": 403, "anonymous": 401},
         },
         "restricted": {
             "scope": "restricted",
@@ -377,7 +378,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
         ] = test_auth.validate_optional
 
         # Create service with specific scope and authorized users
-        service_input = base_service.copy()
+        service_input = deepcopy(base_service)
         service_input["configuration"] = service_input.get("configuration", {})
         service_input["configuration"]["scope"] = config["scope"]
         if "authorized_users" in config:

@@ -3,7 +3,7 @@
 import json
 import logging
 from copy import deepcopy
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 import morecantile
 import pyproj
@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from pydantic import ValidationError
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -21,19 +22,23 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
-from .errors import InvalidProcessGraph, ServiceUnavailable
+from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
+from .settings import ApiSettings
 from .stacapi import stacApiBackend
 from .udp_resolution import resolve_udp_references
 
 logger = logging.getLogger(__name__)
 
 STAC_VERSION = "1.0.0"
+
+#: Tile parameters whose value depends on the caller.
+CALLER_PARAMETERS = ("_openeo_user", "_openeo_tile_store")
 
 
 @define(kw_only=True)
@@ -47,6 +52,8 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
+    cache_tiles_private: str = ApiSettings.model_fields["cache_tiles_private"].default
+    cache_tile_errors: str = ApiSettings.model_fields["cache_tile_errors"].default
     load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
 
     def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
@@ -82,12 +89,96 @@ class EndpointsFactory(BaseFactory):
 
     def overwrite_spatial_extent_without_parameters(self, load_node):
         """Overwrite services Spatial Extent."""
-        if load_node["arguments"]["spatial_extent"] is None:
-            load_node["arguments"]["spatial_extent"] = {}
+        if "spatial_extent" not in (load_node.get("arguments") or {}):
+            raise InvalidProcessGraph(
+                f"Process '{load_node['process_id']}' requires a 'spatial_extent' argument"
+            )
 
         load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
+
+    def _prepare_service_process(self, process: Dict[str, Any], user) -> None:
+        """Validate a service process graph and prepare it for storage, in place.
+
+        Shared by service creation and update so both apply the same checks.
+        """
+        # Inline any referenced UDPs up front so the stored service graph is
+        # self-contained: XYZ tiles are rendered later without an
+        # authenticated user, so they can't look UDPs up themselves.
+        if process.get("process_graph"):
+            process["process_graph"] = self._resolve_udp_references(
+                process["process_graph"], user
+            )
+
+        try:
+            # Every node needs an `arguments` object; the tile endpoint reads it.
+            for node_id, node in (process.get("process_graph") or {}).items():
+                if not isinstance(node.get("arguments"), dict):
+                    raise InvalidProcessGraph(
+                        f"Node '{node_id}' must have an 'arguments' object"
+                    )
+
+            # Parse and validate process graph structure
+            parsed_graph = OpenEOProcessGraph(pg_data=process)
+
+            # Check if all processes exist in registry
+            for node in parsed_graph.nodes:
+                process_id = node[1].get("process_id")
+                if process_id and process_id not in self.process_registry[None]:
+                    raise InvalidProcessGraph(
+                        f"Process '{process_id}' not found in registry"
+                    )
+
+            # Try to create callable to validate parameter types
+            parsed_graph.to_callable(process_registry=self.process_registry)
+
+            for node in self.get_load_nodes(process["process_graph"]):
+                self.overwrite_spatial_extent_without_parameters(node)
+
+        except Exception as e:
+            raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+
+    @staticmethod
+    def _uses_caller_parameters(value: Any) -> bool:
+        """Return True if a process graph reads a caller-specific parameter.
+
+        A graph that reads `_openeo_user` or `_openeo_tile_store` can render a
+        different tile for each caller, whatever the service scope.
+        """
+        if isinstance(value, dict):
+            if value.get("from_parameter") in CALLER_PARAMETERS:
+                return True
+            return any(
+                EndpointsFactory._uses_caller_parameters(v) for v in value.values()
+            )
+        if isinstance(value, list):
+            return any(EndpointsFactory._uses_caller_parameters(v) for v in value)
+        return False
+
+    def _tile_cache_headers(
+        self, service: Dict[str, Any]
+    ) -> Tuple[Dict[str, str], Optional[Dict[str, str]]]:
+        """Return the headers of a tile, and of a tile error, for a service.
+
+        A tile of a non-public service must not go to a shared cache, and
+        `Vary` keeps users of one browser apart. A tile that can differ for
+        each caller (the graph reads the user or the tile store) is never
+        stored: a cached answer would replay a claim or release without
+        reaching the server. Errors are cacheable only when they are the same
+        for every caller; otherwise the error headers are `None` and the
+        middleware sends `no-store`.
+        """
+        from titiler.openeo.services.auth import get_scope
+
+        if self._uses_caller_parameters(service.get("process")):
+            return {"Cache-Control": "no-store", "Vary": "Authorization"}, None
+        if get_scope(service.get("configuration")) != "public":
+            return {
+                "Cache-Control": self.cache_tiles_private,
+                "Vary": "Authorization",
+            }, None
+        return {}, {"Cache-Control": self.cache_tile_errors}
 
     def _parse_query_parameters(self, request: Request) -> dict:
         """Parse query parameters from request, handling JSON and simple types."""
@@ -589,8 +680,10 @@ class EndpointsFactory(BaseFactory):
                         with open(self.default_services_file, "r") as f:
                             default_services_config = json.load(f)
 
-                        # Create each service using the service configuration
-                        for _, service_data in default_services_config[
+                        # Create each service using the service configuration.
+                        # An invalid entry is skipped, so it does not stop the
+                        # other services from being created.
+                        for name, service_data in default_services_config[
                             "services"
                         ].items():
                             # Extract just the service configuration, ignoring id and user_id
@@ -600,10 +693,17 @@ class EndpointsFactory(BaseFactory):
                                     "id"
                                 ]  # Remove the id as it will be generated
 
+                            try:
+                                body = openapi.ServiceInput(**service_config)
+                            except ValidationError as e:
+                                logger.error(
+                                    f"Skipping invalid default service {name!r}: {e}"
+                                )
+                                continue
+
                             # Create the service
-                            body = openapi.ServiceInput(**service_config)
                             self.services_store.add_service(
-                                user.user_id, body.model_dump()
+                                user.user_id, body.model_dump(mode="json")
                             )
 
                         # Reload services after adding defaults
@@ -657,6 +757,9 @@ class EndpointsFactory(BaseFactory):
                 401: {
                     "description": "The request could not be fulfilled since it was not authenticated.",
                 },
+                403: {
+                    "description": "The service is not public and the user is not its owner.",
+                },
                 404: {
                     "description": "The service with the specified identifier does not exist.",
                 },
@@ -671,9 +774,32 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Lists all information about a secondary web service."""
+            from titiler.openeo.services.auth import get_scope
+
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # Other users can read the metadata of public services only (for
+            # example to show a shared service). Bearer auth is still required.
+            if (
+                service.get("user_id") != user.user_id
+                and get_scope(service.get("configuration")) != "public"
+            ):
+                raise HTTPException(403, "User not authorized to read this service")
+
+            # The access list is for the owner only.
+            if service.get("user_id") != user.user_id and isinstance(
+                service.get("configuration"), dict
+            ):
+                service = {
+                    **service,
+                    "configuration": {
+                        k: v
+                        for k, v in service["configuration"].items()
+                        if k != "authorized_users"
+                    },
+                }
 
             return {
                 **service,
@@ -1106,35 +1232,7 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
-            service_def = body.model_dump()
-
-            # Inline any referenced UDPs up front so the stored service graph is
-            # self-contained: XYZ tiles are rendered later without an
-            # authenticated user, so they can't look UDPs up themselves.
-            if isinstance(service_def.get("process"), dict) and service_def[
-                "process"
-            ].get("process_graph"):
-                service_def["process"]["process_graph"] = self._resolve_udp_references(
-                    service_def["process"]["process_graph"], user
-                )
-
-            try:
-                # Parse and validate process graph structure
-                parsed_graph = OpenEOProcessGraph(pg_data=service_def["process"])
-
-                # Check if all processes exist in registry
-                for node in parsed_graph.nodes:
-                    process_id = node[1].get("process_id")
-                    if process_id and process_id not in self.process_registry[None]:
-                        raise InvalidProcessGraph(
-                            f"Process '{process_id}' not found in registry"
-                        )
-
-                # Try to create callable to validate parameter types
-                parsed_graph.to_callable(process_registry=self.process_registry)
-
-            except Exception as e:
-                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+            service_def = body.model_dump(mode="json")
 
             # Check process and type are present
             if not body.process or not body.type:
@@ -1143,8 +1241,7 @@ class EndpointsFactory(BaseFactory):
                     detail="Both 'process' and 'type' fields are required.",
                 )
 
-            for node in self.get_load_nodes(service_def["process"]["process_graph"]):
-                self.overwrite_spatial_extent_without_parameters(node)
+            self._prepare_service_process(service_def["process"], user)
 
             service_id = self.services_store.add_service(user.user_id, service_def)
             service = self.services_store.get_service(service_id)
@@ -1235,7 +1332,17 @@ class EndpointsFactory(BaseFactory):
             ),
             user=Depends(self.auth.validate),
         ):
-            """Updates an existing secondary web service."""
+            """Updates an existing secondary web service.
+
+            Only the fields in the request change. `configuration` is merged
+            key by key: keys that the request leaves out stay, and a key set to
+            `null` is removed. `scope` cannot be removed.
+            """
+            from titiler.openeo.services.auth import (
+                check_authorized_users_scope,
+                get_scope,
+            )
+
             # Get existing service
             existing = self.services_store.get_service(service_id)
             if not existing:
@@ -1244,37 +1351,46 @@ class EndpointsFactory(BaseFactory):
             if existing.get("user_id") != user.user_id:
                 raise HTTPException(403, "User not authorized to update this service")
 
-            # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
-            if body:
-                update_data = {}
-                # Only include non-None fields from the update
-                body_data = body.model_dump(exclude_none=True)
+            # Only fields present in the request are written: every store
+            # merges them into the stored service, so a concurrent update of
+            # another field is not overwritten with an old value.
+            update_data = (
+                body.model_dump(mode="json", exclude_none=True) if body else {}
+            )
 
-                # Start with existing service data
-                update_data = existing.copy()
-                # Remove id since it's a special field from get_service
-                if "id" in update_data:
-                    del update_data["id"]
+            # `configuration` is merged key by key, so a partial update does
+            # not drop keys it does not repeat (for example `scope`). A key
+            # set to null is removed.
+            if "configuration" in update_data:
+                body_configuration = update_data["configuration"]
+                stored = existing.get("configuration")
+                configuration = {
+                    **(stored if isinstance(stored, dict) else {}),
+                    **body_configuration,
+                }
+                configuration = {
+                    k: v for k, v in configuration.items() if v is not None
+                }
 
-                # Update with any new values provided
-                update_data.update(body_data)
+                # The access list applies to restricted services only: drop a
+                # stored one when the scope changes away from restricted, and
+                # refuse one sent in the request.
+                if (
+                    get_scope(configuration) != "restricted"
+                    and "authorized_users" not in body_configuration
+                ):
+                    configuration.pop("authorized_users", None)
+                try:
+                    check_authorized_users_scope(configuration)
+                except ValueError as e:
+                    raise HTTPException(400, str(e)) from e
 
-                # A PATCH can introduce a UDP reference that wasn't there at
-                # creation time, so resolve it here too -- same reason as in
-                # openeo_service_create: XYZ tiles render without an
-                # authenticated user and can't look the UDP up themselves.
-                if isinstance(body_data.get("process"), dict) and body_data[
-                    "process"
-                ].get("process_graph"):
-                    update_data["process"]["process_graph"] = (
-                        self._resolve_udp_references(
-                            update_data["process"]["process_graph"], user
-                        )
-                    )
-            else:
-                update_data = existing
-                if "id" in update_data:
-                    del update_data["id"]
+                update_data["configuration"] = configuration
+
+            # A new process gets the same checks and preparation as on
+            # creation (UDP inlining, validation, spatial extent rewrite).
+            if "process" in update_data:
+                self._prepare_service_process(update_data["process"], user)
 
             self.services_store.update_service(user.user_id, service_id, update_data)
             return Response(status_code=204)
@@ -1481,7 +1597,16 @@ class EndpointsFactory(BaseFactory):
                         "image/jpg": {},
                     },
                     "description": "Return an image.",
-                }
+                },
+                401: {
+                    "description": "The service is not public and the request is not authenticated.",
+                },
+                403: {
+                    "description": "The user is not allowed to access this service.",
+                },
+                404: {
+                    "description": "The service does not exist or is disabled, or the tile has no data.",
+                },
             },
             response_class=Response,
             operation_id="tile-service",
@@ -1526,18 +1651,30 @@ class EndpointsFactory(BaseFactory):
             auth_manager = ServiceAuthorizationManager()
             auth_manager.authorize(service, user)
 
+            if service.get("enabled") is False:
+                raise HTTPException(404, f"Service is disabled: {service_id}")
+
+            tile_headers, error_headers = self._tile_cache_headers(service)
+
             # Get service configuration
-            configuration = service.get("configuration") or {}
+            configuration = service.get("configuration")
+            if not isinstance(configuration, dict):
+                configuration = {}
             tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
             tilesize = configuration.get("tile_size", 256)
             tms = morecantile.tms.get(tilematrixset)
 
-            minzoom = configuration.get("minzoom") or tms.minzoom
-            maxzoom = configuration.get("maxzoom") or tms.maxzoom
+            minzoom = configuration.get("minzoom")
+            if minzoom is None:
+                minzoom = tms.minzoom
+            maxzoom = configuration.get("maxzoom")
+            if maxzoom is None:
+                maxzoom = tms.maxzoom
             if z < minzoom or z > maxzoom:
                 raise HTTPException(
                     400,
                     f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+                    headers=error_headers,
                 )
 
             process = deepcopy(service["process"])
@@ -1608,5 +1745,11 @@ class EndpointsFactory(BaseFactory):
                 # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
-            img = pg_callable(named_parameters=parameters)
-            return Response(img.data, media_type=media_type)
+            try:
+                img = pg_callable(named_parameters=parameters)
+            except NoDataAvailable as e:
+                if error_headers:
+                    e.headers = error_headers  # type: ignore[attr-defined]
+                raise
+
+            return Response(img.data, media_type=media_type, headers=tile_headers)

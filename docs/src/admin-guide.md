@@ -139,14 +139,20 @@ Configure cache control headers:
 ```bash
 TITILER_OPENEO_API_CACHE_STATIC="public, max-age=3600"
 TITILER_OPENEO_API_CACHE_TILES="public, max-age=3600"
+TITILER_OPENEO_API_CACHE_TILES_PRIVATE="private, max-age=3600"
+TITILER_OPENEO_API_CACHE_TILE_ERRORS="private, max-age=60"
 TITILER_OPENEO_API_CACHE_DYNAMIC="no-cache"
 TITILER_OPENEO_API_CACHE_DEFAULT="no-store"
 ```
 
 - `CACHE_STATIC`: For static resources like CSS, JS files
-- `CACHE_TILES`: For XYZ tile endpoints (`/services/xyz/`), allowing browsers to cache tiles
+- `CACHE_TILES`: For XYZ tiles (`/services/xyz/`) of `public` services, allowing browsers and shared caches to cache tiles
+- `CACHE_TILES_PRIVATE`: For XYZ tiles of `private` and `restricted` services. **This replaces `CACHE_TILES` for these tiles.** It must not allow shared caches (no `public`, no `s-maxage`). If you make `CACHE_TILES` stricter (for example `no-store`), set this one too
+- `CACHE_TILE_ERRORS`: For XYZ tile `400` and `404` responses that are the same for every caller (zoom level out of range, no data), on `public` services only. Keep it short and `private`. It is not used when `CACHE_TILES` contains `no-store`
 - `CACHE_DYNAMIC`: For dynamic API endpoints that need fresh data
-- `CACHE_DEFAULT`: Default policy for other endpoints
+- `CACHE_DEFAULT`: Default policy for other successful responses
+
+All other error responses get `no-store`, whatever these settings are. Tiles whose process graph reads the caller (`_openeo_user`, `_openeo_tile_store`) always get `no-store`.
 
 ## Troubleshooting
 

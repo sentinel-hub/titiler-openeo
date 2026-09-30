@@ -180,6 +180,12 @@ class ApiSettings(BaseSettings):
     cache_tiles: str = (
         "public, max-age=3600"  # For XYZ tile endpoints (browser cacheable)
     )
+    # For XYZ tiles of private or restricted services (never in shared caches)
+    cache_tiles_private: str = "private, max-age=3600"
+    # For XYZ tile errors that are the same for every caller (zoom out of
+    # range, no data) on public services. Ignored when `cache_tiles` has
+    # `no-store` (see `tile_errors_policy`).
+    cache_tile_errors: str = "private, max-age=60"
     cache_dynamic: str = "no-cache"  # For dynamic endpoints that need fresh data
     cache_default: str = "no-store"  # Default policy for other endpoints
     root_path: str = ""
@@ -189,6 +195,13 @@ class ApiSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_API_", env_file=".env", extra="ignore"
     )
+
+    @property
+    def tile_errors_policy(self) -> str:
+        """Cache-Control for tile errors that are the same for every caller."""
+        if "no-store" in self.cache_tiles.lower():
+            return "no-store"
+        return self.cache_tile_errors
 
     @field_validator("cors_origins")
     def parse_cors_origin(cls, v):
