@@ -6,6 +6,7 @@ NOTE: This should be used only for Testing Purposes.
 
 import json
 import os
+import stat
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -28,17 +29,33 @@ def load_local_store_data(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 
 def _write_store_file(path: str, data: Dict[str, Any]) -> None:
-    """Write the store file atomically.
+    """Write the store file without the risk of truncating it.
 
-    The data is written to a temporary file in the same directory, then moved
-    over the store file. If serialization fails, the store file is unchanged.
+    The data is serialized first, so a value that cannot be serialized never
+    touches the file. It is then written to a temporary file next to the real
+    store file (symlinks are followed) and moved over it, with the original
+    file mode. If the directory is not writable, the file is written in place.
     """
-    directory = os.path.dirname(os.path.abspath(path))
-    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    text = json.dumps(data, default=_json_default)
+
+    target = os.path.realpath(path)
+    try:
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".tmp")
+    except PermissionError:
+        with open(target, "w") as f:
+            f.write(text)
+        return
+
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(data, f, default=_json_default)
-        os.replace(tmp_path, path)
+            f.write(text)
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, target)
     except BaseException:
         os.unlink(tmp_path)
         raise

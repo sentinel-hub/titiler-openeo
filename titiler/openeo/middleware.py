@@ -55,20 +55,16 @@ class DynamicCacheControlMiddleware:
             return self.settings.cache_dynamic
         return self.settings.cache_default
 
-    def get_status_cache_header(
-        self, status: int, path_header: str, is_tile: bool
-    ) -> str:
+    def get_status_cache_header(self, status: int, path_header: str) -> str:
         """Get the cache control header for a response status.
 
-        Only successful responses get the path-based policy. A tile 400/404
-        (zoom out of range, no data) does not depend on the caller and gets a
-        short private policy. Every other error (for example a 401 on a
-        private tile, or a 5xx) is never stored.
+        Only successful responses get the path-based policy. Errors are never
+        stored. An endpoint that knows an error is the same for every caller
+        (for example a tile zoom level out of range) sets its own header,
+        which this middleware keeps.
         """
         if 200 <= status < 300:
             return path_header
-        if is_tile and status in (400, 404):
-            return self.settings.cache_tile_errors
         return "no-store"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -91,14 +87,13 @@ class DynamicCacheControlMiddleware:
             path = path[len(root_path) :] or "/"
 
         cache_header = self.get_cache_header(path)
-        is_tile = any(path.startswith(tile) for tile in self.tile_paths)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = dict(message["headers"])
                 if b"cache-control" not in (h.lower() for h in headers.keys()):
                     header = self.get_status_cache_header(
-                        message["status"], cache_header, is_tile
+                        message["status"], cache_header
                     )
                     message["headers"] = [
                         *message["headers"],

@@ -58,12 +58,11 @@ A service with `"enabled": false` serves no tiles: the tile endpoint returns `40
 
 ### Caching
 
-Tiles of a `public` service use the `TITILER_OPENEO_API_CACHE_TILES` policy (default `public, max-age=3600`). These tiles use `TITILER_OPENEO_API_CACHE_TILES_PRIVATE` instead, so shared caches do not store them:
+- Tiles of a `public` service use the `TITILER_OPENEO_API_CACHE_TILES` policy (default `public, max-age=3600`).
+- Tiles of a `private` or `restricted` service use `TITILER_OPENEO_API_CACHE_TILES_PRIVATE` (default `private, max-age=3600`), so shared caches do not store them. They also carry `Vary: Authorization`, so two users of one browser do not share cached tiles.
+- Tiles of any service whose process graph reads `_openeo_user` or `_openeo_tile_store` are never stored (`no-store`), whatever the scope: the answer can differ for each caller, and for tile assignment a cached answer would replay a claim or release without reaching the server.
 
-- tiles of a `private` or `restricted` service;
-- tiles of any service whose process graph reads `_openeo_user` or `_openeo_tile_store` (the tile can differ for each caller). These responses also carry `Vary: Authorization`.
-
-See the [admin guide](admin-guide.md#cache-control) for the defaults. Authentication errors, a missing or disabled service, and server errors are never cacheable (`no-store`).
+Errors are never stored (`no-store`), except a zoom level out of range (`400`) or no data (`404`) on a `public` service whose graph does not read the caller. These are the same for every caller and use `TITILER_OPENEO_API_CACHE_TILE_ERRORS`. See the [admin guide](admin-guide.md#cache-control).
 
 ## Implementation
 

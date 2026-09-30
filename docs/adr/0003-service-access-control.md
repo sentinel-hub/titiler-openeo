@@ -319,7 +319,8 @@ shared public service owned by another user; an owner-only check would break tha
   validation as on creation.
 - The owner always has access to their own service's tiles. An authenticated
   non-owner who is refused gets `403`; `401` is only for anonymous requests.
-- Tiles of non-public services, and tiles whose graph reads the caller, are sent
-  with a private Cache-Control policy. Authentication errors and server errors are
-  sent with `no-store`, so shared caches do not store them.
+- Tiles of non-public services are sent with a private Cache-Control policy and
+  `Vary: Authorization`. Tiles whose graph reads the caller are sent with
+  `no-store`. Errors are sent with `no-store`, except errors that are the same for
+  every caller on a public service (zoom out of range, no data).
 - The tile endpoint refuses a service with `"enabled": false`.

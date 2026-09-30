@@ -165,7 +165,9 @@ class ServiceAuthorizationManager:
         if user and user.user_id == service.get("user_id"):
             return
 
-        configuration = service.get("configuration") or {}
+        # get_scope gets the stored value as is: a malformed configuration
+        # (for example `[]` or `""`) is private, not public.
+        configuration = service.get("configuration")
         scope = get_scope(configuration)
 
         if scope == "private":
@@ -179,7 +181,8 @@ class ServiceAuthorizationManager:
                     401, "Authentication required for restricted service"
                 )
 
-            authorized_users = configuration.get("authorized_users")
+            # get_scope returns "restricted" only for a dict configuration.
+            authorized_users = configuration.get("authorized_users")  # type: ignore[union-attr]
             if authorized_users is not None and (
                 not isinstance(authorized_users, list)
                 or user.user_id not in authorized_users

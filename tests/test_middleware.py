@@ -65,26 +65,22 @@ class TestCacheControlMiddleware:
         assert response.headers["cache-control"] == "no-store"
 
     @pytest.mark.parametrize(
-        "status,is_tile,expected",
+        "status,expected",
         [
-            (200, True, "tile-policy"),
-            (400, True, "private, max-age=60"),
-            (404, True, "private, max-age=60"),
-            (401, True, "no-store"),
-            (403, True, "no-store"),
-            (500, True, "no-store"),
-            (404, False, "no-store"),
-            (500, False, "no-store"),
+            (200, "path-policy"),
+            (204, "path-policy"),
+            (400, "no-store"),
+            (401, "no-store"),
+            (403, "no-store"),
+            (404, "no-store"),
+            (500, "no-store"),
         ],
     )
-    def test_status_cache_header(self, monkeypatch, status, is_tile, expected):
+    def test_status_cache_header(self, monkeypatch, status, expected):
         """Errors ignore CACHE_DEFAULT, even when it is cacheable."""
         monkeypatch.setenv("TITILER_OPENEO_API_CACHE_DEFAULT", "public, max-age=600")
         middleware = DynamicCacheControlMiddleware(app=None)
-        assert (
-            middleware.get_status_cache_header(status, "tile-policy", is_tile)
-            == expected
-        )
+        assert middleware.get_status_cache_header(status, "path-policy") == expected
 
     def test_static_path_caching(self, client):
         """Static paths should get static caching headers."""

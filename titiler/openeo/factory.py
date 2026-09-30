@@ -3,7 +3,7 @@
 import json
 import logging
 from copy import deepcopy
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 import morecantile
 import pyproj
@@ -22,13 +22,14 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
-from .errors import InvalidProcessGraph, ServiceUnavailable
+from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
+from .settings import ApiSettings
 from .stacapi import stacApiBackend
 from .udp_resolution import resolve_udp_references
 
@@ -51,7 +52,8 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
-    cache_tiles_private: str = "private, max-age=3600"
+    cache_tiles_private: str = ApiSettings.model_fields["cache_tiles_private"].default
+    cache_tile_errors: str = ApiSettings.model_fields["cache_tile_errors"].default
     load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
 
     def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
@@ -153,6 +155,30 @@ class EndpointsFactory(BaseFactory):
         if isinstance(value, list):
             return any(EndpointsFactory._uses_caller_parameters(v) for v in value)
         return False
+
+    def _tile_cache_headers(
+        self, service: Dict[str, Any]
+    ) -> Tuple[Dict[str, str], Optional[Dict[str, str]]]:
+        """Return the headers of a tile, and of a tile error, for a service.
+
+        A tile of a non-public service must not go to a shared cache, and
+        `Vary` keeps users of one browser apart. A tile that can differ for
+        each caller (the graph reads the user or the tile store) is never
+        stored: a cached answer would replay a claim or release without
+        reaching the server. Errors are cacheable only when they are the same
+        for every caller; otherwise the error headers are `None` and the
+        middleware sends `no-store`.
+        """
+        from titiler.openeo.services.auth import get_scope
+
+        if self._uses_caller_parameters(service.get("process")):
+            return {"Cache-Control": "no-store", "Vary": "Authorization"}, None
+        if get_scope(service.get("configuration")) != "public":
+            return {
+                "Cache-Control": self.cache_tiles_private,
+                "Vary": "Authorization",
+            }, None
+        return {}, {"Cache-Control": self.cache_tile_errors}
 
     def _parse_query_parameters(self, request: Request) -> dict:
         """Parse query parameters from request, handling JSON and simple types."""
@@ -1312,7 +1338,10 @@ class EndpointsFactory(BaseFactory):
             key by key: keys that the request leaves out stay, and a key set to
             `null` is removed. `scope` cannot be removed.
             """
-            from titiler.openeo.services.auth import get_scope
+            from titiler.openeo.services.auth import (
+                check_authorized_users_scope,
+                get_scope,
+            )
 
             # Get existing service
             existing = self.services_store.get_service(service_id)
@@ -1343,15 +1372,18 @@ class EndpointsFactory(BaseFactory):
                     k: v for k, v in configuration.items() if v is not None
                 }
 
-                # The access list applies to restricted services only: refuse
-                # it on another scope, and drop a stored one when the scope
-                # changes away from restricted.
-                if get_scope(configuration) != "restricted":
-                    if body_configuration.get("authorized_users") is not None:
-                        raise HTTPException(
-                            400, 'authorized_users requires "scope": "restricted"'
-                        )
+                # The access list applies to restricted services only: drop a
+                # stored one when the scope changes away from restricted, and
+                # refuse one sent in the request.
+                if (
+                    get_scope(configuration) != "restricted"
+                    and "authorized_users" not in body_configuration
+                ):
                     configuration.pop("authorized_users", None)
+                try:
+                    check_authorized_users_scope(configuration)
+                except ValueError as e:
+                    raise HTTPException(400, str(e)) from e
 
                 update_data["configuration"] = configuration
 
@@ -1609,29 +1641,20 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate_optional),
         ):
             """Create map tile."""
-            from titiler.openeo.services.auth import (
-                ServiceAuthorizationManager,
-                get_scope,
-            )
-
-            # Errors about the service itself must not be cached: the service
-            # can be created, enabled or shared at any time.
-            no_store = {"Cache-Control": "no-store"}
+            from titiler.openeo.services.auth import ServiceAuthorizationManager
 
             service = self.services_store.get_service(service_id)
             if service is None:
-                raise HTTPException(
-                    404, f"Could not find service: {service_id}", headers=no_store
-                )
+                raise HTTPException(404, f"Could not find service: {service_id}")
 
             # Authorize service access
             auth_manager = ServiceAuthorizationManager()
             auth_manager.authorize(service, user)
 
             if service.get("enabled") is False:
-                raise HTTPException(
-                    404, f"Service is disabled: {service_id}", headers=no_store
-                )
+                raise HTTPException(404, f"Service is disabled: {service_id}")
+
+            tile_headers, error_headers = self._tile_cache_headers(service)
 
             # Get service configuration
             configuration = service.get("configuration")
@@ -1651,6 +1674,7 @@ class EndpointsFactory(BaseFactory):
                 raise HTTPException(
                     400,
                     f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+                    headers=error_headers,
                 )
 
             process = deepcopy(service["process"])
@@ -1721,15 +1745,11 @@ class EndpointsFactory(BaseFactory):
                 # parameters=args,  # Use built-in parameter substitution instead of manual
             )
 
-            img = pg_callable(named_parameters=parameters)
+            try:
+                img = pg_callable(named_parameters=parameters)
+            except NoDataAvailable as e:
+                if error_headers:
+                    e.headers = error_headers  # type: ignore[attr-defined]
+                raise
 
-            # Shared caches must not store a tile of a non-public service, or a
-            # tile that can differ for each caller.
-            headers = {}
-            if get_scope(service.get("configuration")) != "public":
-                headers["Cache-Control"] = self.cache_tiles_private
-            elif self._uses_caller_parameters(process):
-                headers["Cache-Control"] = self.cache_tiles_private
-                headers["Vary"] = "Authorization"
-
-            return Response(img.data, media_type=media_type, headers=headers)
+            return Response(img.data, media_type=media_type, headers=tile_headers)

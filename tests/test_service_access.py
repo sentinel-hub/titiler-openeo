@@ -289,6 +289,7 @@ def test_tile_cache_control_follows_scope(client):
     response = client.get(_tile(private_id), headers=OWNER)
     assert response.status_code == 200
     assert response.headers["cache-control"].startswith("private")
+    assert "Authorization" in response.headers["vary"]
 
     response = client.get(_tile(private_id))
     assert response.status_code == 401
@@ -433,7 +434,7 @@ def test_caller_dependent_tile_is_not_public(client):
 
     response = client.get(_tile(service_id), headers=OWNER)
     assert response.status_code == 200, response.text
-    assert not response.headers["cache-control"].startswith("public")
+    assert response.headers["cache-control"] == "no-store"
     assert "Authorization" in response.headers["vary"]
 
 
@@ -686,3 +687,122 @@ def test_authorize_refuses_unknown_scope(monkeypatch):
             {"user_id": "owner", "configuration": {}}, User(user_id="x")
         )
     assert exc.value.status_code == 403
+
+
+def _caller_dependent_process() -> dict:
+    process = deepcopy(TILE_SERVICE["process"])
+    process["process_graph"]["user_node"] = {
+        "process_id": "constant",
+        "arguments": {"x": {"from_parameter": "_openeo_user"}},
+    }
+    return process
+
+
+def test_caller_dependent_errors_are_not_stored(client):
+    """An error of a caller-dependent graph is never cached."""
+    service_id = _create(client, {"minzoom": 2}, process=_caller_dependent_process())
+
+    response = client.get(_tile(service_id), headers=OWNER)
+    assert response.status_code == 400
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    "configuration,process,expected",
+    [
+        ({"scope": "public"}, None, "private, max-age=60"),
+        ({"scope": "private"}, None, "no-store"),
+        ({"scope": "public"}, "caller", "no-store"),
+    ],
+)
+def test_no_data_error_cache(client, monkeypatch, configuration, process, expected):
+    """A no-data 404 is briefly cacheable only when it is the same for all."""
+    from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
+
+    from titiler.openeo.errors import NoDataAvailable
+
+    fields = {"process": _caller_dependent_process()} if process else {}
+    service_id = _create(client, configuration, **fields)
+
+    def no_data(**kwargs):
+        raise NoDataAvailable("There is no data available for the given extents.")
+
+    monkeypatch.setattr(
+        OpenEOProcessGraph, "to_callable", lambda self, **kwargs: no_data
+    )
+
+    response = client.get(_tile(service_id), headers=OWNER)
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == expected
+
+
+def test_tile_errors_follow_no_store_tiles(main_module, monkeypatch):
+    """A no-store CACHE_TILES also makes tile errors no-store."""
+    import importlib
+
+    monkeypatch.setenv("TITILER_OPENEO_API_CACHE_TILES", "no-store")
+    # main.py reads its settings at import time.
+    client = _make_client(importlib.reload(main_module))
+    service_id = _create(client, {"minzoom": 2})
+
+    response = client.get(_tile(service_id))
+    assert response.status_code == 400
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_cache_settings_defaults(monkeypatch):
+    from titiler.openeo.settings import ApiSettings
+
+    monkeypatch.setenv("TITILER_OPENEO_API_CACHE_TILES", "Public, s-maxage=600")
+    settings = ApiSettings()
+    # Not derived from CACHE_TILES.
+    assert settings.cache_tiles_private == "private, max-age=3600"
+    assert settings.tile_errors_policy == "private, max-age=60"
+
+
+@pytest.mark.parametrize("configuration", [[], "", 0, False, ["scope"]])
+def test_malformed_configuration_is_private(configuration):
+    manager = ServiceAuthorizationManager()
+    service = {"user_id": "owner", "configuration": configuration}
+
+    with pytest.raises(HTTPException) as exc:
+        manager.authorize(service, None)
+    assert exc.value.status_code == 401
+    manager.authorize(service, User(user_id="owner"))
+
+
+def test_store_write_follows_symlink_and_keeps_mode(tmp_path):
+    from titiler.openeo.services.local import _write_store_file
+
+    real = tmp_path / "data" / "services.json"
+    real.parent.mkdir()
+    real.write_text("{}")
+    real.chmod(0o640)
+    link = tmp_path / "services.json"
+    link.symlink_to(real)
+
+    _write_store_file(str(link), {"services": {}, "udp_definitions": {}})
+
+    assert link.is_symlink()
+    assert json.loads(real.read_text()) == {"services": {}, "udp_definitions": {}}
+    assert real.stat().st_mode & 0o777 == 0o640
+
+
+def test_store_write_in_read_only_directory(tmp_path):
+    import os
+
+    from titiler.openeo.services.local import _write_store_file
+
+    if os.geteuid() == 0:
+        pytest.skip("root can write to any directory")
+
+    directory = tmp_path / "ro"
+    directory.mkdir()
+    path = directory / "services.json"
+    path.write_text("{}")
+    directory.chmod(0o555)
+    try:
+        _write_store_file(str(path), {"services": {"a": 1}})
+        assert json.loads(path.read_text()) == {"services": {"a": 1}}
+    finally:
+        directory.chmod(0o755)

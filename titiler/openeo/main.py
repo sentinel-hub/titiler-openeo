@@ -141,7 +141,8 @@ def create_app():
         "process_registry": process_registry,
         "auth": auth,
         "default_services_file": backend_settings.default_services_file,
-        "cache_tiles_private": api_settings.tiles_private_policy,
+        "cache_tiles_private": api_settings.cache_tiles_private,
+        "cache_tile_errors": api_settings.tile_errors_policy,
     }
     if tile_store:
         factory_args["tile_store"] = tile_store

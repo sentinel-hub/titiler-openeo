@@ -72,6 +72,7 @@ class ExceptionHandler:
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
+            headers=getattr(exc, "headers", None),
         )
 
     def validation_exception_handler(
