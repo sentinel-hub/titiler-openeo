@@ -5,6 +5,9 @@ NOTE: This should be used only for Testing Purposes.
 """
 
 import json
+import os
+import stat
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +26,39 @@ def load_local_store_data(path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         return {}, {}
 
     return data.get("services", {}), data.get("udp_definitions", {})
+
+
+def _write_store_file(path: str, data: Dict[str, Any]) -> None:
+    """Write the store file without the risk of truncating it.
+
+    The data is serialized first, so a value that cannot be serialized never
+    touches the file. It is then written to a temporary file next to the real
+    store file (symlinks are followed) and moved over it, with the original
+    file mode. If the directory is not writable, the file is written in place.
+    """
+    text = json.dumps(data, default=_json_default)
+
+    target = os.path.realpath(path)
+    try:
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".tmp")
+    except PermissionError:
+        with open(target, "w") as f:
+            f.write(text)
+        return
+
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, target)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def _json_default(value: Any) -> Any:
@@ -139,8 +175,7 @@ class LocalServiceStore(ServicesStore):
 
         _, udp_definitions = load_local_store_data(self.path)
         data = {"services": self.store, "udp_definitions": udp_definitions}
-        with open(self.path, "w") as f:
-            json.dump(data, f, default=_json_default)
+        _write_store_file(self.path, data)
 
     def ping(self) -> None:
         """Verify the backing JSON file is readable. Raises on failure."""
@@ -274,8 +309,7 @@ class LocalUdpStore(UdpStore):
 
         services, _ = load_local_store_data(self.path)
         data = {"services": services, "udp_definitions": self.store}
-        with open(self.path, "w") as f:
-            json.dump(data, f, default=_json_default)
+        _write_store_file(self.path, data)
 
     @staticmethod
     def _parse_dt(value: Any) -> datetime:

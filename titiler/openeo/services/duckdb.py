@@ -55,7 +55,7 @@ class DuckDBStore(ServicesStore):
         with duckdb.connect(self.store) as con:
             result = con.execute(
                 """
-                SELECT service_id, service
+                SELECT service_id, service, user_id
                 FROM services
                 WHERE service_id = ?
                 """,
@@ -68,6 +68,7 @@ class DuckDBStore(ServicesStore):
             return {
                 "id": result[0],
                 **json.loads(result[1]),
+                "user_id": result[2],
             }
 
     def get_services(self, **kwargs) -> List[Dict]:
@@ -75,7 +76,7 @@ class DuckDBStore(ServicesStore):
         with duckdb.connect(self.store) as con:
             results = con.execute(
                 """
-                SELECT service_id, json(service)
+                SELECT service_id, json(service), user_id
                 FROM services
                 """
             ).fetchall()
@@ -84,6 +85,7 @@ class DuckDBStore(ServicesStore):
                 {
                     "id": result[0],
                     **json.loads(result[1]),
+                    "user_id": result[2],
                 }
                 for result in results
             ]
@@ -93,7 +95,7 @@ class DuckDBStore(ServicesStore):
         with duckdb.connect(self.store) as con:
             results = con.execute(
                 """
-                SELECT service_id, service::JSON
+                SELECT service_id, service::JSON, user_id
                 FROM services
                 WHERE user_id = ?
                 """,
@@ -104,6 +106,7 @@ class DuckDBStore(ServicesStore):
                 {
                     "id": result[0],
                     **json.loads(result[1]),
+                    "user_id": result[2],
                 }
                 for result in results
             ]
@@ -117,7 +120,7 @@ class DuckDBStore(ServicesStore):
                 INSERT INTO services (service_id, user_id, service)
                 VALUES (?, ?, ?)
                 """,
-                [service_id, user_id, service],
+                [service_id, user_id, _serialize_json(service)],
             )
         return service_id
 
@@ -172,7 +175,7 @@ class DuckDBStore(ServicesStore):
                 SET service = ?
                 WHERE service_id = ?
                 """,
-                [service, item_id],
+                [_serialize_json(service), item_id],
             )
 
         return item_id

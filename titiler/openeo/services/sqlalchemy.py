@@ -132,6 +132,7 @@ class SQLAlchemyStore(ServicesStore):
             return {
                 "id": result.service_id,
                 **result.service,
+                "user_id": result.user_id,
             }
 
     def get_services(self, **kwargs) -> List[Dict]:
@@ -143,6 +144,7 @@ class SQLAlchemyStore(ServicesStore):
                 {
                     "id": result.service_id,
                     **result.service,
+                    "user_id": result.user_id,
                 }
                 for result in results
             ]
@@ -160,6 +162,7 @@ class SQLAlchemyStore(ServicesStore):
                 {
                     "id": result.service_id,
                     **result.service,
+                    "user_id": result.user_id,
                 }
                 for result in results
             ]

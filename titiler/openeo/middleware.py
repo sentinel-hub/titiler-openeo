@@ -55,6 +55,18 @@ class DynamicCacheControlMiddleware:
             return self.settings.cache_dynamic
         return self.settings.cache_default
 
+    def get_status_cache_header(self, status: int, path_header: str) -> str:
+        """Get the cache control header for a response status.
+
+        Only successful responses get the path-based policy. Errors are never
+        stored. An endpoint that knows an error is the same for every caller
+        (for example a tile zoom level out of range) sets its own header,
+        which this middleware keeps.
+        """
+        if 200 <= status < 300:
+            return path_header
+        return "no-store"
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Process request/response.
 
@@ -80,9 +92,12 @@ class DynamicCacheControlMiddleware:
             if message["type"] == "http.response.start":
                 headers = dict(message["headers"])
                 if b"cache-control" not in (h.lower() for h in headers.keys()):
+                    header = self.get_status_cache_header(
+                        message["status"], cache_header
+                    )
                     message["headers"] = [
                         *message["headers"],
-                        [b"cache-control", cache_header.encode()],
+                        [b"cache-control", header.encode()],
                     ]
 
             await send(message)
