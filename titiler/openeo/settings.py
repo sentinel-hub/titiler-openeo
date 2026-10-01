@@ -326,6 +326,52 @@ class Sentinel2Settings(BaseSettings):
     )
 
 
+class StoreSettings(BaseSettings):
+    """Connection settings for the SQLAlchemy stores.
+
+    The services store and the UDP store share one engine, and so one pool, per
+    database URL and process. A deployment can therefore open up to
+    `replicas x (pool_size + max_overflow)` connections. Size these so that total
+    stays under the database's `max_connections`.
+
+    The pool settings do not apply to SQLite.
+    """
+
+    pool_size: int = Field(5, ge=1, description="Connections kept open per engine.")
+    max_overflow: int = Field(
+        10, ge=0, description="Extra connections an engine may open under load."
+    )
+    pool_timeout: float = Field(
+        30, gt=0, description="Seconds to wait for a free connection before failing."
+    )
+    pool_recycle: int = Field(
+        -1,
+        description=(
+            "Seconds after which a connection is replaced. Set it below the idle "
+            "timeout of any proxy or pooler in front of the database. -1 disables."
+        ),
+    )
+    pool_pre_ping: bool = Field(
+        False, description="Test a connection before use; drops stale ones."
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_STORE_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    def engine_kwargs(self) -> dict:
+        """Keyword arguments for `create_engine` on a server database."""
+        return {
+            "pool_size": self.pool_size,
+            "max_overflow": self.max_overflow,
+            "pool_timeout": self.pool_timeout,
+            "pool_recycle": self.pool_recycle,
+            "pool_pre_ping": self.pool_pre_ping,
+        }
+
+
 class SigningSettings(BaseSettings):
     """Which signer this deployment's assets need.
 

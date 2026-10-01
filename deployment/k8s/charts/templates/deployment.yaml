@@ -112,6 +112,18 @@ spec:
               value: {{ .Values.auth.oidc.description | quote }}
             {{- end }}
             {{- end }}
+            {{- with .Values.database.pool }}
+            - name: TITILER_OPENEO_STORE_POOL_SIZE
+              value: {{ .size | quote }}
+            - name: TITILER_OPENEO_STORE_MAX_OVERFLOW
+              value: {{ .maxOverflow | quote }}
+            - name: TITILER_OPENEO_STORE_POOL_TIMEOUT
+              value: {{ .timeout | quote }}
+            - name: TITILER_OPENEO_STORE_POOL_RECYCLE
+              value: {{ .recycle | quote }}
+            - name: TITILER_OPENEO_STORE_POOL_PRE_PING
+              value: {{ .prePing | quote }}
+            {{- end }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_STORE_URL" }}
             - name: {{ $key }}

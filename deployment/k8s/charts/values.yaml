@@ -172,6 +172,10 @@ enableTileStore: false
 postgresql:
   enabled: false
 
+  # Server `max_connections`. Empty keeps the Postgres default (100). Size it
+  # against `database.pool` below: `replicaCount x (size + maxOverflow)`.
+  maxConnections: ""
+
   image:
     # Official postgres image from the postgres community. Replaces the
     # previous bitnami subchart, whose images moved behind a paid
@@ -266,6 +270,20 @@ database:
     # full DSN via `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` above,
     # which bypasses this helper entirely.
     password: ""
+
+  # Connection pool for SQL databases (PostgreSQL). Every replica opens up to
+  # `size + maxOverflow` connections, so keep
+  # `replicaCount x (size + maxOverflow)` below the database's
+  # `max_connections`. With the bundled PostgreSQL (`postgresql.enabled`), set
+  # it with `postgresql.maxConnections` (default 100). For an external
+  # database, set it on the server (e.g. the provider's parameter group, or
+  # `postgresql.parameters.max_connections` in a CloudNativePG `Cluster`).
+  pool:
+    size: 5
+    maxOverflow: 10
+    timeout: 30  # seconds to wait for a free connection
+    recycle: -1  # seconds before a connection is replaced; -1 disables
+    prePing: false  # test connections before use
 
 securityContext:
   {}

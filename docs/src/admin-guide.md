@@ -62,6 +62,20 @@ TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
 ```
 
+#### Store Settings ([`StoreSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
+
+Connection pool for SQL stores such as PostgreSQL. They do not apply to SQLite, JSON or DuckDB.
+
+The services store and the UDP store share one pool per process. Each process can open up to `POOL_SIZE + MAX_OVERFLOW` connections, so keep `replicas x (POOL_SIZE + MAX_OVERFLOW)` below the database's `max_connections`.
+
+```bash
+TITILER_OPENEO_STORE_POOL_SIZE=5
+TITILER_OPENEO_STORE_MAX_OVERFLOW=10
+TITILER_OPENEO_STORE_POOL_TIMEOUT=30      # Seconds to wait for a free connection
+TITILER_OPENEO_STORE_POOL_RECYCLE=-1      # Seconds before a connection is replaced; -1 disables
+TITILER_OPENEO_STORE_POOL_PRE_PING=false  # Test a connection before use
+```
+
 #### Cache Settings ([`CacheSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L196))
 
 ```bash
