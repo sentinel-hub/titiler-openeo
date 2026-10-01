@@ -45,6 +45,18 @@ class DuckDBStore(ServicesStore):
                 """
             )
 
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    user_id VARCHAR,
+                    provider VARCHAR,
+                    session_id VARCHAR,
+                    started_at TIMESTAMP,
+                    PRIMARY KEY (provider, session_id)
+                );
+                """
+            )
+
     def ping(self) -> None:
         """Verify the DuckDB store is reachable. Raises on failure."""
         with duckdb.connect(self.store) as con:
@@ -180,14 +192,35 @@ class DuckDBStore(ServicesStore):
 
         return item_id
 
-    def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity."""
+    def record_session(self, user: User, provider: str, session_id: str) -> bool:
+        """Record the start of a user session."""
         now = datetime.now(timezone.utc)
 
         with duckdb.connect(self.store) as con:
             # Begin transaction for atomic operation
             con.execute("BEGIN TRANSACTION")
             try:
+                known = con.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM user_sessions
+                    WHERE provider = ? AND session_id = ?
+                    """,
+                    [provider, session_id],
+                ).fetchone()[0]
+                if known:
+                    con.execute("ROLLBACK")
+                    return False
+
+                con.execute(
+                    """
+                    INSERT INTO user_sessions
+                    (user_id, provider, session_id, started_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    [user.user_id, provider, session_id, now],
+                )
+
                 # Check if record exists
                 exists = con.execute(
                     """
@@ -225,6 +258,34 @@ class DuckDBStore(ServicesStore):
             except Exception:
                 con.execute("ROLLBACK")
                 raise
+        return True
+
+    def get_user_sessions(
+        self, user_id: str, provider: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List the recorded sessions of a user, oldest first."""
+        query = """
+            SELECT user_id, provider, session_id, started_at
+            FROM user_sessions
+            WHERE user_id = ?
+        """
+        params: List[Any] = [user_id]
+        if provider is not None:
+            query += " AND provider = ?"
+            params.append(provider)
+
+        with duckdb.connect(self.store) as con:
+            rows = con.execute(query + " ORDER BY started_at", params).fetchall()
+
+        return [
+            {
+                "user_id": row[0],
+                "provider": row[1],
+                "session_id": row[2],
+                "started_at": row[3],
+            }
+            for row in rows
+        ]
 
     def get_user_tracking(
         self, user_id: str, provider: str

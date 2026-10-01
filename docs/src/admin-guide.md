@@ -100,6 +100,29 @@ openEO by TiTiler supports two authentication methods:
 2. OpenID Connect
    - See [OpenID Connect Configuration](openid-connect.md) for details
 
+### User Sessions
+
+The backend records one row per session, not one per request, so you can count active users. A session starts once:
+
+- **Basic auth:** at `/credentials/basic`, where the token is issued.
+- **OIDC:** on the first request of an identity-provider session, identified by the token's `sid` claim. The `sid` claim stays the same when the client refreshes its token, so a refresh is not a new session. The identity provider must emit `sid`; without it no OIDC session is recorded and the backend logs one warning.
+
+Ordinary requests never write to these tables. If the database is unreachable, the failure is logged and the request is not rejected.
+
+Two tables hold the data. `user_sessions` is append-only, with one row per session: `user_id`, `provider`, `session_id`, `started_at`. `user_tracking` keeps one row per user and provider (`first_login`, `last_login`, `login_count`, `email`, `name`). `login_count` counts sessions.
+
+Monthly active users, on PostgreSQL:
+
+```sql
+SELECT date_trunc('month', started_at) AS month,
+       count(DISTINCT user_id)         AS active_users
+FROM user_sessions
+GROUP BY 1
+ORDER BY 1;
+```
+
+A session is counted in the month it started. The end of a session is not stored, so a long session that crosses a month boundary is not counted in the second month.
+
 ## Performance Tuning
 
 ### Cache Configuration

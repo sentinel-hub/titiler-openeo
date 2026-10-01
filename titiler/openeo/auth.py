@@ -5,12 +5,14 @@ import base64
 import json
 import logging
 import time
+import uuid
 from base64 import b64decode
 from enum import Enum
 from threading import Lock
 from typing import Any, Dict, Literal, Optional
 
 from attrs import define, field
+from cachetools import TTLCache
 from fastapi import Header
 from fastapi.exceptions import HTTPException
 from fastapi.security.utils import get_authorization_scheme_param
@@ -43,6 +45,34 @@ except ImportError:  # pragma: nocover
 
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on how long a session id stays in an OIDC process's memory.
+_SESSION_CACHE_TTL = 24 * 3600
+
+
+def _record_session(
+    store: ServicesStore, user: User, provider: str, session_id: Optional[str] = None
+) -> bool:
+    """Record a session start without letting bookkeeping decide the auth outcome.
+
+    A database that is busy or briefly unreachable must not turn a valid token
+    into a 401 (or a 500): the user is already authenticated at this point.
+
+    Returns:
+        False if the store raised, so the caller can retry on a later request.
+    """
+    try:
+        store.record_session(user, provider, session_id or str(uuid.uuid4()))
+    except Exception:
+        logger.warning(
+            "Could not record %s session for user %r",
+            provider,
+            user.user_id,
+            exc_info=True,
+        )
+        return False
+    return True
+
 
 #: The only signature algorithm this backend verifies. Pinned from the token
 #: header rather than trusted from it: verification below is hardcoded to
@@ -140,6 +170,15 @@ class OIDCAuth(Auth):
     # (`threading.Lock` is not reentrant). `config` is always resolved before
     # `_jwks_lock` is acquired.
     _config_lock: Lock = field(factory=Lock, init=False)
+    # Session ids already recorded by this process. A session outlives its
+    # tokens (each refresh issues a new one with the same `sid`), so only the
+    # first request of a session reaches the store. The TTL just bounds memory.
+    _sessions: TTLCache = field(
+        factory=lambda: TTLCache(maxsize=10_000, ttl=_SESSION_CACHE_TTL),
+        init=False,
+    )
+    _sessions_lock: Lock = field(factory=Lock, init=False)
+    _warned_no_sid: bool = field(default=False, init=False)
     _jwks_lock: Lock = field(factory=Lock, init=False)
     _oidc_config: OIDCConfig = field(init=False)
 
@@ -408,6 +447,29 @@ class OIDCAuth(Auth):
         if nbf is not None and nbf > now + _CLOCK_SKEW_LEEWAY:
             raise ValueError("Token is not yet valid")
 
+    def _track_session(self, user: User, payload: Dict[str, Any]) -> None:
+        """Record the session of a validated token, once per session."""
+        sid = payload.get("sid")
+        if not sid:
+            if not self._warned_no_sid:
+                self._warned_no_sid = True
+                logger.warning(
+                    "OIDC token has no 'sid' claim; user sessions are not "
+                    "recorded. Configure the identity provider to emit it."
+                )
+            return
+
+        with self._sessions_lock:
+            if sid in self._sessions:
+                return
+            # Reserve before the write so concurrent requests of a new session
+            # do not all reach the store.
+            self._sessions[sid] = True
+
+        if not _record_session(self.store, user, "oidc", str(sid)):
+            with self._sessions_lock:
+                self._sessions.pop(sid, None)
+
     def login(self, authorization: str = Header()) -> Any:
         """OIDC doesn't support direct login - must be done through provider."""
         raise HTTPException(
@@ -471,8 +533,7 @@ class OIDCAuth(Auth):
                 name=name_claim,
             )
 
-            # Track user login
-            self.store.track_user_login(user=user, provider="oidc")
+            self._track_session(user, payload)
 
             return user
 
@@ -546,7 +607,12 @@ class BasicAuth(Auth):
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-        self._get_user_from_base64(param)
+        base_user = self._get_user_from_base64(param)
+
+        # The token is issued here, so this is where a basic-auth session
+        # starts. `validate` runs on every request and must not write.
+        _record_session(self.store, User(user_id=base_user.user_id), "basic")
+
         return CredentialsBasic(access_token=param)
 
     def _get_user_from_base64(self, param: str) -> BasicAuthUser:
@@ -599,8 +665,5 @@ class BasicAuth(Auth):
 
         base_user = self._get_user_from_base64(parsed_token.token)
         user = User(user_id=base_user.user_id)
-
-        # Track user login
-        self.store.track_user_login(user=user, provider="basic")
 
         return user

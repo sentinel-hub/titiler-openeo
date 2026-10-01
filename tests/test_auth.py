@@ -276,12 +276,48 @@ def test_user_id_comes_from_the_configured_claim(settings, mock_key):
     auth._config_cache = dict(DISCOVERY)
     auth._config_fetched_at = time.monotonic()
 
-    token = create_mock_token(_payload(oid="entra-object-id", name="Alice"))
+    token = create_mock_token(
+        _payload(oid="entra-object-id", name="Alice", sid="session-a")
+    )
     with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
         user = auth.validate(f"oidc/oidc/{token}")
 
     assert user.user_id == "entra-object-id"
-    store.track_user_login.assert_called_once()
+    store.record_session.assert_called_once()
+    assert store.record_session.call_args.args[0].user_id == "entra-object-id"
+
+
+def test_a_session_is_recorded_once_across_token_refresh(auth, mock_key):
+    """Refreshed tokens carry a new jti but the same sid: one session (#408)."""
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        for jti in ("t1", "t2", "t3"):
+            token = create_mock_token(_payload(sid="session-a", jti=jti))
+            auth.validate(f"oidc/oidc/{token}")
+        assert auth.store.record_session.call_count == 1
+
+        token = create_mock_token(_payload(sid="session-b"))
+        auth.validate(f"oidc/oidc/{token}")
+        assert auth.store.record_session.call_count == 2
+    assert auth.store.record_session.call_args.args[2] == "session-b"
+
+
+def test_a_token_without_sid_records_nothing_and_warns_once(auth, mock_key, caplog):
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        for _ in range(3):
+            auth.validate(f"oidc/oidc/{token}")
+
+    auth.store.record_session.assert_not_called()
+    assert caplog.text.count("no 'sid' claim") == 1
+
+
+def test_a_failed_record_is_retried_on_the_next_request(auth, mock_key):
+    auth.store.record_session.side_effect = [RuntimeError("down"), True]
+    token = create_mock_token(_payload(sid="session-a"))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        auth.validate(f"oidc/oidc/{token}")  # store down: still authenticated
+        auth.validate(f"oidc/oidc/{token}")
+    assert auth.store.record_session.call_count == 2
 
 
 def test_user_id_defaults_to_sub(auth, mock_key):
