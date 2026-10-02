@@ -327,12 +327,12 @@ class Sentinel2Settings(BaseSettings):
 
 
 class StoreSettings(BaseSettings):
-    """Connection settings for the SQLAlchemy stores.
+    """Connection pool settings for the SQLAlchemy stores.
 
-    The services store and the UDP store share one engine, and so one pool, per
-    database URL and process. A deployment can therefore open up to
-    `replicas x (pool_size + max_overflow)` connections. Size these so that total
-    stays under the database's `max_connections`.
+    The services, UDP and tile stores share one engine, and so one pool, per
+    database URL and worker process. Each process can open up to
+    `pool_size + max_overflow` connections. See "Store Settings" in the admin
+    guide for how to size this against the database's `max_connections`.
 
     The pool settings do not apply to SQLite.
     """
@@ -342,7 +342,12 @@ class StoreSettings(BaseSettings):
         10, ge=0, description="Extra connections an engine may open under load."
     )
     pool_timeout: float = Field(
-        30, gt=0, description="Seconds to wait for a free connection before failing."
+        5,
+        gt=0,
+        description=(
+            "Seconds to wait for a free connection before failing. Keep it short: "
+            "a waiting request holds a worker thread."
+        ),
     )
     pool_recycle: int = Field(
         -1,
@@ -359,17 +364,18 @@ class StoreSettings(BaseSettings):
         env_prefix="TITILER_OPENEO_STORE_",
         env_file=".env",
         extra="ignore",
+        # An empty variable (e.g. a Helm value set to null) keeps the default
+        # instead of failing the import-time store setup.
+        env_ignore_empty=True,
     )
 
-    def engine_kwargs(self) -> dict:
-        """Keyword arguments for `create_engine` on a server database."""
-        return {
-            "pool_size": self.pool_size,
-            "max_overflow": self.max_overflow,
-            "pool_timeout": self.pool_timeout,
-            "pool_recycle": self.pool_recycle,
-            "pool_pre_ping": self.pool_pre_ping,
-        }
+    @field_validator("pool_recycle")
+    @classmethod
+    def _recycle_disabled_is_minus_one(cls, value: int) -> int:
+        # SQLAlchemy reads 0 as "replace on every checkout", not "disabled".
+        if value == 0 or value < -1:
+            raise ValueError("pool_recycle must be -1 (disabled) or > 0 seconds")
+        return value
 
 
 class SigningSettings(BaseSettings):

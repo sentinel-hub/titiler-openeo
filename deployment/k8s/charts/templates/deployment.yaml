@@ -112,17 +112,27 @@ spec:
               value: {{ .Values.auth.oidc.description | quote }}
             {{- end }}
             {{- end }}
-            {{- with .Values.database.pool }}
-            - name: TITILER_OPENEO_STORE_POOL_SIZE
-              value: {{ .size | quote }}
-            - name: TITILER_OPENEO_STORE_MAX_OVERFLOW
-              value: {{ .maxOverflow | quote }}
-            - name: TITILER_OPENEO_STORE_POOL_TIMEOUT
-              value: {{ .timeout | quote }}
-            - name: TITILER_OPENEO_STORE_POOL_RECYCLE
-              value: {{ .recycle | quote }}
-            - name: TITILER_OPENEO_STORE_POOL_PRE_PING
-              value: {{ .prePing | quote }}
+            {{- /*
+              Pool settings. A key set to null or "" is left out, so the app
+              keeps its default; a name also set through `env` or `envVars`
+              is left out, so it is not rendered twice.
+            */}}
+            {{- $overridden := keys (.Values.env | default dict) }}
+            {{- range concat (.Values.envVars.fromSecret | default list) (.Values.envVars.fromConfigMap | default list) }}
+            {{- $overridden = append $overridden .name }}
+            {{- end }}
+            {{- $pool := .Values.database.pool | default dict }}
+            {{- range $key, $suffix := dict "size" "POOL_SIZE" "maxOverflow" "MAX_OVERFLOW" "timeout" "POOL_TIMEOUT" "recycle" "POOL_RECYCLE" "prePing" "POOL_PRE_PING" }}
+            {{- $name := printf "TITILER_OPENEO_STORE_%s" $suffix }}
+            {{- $val := get $pool $key }}
+            {{- if and (hasKey $pool $key) (not (kindIs "invalid" $val)) (ne (toString $val) "") (not (has $name $overridden)) }}
+            {{- /* YAML numbers are float64; print whole ones as integers, not 1e+06 */}}
+            {{- if and (kindIs "float64" $val) (eq (floor $val) $val) }}
+            {{- $val = int64 $val }}
+            {{- end }}
+            - name: {{ $name }}
+              value: {{ $val | toString | quote }}
+            {{- end }}
             {{- end }}
             {{- range $key, $val := .Values.env }}
             {{- if ne $key "TITILER_OPENEO_STORE_URL" }}

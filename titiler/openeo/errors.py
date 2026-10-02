@@ -274,13 +274,19 @@ class ResourceNotFound(OpenEOException):
 class ServiceUnavailable(OpenEOException):
     """The service is temporarily unavailable."""
 
-    def __init__(self, detail: str = "The service is temporarily unavailable"):
+    def __init__(
+        self,
+        detail: str = "The service is temporarily unavailable",
+        retry_after: Optional[int] = None,
+    ):
         """Initialize error with service unavailable."""
         super().__init__(
             message=detail,
             code="ServiceUnavailable",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+        if retry_after is not None:
+            self.headers = {"Retry-After": str(retry_after)}
 
 
 class OutputLimitExceeded(OpenEOException):

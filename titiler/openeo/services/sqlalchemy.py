@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from attrs import define, field
 from sqlalchemy import (
@@ -19,6 +19,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
@@ -94,40 +95,66 @@ _engines: Dict[str, Any] = {}
 _engines_lock = Lock()
 
 
-def _get_engine(store: str) -> Any:
+def _is_sqlite_memory(url: URL) -> bool:
+    """Whether a URL names an in-memory SQLite database.
+
+    `sqlite://`, `sqlite:///:memory:` and their `sqlite+driver` forms all do.
+    """
+    return url.get_backend_name() == "sqlite" and url.database in (
+        None,
+        "",
+        ":memory:",
+    )
+
+
+def _get_engine(store: Union[str, URL]) -> Any:
     """Return the engine for a store URL.
 
-    Server databases get one engine per URL and process, shared by the services
-    and UDP stores, so the two do not each hold a connection pool against the
-    same database. SQLite gets a fresh engine each time: an in-memory database
-    exists only within its connection, so sharing would leak data between
-    stores.
+    Server databases get one engine per URL and process, shared by every store
+    (services, UDP, tile), so they do not each hold a connection pool against
+    the same database. SQLite gets a fresh engine each time: an in-memory
+    database exists only within its connection, so sharing would leak data
+    between stores.
     """
-    if store == "sqlite:///:memory:":
+    url = make_url(store)
+    if _is_sqlite_memory(url):
         # the same connection object must be shared among threads,
         # since the database exists only within the scope of that connection.
         return create_engine(
-            store,
+            url,
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-    if store.startswith("sqlite"):
-        return create_engine(store)
+    if url.get_backend_name() == "sqlite":
+        return create_engine(url)
 
+    # `str(url)` masks the password, so two URLs that differ only by password
+    # would share an engine.
+    key = url.render_as_string(hide_password=False)
     with _engines_lock:
-        engine = _engines.get(store)
+        engine = _engines.get(key)
         if engine is None:
-            engine = _engines[store] = create_engine(
-                store, **StoreSettings().engine_kwargs()
-            )
+            engine = _engines[key] = create_engine(url, **StoreSettings().model_dump())
         return engine
+
+
+def dispose_engines() -> None:
+    """Dispose of and forget every shared engine.
+
+    The next store built for a URL then gets a new engine with the current
+    `StoreSettings`. Meant for tests.
+    """
+    with _engines_lock:
+        for engine in _engines.values():
+            engine.dispose()
+        _engines.clear()
 
 
 @define(kw_only=True)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
 
-    store: str = field()
+    store: Union[str, URL] = field()
     _engine: Any = field(default=None, init=False)
     _session_factory: Any = field(default=None, init=False)
 
@@ -306,7 +333,7 @@ class SQLAlchemyStore(ServicesStore):
 class SQLAlchemyUdpStore(UdpStore):
     """SQLAlchemy UDP Store."""
 
-    store: str = field()
+    store: Union[str, URL] = field()
     _engine: Any = field(default=None, init=False)
     _session_factory: Any = field(default=None, init=False)
 
