@@ -172,6 +172,10 @@ enableTileStore: false
 postgresql:
   enabled: false
 
+  # Server `max_connections`. Empty keeps the Postgres default (100). Size it
+  # against `database.pool` below.
+  maxConnections: ""
+
   image:
     # Official postgres image from the postgres community. Replaces the
     # previous bitnami subchart, whose images moved behind a paid
@@ -266,6 +270,30 @@ database:
     # full DSN via `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` above,
     # which bypasses this helper entirely.
     password: ""
+
+  # Connection pool for SQL databases (PostgreSQL). Needs an image built on
+  # titiler-openeo newer than 0.18.2; older versions ignore these settings.
+  #
+  # Each uvicorn worker process (not each pod) opens up to
+  # `size + maxOverflow` connections, shared by the services, UDP and tile
+  # stores. Keep the worst case below the database's `max_connections`:
+  #
+  #   max pods x WEB_CONCURRENCY x (size + maxOverflow) < max_connections - 3
+  #
+  # where max pods is `autoscaling.maxReplicas` (or `replicaCount`) plus the
+  # rolling-update surge (25% by default). See "Store Settings" in
+  # docs/src/admin-guide.md. With the bundled PostgreSQL (`postgresql.enabled`),
+  # set `postgresql.maxConnections` (default 100). For an external database, set
+  # it on the server (e.g. the provider's parameter group, or
+  # `postgresql.parameters.max_connections` in a CloudNativePG `Cluster`).
+  #
+  # A key set to null is not rendered, so the app default applies.
+  pool:
+    size: 5
+    maxOverflow: 10
+    timeout: 5  # seconds to wait for a free connection; a waiting request holds a worker thread
+    recycle: -1  # seconds before a connection is replaced; -1 disables (0 is rejected)
+    prePing: false  # test connections before use
 
 securityContext:
   {}

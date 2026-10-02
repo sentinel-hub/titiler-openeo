@@ -62,6 +62,28 @@ TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
 ```
 
+#### Store Settings ([`StoreSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
+
+Connection pool for SQL stores such as PostgreSQL. They do not apply to SQLite, JSON or DuckDB. These settings need titiler-openeo newer than 0.18.2. Older versions ignore them, and each process then keeps two default pools of up to 15 connections each.
+
+The services, UDP and tile stores share one pool per database URL and per worker process. Each process can open up to `POOL_SIZE + MAX_OVERFLOW` connections. A deployment runs `WEB_CONCURRENCY` worker processes per pod, so keep the worst case below the database's `max_connections` (less the 3 slots Postgres reserves for superusers):
+
+```text
+max pods × WEB_CONCURRENCY × (POOL_SIZE + MAX_OVERFLOW) < max_connections - 3
+```
+
+Max pods is the largest number of pods that can run at the same time: `autoscaling.maxReplicas` when autoscaling is on, else `replicaCount`, plus the extra pods of a rolling update (25% surge by default). For example, 10 pods with a 25% surge, 1 worker each and `max_connections = 100`: 13 × 1 × 7 = 91 < 97, so `POOL_SIZE=3` and `MAX_OVERFLOW=4`.
+
+```bash
+TITILER_OPENEO_STORE_POOL_SIZE=5
+TITILER_OPENEO_STORE_MAX_OVERFLOW=10
+TITILER_OPENEO_STORE_POOL_TIMEOUT=5       # Seconds to wait for a free connection
+TITILER_OPENEO_STORE_POOL_RECYCLE=-1      # Seconds before a connection is replaced; -1 disables, 0 is rejected
+TITILER_OPENEO_STORE_POOL_PRE_PING=false  # Test a connection before use
+```
+
+If the login record of an authenticated request cannot reach the database (for example, no free connection within `POOL_TIMEOUT`), the request gets `503 Service Unavailable` with a `Retry-After` header, not `401`.
+
 #### Cache Settings ([`CacheSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L196))
 
 ```bash

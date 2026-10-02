@@ -326,6 +326,58 @@ class Sentinel2Settings(BaseSettings):
     )
 
 
+class StoreSettings(BaseSettings):
+    """Connection pool settings for the SQLAlchemy stores.
+
+    The services, UDP and tile stores share one engine, and so one pool, per
+    database URL and worker process. Each process can open up to
+    `pool_size + max_overflow` connections. See "Store Settings" in the admin
+    guide for how to size this against the database's `max_connections`.
+
+    The pool settings do not apply to SQLite.
+    """
+
+    pool_size: int = Field(5, ge=1, description="Connections kept open per engine.")
+    max_overflow: int = Field(
+        10, ge=0, description="Extra connections an engine may open under load."
+    )
+    pool_timeout: float = Field(
+        5,
+        gt=0,
+        description=(
+            "Seconds to wait for a free connection before failing. Keep it short: "
+            "a waiting request holds a worker thread."
+        ),
+    )
+    pool_recycle: int = Field(
+        -1,
+        description=(
+            "Seconds after which a connection is replaced. Set it below the idle "
+            "timeout of any proxy or pooler in front of the database. -1 disables."
+        ),
+    )
+    pool_pre_ping: bool = Field(
+        False, description="Test a connection before use; drops stale ones."
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="TITILER_OPENEO_STORE_",
+        env_file=".env",
+        extra="ignore",
+        # An empty variable (e.g. a Helm value set to null) keeps the default
+        # instead of failing the import-time store setup.
+        env_ignore_empty=True,
+    )
+
+    @field_validator("pool_recycle")
+    @classmethod
+    def _recycle_disabled_is_minus_one(cls, value: int) -> int:
+        # SQLAlchemy reads 0 as "replace on every checkout", not "disabled".
+        if value == 0 or value < -1:
+            raise ValueError("pool_recycle must be -1 (disabled) or > 0 seconds")
+        return value
+
+
 class SigningSettings(BaseSettings):
     """Which signer this deployment's assets need.
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
+from .errors import ServiceUnavailable
 from .models.auth import BasicAuthUser, User
 from .services.base import ServicesStore
 from .settings import AuthSettings, OIDCConfig
@@ -102,6 +103,23 @@ class Auth(metaclass=abc.ABCMeta):
         if not authorization:
             return None
         return self.validate(authorization)
+
+    def _track_login(self, user: User, provider: str) -> None:
+        """Record a login; a store failure is an outage, not a bad credential.
+
+        Reported as a 503 so clients retry instead of discarding a valid
+        token, and without the driver message, which can name the database
+        host.
+        """
+        try:
+            self.store.track_user_login(user=user, provider=provider)
+        except Exception as err:
+            logger.warning(
+                "Could not record login for user_id=%r", user.user_id, exc_info=True
+            )
+            raise ServiceUnavailable(
+                "Could not reach the user store", retry_after=5
+            ) from err
 
 
 def get_auth(settings: AuthSettings, store: ServicesStore) -> "Auth":
@@ -471,11 +489,6 @@ class OIDCAuth(Auth):
                 name=name_claim,
             )
 
-            # Track user login
-            self.store.track_user_login(user=user, provider="oidc")
-
-            return user
-
         except HTTPException:
             # Already a considered response with its own detail. Re-wrapping it
             # produced messages like "401: 401:" -- the outer detail being
@@ -489,6 +502,11 @@ class OIDCAuth(Auth):
                 detail=str(err) or f"{type(err).__name__} during token validation",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from err
+
+        # Outside the `try`: a store failure here must not become a 401.
+        self._track_login(user=user, provider="oidc")
+
+        return user
 
 
 class CredentialsBasic(BaseModel):
@@ -600,7 +618,6 @@ class BasicAuth(Auth):
         base_user = self._get_user_from_base64(parsed_token.token)
         user = User(user_id=base_user.user_id)
 
-        # Track user login
-        self.store.track_user_login(user=user, provider="basic")
+        self._track_login(user=user, provider="basic")
 
         return user

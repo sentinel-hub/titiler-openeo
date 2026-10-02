@@ -425,3 +425,25 @@ def test_a_blank_exception_still_yields_a_named_detail(auth, mock_key):
             auth.validate(f"oidc/oidc/{create_mock_token(_payload())}")
 
     assert "Blank during token validation" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Store failures
+# ---------------------------------------------------------------------------
+
+
+def test_store_failure_during_login_tracking_is_a_503(auth, mock_key):
+    """A database outage must not tell the client its valid token is bad."""
+    from titiler.openeo.errors import ServiceUnavailable
+
+    auth.store.track_user_login.side_effect = RuntimeError(
+        "connection to server at db.internal (10.0.0.5) failed"
+    )
+    token = create_mock_token(_payload(sub="subject-1"))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        with pytest.raises(ServiceUnavailable) as excinfo:
+            auth.validate(f"oidc/oidc/{token}")
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.headers == {"Retry-After": "5"}
+    assert "10.0.0.5" not in excinfo.value.message

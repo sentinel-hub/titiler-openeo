@@ -11,7 +11,6 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    create_engine,
     select,
     text,
 )
@@ -23,7 +22,7 @@ from .base import (
     TileAssignmentStore,
     TileNotAssignedError,
 )
-from .sqlalchemy import Base
+from .sqlalchemy import Base, _get_engine
 
 
 class TileAssignment(Base):
@@ -56,8 +55,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
             store: SQLAlchemy connection string
         """
         super().__init__(store)
-        # Create engine and session factory
-        self._engine = create_engine(store)
+        # Shares the services store's engine and pool for the same URL
+        self._engine = _get_engine(store)
         self._session_factory = sessionmaker(bind=self._engine)
         # Ensure tile_assignments table exists
         Base.metadata.create_all(self._engine)
