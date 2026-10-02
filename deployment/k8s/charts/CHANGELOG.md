@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.2 (2026-10-02)
+
+## What's Changed
+* fix(store): refactor tests and expose user_id in stores by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/411
+* fix(store): add SQLAlchemy connection pool configuration and tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/412
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-chart-v3.0.1...titiler-openeo-chart-v3.0.2
+
 ## 3.0.1 (2026-09-11)
 
 ## What's Changed
