@@ -46,7 +46,7 @@ TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
 TITILER_OPENEO_STORE_URL="services/copernicus.json"
 ```
 
-For CDSE, additional environment variables are required for efficient data access:
+For CDSE, additional environment variables are required for efficient data access. You can create your access key on `https://eodata-s3keysmanager.dataspace.copernicus.eu/panel/s3-credentials` then expose it as a variable:
 
 ```bash
 AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu
