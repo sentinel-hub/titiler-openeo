@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.0.2 (2026-10-06)
+
+## What's Changed
+* fix(store): refactor tests and expose user_id in stores by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/411
+* fix(store): add SQLAlchemy connection pool configuration and tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/412
+* docs: add link to S3 keys manager by @martinRenou in https://github.com/sentinel-hub/titiler-openeo/pull/420
+* chore(deps): bump the all group across 1 directory with 5 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/407
+* chore(main): release 0.18.3 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/404
+
+## New Contributors
+* @martinRenou made their first contribution in https://github.com/sentinel-hub/titiler-openeo/pull/420
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/titiler-openeo-chart-v3.0.1...titiler-openeo-chart-v3.0.2
+
 ## 3.0.1 (2026-09-11)
 
 ## What's Changed
