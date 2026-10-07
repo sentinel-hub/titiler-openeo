@@ -212,6 +212,13 @@ In the Entra app registration:
 - Register a **public client**; both grants openEO clients use — authorization
   code with PKCE, and device code — are supported.
 - Add your openEO client's redirect URL (the Web Editor's is its own origin).
+  For a browser client such as the Web Editor, add it on the
+  **Single-page application** platform, not on *Web* or *Mobile and desktop
+  applications*. Otherwise Entra refuses the token request with
+  *"AADSTS9002326: Cross-origin token redemption is permitted only for the
+  'Single-Page Application' client-type"*. Keep **Allow public client flows**
+  on for the device code flow. Also list the URL in
+  `TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL`.
 - If your clients present **access** tokens audienced at your own API rather
   than ID tokens, add that audience:
   `TITILER_OPENEO_AUTH_OIDC_AUDIENCES="api://<client_id>"`.
