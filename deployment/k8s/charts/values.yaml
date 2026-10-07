@@ -77,11 +77,19 @@ auth:
     enabled: false
     clientId: ""
     wellKnownUrl: ""
-    redirectUrl: ""
+    redirectUrl: ""  # One URL, or several separated by spaces
     scopes: "openid email profile"
     nameClaim: "name"
     title: "OIDC"
     description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+    # Extra accepted `aud` values, space-separated (e.g. "api://<client_id>")
+    audiences: ""
+    # Token claim used as the user id. Empty keeps the backend default, "sub".
+    # Do not change on a running deployment: stored services are keyed on it.
+    userIdClaim: ""
+    # Microsoft Entra tenant ids allowed to sign in, space-separated. Empty
+    # allows all. Personal Microsoft accounts: 9188040d-6c67-4c5b-b112-36a304b66dad
+    allowedTenants: ""
 
 # STAC configuration
 stac:

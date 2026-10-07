@@ -95,3 +95,53 @@ tests:
           content:
             name: TITILER_OPENEO_STORE_POOL_SIZE
             value: "5"
+
+  - it: should map the optional OIDC settings to the environment
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+      auth.oidc.redirectUrl: "https://editor.openeo.org/ http://localhost:8080/"
+      auth.oidc.audiences: "api://client"
+      auth.oidc.userIdClaim: "sub"
+      auth.oidc.allowedTenants: "9188040d-6c67-4c5b-b112-36a304b66dad"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+            value: "https://editor.openeo.org/ http://localhost:8080/"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_AUDIENCES
+            value: "api://client"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+            value: "sub"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
+            value: "9188040d-6c67-4c5b-b112-36a304b66dad"
+
+  - it: should not set the optional OIDC settings when they are empty
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+          any: true

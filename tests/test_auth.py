@@ -6,6 +6,7 @@ import time
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from fastapi.exceptions import HTTPException
 from pydantic import ValidationError
 
 from titiler.openeo.auth import AuthToken, OIDCAuth, OIDCConfig
@@ -15,6 +16,16 @@ ISSUER = "https://auth.example.com"
 JWKS_URI = "https://auth.example.com/jwks"
 WK_URL = "https://auth.example.com/.well-known/openid-configuration"
 DISCOVERY = {"issuer": ISSUER, "jwks_uri": JWKS_URI}
+
+# Microsoft Entra multi-tenant (`common`) endpoint.
+ENTRA_COMMON_WK_URL = (
+    "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+)
+ENTRA_TEMPLATE = "https://login.microsoftonline.com/{tenantid}/v2.0"
+TENANT_A = "11111111-1111-1111-1111-111111111111"
+TENANT_B = "22222222-2222-2222-2222-222222222222"
+#: The tenant id Entra gives every personal Microsoft account.
+MSA_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"
 
 
 @pytest.fixture
@@ -235,13 +246,10 @@ def test_the_refetch_is_rate_limited(auth):
 # ---------------------------------------------------------------------------
 
 
-def test_a_templated_issuer_is_rejected_with_the_fix_in_the_message(settings):
-    """Entra's multi-tenant `common` endpoint returns this (ADR 0006 S1.1)."""
+def test_a_templated_issuer_is_accepted(settings):
+    """Entra's multi-tenant `common` endpoint returns this (ADR 0006 S2.3)."""
     auth = OIDCAuth(settings=settings, store=Mock())
-    templated = {
-        "issuer": "https://login.microsoftonline.com/{tenantid}/v2.0",
-        "jwks_uri": JWKS_URI,
-    }
+    templated = {"issuer": ENTRA_TEMPLATE, "jwks_uri": JWKS_URI}
 
     client = MagicMock()
     client.__enter__.return_value = client
@@ -250,8 +258,7 @@ def test_a_templated_issuer_is_rejected_with_the_fix_in_the_message(settings):
     httpx.Client.return_value = client
 
     with patch("titiler.openeo.auth.httpx", httpx):
-        with pytest.raises(ValueError, match="single-tenant"):
-            _ = auth.config
+        assert auth.config["issuer"] == ENTRA_TEMPLATE
 
 
 def test_discovery_document_is_cached(auth):
@@ -293,6 +300,144 @@ def test_user_id_defaults_to_sub(auth, mock_key):
 
 
 # ---------------------------------------------------------------------------
+# Microsoft Entra multi-tenant (`common`)
+# ---------------------------------------------------------------------------
+
+
+def _entra_iss(tid: str) -> str:
+    return ENTRA_TEMPLATE.replace("{tenantid}", tid)
+
+
+def _entra_auth(key_issuer=ENTRA_TEMPLATE, store=None, **oidc) -> OIDCAuth:
+    """An OIDCAuth on the `common` endpoint, with no network.
+
+    The cached JWKS binds the test key to `key_issuer`, as Entra's own
+    `common/discovery/v2.0/keys` does: `{tenantid}` for the keys any tenant
+    may use, the MSA tenant for keys reserved to personal accounts.
+    """
+    config = OIDCConfig(client_id="test-client-id", wk_url=ENTRA_COMMON_WK_URL, **oidc)
+    auth = OIDCAuth(
+        settings=AuthSettings(method="oidc", oidc=config), store=store or Mock()
+    )
+    auth._config_cache = {"issuer": ENTRA_TEMPLATE, "jwks_uri": JWKS_URI}
+    auth._config_fetched_at = time.monotonic()
+    auth._jwks_cache = {"keys": [{"kid": "test-key", "issuer": key_issuer}]}
+    return auth
+
+
+def _validate(auth: OIDCAuth, mock_key, **claims):
+    token = create_mock_token(_payload(**claims))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        return auth.validate(f"oidc/oidc/{token}")
+
+
+def test_common_accepts_a_work_account_token(mock_key):
+    user = _validate(
+        _entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_A, sub="w-1"
+    )
+    assert user.user_id == "w-1"
+
+
+def test_common_accepts_a_personal_account_token(mock_key):
+    """MSA tokens are signed by keys the JWKS binds to the MSA tenant."""
+    user = _validate(
+        _entra_auth(key_issuer=_entra_iss(MSA_TENANT)),
+        mock_key,
+        iss=_entra_iss(MSA_TENANT),
+        tid=MSA_TENANT,
+        sub="p-1",
+    )
+    assert user.user_id == "p-1"
+
+
+def test_common_rejects_a_tid_iss_mismatch(mock_key):
+    with pytest.raises(HTTPException, match="Invalid issuer"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_B)
+
+
+def test_common_rejects_a_token_without_tid(mock_key):
+    with pytest.raises(HTTPException, match="'tid'"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A))
+
+
+@pytest.mark.parametrize("tid", ["not-a-guid", f"{TENANT_A}/v2.0/x", 42])
+def test_common_rejects_a_malformed_tid(mock_key, tid):
+    """`tid` fills one path segment of the issuer, and nothing else."""
+    with pytest.raises(HTTPException, match="'tid'"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=tid)
+
+
+def test_common_rejects_a_v1_issuer(mock_key):
+    with pytest.raises(HTTPException, match="requestedAccessTokenVersion"):
+        _validate(
+            _entra_auth(),
+            mock_key,
+            iss=f"https://sts.windows.net/{TENANT_A}/",
+            tid=TENANT_A,
+        )
+
+
+def test_common_rejects_a_work_token_signed_by_a_personal_account_key(mock_key):
+    """The key's own `issuer` is checked, not only the discovery issuer."""
+    with pytest.raises(HTTPException, match="signing key"):
+        _validate(
+            _entra_auth(key_issuer=_entra_iss(MSA_TENANT)),
+            mock_key,
+            iss=_entra_iss(TENANT_A),
+            tid=TENANT_A,
+        )
+
+
+def test_allowed_tenants_rejects_another_tenant(mock_key):
+    auth = _entra_auth(allowed_tenants=[TENANT_A, MSA_TENANT])
+    with pytest.raises(HTTPException, match="Tenant not allowed"):
+        _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
+
+
+def test_allowed_tenants_accepts_listed_tenants(mock_key):
+    auth = _entra_auth(allowed_tenants=[TENANT_A.upper()])
+    _validate(auth, mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_A)
+
+
+def test_allowed_tenants_rejects_a_token_without_tid(auth, mock_key):
+    """Set on a non-Entra provider, the list rejects tokens that carry no tid."""
+    auth._oidc_config.allowed_tenants = [TENANT_A]
+    with pytest.raises(Exception, match="Tenant not allowed"):
+        auth._verify_token(create_mock_token(_payload()), mock_key)
+
+
+def test_single_tenant_entra_is_unchanged(mock_key):
+    """A concrete issuer is compared exactly, and its keys carry that issuer."""
+    iss = _entra_iss(TENANT_A)
+    auth = _entra_auth(key_issuer=iss)
+    auth._config_cache["issuer"] = iss
+
+    _validate(auth, mock_key, iss=iss, tid=TENANT_A)
+    with pytest.raises(HTTPException, match="Invalid issuer"):
+        _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
+
+
+def test_a_key_without_an_issuer_is_not_checked(auth, mock_key):
+    """Keycloak JWKS entries carry no `issuer`."""
+    auth._jwks_cache = {"keys": [{"kid": "test-key"}]}
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        assert auth.validate(f"oidc/oidc/{token}").user_id == "user-1"
+
+
+def test_authority_comes_from_the_well_known_url():
+    assert _entra_auth().authority == "https://login.microsoftonline.com/common/v2.0"
+
+
+def test_authority_falls_back_to_the_discovery_issuer(settings):
+    settings.oidc.wk_url = "https://auth.example.com/discovery"
+    auth = OIDCAuth(settings=settings, store=Mock())
+    auth._config_cache = dict(DISCOVERY)
+    auth._config_fetched_at = time.monotonic()
+    assert auth.authority == ISSUER
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
@@ -312,6 +457,36 @@ def test_oidc_method_requires_client_id_and_wk_url():
 
 def test_basic_method_needs_no_oidc_config():
     assert AuthSettings(method="basic").method == "basic"
+
+
+def test_redirect_url_accepts_one_url_or_a_list():
+    assert OIDCConfig(redirect_url="http://a/").redirect_url == ["http://a/"]
+    assert OIDCConfig(redirect_url="http://a/ http://b/").redirect_url == [
+        "http://a/",
+        "http://b/",
+    ]
+    assert OIDCConfig(redirect_url=["http://a/"]).redirect_url == ["http://a/"]
+    assert OIDCConfig().redirect_url == []
+
+
+def test_list_settings_parse_space_separated_env(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://a/ http://b/")
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS", f"{TENANT_A} {MSA_TENANT}"
+    )
+    config = OIDCConfig()
+    assert config.redirect_url == ["http://a/", "http://b/"]
+    assert config.allowed_tenants == [TENANT_A, MSA_TENANT]
+
+
+def test_single_redirect_url_env_stays_valid(monkeypatch):
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://localhost:8080/"
+    )
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS", raising=False)
+    config = OIDCConfig()
+    assert config.redirect_url == ["http://localhost:8080/"]
+    assert config.allowed_tenants == []
 
 
 def test_audiences_parse_space_separated():

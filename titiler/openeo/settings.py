@@ -18,7 +18,9 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = ""
     wk_url: str = ""
-    redirect_url: str = ""
+    # Space-separated in the environment; a single URL stays valid. Advertised
+    # to openEO clients as `redirect_urls` in `GET /credentials/oidc`.
+    redirect_url: list[str] = []
     scopes: list[str] = ["openid", "email", "profile"]
     name_claim: str = "name"
     title: str = "OIDC"
@@ -39,6 +41,21 @@ class OIDCConfig(BaseSettings):
     # registration*), so a deployment that expects to re-register its app may
     # prefer the tenant-stable `oid`. See ADR 0006 S2.4.
     user_id_claim: str = "sub"
+
+    # Entra tenant ids (`tid` claim) allowed to sign in, space-separated. Empty
+    # accepts every tenant the issuer accepts -- with a multi-tenant (`common`)
+    # discovery URL, that is every Microsoft work and personal account. The
+    # personal-account (MSA) tenant is 9188040d-6c67-4c5b-b112-36a304b66dad.
+    # When set, a token without `tid` is rejected. See ADR 0006 S2.3.
+    allowed_tenants: list[str] = []
+
+    @field_validator("redirect_url", mode="before")
+    @classmethod
+    def _split_redirect_url(cls, value: Any) -> Any:
+        """Accept one URL or a space-separated list, as a `str` or a list."""
+        if isinstance(value, str):
+            return value.split()
+        return value
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
@@ -102,9 +119,14 @@ class OIDCConfig(BaseSettings):
             Returns:
                 Processed value for the field
             """
-            # allow space-separated list parsing for scopes and audiences
-            if field_name in ("scopes", "audiences"):
-                return value.split(" ") if value else None
+            # allow space-separated list parsing for list-valued fields
+            if field_name in (
+                "scopes",
+                "audiences",
+                "redirect_url",
+                "allowed_tenants",
+            ):
+                return value.split() if value else None
 
             return super().prepare_field_value(
                 field_name, field, value, value_is_complex
