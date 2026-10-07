@@ -83,8 +83,10 @@ is both wrong and expensive. `.env.planetarycomputer` and the Helm values set it
 Signing is independent of login — Planetary Computer's SAS API is
 unauthenticated, and grants every caller the same read access. Adding Microsoft
 Entra ID gives your **users** identities, so services and UDPs are theirs. See
-[OpenID Connect](openid-connect.md#microsoft-entra-id) for the setup, including
-the single-tenant well-known URL requirement.
+[OpenID Connect](openid-connect.md#microsoft-entra-id) for the setup. The
+multi-tenant `common` well-known URL lets users sign in with a work, school or
+personal Microsoft account; `TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS` limits
+the tenants.
 
 ## Known limits
 

@@ -34,9 +34,14 @@ env:
   GDAL_HTTP_VERSION: 2
   PYTHONWARNINGS: "ignore"
 
-# Microsoft Entra ID. A single-tenant well-known URL is required: the
-# multi-tenant `common` endpoint returns a templated issuer that cannot be
-# validated against a token's `iss` (docs/adr/0006-microsoft-entra-oidc.md S2.3).
+# Default services shown to every user, from the chart's `files/` directory.
+database:
+  defaultServices: "files/planetarycomputer.json"
+
+# Microsoft Entra ID, multi-tenant: the `common` well-known URL accepts work,
+# school and personal Microsoft accounts. The token's `iss` must equal the
+# discovery issuer template with the token's own `tid` in it; `allowedTenants`
+# limits which tenants can sign in (docs/adr/0006-microsoft-entra-oidc.md S2.3).
 auth:
   method: "basic"
   basic:
@@ -47,12 +52,15 @@ auth:
   oidc:
     enabled: false
     clientId: ""
-    wellKnownUrl: ""  # https://login.microsoftonline.com/<tenant_id>/v2.0/.well-known/openid-configuration
-    redirectUrl: ""
-    scopes: "openid email profile"
+    wellKnownUrl: "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+    redirectUrl: ""  # Space-separated, e.g. "https://editor.openeo.org/ http://localhost:8080/"
+    scopes: "openid email profile"  # Add "api://<client_id>/openeo" for an API-audienced token
+    audiences: ""  # "api://<client_id>"
     nameClaim: "preferred_username"
+    userIdClaim: ""  # Empty = "sub", which stays unique across tenants; `oid` does not
+    allowedTenants: ""  # Empty = all tenants and personal accounts
     title: "Microsoft Entra ID"
-    description: "Sign in with your Microsoft work or school account"
+    description: "Sign in with your Microsoft work, school or personal account"
 
 # Optional: raises Planetary Computer SAS API rate limits. Supply it from a
 # Secret rather than inline.

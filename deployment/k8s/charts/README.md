@@ -163,13 +163,22 @@ auth:
     enabled: true
     clientId: "your-client-id"
     wellKnownUrl: "https://your-provider/.well-known/openid-configuration"
-    redirectUrl: "your-redirect-url"
+    redirectUrl: "your-redirect-url"  # One URL, or several separated by spaces
     # Optional configurations
     scopes: "openid email profile"  # Space-separated list
     nameClaim: "name"  # Claim to use for user name
     title: "OIDC"  # Provider title
     description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"  # Provider description
+    audiences: ""  # Extra accepted `aud` values, space-separated
+    userIdClaim: ""  # Claim used as the user id; empty = "sub"
+    allowedTenants: ""  # Microsoft Entra tenant ids, space-separated; empty = all
 ```
+
+For Microsoft Entra ID with work, school and personal accounts, use the
+multi-tenant `common` well-known URL
+(`https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration`).
+See `ci/planetarycomputer-values.yaml` and the
+[OpenID Connect guide](../../../docs/src/openid-connect.md).
 
 ### Resource Configuration
 

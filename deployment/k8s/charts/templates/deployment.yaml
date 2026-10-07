@@ -111,6 +111,18 @@ spec:
             - name: TITILER_OPENEO_AUTH_OIDC_DESCRIPTION
               value: {{ .Values.auth.oidc.description | quote }}
             {{- end }}
+            {{- if .Values.auth.oidc.audiences }}
+            - name: TITILER_OPENEO_AUTH_OIDC_AUDIENCES
+              value: {{ .Values.auth.oidc.audiences | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.userIdClaim }}
+            - name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+              value: {{ .Values.auth.oidc.userIdClaim | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.allowedTenants }}
+            - name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
+              value: {{ .Values.auth.oidc.allowedTenants | quote }}
+            {{- end }}
             {{- end }}
             {{- /*
               Pool settings. A key set to null or "" is left out, so the app

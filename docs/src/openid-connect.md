@@ -28,7 +28,7 @@ The OIDC configuration is managed through [`OIDCConfig`](https://github.com/sent
 TITILER_OPENEO_AUTH_METHOD=oidc
 TITILER_OPENEO_AUTH_OIDC_CLIENT_ID="your-client-id"
 TITILER_OPENEO_AUTH_OIDC_WK_URL="https://your-provider/.well-known/openid-configuration"
-TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="your-redirect-url"
+TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="your-redirect-url"  # One URL, or several separated by spaces
 ```
 
 Optional configuration:
@@ -40,7 +40,11 @@ TITILER_OPENEO_AUTH_OIDC_TITLE="OIDC"  # Provider title (default)
 TITILER_OPENEO_AUTH_OIDC_DESCRIPTION="OpenID Connect (OIDC) Authorization Code Flow with PKCE"  # Provider description (default)
 TITILER_OPENEO_AUTH_OIDC_AUDIENCES=""  # Space-separated extra accepted `aud` values
 TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM="sub"  # Claim used as User.user_id (default)
+TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS=""  # Space-separated Entra tenant ids; empty = all
 ```
+
+All the values in `REDIRECT_URL` are advertised to openEO clients as the
+`redirect_urls` of the default client in `GET /credentials/oidc`.
 
 `TITILER_OPENEO_AUTH_METHOD=oidc` is validated at startup: the backend refuses
 to start if `CLIENT_ID` or `WK_URL` is unset, rather than failing on the first
@@ -53,22 +57,67 @@ request.
 ## Microsoft Entra ID
 
 [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc)
-works with the configuration above, with one requirement.
+works with the configuration above. Select one of the two well-known URLs.
 
-**Use a single-tenant well-known URL.** The multi-tenant `common` endpoint
-returns a templated issuer, `https://login.microsoftonline.com/{tenantid}/v2.0`,
-which is a literal placeholder rather than a URL. It cannot be compared against
-a token's `iss` and cannot be advertised to openEO clients, so the backend
-rejects it with a message naming the fix.
+**Single tenant.** Only the accounts of one organization can sign in:
+
+```bash
+TITILER_OPENEO_AUTH_OIDC_WK_URL="https://login.microsoftonline.com/<tenant_id>/v2.0/.well-known/openid-configuration"
+```
+
+**Multi-tenant (`common`).** Work and school accounts of all organizations, and
+personal Microsoft accounts, can sign in:
+
+```bash
+TITILER_OPENEO_AUTH_OIDC_WK_URL="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS=""  # Empty = all tenants
+```
+
+The `common` discovery document gives an issuer *template*,
+`https://login.microsoftonline.com/{tenantid}/v2.0`. The backend puts the
+token's `tid` claim into the template and compares the result with the token's
+`iss`. Thus:
+
+- A token whose `iss` and `tid` do not agree is rejected (*"Invalid issuer"*).
+- A v1.0 token (`iss` = `https://sts.windows.net/<tid>/`) is rejected.
+- The `issuer` that the JWKS gives to the signing key is also checked. Some
+  keys in the `common` JWKS sign only personal-account tokens.
+
+To limit the tenants that can sign in, set `ALLOWED_TENANTS` to a
+space-separated list of tenant ids. Personal Microsoft accounts all have the
+tenant id `9188040d-6c67-4c5b-b112-36a304b66dad`:
+
+```bash
+# One organization, plus personal accounts
+TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS="<tenant_id> 9188040d-6c67-4c5b-b112-36a304b66dad"
+```
+
+When `ALLOWED_TENANTS` is set, a token without a `tid` claim is rejected. Do not
+set it for a provider that is not Entra.
+
+`GET /credentials/oidc` advertises the authority from `WK_URL` (the URL without
+`/.well-known/openid-configuration`), for example
+`https://login.microsoftonline.com/common/v2.0`. It does not advertise the
+discovery `issuer`, because clients cannot resolve the `{tenantid}` template.
+For a single-tenant or Keycloak provider, the two values are the same.
+
+A typical configuration:
 
 ```bash
 TITILER_OPENEO_AUTH_METHOD=oidc
 TITILER_OPENEO_AUTH_OIDC_CLIENT_ID="<application (client) ID>"
-TITILER_OPENEO_AUTH_OIDC_WK_URL="https://login.microsoftonline.com/<tenant_id>/v2.0/.well-known/openid-configuration"
-TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="http://localhost:8080/"
+TITILER_OPENEO_AUTH_OIDC_WK_URL="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://editor.openeo.org/ http://localhost:8080/"
 TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM="preferred_username"
 TITILER_OPENEO_AUTH_OIDC_TITLE="Microsoft Entra ID"
 ```
+
+For the multi-tenant case, the app registration must have **Supported account
+types** = *Accounts in any organizational directory and personal Microsoft
+accounts* (`"signInAudience": "AzureADandPersonalMicrosoftAccount"`). If the
+app registration is single-tenant, Entra refuses the `common` sign-in with
+*"AADSTS50059: No tenant-identifying information found"*, before the backend
+is involved.
 
 ### Expose an API scope, and mint the token out-of-band
 
@@ -93,8 +142,8 @@ Entra must therefore issue a token audienced at *this* backend:
 TITILER_OPENEO_AUTH_OIDC_AUDIENCES="api://<client_id>"
 ```
 
-!!! warning "The openEO **Python** client drops this scope by default"
-    `openeo` (checked at 0.48.0) intersects the scopes a backend advertises with
+!!! warning "The openEO **Python** client before 0.52 drops this scope"
+    `openeo` before 0.52.0 intersects the scopes a backend advertises with
     the provider's own `scopes_supported`
     (`openeo/rest/auth/oidc.py`, `OidcProviderInfo.__init__`):
     `{"openid"}.union(scopes).intersection(self._supported_scopes)`. Microsoft
@@ -108,8 +157,14 @@ TITILER_OPENEO_AUTH_OIDC_AUDIENCES="api://<client_id>"
     that Entra will never advertise custom scopes, so this cannot be fixed from
     the provider side.
 
-Undo the intersection with the helper this project ships. Call it once, before
-connecting — from any notebook or script:
+`openeo` 0.52.0 fixes this
+([openeo-python-client#930](https://github.com/Open-EO/openeo-python-client/issues/930)):
+it no longer drops requested scopes. With `openeo>=0.52`, no patch is necessary,
+and `authenticate_oidc()` (device code flow) works with work and personal
+accounts.
+
+For an older client, undo the intersection with the helper this project ships.
+Call it once, before connecting — from any notebook or script:
 
 ```python
 from titiler.openeo.client_compat import patch_openeo_client_scopes
@@ -157,6 +212,13 @@ In the Entra app registration:
 - Register a **public client**; both grants openEO clients use — authorization
   code with PKCE, and device code — are supported.
 - Add your openEO client's redirect URL (the Web Editor's is its own origin).
+  For a browser client such as the Web Editor, add it on the
+  **Single-page application** platform, not on *Web* or *Mobile and desktop
+  applications*. Otherwise Entra refuses the token request with
+  *"AADSTS9002326: Cross-origin token redemption is permitted only for the
+  'Single-Page Application' client-type"*. Keep **Allow public client flows**
+  on for the device code flow. Also list the URL in
+  `TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL`.
 - If your clients present **access** tokens audienced at your own API rather
   than ID tokens, add that audience:
   `TITILER_OPENEO_AUTH_OIDC_AUDIENCES="api://<client_id>"`.
@@ -166,6 +228,9 @@ registration, and different if you re-register the app. If you expect to
 re-register, consider pinning identity to the tenant-stable object id with
 `TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM="oid"` — but decide before going live,
 per the warning above.
+
+With the multi-tenant `common` URL, keep the default `sub`. An `oid` is unique
+only in its tenant, so two users of different tenants can have the same `oid`.
 
 For asset access on Microsoft Planetary Computer, see
 [Microsoft Planetary Computer](planetary-computer.md). Note that Entra
@@ -196,7 +261,10 @@ and `_verify_claims` methods:
 2. The signature is verified against the provider's JWKS. If the token's key id
    is not in the cached key set, the JWKS is refetched once — providers rotate
    signing keys continuously, and Entra publishes six at a time.
-3. `iss` must match the discovery document's `issuer`.
+3. `iss` must match the discovery document's `issuer`. If the issuer is an
+   Entra template (`{tenantid}`), the token's `tid` is put into it first. If
+   the JWKS gives an `issuer` to the signing key, `iss` must match it too.
+   If `ALLOWED_TENANTS` is set, `tid` must be in it.
 4. `aud` must contain the client ID or one of the configured `AUDIENCES`, or
    `azp` must equal one of them.
 5. `exp` is **required**, and checked with 60 seconds of clock-skew allowance.
