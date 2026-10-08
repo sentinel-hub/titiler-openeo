@@ -187,6 +187,19 @@ blob assets fail with HTTP 409. The startup log states which signer is active.
   a five-minute safety margin. The lock is required: the read path fans out
   across a `ThreadPoolExecutor`, so several threads can miss the cache at once —
   the same reasoning as `SimpleSTACReader._inverse_map_lock` (ADR 0002 §2.3).
+- **Revision (issue #425): one mint per container at a time.** The first version
+  held the lock only to read and write the cache, and minted outside it. On a
+  cold cache — after a pod starts, and each time the token expires — every read
+  thread missed together and called the SAS API. On a busy pod some calls passed
+  the 10 s timeout, the band read failed with `SigningError`, and band math then
+  failed with `index 1 is out of bounds`. Now one thread (the leader) mints for
+  each `(account, container)`, and the other threads wait for its token **or its
+  error**. A per-key lock alone does not do this: after a failed mint, each
+  waiter would take the lock in turn and mint again. A failure is never cached.
+  The module lock is never held during a mint, so containers do not block each
+  other. A token inside the margin but not yet expired is refreshed by one
+  thread while the others keep using it. If that refresh fails, the leader also
+  keeps the old token and logs a warning, and the next call tries again.
 - Returns the href unchanged when it already carries a `sig=` parameter, so
   signing is idempotent and a pre-signed `alternate` href is never corrupted.
 - Uses `urllib.request`, like `sar/fetcher._http_get`, so the module adds no
