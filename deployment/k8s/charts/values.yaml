@@ -125,6 +125,13 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
+  # Scale/offset of each band, from an ordered list of sources: "stac"
+  # (raster:scale/offset), "cog" (GeoTIFF header), "sentinel2-boa" (plugin:
+  # BOA offset in MTD_MSIL2A.xml). For each band the first source with a value
+  # wins. See the admin guide, "Scale and offset". Lists are JSON or comma lists:
+  # TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET: "true"   # master switch
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_SOURCES: "stac,sentinel2-boa,cog"
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS: '{"sentinel-2-l2a": ["stac"], "my-raw-collection": []}'
 
 # Additional environment variables from ConfigMaps and Secrets
 # Use this to map specific keys from secrets or configmaps to environment variables

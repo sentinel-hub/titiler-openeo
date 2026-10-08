@@ -4,7 +4,18 @@ import logging
 import time
 import warnings
 from threading import Lock
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 import attr
 import numpy
@@ -38,6 +49,8 @@ from .bandsources import (
     resolve_band,
 )
 from .errors import OutputLimitExceeded
+from .scaleoffset import PLUGINS as SCALE_OFFSET_PLUGINS
+from .scaleoffset import ProductScaleOffset, find_metadata_asset
 from .settings import ProcessingSettings
 from .signing import HrefSigner, signer_for_item
 
@@ -1210,19 +1223,94 @@ def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
     )
 
 
+def _scale_offset_sources(item: Any) -> List[str]:
+    """Return the ordered scale/offset sources for ``item``'s collection.
+
+    The master switch `apply_scale_offset` (off -> none), then the
+    collection's list in `scale_offset_collections`, then the global
+    `scale_offset_sources`. The collection id comes from the item itself, so
+    an item without one (e.g. from `load_stac`) uses the global list.
+    """
+    settings = processing_settings
+    if not settings.apply_scale_offset:
+        return []
+
+    if isinstance(item, dict):
+        collection = item.get("collection")
+    else:
+        collection = getattr(item, "collection_id", None)
+
+    if collection and collection in settings.scale_offset_collections:
+        return list(settings.scale_offset_collections[collection])
+    return list(settings.scale_offset_sources)
+
+
+def _is_identity(pair: Tuple[float, float]) -> bool:
+    return pair[0] == 1.0 and pair[1] == 0.0
+
+
+#: ``plugin name -> per-band pairs``, or None when the plugin does not apply.
+PluginPairs = Callable[[str], Optional[ProductScaleOffset]]
+
+
+def _plugin_pairs_for(src_dst: Any) -> PluginPairs:
+    """Load a plugin's pairs for the item ``src_dst`` reads.
+
+    Finds the plugin's metadata asset on the item, signs its href with the
+    reader's signer, and fetches it with the reader's band-source fetcher --
+    the same path the derived-band readers use for their XML. The unsigned
+    href is the plugin's cache key.
+    """
+    item = getattr(src_dst, "input", None)
+
+    def load(name: str) -> Optional[ProductScaleOffset]:
+        if not isinstance(item, pystac.Item):
+            return None
+        plugin = SCALE_OFFSET_PLUGINS[name]
+        asset = find_metadata_asset(plugin, item)
+        if asset is None:
+            return None
+        return plugin.load(
+            _resolve_asset_href(asset),
+            _resolve_asset_href(asset, getattr(src_dst, "signer", None)),
+            getattr(src_dst, "band_source_fetcher", None),
+        )
+
+    return load
+
+
 def _apply_scale_offset(
-    img: ImageData, item: Any, assets: Optional[Sequence[str]]
+    img: ImageData,
+    item: Any,
+    assets: Optional[Sequence[str]],
+    *,
+    sources: Sequence[str] = ("stac",),
+    plugin_pairs: Optional[PluginPairs] = None,
 ) -> ImageData:
-    """Apply per-band STAC ``raster:scale``/``raster:offset`` to ``img``.
+    """Apply per-band scale/offset to ``img``.
+
+    For each band, ``sources`` are tried in order and the first one with a
+    scale/offset that is not 1/0 wins, so a band is never scaled two times:
+
+    - ``"stac"``: the asset's ``raster:scale``/``raster:offset``;
+    - ``"cog"``: the COG header scale/offset that rio-tiler reports on
+      ``img.scales``/``img.offsets`` when it reads with ``unscale=False``;
+    - a plugin name (`titiler.openeo.scaleoffset.PLUGINS`): the pairs that
+      ``plugin_pairs(name)`` returns. It is called at most once per plugin,
+      and only when the walk reaches the plugin for a band the plugin knows
+      (its ``band_key`` is not None); ``None`` means the plugin does not apply
+      to this item and is skipped. Errors raise.
+
+    A band that no source covers stays as it is (identity).
 
     Returns physical values (e.g. reflectance) as ``float32``. Bands without
-    scale/offset metadata (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
+    scale/offset (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
     keeps its integer class values. The nodata mask is preserved.
 
     No-ops (returns ``img`` unchanged, keeping its dtype) when ``assets`` is missing,
     its length does not match the band count, or every band is identity (1/0).
     """
-    if not assets:
+    if not assets or not sources:
         return img
 
     nbands = img.array.shape[0]
@@ -1234,8 +1322,38 @@ def _apply_scale_offset(
         )
         return img
 
-    pairs = [_band_scale_offset(_asset_extra_fields(item, b)) for b in assets]
-    if all(scale == 1.0 and offset == 0.0 for scale, offset in pairs):
+    img_scales, img_offsets = img.scales or [], img.offsets or []
+    has_cog = len(img_scales) == nbands and len(img_offsets) == nbands
+
+    loaded: Dict[str, Optional[ProductScaleOffset]] = {}
+
+    def from_source(source: str, index: int, band: str) -> Tuple[float, float]:
+        if source == "stac":
+            return _band_scale_offset(_asset_extra_fields(item, band))
+        if source == "cog":
+            if not has_cog:
+                return (1.0, 0.0)
+            return (float(img_scales[index]), float(img_offsets[index]))
+        # Ask the plugin for the band's key first: that needs no fetch, so a
+        # band the plugin knows nothing about (e.g. SCL) never loads its file.
+        key = SCALE_OFFSET_PLUGINS[source].band_key(_asset_extra_fields(item, band))
+        if plugin_pairs is None or key is None:
+            return (1.0, 0.0)
+        if source not in loaded:
+            loaded[source] = plugin_pairs(source)
+        product = loaded[source]
+        return product.get(key, (1.0, 0.0)) if product else (1.0, 0.0)
+
+    pairs: List[Tuple[float, float]] = []
+    for index, band in enumerate(assets):
+        pair = (1.0, 0.0)
+        for source in sources:
+            pair = from_source(source, index, band)
+            if not _is_identity(pair):
+                break
+        pairs.append(pair)
+
+    if all(_is_identity(pair) for pair in pairs):
         return img
 
     scales = numpy.array([s for s, _ in pairs])
@@ -1353,11 +1471,20 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                         img, getattr(src_dst, "_derived_bands", {}), requested
                     )
 
-                # Apply STAC raster:scale/raster:offset (per band) so bands are
-                # returned as physical values (e.g. reflectance) instead of raw DN.
-                # Runs inside the lazy task — only when a slice is actually read.
-                if processing_settings.apply_scale_offset:
-                    img = _apply_scale_offset(img, item, kwargs.get("assets"))
+                # Apply scale/offset (per band, from the deployment's ordered
+                # sources: STAC, a plugin's product metadata, the COG header)
+                # so bands are returned as physical values (e.g. reflectance)
+                # instead of raw DN. Runs inside the lazy task — only when a
+                # slice is actually read.
+                sources = _scale_offset_sources(item)
+                if sources:
+                    img = _apply_scale_offset(
+                        img,
+                        item,
+                        kwargs.get("assets"),
+                        sources=sources,
+                        plugin_pairs=_plugin_pairs_for(src_dst),
+                    )
 
                 # IMPORTANT: We intentionally do NOT set cutline_mask on individual tiles.
                 #

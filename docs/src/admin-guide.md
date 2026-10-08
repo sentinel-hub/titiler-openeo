@@ -62,6 +62,44 @@ TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
 ```
 
+##### Scale and offset
+
+By default, `load_collection` and `load_stac` apply the scale/offset of each band, so that bands are physical values (for example, Sentinel-2 reflectance from 0 to 1) and not raw DN. There are three sources:
+
+| Source | Where the values come from |
+| --- | --- |
+| `stac` | The `raster:scale`/`raster:offset` of the asset (or of `raster:bands`). |
+| `cog` | The scale/offset in the GeoTIFF header. |
+| `sentinel2-boa` | Plugin for `sentinel-2-l2a`: `BOA_QUANTIFICATION_VALUE` and `BOA_ADD_OFFSET` in the product metadata (`MTD_MSIL2A.xml`, asset `product_metadata` or `product-metadata`). Also `AOT` and `WVP`. |
+
+The sources are an ordered list. For each band, the first source that has a value wins, so a band is scaled one time only. A source that does not apply to an item is skipped. For example, `sentinel2-boa` is skipped for an item that is not Sentinel-2 L2A or has no product metadata asset. Bands with no value in any listed source (for example, Sentinel-2 `SCL`) do not change and keep their integer type.
+
+A plugin fetches its file only for a band that it knows, and only when no earlier source has a value for that band. The file is cached for each product (`TITILER_OPENEO_SENTINEL2_PRODUCT_METADATA_CACHE_MAXSIZE`, default 128). If a plugin applies but cannot fetch or read its file, the read fails, so raw DN is never returned without an error.
+
+```bash
+# Master switch. "false" keeps raw DN for all collections.
+TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET=true
+# Global order (JSON list or comma list). [] = no scale/offset.
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_SOURCES='["stac", "sentinel2-boa", "cog"]'
+# Per-collection order (JSON). A list here replaces the global order for that collection.
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS='{"sentinel-2-l2a": ["sentinel2-boa"], "my-raw-collection": []}'
+```
+
+Recommended settings for Sentinel-2 L2A, checked on 2026-10-08:
+
+| Catalogue and collection | STAC values | COG header | Setting |
+| --- | --- | --- | --- |
+| Microsoft Planetary Computer `sentinel-2-l2a` | none ([#134](https://github.com/microsoft/PlanetaryComputer/issues/134)) | 1/0 | `{"sentinel-2-l2a": ["sentinel2-boa"]}` |
+| CDSE `sentinel-2-l2a` | correct | 1/0 (JP2) | `{"sentinel-2-l2a": ["stac"]}` |
+| Element84 Earth Search `sentinel-2-c1-l2a` | correct | correct | the default |
+| Element84 Earth Search `sentinel-2-l2a` | **wrong on many items** | 1/0 | do not use; use `sentinel-2-c1-l2a` |
+
+On the same clear area and dates, Planetary Computer with `sentinel2-boa`, CDSE with `stac` (or with `sentinel2-boa`, which gives the same values) and Earth Search `sentinel-2-c1-l2a` with the default order gave a B04 median reflectance within 0.002 of each other, for a baseline 05.12 product (2026) and for a 2021 product.
+
+Earth Search's legacy `sentinel-2-l2a` collection subtracted the 1000 DN offset from the pixels of many items, but its STAC still declares `offset: -0.1`. Its `earthsearch:boa_offset_applied` flag is also wrong on some items ([Element84/earth-search#9](https://github.com/Element84/earth-search/issues/9), [#66](https://github.com/Element84/earth-search/issues/66), [#71](https://github.com/Element84/earth-search/issues/71)). Element84 recommends `sentinel-2-c1-l2a` instead ([#41](https://github.com/Element84/earth-search/issues/41)). No metadata source is reliable for that collection: STAC values give negative reflectance, and the product XML (`sentinel2-boa`) has the same problem. Its `product_metadata` is also in a requester-pays bucket.
+
+The collection is found from the `collection` field of each STAC item. Items with no `collection` field use the global order. An unknown or repeated source name stops the service at startup. See [ADR 0009 — Scale/offset sources and plugins](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0009-scale-offset-sources.md).
+
 #### Store Settings ([`StoreSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
 
 Connection pool for SQL stores such as PostgreSQL. They do not apply to SQLite, JSON or DuckDB. These settings need titiler-openeo newer than 0.18.2. Older versions ignore them, and each process then keeps two default pools of up to 15 connections each.

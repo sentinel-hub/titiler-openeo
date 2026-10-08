@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<n1:Level-2A_User_Product xmlns:n1="https://psd-15.sentinel2.eo.esa.int/PSD/User_Product_Level-2A.xsd">
+  <n1:General_Info>
+    <Product_Info>
+      <PRODUCT_URI>S2A_MSIL2A_20260928T104741_N0513_R051_T31UFU_20260928T172818.SAFE</PRODUCT_URI>
+      <PRODUCT_TYPE>S2MSI2A</PRODUCT_TYPE>
+      <PROCESSING_BASELINE>05.13</PROCESSING_BASELINE>
+    </Product_Info>
+    <Product_Image_Characteristics>
+      <QUANTIFICATION_VALUES_LIST>
+        <BOA_QUANTIFICATION_VALUE unit="none">10000</BOA_QUANTIFICATION_VALUE>
+        <AOT_QUANTIFICATION_VALUE unit="none">1000.0</AOT_QUANTIFICATION_VALUE>
+        <WVP_QUANTIFICATION_VALUE unit="cm">1000.0</WVP_QUANTIFICATION_VALUE>
+      </QUANTIFICATION_VALUES_LIST>
+      <BOA_ADD_OFFSET_VALUES_LIST>
+        <BOA_ADD_OFFSET band_id="0">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="1">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="2">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="3">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="4">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="5">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="6">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="7">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="8">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="9">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="10">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="11">-1000</BOA_ADD_OFFSET>
+        <BOA_ADD_OFFSET band_id="12">-1000</BOA_ADD_OFFSET>
+      </BOA_ADD_OFFSET_VALUES_LIST>
+      <Spectral_Information_List>
+        <Spectral_Information bandId="0" physicalBand="B1" />
+        <Spectral_Information bandId="1" physicalBand="B2" />
+        <Spectral_Information bandId="2" physicalBand="B3" />
+        <Spectral_Information bandId="3" physicalBand="B4" />
+        <Spectral_Information bandId="4" physicalBand="B5" />
+        <Spectral_Information bandId="5" physicalBand="B6" />
+        <Spectral_Information bandId="6" physicalBand="B7" />
+        <Spectral_Information bandId="7" physicalBand="B8" />
+        <Spectral_Information bandId="8" physicalBand="B8A" />
+        <Spectral_Information bandId="9" physicalBand="B9" />
+        <Spectral_Information bandId="10" physicalBand="B10" />
+        <Spectral_Information bandId="11" physicalBand="B11" />
+        <Spectral_Information bandId="12" physicalBand="B12" />
+      </Spectral_Information_List>
+    </Product_Image_Characteristics>
+  </n1:General_Info>
+</n1:Level-2A_User_Product>

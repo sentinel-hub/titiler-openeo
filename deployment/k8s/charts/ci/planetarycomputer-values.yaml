@@ -21,6 +21,10 @@ env:
   # which fails openEO response validation and takes the whole GET /collections
   # response with it. Verified upstream 2026-08-10.
   TITILER_OPENEO_EXCLUDE_COLLECTIONS: "noaa-c-cap"
+  # Planetary Computer's Sentinel-2 L2A has no scale/offset in STAC and 1/0 in
+  # the COG header (microsoft/PlanetaryComputer#134). The BOA quantification
+  # and offset come from each product's MTD_MSIL2A.xml.
+  TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS: '{"sentinel-2-l2a": ["sentinel2-boa"]}'
   CPL_TMPDIR: /tmp
   GDAL_CACHEMAX: "200"
   VSI_CACHE: "TRUE"
