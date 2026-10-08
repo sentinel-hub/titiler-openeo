@@ -18,7 +18,7 @@ catalogues do not publish the values in the same place. Checked live on
 | Catalogue, collection | STAC | COG header | Product metadata (`MTD_MSIL2A.xml`) |
 | --- | --- | --- | --- |
 | Microsoft Planetary Computer `sentinel-2-l2a` | none | 1/0 | `product-metadata`, all items |
-| CDSE `sentinel-2-l2a` | `0.0001` / `-0.1` | not checked | `product_metadata` |
+| CDSE `sentinel-2-l2a` | `0.0001` / `-0.1` | 1/0 (JP2) | `product_metadata`, same values as STAC |
 | Element84 Earth Search `sentinel-2-c1-l2a` | `0.0001` / `-0.1` | `0.0001` / `-0.1` | `product_metadata` |
 | Element84 Earth Search `sentinel-2-l2a` | `-0.1` also on items whose pixels already had the offset removed | 1/0 | `product_metadata` (requester-pays), new items only |
 
@@ -116,8 +116,8 @@ fails and does not return raw DN without an error. `_reader` retries only on
 
 - Planetary Computer `sentinel-2-l2a` gives harmonized 0–1 reflectance for
   all baselines. On the same clear area, its B04 median reflectance agreed
-  with Earth Search `sentinel-2-c1-l2a` within 0.002 for 2026 and 2021
-  products.
+  with CDSE and Earth Search `sentinel-2-c1-l2a` within 0.002 for 2026 and
+  2021 products.
 - A new mission with the same problem needs one plugin module, one entry in
   `PLUGINS` and one name in the `Literal`.
 - Behavior change: the COG source and the plugin are on by default. A
