@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-10-08
 - **Deciders:** @emmanuelmathot
-- **Related:** PR #322, PR #427, microsoft/PlanetaryComputer#134
+- **Related:** [PR #322](https://github.com/sentinel-hub/titiler-openeo/pull/322), [PR #427](https://github.com/sentinel-hub/titiler-openeo/pull/427), [microsoft/PlanetaryComputer#134](https://github.com/microsoft/PlanetaryComputer/issues/134), [Element84/earth-search#9](https://github.com/Element84/earth-search/issues/9), [#66](https://github.com/Element84/earth-search/issues/66), [#71](https://github.com/Element84/earth-search/issues/71), [#41](https://github.com/Element84/earth-search/issues/41)
 
 ---
 
@@ -22,9 +22,10 @@ catalogues do not publish the values in the same place. Checked live on
 | Element84 Earth Search `sentinel-2-c1-l2a` | `0.0001` / `-0.1` | `0.0001` / `-0.1` | `product_metadata` |
 | Element84 Earth Search `sentinel-2-l2a` | `-0.1` also on items whose pixels already had the offset removed | 1/0 | `product_metadata` (requester-pays), new items only |
 
-Planetary Computer makes its own L2A with Sen2Cor and does not publish the
+Planetary Computer makes its own L2A with Sen2Cor
+([microsoft/PlanetaryComputer discussion #40](https://github.com/microsoft/PlanetaryComputer/discussions/40)) and does not publish the
 offset in STAC or in the COG header. This problem is open since 2022, with no
-planned fix (microsoft/PlanetaryComputer#134). The only correct source there is
+planned fix ([microsoft/PlanetaryComputer#134](https://github.com/microsoft/PlanetaryComputer/issues/134)). The only correct source there is
 each product's `MTD_MSIL2A.xml`:
 
     reflectance = (DN + BOA_ADD_OFFSET[band]) / BOA_QUANTIFICATION_VALUE
@@ -35,10 +36,11 @@ before. A fixed offset or a date cutoff is thus wrong for part of the archive.
 Earth Search's legacy `sentinel-2-l2a` shows the opposite problem. Many of
 its items had the 1000 DN offset removed from the pixels, but STAC still
 declares `-0.1`, and the `earthsearch:boa_offset_applied` flag is sometimes
-wrong too (Element84/earth-search#9, #66, #71). On a clear area, its raw B04 DN
+wrong too ([Element84/earth-search#9](https://github.com/Element84/earth-search/issues/9), [#66](https://github.com/Element84/earth-search/issues/66), [#71](https://github.com/Element84/earth-search/issues/71)). On a clear area, its raw B04 DN
 was 797 against 1797 for the same product on Planetary Computer and on
 `sentinel-2-c1-l2a`. No metadata describes those pixels correctly, so that
-collection is not supported; deployments use `sentinel-2-c1-l2a`.
+collection is not supported; deployments use `sentinel-2-c1-l2a`, as an
+Element84 contributor recommends ([Element84/earth-search#41](https://github.com/Element84/earth-search/issues/41)).
 
 Other missions can have the same problem. The core must not contain provider
 names (the reason for issue #377).

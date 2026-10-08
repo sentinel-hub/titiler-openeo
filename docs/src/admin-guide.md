@@ -89,14 +89,14 @@ Recommended settings for Sentinel-2 L2A, checked on 2026-10-08:
 
 | Catalogue and collection | STAC values | COG header | Setting |
 | --- | --- | --- | --- |
-| Microsoft Planetary Computer `sentinel-2-l2a` | none | 1/0 | `{"sentinel-2-l2a": ["sentinel2-boa"]}` |
+| Microsoft Planetary Computer `sentinel-2-l2a` | none ([#134](https://github.com/microsoft/PlanetaryComputer/issues/134)) | 1/0 | `{"sentinel-2-l2a": ["sentinel2-boa"]}` |
 | CDSE `sentinel-2-l2a` | correct | 1/0 (JP2) | `{"sentinel-2-l2a": ["stac"]}` |
 | Element84 Earth Search `sentinel-2-c1-l2a` | correct | correct | the default |
 | Element84 Earth Search `sentinel-2-l2a` | **wrong on many items** | 1/0 | do not use; use `sentinel-2-c1-l2a` |
 
 On the same clear area and dates, Planetary Computer with `sentinel2-boa`, CDSE with `stac` (or with `sentinel2-boa`, which gives the same values) and Earth Search `sentinel-2-c1-l2a` with the default order gave a B04 median reflectance within 0.002 of each other, for a baseline 05.12 product (2026) and for a 2021 product.
 
-Earth Search's legacy `sentinel-2-l2a` collection subtracted the 1000 DN offset from the pixels of many items, but its STAC still declares `offset: -0.1`. Its `earthsearch:boa_offset_applied` flag is also wrong on some items (Element84/earth-search#9, #66, #71). No metadata source is reliable for that collection: STAC values give negative reflectance, and the product XML (`sentinel2-boa`) has the same problem. Its `product_metadata` is also in a requester-pays bucket.
+Earth Search's legacy `sentinel-2-l2a` collection subtracted the 1000 DN offset from the pixels of many items, but its STAC still declares `offset: -0.1`. Its `earthsearch:boa_offset_applied` flag is also wrong on some items ([Element84/earth-search#9](https://github.com/Element84/earth-search/issues/9), [#66](https://github.com/Element84/earth-search/issues/66), [#71](https://github.com/Element84/earth-search/issues/71)). Element84 recommends `sentinel-2-c1-l2a` instead ([#41](https://github.com/Element84/earth-search/issues/41)). No metadata source is reliable for that collection: STAC values give negative reflectance, and the product XML (`sentinel2-boa`) has the same problem. Its `product_metadata` is also in a requester-pays bucket.
 
 The collection is found from the `collection` field of each STAC item. Items with no `collection` field use the global order. An unknown or repeated source name stops the service at startup. See [ADR 0009 — Scale/offset sources and plugins](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0009-scale-offset-sources.md).
 

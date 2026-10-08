@@ -67,7 +67,8 @@ minutes before it expires.
 
 ## Sentinel-2 L2A reflectance
 
-Planetary Computer's `sentinel-2-l2a` has no scale/offset in STAC, and its COG
+Planetary Computer makes its own Sentinel-2 L2A with Sen2Cor
+([discussion #40](https://github.com/microsoft/PlanetaryComputer/discussions/40)). Its `sentinel-2-l2a` has no scale/offset in STAC, and its COG
 headers have scale 1 and offset 0 ([microsoft/PlanetaryComputer#134](https://github.com/microsoft/PlanetaryComputer/issues/134)).
 The values are only in each product's `MTD_MSIL2A.xml` (asset
 `product-metadata`): `BOA_QUANTIFICATION_VALUE` 10000, and `BOA_ADD_OFFSET`
