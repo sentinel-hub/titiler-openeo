@@ -126,3 +126,7 @@ fails and does not return raw DN without an error. `_reader` retries only on
   scale two times. To keep the old behavior, list only `stac`, or set
   `APPLY_SCALE_OFFSET=false`.
 - `dataset_statistics` are not scaled (`unscale=True` would scale them).
+- SAR calibration still needs raw DN (ADR 0001). The Sentinel-1 GRD
+  measurement headers on Planetary Computer and CDSE have scale 1 and offset 0
+  (checked 2026-10-08), and no plugin matches Sentinel-1, so nothing changes
+  for `sar_backscatter`.

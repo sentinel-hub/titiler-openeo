@@ -65,6 +65,28 @@ Tokens are container-scoped, read-only, and last about 45 minutes. One token is
 minted per storage container and reused for every asset in it, refreshed five
 minutes before it expires.
 
+## Sentinel-2 L2A reflectance
+
+Planetary Computer's `sentinel-2-l2a` has no scale/offset in STAC, and its COG
+headers have scale 1 and offset 0 ([microsoft/PlanetaryComputer#134](https://github.com/microsoft/PlanetaryComputer/issues/134)).
+The values are only in each product's `MTD_MSIL2A.xml` (asset
+`product-metadata`): `BOA_QUANTIFICATION_VALUE` 10000, and `BOA_ADD_OFFSET`
+-1000 from processing baseline 04.00 (2022-01-25), none before.
+
+The `sentinel2-boa` scale/offset source reads that file for each product, so
+B01–B12 are 0–1 reflectance for all baselines, and `AOT`/`WVP` are physical
+values. `SCL` does not change. Set it as the only source for the collection:
+
+```bash
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS='{"sentinel-2-l2a": ["sentinel2-boa"]}'
+```
+
+`.env.planetarycomputer` and `ci/planetarycomputer-values.yaml` set it. The
+default order (`stac,sentinel2-boa,cog`) also reaches `sentinel2-boa` here,
+because STAC and the COG header have no values. The file is signed like any
+other asset and cached for each product. See
+[Scale and offset](admin-guide.md#scale-and-offset) in the admin guide.
+
 ## Settings
 
 | Variable | Default | Description |
@@ -104,6 +126,7 @@ the tenants.
 
 - [ADR 0005 — Asset href signing](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0005-asset-href-signing.md)
 - [ADR 0006 — Microsoft Entra ID as an OIDC provider](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0006-microsoft-entra-oidc.md)
+- [ADR 0009 — Scale/offset sources and plugins](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0009-scale-offset-sources.md)
 - [SAR Backscatter](sar-backscatter.md) and
   [Sentinel-2 View/Sun Angle Bands](sentinel2-view-angles.md) — both read
   non-raster assets that are signed by the same mechanism.

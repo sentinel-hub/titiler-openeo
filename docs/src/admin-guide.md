@@ -98,7 +98,7 @@ On the same clear area and dates, Planetary Computer with `sentinel2-boa`, CDSE 
 
 Earth Search's legacy `sentinel-2-l2a` collection subtracted the 1000 DN offset from the pixels of many items, but its STAC still declares `offset: -0.1`. Its `earthsearch:boa_offset_applied` flag is also wrong on some items (Element84/earth-search#9, #66, #71). No metadata source is reliable for that collection: STAC values give negative reflectance, and the product XML (`sentinel2-boa`) has the same problem. Its `product_metadata` is also in a requester-pays bucket.
 
-The collection is found from the `collection` field of each STAC item. Items with no `collection` field use the global order. An unknown or repeated source name stops the service at startup. See [ADR 0009](../adr/0009-scale-offset-sources.md).
+The collection is found from the `collection` field of each STAC item. Items with no `collection` field use the global order. An unknown or repeated source name stops the service at startup. See [ADR 0009 — Scale/offset sources and plugins](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0009-scale-offset-sources.md).
 
 #### Store Settings ([`StoreSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
 
