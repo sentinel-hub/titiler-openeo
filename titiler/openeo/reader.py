@@ -1210,19 +1210,65 @@ def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
     )
 
 
+def _scale_offset_sources(item: Any) -> Tuple[bool, bool]:
+    """Return ``(use_stac, use_cog)`` for ``item``'s collection.
+
+    Order: the master switch `apply_scale_offset` (off -> nothing), then the
+    per-collection override in `scale_offset_collections`, then the global
+    `scale_offset_stac` / `scale_offset_cog` defaults. The collection id comes
+    from the item itself, so an item without one (e.g. from `load_stac`) uses
+    the global defaults.
+    """
+    settings = processing_settings
+    if not settings.apply_scale_offset:
+        return False, False
+
+    if isinstance(item, dict):
+        collection = item.get("collection")
+    else:
+        collection = getattr(item, "collection_id", None)
+
+    use_stac, use_cog = settings.scale_offset_stac, settings.scale_offset_cog
+    override = settings.scale_offset_collections.get(collection) if collection else None
+    if override is not None:
+        if override.stac is not None:
+            use_stac = override.stac
+        if override.cog is not None:
+            use_cog = override.cog
+    return use_stac, use_cog
+
+
+def _is_identity(pair: Tuple[float, float]) -> bool:
+    return pair[0] == 1.0 and pair[1] == 0.0
+
+
 def _apply_scale_offset(
-    img: ImageData, item: Any, assets: Optional[Sequence[str]]
+    img: ImageData,
+    item: Any,
+    assets: Optional[Sequence[str]],
+    *,
+    use_stac: bool = True,
+    use_cog: bool = False,
 ) -> ImageData:
-    """Apply per-band STAC ``raster:scale``/``raster:offset`` to ``img``.
+    """Apply per-band scale/offset to ``img``.
+
+    For each band, the scale/offset comes from one source only, so a band is
+    never scaled two times:
+
+    1. STAC ``raster:scale``/``raster:offset`` (when ``use_stac``), else
+    2. the COG header scale/offset that rio-tiler reports on ``img.scales`` /
+       ``img.offsets`` when it reads with ``unscale=False`` (when ``use_cog``),
+       else
+    3. identity (1/0).
 
     Returns physical values (e.g. reflectance) as ``float32``. Bands without
-    scale/offset metadata (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
+    scale/offset (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
     keeps its integer class values. The nodata mask is preserved.
 
     No-ops (returns ``img`` unchanged, keeping its dtype) when ``assets`` is missing,
     its length does not match the band count, or every band is identity (1/0).
     """
-    if not assets:
+    if not assets or not (use_stac or use_cog):
         return img
 
     nbands = img.array.shape[0]
@@ -1234,8 +1280,21 @@ def _apply_scale_offset(
         )
         return img
 
-    pairs = [_band_scale_offset(_asset_extra_fields(item, b)) for b in assets]
-    if all(scale == 1.0 and offset == 0.0 for scale, offset in pairs):
+    cog_pairs: List[Tuple[float, float]] = [(1.0, 0.0)] * nbands
+    img_scales, img_offsets = img.scales or [], img.offsets or []
+    if use_cog and len(img_scales) == nbands and len(img_offsets) == nbands:
+        cog_pairs = [(float(s), float(o)) for s, o in zip(img_scales, img_offsets)]
+
+    pairs: List[Tuple[float, float]] = []
+    for band, cog_pair in zip(assets, cog_pairs):
+        stac_pair = (
+            _band_scale_offset(_asset_extra_fields(item, band))
+            if use_stac
+            else (1.0, 0.0)
+        )
+        pairs.append(stac_pair if not _is_identity(stac_pair) else cog_pair)
+
+    if all(_is_identity(pair) for pair in pairs):
         return img
 
     scales = numpy.array([s for s, _ in pairs])
@@ -1353,11 +1412,19 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                         img, getattr(src_dst, "_derived_bands", {}), requested
                     )
 
-                # Apply STAC raster:scale/raster:offset (per band) so bands are
-                # returned as physical values (e.g. reflectance) instead of raw DN.
-                # Runs inside the lazy task — only when a slice is actually read.
-                if processing_settings.apply_scale_offset:
-                    img = _apply_scale_offset(img, item, kwargs.get("assets"))
+                # Apply scale/offset (per band, from STAC or the COG header) so
+                # bands are returned as physical values (e.g. reflectance)
+                # instead of raw DN. Runs inside the lazy task — only when a
+                # slice is actually read.
+                use_stac, use_cog = _scale_offset_sources(item)
+                if use_stac or use_cog:
+                    img = _apply_scale_offset(
+                        img,
+                        item,
+                        kwargs.get("assets"),
+                        use_stac=use_stac,
+                        use_cog=use_cog,
+                    )
 
                 # IMPORTANT: We intentionally do NOT set cutline_mask on individual tiles.
                 #

@@ -2,7 +2,15 @@
 
 from typing import Annotated, Any, Dict, Optional, Union
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PostgresDsn,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -286,6 +294,20 @@ class PySTACSettings(BaseSettings):
     )
 
 
+class ScaleOffsetSources(BaseModel):
+    """Per-collection override of the scale/offset sources.
+
+    A source left unset (``None``) uses the global default
+    (`ProcessingSettings.scale_offset_stac` / `scale_offset_cog`). Unknown keys
+    are rejected, so a typing error fails at startup instead of being ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stac: Optional[bool] = None
+    cog: Optional[bool] = None
+
+
 class ProcessingSettings(BaseSettings):
     """Processing settings"""
 
@@ -299,10 +321,24 @@ class ProcessingSettings(BaseSettings):
     # memory to ~the working set. See titiler.openeo.results_cache.
     evict_intermediate_results: bool = True
 
-    # Apply STAC raster:scale / raster:offset (per band) when loading so bands are
-    # returned as physical values (e.g. Sentinel-2 BOA reflectance) instead of raw
-    # DN. Disable to keep raw DN (e.g. while migrating graphs that scale manually).
+    # Apply scale/offset (per band) when loading so bands are returned as
+    # physical values (e.g. Sentinel-2 BOA reflectance) instead of raw DN.
+    # Master switch: disable to keep raw DN everywhere (e.g. while migrating
+    # graphs that scale manually), whatever the per-source settings say.
     apply_scale_offset: bool = True
+
+    # Global defaults for the two scale/offset sources. For each band the STAC
+    # `raster:scale`/`raster:offset` wins; the COG header scale/offset is used
+    # only when STAC has none. A band is scaled one time only.
+    scale_offset_stac: bool = True
+    scale_offset_cog: bool = True
+
+    # Per-collection overrides, as JSON: collection id -> {"stac": bool,
+    # "cog": bool}. A source that is not given uses the global default above.
+    # e.g. '{"sentinel-2-l2a": {"stac": false}, "raw-dn": {"stac": false, "cog": false}}'
+    scale_offset_collections: Dict[str, ScaleOffsetSources] = Field(
+        default_factory=dict
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_PROCESSING_",

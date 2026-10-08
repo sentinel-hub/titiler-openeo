@@ -62,6 +62,27 @@ TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
 ```
 
+##### Scale and offset
+
+By default, `load_collection` and `load_stac` apply the scale/offset of each band, so that bands are physical values (for example, Sentinel-2 reflectance from 0 to 1) and not raw DN. There are two sources:
+
+- **STAC**: the `raster:scale`/`raster:offset` of the asset (or of `raster:bands`).
+- **COG**: the scale/offset in the GeoTIFF header.
+
+For each band, the STAC value is used first. The COG value is used only when STAC has no value. A band is scaled one time only. Bands with no scale/offset (for example, Sentinel-2 `SCL`) do not change and keep their integer type.
+
+```bash
+# Master switch. "false" keeps raw DN for all collections.
+TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET=true
+# Global defaults for each source.
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_STAC=true
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COG=true
+# Per-collection overrides (JSON). A source that is not given uses the global default.
+TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS='{"sentinel-2-l2a": {"stac": false}, "my-raw-collection": {"stac": false, "cog": false}}'
+```
+
+The collection is found from the `collection` field of each STAC item. Items with no `collection` field use the global defaults. An unknown key in `SCALE_OFFSET_COLLECTIONS` (for example `"cogs"`) stops the service at startup.
+
 #### Store Settings ([`StoreSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py))
 
 Connection pool for SQL stores such as PostgreSQL. They do not apply to SQLite, JSON or DuckDB. These settings need titiler-openeo newer than 0.18.2. Older versions ignore them, and each process then keeps two default pools of up to 15 connections each.

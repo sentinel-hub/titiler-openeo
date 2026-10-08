@@ -1,4 +1,4 @@
-"""Tests for STAC raster:scale/raster:offset application in the reader.
+"""Tests for scale/offset application (STAC and COG header) in the reader.
 
 CDSE sentinel-2-l2a bands declare raster:scale=0.0001 / raster:offset=-0.1 (BOA
 offset, processing baseline >= 04.00). The reader applies them per band so bands
@@ -18,7 +18,7 @@ from titiler.openeo.reader import (
     _asset_extra_fields,
     _band_scale_offset,
 )
-from titiler.openeo.settings import ProcessingSettings
+from titiler.openeo.settings import ProcessingSettings, ScaleOffsetSources
 
 
 # --- _band_scale_offset -----------------------------------------------------
@@ -222,3 +222,181 @@ def test_setting_default_on():
 def test_setting_env_override(monkeypatch):
     monkeypatch.setenv("TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET", "false")
     assert ProcessingSettings().apply_scale_offset is False
+
+
+# --- sources: STAC vs COG header, per collection ------------------------------
+def _img_with_header(dn, scales, offsets, dtype="uint16"):
+    """An image as rio-tiler returns it with ``unscale=False``: raw DN, plus the
+    COG header scale/offset on ``scales``/``offsets``."""
+    img = _img(dn, dtype=dtype)
+    img.scales = scales
+    img.offsets = offsets
+    return img
+
+
+def test_apply_scale_offset_cog_header_only():
+    # No STAC scale/offset (as on MPC sentinel-2-l2a): the COG header is used.
+    img = _img_with_header([[[2000]], [[4]]], [0.0001, 1.0], [-0.1, 0.0])
+    item = {"assets": {"B04": {}, "SCL": {}}}
+    out = _apply_scale_offset(img, item, ["B04", "SCL"], use_stac=True, use_cog=True)
+    assert out.array.dtype == numpy.float32
+    assert out.array.data[0][0, 0] == pytest.approx(0.1, rel=1e-5)
+    assert out.array.data[1][0, 0] == 4.0
+
+
+def test_apply_scale_offset_cog_off_ignores_header():
+    img = _img_with_header([[[2000]]], [0.0001], [-0.1])
+    out = _apply_scale_offset(img, {"assets": {"B04": {}}}, ["B04"], use_cog=False)
+    assert out is img
+
+
+def test_apply_scale_offset_stac_and_cog_applied_once():
+    # Both sources carry the same values: the band must be scaled one time only.
+    img = _img_with_header([[[2000]]], [0.0001], [-0.1])
+    item = {"assets": {"B04": {"raster:scale": 0.0001, "raster:offset": -0.1}}}
+    out = _apply_scale_offset(img, item, ["B04"], use_stac=True, use_cog=True)
+    assert out.array.data[0][0, 0] == pytest.approx(0.1, rel=1e-5)
+
+
+def test_apply_scale_offset_stac_wins_over_cog():
+    img = _img_with_header([[[2000]]], [0.5], [0.0])
+    item = {"assets": {"B04": {"raster:scale": 0.0001, "raster:offset": -0.1}}}
+    out = _apply_scale_offset(img, item, ["B04"], use_stac=True, use_cog=True)
+    assert out.array.data[0][0, 0] == pytest.approx(0.1, rel=1e-5)
+
+
+def test_apply_scale_offset_stac_off_uses_cog():
+    img = _img_with_header([[[2000]]], [0.5], [0.0])
+    item = {"assets": {"B04": {"raster:scale": 0.0001, "raster:offset": -0.1}}}
+    out = _apply_scale_offset(img, item, ["B04"], use_stac=False, use_cog=True)
+    assert out.array.data[0][0, 0] == pytest.approx(1000.0)
+
+
+def test_apply_scale_offset_cog_header_length_mismatch_ignored():
+    img = _img_with_header([[[2000]], [[4]]], [0.0001], [-0.1])  # 2 bands, 1 pair
+    item = {"assets": {"B04": {}, "SCL": {}}}
+    assert _apply_scale_offset(img, item, ["B04", "SCL"], use_cog=True) is img
+
+
+@pytest.fixture
+def scale_settings(monkeypatch):
+    """Reset the scale/offset settings to their defaults for one test."""
+    settings = reader.processing_settings
+    monkeypatch.setattr(settings, "apply_scale_offset", True)
+    monkeypatch.setattr(settings, "scale_offset_stac", True)
+    monkeypatch.setattr(settings, "scale_offset_cog", True)
+    monkeypatch.setattr(settings, "scale_offset_collections", {})
+    return settings
+
+
+def test_sources_defaults(scale_settings):
+    assert reader._scale_offset_sources({"collection": "any"}) == (True, True)
+    assert reader._scale_offset_sources({}) == (True, True)
+
+
+def test_sources_master_switch_off(scale_settings, monkeypatch):
+    monkeypatch.setattr(scale_settings, "apply_scale_offset", False)
+    monkeypatch.setattr(
+        scale_settings,
+        "scale_offset_collections",
+        {"c": ScaleOffsetSources(stac=True, cog=True)},
+    )
+    assert reader._scale_offset_sources({"collection": "c"}) == (False, False)
+
+
+def test_sources_per_collection_override(scale_settings, monkeypatch):
+    monkeypatch.setattr(scale_settings, "scale_offset_cog", False)
+    monkeypatch.setattr(
+        scale_settings,
+        "scale_offset_collections",
+        {
+            "s2": ScaleOffsetSources(stac=False, cog=True),
+            "only-stac-off": ScaleOffsetSources(stac=False),
+        },
+    )
+    assert reader._scale_offset_sources({"collection": "s2"}) == (False, True)
+    # `cog` not given: uses the global default (False here).
+    assert reader._scale_offset_sources({"collection": "only-stac-off"}) == (
+        False,
+        False,
+    )
+    # Other collections and items without a collection use the globals.
+    assert reader._scale_offset_sources({"collection": "other"}) == (True, False)
+    assert reader._scale_offset_sources({}) == (True, False)
+
+
+def test_sources_from_pystac_item(scale_settings, monkeypatch):
+    import pystac
+
+    monkeypatch.setattr(
+        scale_settings,
+        "scale_offset_collections",
+        {"s2": ScaleOffsetSources(stac=False, cog=False)},
+    )
+    item = pystac.Item(
+        id="x",
+        geometry=None,
+        bbox=None,
+        datetime=datetime(2024, 6, 14),
+        properties={},
+        collection="s2",
+    )
+    assert reader._scale_offset_sources(item) == (False, False)
+
+
+def test_reader_collection_disabled_keeps_raw_dn(scale_settings, monkeypatch):
+    monkeypatch.setattr(
+        scale_settings,
+        "scale_offset_collections",
+        {"raw": ScaleOffsetSources(stac=False, cog=False)},
+    )
+
+    def run(collection):
+        img = _img_with_header([[[2000]]], [0.0001], [-0.1])
+        monkeypatch.setattr(
+            reader, "SimpleSTACReader", lambda item, **kwargs: _FakeSrc(img)
+        )
+        item = {
+            "id": "x",
+            "collection": collection,
+            "properties": {"datetime": "2024-06-14T10:00:00Z"},
+            "assets": {"B04": {}},
+        }
+        return reader._reader(item, (0, 0, 1, 1), assets=["B04"])
+
+    raw = run("raw")
+    assert raw.array.dtype == numpy.dtype("uint16")
+    assert raw.array.data[0][0, 0] == 2000
+
+    scaled = run("other")
+    assert scaled.array.dtype == numpy.float32
+    assert scaled.array.data[0][0, 0] == pytest.approx(0.1, rel=1e-5)
+
+
+def test_settings_source_defaults():
+    settings = ProcessingSettings()
+    assert settings.scale_offset_stac is True
+    assert settings.scale_offset_cog is True
+    assert settings.scale_offset_collections == {}
+
+
+def test_settings_collections_from_env(monkeypatch):
+    monkeypatch.setenv(
+        "TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS",
+        '{"sentinel-2-l2a": {"stac": false}, "raw": {"stac": false, "cog": false}}',
+    )
+    collections = ProcessingSettings().scale_offset_collections
+    assert collections["sentinel-2-l2a"].stac is False
+    assert collections["sentinel-2-l2a"].cog is None
+    assert collections["raw"].cog is False
+
+
+def test_settings_collections_rejects_unknown_key(monkeypatch):
+    from pydantic import ValidationError
+
+    monkeypatch.setenv(
+        "TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS",
+        '{"sentinel-2-l2a": {"cogs": false}}',
+    )
+    with pytest.raises(ValidationError):
+        ProcessingSettings()
