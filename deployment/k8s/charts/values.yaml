@@ -125,6 +125,13 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
+  # Scale/offset of each band, from STAC raster:scale/offset or the COG header
+  # (STAC first; a band is scaled one time only). All on by default; see the
+  # admin guide, "Scale and offset". Per-collection overrides are JSON:
+  # TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET: "true"   # master switch
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_STAC: "true"
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COG: "true"
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS: '{"my-raw-collection": {"stac": false, "cog": false}}'
 
 # Additional environment variables from ConfigMaps and Secrets
 # Use this to map specific keys from secrets or configmaps to environment variables
