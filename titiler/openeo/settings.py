@@ -1,16 +1,8 @@
 """Titiler-openEO API settings."""
 
-from typing import Annotated, Any, Dict, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import (
-    AnyHttpUrl,
-    BaseModel,
-    ConfigDict,
-    Field,
-    PostgresDsn,
-    field_validator,
-    model_validator,
-)
+from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -294,18 +286,33 @@ class PySTACSettings(BaseSettings):
     )
 
 
-class ScaleOffsetSources(BaseModel):
-    """Per-collection override of the scale/offset sources.
+#: The scale/offset sources a deployment can list. ``"stac"`` and ``"cog"``
+#: are built in; every other name is a plugin in
+#: `titiler.openeo.scaleoffset.PLUGINS` (a test keeps the two in sync). A
+#: `Literal` rather than a check against the registry, so that this module
+#: does not import the plugins (which import these settings).
+ScaleOffsetSource = Literal["stac", "cog", "sentinel2-boa"]
 
-    A source left unset (``None``) uses the global default
-    (`ProcessingSettings.scale_offset_stac` / `scale_offset_cog`). Unknown keys
-    are rejected, so a typing error fails at startup instead of being ignored.
-    """
+DEFAULT_SCALE_OFFSET_SOURCES: List[ScaleOffsetSource] = [
+    "stac",
+    "sentinel2-boa",
+    "cog",
+]
 
-    model_config = ConfigDict(extra="forbid")
 
-    stac: Optional[bool] = None
-    cog: Optional[bool] = None
+def _parse_scale_offset_sources(value: Any) -> Any:
+    """Accept a JSON list or a comma-separated string, and reject duplicates."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            import json
+
+            value = json.loads(text)
+        else:
+            value = [v.strip() for v in text.split(",") if v.strip()]
+    if isinstance(value, list) and len(set(value)) != len(value):
+        raise ValueError(f"duplicate scale/offset source in {value!r}")
+    return value
 
 
 class ProcessingSettings(BaseSettings):
@@ -327,18 +334,33 @@ class ProcessingSettings(BaseSettings):
     # graphs that scale manually), whatever the per-source settings say.
     apply_scale_offset: bool = True
 
-    # Global defaults for the two scale/offset sources. For each band the STAC
-    # `raster:scale`/`raster:offset` wins; the COG header scale/offset is used
-    # only when STAC has none. A band is scaled one time only.
-    scale_offset_stac: bool = True
-    scale_offset_cog: bool = True
+    # Scale/offset sources, in order. For each band the first source that has
+    # a scale/offset (not 1/0) wins, so a band is scaled one time only. A
+    # source that does not apply to an item (e.g. no product XML) is skipped.
+    # JSON list or comma list, e.g. "stac,sentinel2-boa,cog". Empty = none.
+    scale_offset_sources: Annotated[List[ScaleOffsetSource], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_SCALE_OFFSET_SOURCES)
+    )
 
-    # Per-collection overrides, as JSON: collection id -> {"stac": bool,
-    # "cog": bool}. A source that is not given uses the global default above.
-    # e.g. '{"sentinel-2-l2a": {"stac": false}, "raw-dn": {"stac": false, "cog": false}}'
-    scale_offset_collections: Dict[str, ScaleOffsetSources] = Field(
+    # Per-collection source lists, as JSON: collection id -> ordered list. A
+    # list given here replaces `scale_offset_sources` for that collection; an
+    # empty list turns scale/offset off for it.
+    # e.g. '{"sentinel-2-l2a": ["sentinel2-boa"], "raw-dn": []}'
+    scale_offset_collections: Dict[str, List[ScaleOffsetSource]] = Field(
         default_factory=dict
     )
+
+    @field_validator("scale_offset_sources", mode="before")
+    @classmethod
+    def _parse_sources(cls, value: Any) -> Any:
+        return _parse_scale_offset_sources(value)
+
+    @field_validator("scale_offset_collections", mode="before")
+    @classmethod
+    def _parse_collections(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: _parse_scale_offset_sources(v) for k, v in value.items()}
+        return value
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_PROCESSING_",
@@ -376,6 +398,11 @@ class Sentinel2Settings(BaseSettings):
     # Max number of parsed MTD_TL.xml tile-metadata objects to keep cached,
     # mirroring SARSettings.annotation_cache_maxsize -- one entry per granule.
     tile_metadata_cache_maxsize: int = 128
+
+    # Max number of parsed MTD_MSIL2A.xml product-metadata objects (BOA
+    # quantification/offset, for the "sentinel2-boa" scale/offset source) to
+    # keep cached -- one entry per product.
+    product_metadata_cache_maxsize: int = 128
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_SENTINEL2_",
