@@ -193,18 +193,32 @@ jobs:
           SVC_URL="http://${RELEASE}-titiler-openeo.${NAMESPACE}.svc.cluster.local"
 
           run_curl() {
-            # `-i` (stdin) + `--restart=Never` + `--rm` runs curl in a
-            # one-shot pod, streams its stdout to us, and cleans up. No TTY
-            # required. We intentionally do NOT pass `-f` — that swallows
-            # the body on >=400 and makes diagnosis painful. Instead we
-            # print "<http_code>|<body>" and parse it.
-            kubectl run "curl-$(date +%s%N)" \
+            # Runs curl in a one-shot pod, waits for it to end, then reads
+            # its logs. Not `kubectl run -i --rm`: its attach races the
+            # short-lived pod, so the output is either lost
+            # (`<no-response>`) or printed twice (`200200`). kind v0.33 /
+            # kubectl v1.37 (kind-action v1.15.0) hit this on ~40% of runs.
+            # We intentionally do NOT pass `-f` — that swallows the body on
+            # >=400 and makes diagnosis painful. Instead we print the body
+            # followed by "---HTTP_CODE---<code>" and parse it.
+            local pod phase
+            pod="curl-$(date +%s%N)"
+            kubectl run "${pod}" \
               --namespace "${NAMESPACE}" \
               --image=curlimages/curl:8.10.1 \
-              --restart=Never --rm -i --quiet \
+              --restart=Never --quiet \
               --command -- curl -sS \
               -w '\n---HTTP_CODE---%{http_code}\n' \
-              "${SVC_URL}$1"
+              "${SVC_URL}$1" >/dev/null
+            for _ in $(seq 1 60); do
+              phase=$(kubectl get pod "${pod}" --namespace "${NAMESPACE}" \
+                -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              [[ "${phase}" == "Succeeded" || "${phase}" == "Failed" ]] && break
+              sleep 1
+            done
+            kubectl logs "${pod}" --namespace "${NAMESPACE}" 2>&1 || true
+            kubectl delete pod "${pod}" --namespace "${NAMESPACE}" \
+              --wait=false >/dev/null 2>&1 || true
           }
 
           for endpoint in /healthz /readyz /api /api.html /.well-known/openeo; do
