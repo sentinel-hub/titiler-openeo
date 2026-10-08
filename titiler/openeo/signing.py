@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
@@ -94,10 +94,32 @@ _HAS_SIGNATURE = re.compile(r"(?:^|&)sig=", re.IGNORECASE)
 #: costs nothing. A delegated signer must key this by user.
 _TOKEN_CACHE: Dict[Tuple[str, str], Tuple[str, datetime]] = {}
 
-#: Guards `_TOKEN_CACHE`. The read path fans out over a ThreadPoolExecutor, so
-#: several threads can miss the cache for one container at the same time --
-#: the same reasoning as `SimpleSTACReader._inverse_map_lock` (ADR 0002 S2.3).
+#: Guards `_TOKEN_CACHE` and `_IN_FLIGHT`. Held only to read and write them,
+#: never while a token is minted, so a slow mint for one container does not
+#: block reads of another.
 _TOKEN_LOCK = Lock()
+
+
+class _Flight:
+    """One token request in progress for one ``(account, container)``.
+
+    The read path fans out over a ThreadPoolExecutor, so many threads miss the
+    cache for one container at the same time -- after a pod starts, and each
+    time the token expires (issue #425). One thread (the leader) mints; the
+    others wait on this record and take its result, *or its error*. A per-key
+    lock alone is not enough: after a failed mint each waiter would take the
+    lock in turn, find the cache empty, and mint again.
+    """
+
+    def __init__(self) -> None:
+        self.done = Event()
+        self.token: Optional[str] = None
+        self.error: Optional[BaseException] = None
+
+
+#: Token requests in progress, keyed like `_TOKEN_CACHE`. An entry exists only
+#: while its mint runs: a failure is never cached, so the next call tries again.
+_IN_FLIGHT: Dict[Tuple[str, str], _Flight] = {}
 
 
 def _parse_blob_url(parts) -> Optional[Tuple[str, str]]:
@@ -166,19 +188,60 @@ class PlanetaryComputerSigner:
         return urlunsplit(parts._replace(query=query))
 
     def _token_for(self, account: str, container: str) -> str:
-        """Return a live SAS token for one container, minting it if needed."""
+        """Return a live SAS token for one container, minting it if needed.
+
+        At most one mint runs per container at a time (`_Flight`). A cached
+        token inside ``expiry_margin`` but not yet expired is refreshed by the
+        first thread that sees it; the other threads keep using it meanwhile,
+        so a read waits for the SAS API only when no valid token exists.
+        """
         key = (account, container)
         margin = timedelta(seconds=self.settings.expiry_margin)
 
         with _TOKEN_LOCK:
+            now = datetime.now(timezone.utc)
             cached = _TOKEN_CACHE.get(key)
-            if cached is not None and datetime.now(timezone.utc) + margin < cached[1]:
+            if cached is not None and now + margin < cached[1]:
                 return cached[0]
 
-        token, expiry = self._mint(account, container)
+            # Still valid, but inside the margin: usable while it is refreshed.
+            stale = cached[0] if cached is not None and now < cached[1] else None
+
+            flight = _IN_FLIGHT.get(key)
+            if flight is not None:
+                if stale is not None:
+                    return stale
+                leader = False
+            else:
+                flight = _IN_FLIGHT[key] = _Flight()
+                leader = True
+
+        if not leader:
+            flight.done.wait()
+            if flight.error is not None:
+                raise SigningError(str(flight.error)) from flight.error
+            assert flight.token is not None
+            return flight.token
+
+        try:
+            token, expiry = self._mint(account, container)
+        except BaseException as err:
+            with _TOKEN_LOCK:
+                del _IN_FLIGHT[key]
+            flight.error = err
+            flight.done.set()
+            if stale is not None and isinstance(err, SigningError):
+                # A failed refresh must not fail a read that still holds a
+                # valid token. The next call past the margin tries again.
+                logger.warning("%s; using the cached token until it expires", err)
+                return stale
+            raise
 
         with _TOKEN_LOCK:
             _TOKEN_CACHE[key] = (token, expiry)
+            del _IN_FLIGHT[key]
+        flight.token = token
+        flight.done.set()
 
         return token
 

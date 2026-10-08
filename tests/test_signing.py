@@ -1,7 +1,10 @@
 """Tests for titiler.openeo.signing (docs/adr/0005-asset-href-signing.md)."""
 
 import json
+import threading
+import time
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -41,9 +44,11 @@ def clear_token_cache():
     otherwise leak into the next.
     """
     signing._TOKEN_CACHE.clear()
+    signing._IN_FLIGHT.clear()
     get_signer.cache_clear()
     yield
     signing._TOKEN_CACHE.clear()
+    signing._IN_FLIGHT.clear()
     get_signer.cache_clear()
 
 
@@ -257,6 +262,167 @@ def test_cache_is_shared_across_independently_resolved_signers():
         get_signer(PC_KEY)(BLOB_HREF)
 
     assert urlopen.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Concurrent minting (issue #425)
+# ---------------------------------------------------------------------------
+
+
+def _expiry(minutes: float = 45) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
+def _call_concurrently(fn, n: int):
+    """Run ``fn`` in ``n`` threads released together; return results or errors."""
+    barrier = threading.Barrier(n)
+
+    def run(_):
+        barrier.wait()
+        try:
+            return fn()
+        except Exception as err:  # noqa: BLE001
+            return err
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        return list(pool.map(run, range(n)))
+
+
+def test_a_cold_cache_mints_once_for_many_concurrent_threads():
+    signer = PlanetaryComputerSigner()
+    calls = []
+
+    def slow_mint(account, container):
+        calls.append((account, container))
+        time.sleep(0.2)  # long enough for every thread to miss the cache
+        return f"sig=token{len(calls)}", _expiry()
+
+    with patch.object(signer, "_mint", side_effect=slow_mint):
+        results = _call_concurrently(lambda: signer(BLOB_HREF), 50)
+
+    assert calls == [("sentinel2l2a01", "sentinel2-l2")]
+    assert set(results) == {f"{BLOB_HREF}?sig=token1"}
+    assert not signing._IN_FLIGHT
+
+
+def test_mints_for_different_containers_overlap():
+    """A slow mint for one container must not hold up another (one lock each)."""
+    signer = PlanetaryComputerSigner()
+    both_started = threading.Barrier(2, timeout=5)
+
+    def mint(account, container):
+        # Each mint waits for the other to start: this deadlocks (and the
+        # barrier times out) if the two requests run one after the other.
+        both_started.wait()
+        return f"sig={container}", _expiry()
+
+    hrefs = iter(
+        [
+            "https://acct.blob.core.windows.net/one/a.tif",
+            "https://acct.blob.core.windows.net/two/a.tif",
+        ]
+    )
+    lock = threading.Lock()
+
+    def call():
+        with lock:
+            href = next(hrefs)
+        return signer(href)
+
+    with patch.object(signer, "_mint", side_effect=mint):
+        results = _call_concurrently(call, 2)
+
+    assert sorted(results) == [
+        "https://acct.blob.core.windows.net/one/a.tif?sig=one",
+        "https://acct.blob.core.windows.net/two/a.tif?sig=two",
+    ]
+
+
+def test_a_failed_mint_fails_every_waiter_and_is_not_cached():
+    signer = PlanetaryComputerSigner()
+    calls = []
+
+    def failing_mint(account, container):
+        calls.append(container)
+        time.sleep(0.2)
+        raise SigningError("Could not obtain a token: timed out")
+
+    with patch.object(signer, "_mint", side_effect=failing_mint):
+        results = _call_concurrently(lambda: signer(BLOB_HREF), 20)
+
+    assert len(calls) == 1
+    assert all(isinstance(r, SigningError) for r in results)
+    assert all("timed out" in str(r) for r in results)
+    assert not signing._TOKEN_CACHE
+    assert not signing._IN_FLIGHT
+
+    # The failure is not cached: the next call requests a token again.
+    with patch.object(signer, "_mint", return_value=("sig=ok", _expiry())) as mint:
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=ok"
+    assert mint.call_count == 1
+
+
+def test_a_token_inside_the_margin_is_refreshed_once_while_callers_keep_it():
+    settings = PlanetaryComputerSettings(expiry_margin=300.0)
+    signer = PlanetaryComputerSigner(settings=settings)
+    key = ("sentinel2l2a01", "sentinel2-l2")
+    # Valid for two more minutes, which is inside the five-minute margin.
+    signing._TOKEN_CACHE[key] = ("sig=old", _expiry(minutes=2))
+
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+    calls = []
+
+    def slow_mint(account, container):
+        calls.append(container)
+        refresh_started.set()
+        assert release_refresh.wait(5)
+        return "sig=new", _expiry()
+
+    with patch.object(signer, "_mint", side_effect=slow_mint):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            refresher = pool.submit(signer, BLOB_HREF)
+            assert refresh_started.wait(5)
+
+            # While the refresh runs, other callers get the old token at once.
+            others = _call_concurrently(lambda: signer(BLOB_HREF), 20)
+            assert set(others) == {f"{BLOB_HREF}?sig=old"}
+
+            release_refresh.set()
+            assert refresher.result() == f"{BLOB_HREF}?sig=new"
+
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=new"
+
+    assert len(calls) == 1
+
+
+def test_a_failed_refresh_keeps_the_valid_token():
+    settings = PlanetaryComputerSettings(expiry_margin=300.0)
+    signer = PlanetaryComputerSigner(settings=settings)
+    signing._TOKEN_CACHE[("sentinel2l2a01", "sentinel2-l2")] = (
+        "sig=old",
+        _expiry(minutes=2),
+    )
+
+    with patch.object(signer, "_mint", side_effect=SigningError("down")) as mint:
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=old"
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=old"
+
+    # Each call past the margin tries again: the failure is not cached.
+    assert mint.call_count == 2
+    assert not signing._IN_FLIGHT
+
+
+def test_an_expired_token_is_not_used_while_a_new_one_is_minted():
+    signer = PlanetaryComputerSigner()
+    signing._TOKEN_CACHE[("sentinel2l2a01", "sentinel2-l2")] = (
+        "sig=old",
+        _expiry(minutes=-1),
+    )
+
+    with patch.object(signer, "_mint", side_effect=SigningError("down")):
+        with pytest.raises(SigningError):
+            signer(BLOB_HREF)
 
 
 # ---------------------------------------------------------------------------
