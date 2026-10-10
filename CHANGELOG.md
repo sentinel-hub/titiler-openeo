@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.19.0 (2026-10-08)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 3.0.2 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/418
+* feat: enhance Microsoft Entra ID OIDC support for multi-tenant scenarios by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/423
+* fix(api): mint one SAS token per container at a time by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/426
+* fix: fix CI race condition in curl output handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/428
+* feat(api): refactor scale and offset handling for collections by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/427
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.3...v0.19.0
+
 ## 0.18.3 (2026-10-06)
 
 ## What's Changed
