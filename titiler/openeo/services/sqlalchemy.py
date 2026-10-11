@@ -15,10 +15,13 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    case,
     create_engine,
+    func,
     select,
     text,
 )
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -150,6 +153,30 @@ def dispose_engines() -> None:
         _engines.clear()
 
 
+# Arbitrary key of the PostgreSQL advisory lock that serializes schema creation.
+_SCHEMA_LOCK_KEY = 0x7469_7469_6C65_7230
+
+
+def create_schema(engine: Any) -> None:
+    """Create the missing tables.
+
+    `create_all` checks for a table and then creates it, so two replicas that
+    start together against an empty PostgreSQL database can both try to create
+    it, and one crashes (#274). A transaction-scoped advisory lock lets only
+    one process create the schema at a time; the next ones then find the
+    tables and skip them.
+    """
+    if engine.dialect.name != "postgresql":
+        Base.metadata.create_all(engine)
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SCHEMA_LOCK_KEY}
+        )
+        Base.metadata.create_all(conn)
+
+
 @define(kw_only=True)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
@@ -162,10 +189,7 @@ class SQLAlchemyStore(ServicesStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-
-        # Create tables if they don't exist
-
-        Base.metadata.create_all(self._engine)
+        create_schema(self._engine)
 
     def ping(self) -> None:
         """Verify the SQLAlchemy store is reachable. Raises on failure."""
@@ -272,36 +296,54 @@ class SQLAlchemyStore(ServicesStore):
         return item_id
 
     def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity."""
+        """Track user login activity.
+
+        A single upsert, not a select then an insert: two replicas that serve
+        the first requests of a new user at the same time would otherwise both
+        insert the row, and one fails on `uix_user_provider` (#275).
+        """
         now = datetime.now(timezone.utc)
+        dialect = {"postgresql": postgresql, "sqlite": sqlite}[
+            self._engine.dialect.name
+        ]
+
+        stmt = dialect.insert(UserTracking).values(
+            user_id=user.user_id,
+            provider=provider,
+            first_login=now,
+            last_login=now,
+            login_count=1,
+            email=user.email,
+            name=user.name,
+        )
+        table = UserTracking.__table__.c
+        new = stmt.excluded
+        # Concurrent logins can commit out of order: an older event must not
+        # move `last_login` back or overwrite newer profile data.
+        is_latest = new.last_login >= table.last_login
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[table.user_id, table.provider],
+            set_={
+                "first_login": case(
+                    (new.first_login < table.first_login, new.first_login),
+                    else_=table.first_login,
+                ),
+                "last_login": case((is_latest, new.last_login), else_=table.last_login),
+                "login_count": table.login_count + 1,
+                # Keep the stored values when the IdP does not send them.
+                "email": case(
+                    (is_latest, func.coalesce(new.email, table.email)),
+                    else_=table.email,
+                ),
+                "name": case(
+                    (is_latest, func.coalesce(new.name, table.name)),
+                    else_=table.name,
+                ),
+            },
+        )
 
         with Session(self._engine) as session:
-            tracking: Optional[UserTracking] = session.execute(
-                select(UserTracking).where(
-                    UserTracking.user_id == user.user_id,
-                    UserTracking.provider == provider,
-                )
-            ).scalar_one_or_none()
-
-            if tracking is not None:
-                tracking.last_login = now
-                tracking.login_count += 1
-                if user.email:
-                    tracking.email = user.email
-                if user.name:
-                    tracking.name = user.name
-            else:
-                tracking = UserTracking(
-                    user_id=user.user_id,
-                    provider=provider,
-                    first_login=now,
-                    last_login=now,
-                    login_count=1,
-                    email=user.email,
-                    name=user.name,
-                )
-                session.add(tracking)
-
+            session.execute(stmt)
             session.commit()
 
     def get_user_tracking(
@@ -341,7 +383,7 @@ class SQLAlchemyUdpStore(UdpStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        Base.metadata.create_all(self._engine)
+        create_schema(self._engine)
 
     def list_udps(
         self, user_id: str, limit: int = 100, offset: int = 0
