@@ -100,3 +100,16 @@ def test_empty_pool_variable_keeps_the_default(monkeypatch):
     """An empty variable (e.g. a Helm value set to null) is not a crash."""
     monkeypatch.setenv("TITILER_OPENEO_STORE_POOL_RECYCLE", "")
     assert StoreSettings().pool_recycle == -1
+
+
+def test_postgres_schema_creation_holds_an_advisory_lock(create_engine):
+    """On PostgreSQL, the schema is created under an advisory lock (#274)."""
+    engine = MagicMock()
+    engine.dialect.name = "postgresql"
+    create_engine.side_effect = lambda *a, **k: engine
+
+    module.SQLAlchemyStore(store="postgresql://u:p@localhost/db")
+
+    conn = engine.begin.return_value.__enter__.return_value
+    assert "pg_advisory_xact_lock" in str(conn.execute.call_args.args[0])
+    module.Base.metadata.create_all.assert_called_once_with(conn)
