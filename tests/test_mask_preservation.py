@@ -66,11 +66,11 @@ def test_array_element_preserves_masks_over_stack():
         }
     )
 
-    result = array_element(stack, 0)
+    result = array_element(stack, 1)
 
     assert isinstance(result, np.ma.MaskedArray)
-    # Shape is (time, height, width) after taking band 0 from each slice.
-    assert np.ma.getmaskarray(result).tolist() == [[[True, False]], [[False, True]]]
+    # Index 1 is the second time step, with shape (bands, height, width).
+    assert np.ma.getmaskarray(result).tolist() == [[[False, True]]]
 
 
 def test_array_element_preserves_mask_on_band_index():

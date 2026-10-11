@@ -235,11 +235,13 @@ def test_apply(sample_raster_stack):
 
 def test_array_element(sample_raster_stack):
     """Test the array_element function."""
-    # Extract first band
+    # The elements of a RasterStack are its time steps: index 0 is the first one
     result = array_element(sample_raster_stack, 0)
 
     assert isinstance(result, np.ndarray)
-    assert result.shape == (2, 10, 10)  # 2 images, 10x10 pixels
+    assert result.shape == (3, 10, 10)  # 3 bands of the first image
+    first = sample_raster_stack[datetime(2021, 1, 1)].array
+    np.testing.assert_array_equal(result, first)
 
 
 def test_reduce_dimension_spectral(sample_raster_stack):

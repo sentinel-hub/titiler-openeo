@@ -1146,3 +1146,108 @@ def test_before_after_merge_of_same_band_needs_no_resolver():
     assert img.band_descriptions == ["vv_before", "vv_during"]
     np.testing.assert_array_equal(img.array[0], 1.0)
     np.testing.assert_array_equal(img.array[1], 2.0)
+
+
+def test_array_element_in_temporal_reducer_selects_time_step_via_graph():
+    """array_element in a reducer over ``t`` must select ONE time step (#437).
+
+    It used to take band ``index`` of every time step, so ``data[0]`` returned
+    all time steps and ``data[2]`` failed on a single-band cube.
+    """
+    pg = {
+        "reduce": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "elem": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 2,
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+    (img,) = result.values()
+    assert img.array.shape == (1, 2, 2)
+    assert float(img.array.mean()) == 5.0
+
+
+def test_array_element_label_in_temporal_reducer_via_graph():
+    """array_element(label=...) accepts an ISO date for a datetime stack key."""
+    pg = {
+        "reduce": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "elem": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "label": "2024-06-02",
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+    (img,) = result.values()
+    assert float(img.array.mean()) == 7.0
+
+
+def test_aggregate_temporal_two_date_labels_via_graph():
+    """Two date strings in ``labels`` must not be read as a temporal-interval (#438)."""
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 4, 10): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.2, np.float32))
+            ),
+            datetime(2024, 5, 10): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.5, np.float32))
+            ),
+        }
+    )
+    pg = {
+        "aggt": {
+            "process_id": "aggregate_temporal",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "intervals": [
+                    ["2024-04-01", "2024-05-01"],
+                    ["2024-05-01", "2024-06-01"],
+                ],
+                "labels": ["2024-04-15", "2024-05-15"],
+                "reducer": {
+                    "process_graph": {
+                        "mean1": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    assert [k.date().isoformat() for k in result.keys()] == [
+        "2024-04-15",
+        "2024-05-15",
+    ]

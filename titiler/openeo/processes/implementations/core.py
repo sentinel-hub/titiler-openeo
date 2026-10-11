@@ -34,8 +34,12 @@ from geojson_pydantic import (
 )
 from openeo_pg_parser_networkx.pg_schema import (
     BoundingBox,
+    Date,
+    DateTime,
     ParameterReference,
     TemporalInterval,
+    Time,
+    Year,
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -195,6 +199,56 @@ def _resolve_special_parameter(
         return _convert_to_temporal_interval(param_value)
 
     return param_value
+
+
+def _accepts_type(param_type: Any, target: type) -> bool:
+    """Return True if ``param_type`` is ``target`` or a Union that contains it."""
+    if param_type is target:
+        return True
+    if get_origin(param_type) is Union:
+        return any(_accepts_type(t, target) for t in get_args(param_type))
+    return False
+
+
+# Wrappers the graph parser builds from date and time strings
+_PARSED_TEMPORAL_TYPES = (Year, Date, DateTime, Time)
+
+
+def _temporal_to_label(value: Any) -> Any:
+    """Serialize a value parsed from a date or time string back to a string."""
+    if isinstance(value, Date):
+        return value.root.date().isoformat()
+    if isinstance(value, Year):
+        return f"{value.root.year:04d}"
+    root = getattr(value, "root", value)
+    return root.isoformat() if hasattr(root, "isoformat") else root
+
+
+def _uncoerce_temporal_values(
+    resolved_kwargs: Dict[str, Any], param_types: Dict[str, Any]
+) -> None:
+    """Turn parsed temporal values back into strings where none is expected.
+
+    The graph parser converts every array of two date strings to a
+    ``TemporalInterval`` and every date string to a ``Date``/``DateTime``, also
+    when the parameter is a plain array or string (for example ``labels`` of
+    ``aggregate_temporal`` or ``label`` of ``array_element``). Only parameters
+    that declare ``TemporalInterval`` keep the parsed interval (#438).
+    """
+    for name, value in resolved_kwargs.items():
+        param_type = param_types.get(name)
+        if (
+            param_type is None
+            or param_type is inspect.Parameter.empty
+            or param_type is Any
+        ):
+            continue
+        if isinstance(value, TemporalInterval):
+            if not _accepts_type(param_type, TemporalInterval):
+                resolved_kwargs[name] = [_temporal_to_label(v) for v in value.root]
+        elif isinstance(value, _PARSED_TEMPORAL_TYPES):
+            if _accepts_type(param_type, str):
+                resolved_kwargs[name] = _temporal_to_label(value)
 
 
 def _resolve_nested(
@@ -631,6 +685,9 @@ def process(f):
         # Pass named_parameters if function expects it
         if "named_parameters" in sig.parameters:
             resolved_kwargs["named_parameters"] = named_parameters
+
+        # Undo the parser's date coercion for plain array and string parameters
+        _uncoerce_temporal_values(resolved_kwargs, param_types)
 
         # Validate parameter types
         _validate_parameter_types(resolved_kwargs, param_types, f.__name__)

@@ -11,7 +11,7 @@ from rio_tiler.models import ImageData
 from ...errors import OpenEOException
 from .core import process
 from .data_model import RasterStack
-from .reduce import _normalize_to_naive_utc
+from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
@@ -54,24 +54,21 @@ def array_element(
             "Label parameter is only supported for RasterStack/dict data types"
         )
 
-    # Validate label exists in dict (do this after type check)
-    if label is not None and isinstance(data, dict) and label not in data.keys():
-        raise KeyError(f"Label {label} not found in data: {data.keys()}")
-
-    # Handle RasterStack
+    # Handle RasterStack: in a reducer over the temporal dimension, ``data`` is
+    # the stack itself and its elements are the time steps (keys in temporal
+    # order). Select ONE time step, not one band of every time step (#437).
     if isinstance(data, dict):
-        if index is not None:
-            array_dict = {
-                k: numpy.take(v.array, index, axis=0) for k, v in data.items()
-            }
+        keys = list(data.keys())
         if label is not None:
-            array_dict = {k: v.array for k, v in data.items() if k == label}
-        # return a multi-dimensional array
-        # For RasterStack, this will execute all tasks when stacking is needed
-        # This is expected behavior for array operations.
-        # Use numpy.ma.stack (not numpy.stack) so per-slice nodata masks are
-        # preserved; plain numpy.stack silently drops them.
-        return numpy.ma.stack(list(array_dict.values()), axis=0)
+            key = _find_stack_label(keys, label)
+        else:
+            assert index is not None  # guarded above
+            if index >= len(keys):
+                raise IndexError(
+                    f"Index {index} is out of bounds for axis 0 with size {len(keys)}"
+                )
+            key = keys[index]
+        return data[key].array
 
     # Handle regular arrays (index must be provided at this point)
     if index is None:
@@ -103,6 +100,24 @@ def array_element(
         )
 
     return numpy.take(array_data, index, axis=0)
+
+
+def _find_stack_label(keys: List[Any], label: Any) -> Any:
+    """Return the RasterStack key that matches ``label``.
+
+    Stack keys are datetimes, while a label from a process graph is usually an
+    ISO 8601 string, so compare both forms.
+    """
+    if label in keys:
+        return label
+    try:
+        wanted = _coerce_temporal_label(label)
+    except LabelsNotEnumerated:
+        wanted = None
+    for key in keys:
+        if isinstance(key, datetime) and _normalize_to_naive_utc(key) == wanted:
+            return key
+    raise KeyError(f"Label {label} not found in data: {keys}")
 
 
 def _is_bool(v: Any) -> bool:
@@ -551,6 +566,25 @@ def _merge_images_bands(
             metadata=img1.metadata or {},
         )
 
+    # A single-band image without band names comes from a cube that has no
+    # bands dimension (e.g. reduced with array_element). Per spec example 4, it
+    # is merged with each band of the other cube, so the resolver gets all bands.
+    unnamed = img1 if not bands1 else img2 if not bands2 else None
+    if unnamed is not None and unnamed.count == 1:
+        if overlap_resolver is None:
+            raise OverlapResolverMissing()
+        resolved = overlap_resolver(x=img1.array, y=img2.array, context=context)
+        if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
+            resolved = numpy.asarray(resolved)
+        return ImageData(
+            resolved,
+            assets=(img1.assets or []) + (img2.assets or []),
+            crs=img1.crs,
+            bounds=img1.bounds,
+            band_descriptions=bands1 or bands2,
+            metadata=img1.metadata or {},
+        )
+
     # Find overlapping and unique bands
     set1 = set(bands1)
     set2 = set(bands2)
@@ -616,6 +650,9 @@ def merge_cubes(
     - Timestamps unique to either cube are included as-is
     - Overlapping timestamps with disjoint bands are concatenated
     - Overlapping timestamps with overlapping bands require an overlap_resolver
+    - A cube without a temporal dimension is merged with each time step of the
+      other cube, and a single-band cube without band labels with each band
+      (spec example 4)
     - Spatial dimensions of cube2 are resampled to match cube1 if needed
 
     Args:
@@ -639,6 +676,18 @@ def merge_cubes(
     if target_height is None or target_width is None:
         raise ValueError("cube1 has no spatial dimensions")
 
+    def _match_size(img: ImageData) -> ImageData:
+        if img.height != target_height or img.width != target_width:
+            logging.warning(
+                "Resizing cube2 image from %dx%d to %dx%d to match cube1",
+                img.width,
+                img.height,
+                target_width,
+                target_height,
+            )
+            img = img.resize(target_height, target_width)
+        return img
+
     # The two cubes may carry datetime keys with inconsistent tz-awareness:
     # raw load_collection keeps STAC tz-aware datetimes, while processes such as
     # aggregate_temporal/filter_temporal normalize to naive UTC. Comparing the two
@@ -653,11 +702,32 @@ def merge_cubes(
     norm_to_key2 = {_norm(k): k for k in cube2.keys()}
     keys1 = set(norm_to_key1)
     keys2 = set(norm_to_key2)
-    all_keys = sorted(keys1 | keys2)
 
     merged_images: Dict[datetime, ImageData] = {}
 
-    for key in all_keys:
+    # A temporally-reduced cube has no temporal dimension. When only one of the
+    # two cubes is reduced, `t` is not an overlapping dimension: the reduced cube
+    # is merged with each time step of the other cube (spec example 4, #436).
+    reduced = {REDUCED_TEMPORAL_SENTINEL}
+    if (keys1 == reduced) != (keys2 == reduced):
+        if keys2 == reduced:
+            static2 = _match_size(cube2[norm_to_key2[REDUCED_TEMPORAL_SENTINEL]])
+            for key in sorted(keys1):
+                merged_images[key] = _merge_images_bands(
+                    cube1[norm_to_key1[key]], static2, overlap_resolver, context
+                )
+        else:
+            static1 = cube1[norm_to_key1[REDUCED_TEMPORAL_SENTINEL]]
+            for key in sorted(keys2):
+                merged_images[key] = _merge_images_bands(
+                    static1,
+                    _match_size(cube2[norm_to_key2[key]]),
+                    overlap_resolver,
+                    context,
+                )
+        return RasterStack.from_images(merged_images)
+
+    for key in sorted(keys1 | keys2):
         in_cube1 = key in keys1
         in_cube2 = key in keys2
 
@@ -667,33 +737,15 @@ def merge_cubes(
 
         elif in_cube2 and not in_cube1:
             # Timestamp only in cube2 - resize to match cube1 spatial dims
-            img2 = cube2[norm_to_key2[key]]
-            if img2.height != target_height or img2.width != target_width:
-                logging.warning(
-                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
-                    img2.width,
-                    img2.height,
-                    target_width,
-                    target_height,
-                )
-                img2 = img2.resize(target_height, target_width)
-            merged_images[key] = img2
+            merged_images[key] = _match_size(cube2[norm_to_key2[key]])
 
         else:
             # Timestamp in both cubes - merge bands
-            img1 = cube1[norm_to_key1[key]]
-            img2 = cube2[norm_to_key2[key]]
-            if img2.height != target_height or img2.width != target_width:
-                logging.warning(
-                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
-                    img2.width,
-                    img2.height,
-                    target_width,
-                    target_height,
-                )
-                img2 = img2.resize(target_height, target_width)
             merged_images[key] = _merge_images_bands(
-                img1, img2, overlap_resolver, context
+                cube1[norm_to_key1[key]],
+                _match_size(cube2[norm_to_key2[key]]),
+                overlap_resolver,
+                context,
             )
 
     return RasterStack.from_images(merged_images)
