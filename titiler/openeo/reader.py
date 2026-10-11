@@ -690,11 +690,28 @@ def _get_asset_crs(
     return None
 
 
+def _gsd_resolution(
+    gsd: Any, crs: Optional[rasterio.crs.CRS]
+) -> Tuple[Optional[float], Optional[float]]:
+    """Turn a STAC `gsd` into an (x, y) resolution in `crs` units.
+
+    `gsd` is a ground distance in metres (STAC common metadata), but callers
+    treat the result as already in the CRS's own units -- `_reproject_resolution`
+    passes it straight through. That only holds for a projected CRS, so a
+    geographic (or unknown) CRS gets no resolution rather than a metre value
+    read as degrees.
+    """
+    if not gsd or crs is None or not crs.is_projected:
+        return None, None
+    return abs(float(gsd)), abs(float(gsd))
+
+
 def _get_asset_resolution(
     item: pystac.Item,
     asset: pystac.Asset,
     asset_proj_ext: Optional[ProjectionExtension],
     src_dst: SimpleSTACReader,
+    asset_crs: Optional[rasterio.crs.CRS] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """Get x and y resolutions from asset metadata.
 
@@ -703,6 +720,8 @@ def _get_asset_resolution(
         asset: STAC asset
         asset_proj_ext: Asset's projection extension
         src_dst: SimpleSTACReader instance
+        asset_crs: The asset's resolved CRS; the `gsd` fallback is used only
+            when it is projected
 
     Returns:
         Tuple of (x_resolution, y_resolution), either may be None
@@ -728,10 +747,7 @@ def _get_asset_resolution(
     # transform -- e.g. EOPF's `AOT_10m`/`SCL_20m`/`WVP_10m`, which declare only
     # `gsd`. Without this, such an asset contributes no resolution at all and
     # `_estimate_output_dimensions` silently ignores it.
-    if gsd := asset.extra_fields.get("gsd"):
-        return abs(float(gsd)), abs(float(gsd))
-
-    return None, None
+    return _gsd_resolution(asset.extra_fields.get("gsd"), asset_crs)
 
 
 def _get_assets_resolutions(
@@ -812,16 +828,23 @@ def _get_assets_resolutions(
         # Get asset CRS or fall back to item CRS
         asset_crs = _get_asset_crs(item, asset, asset_proj_ext) or src_dst.crs
 
-        # Get resolution: the band's own gsd when known, else the asset's.
-        x_res: Optional[float]
-        y_res: Optional[float]
-        if band_gsd is not None:
-            x_res, y_res = float(band_gsd), float(band_gsd)
-        else:
-            x_res, y_res = _get_asset_resolution(item, asset, asset_proj_ext, src_dst)
+        # Get resolution: the band's own gsd when usable, else the asset's.
+        x_res, y_res = _gsd_resolution(band_gsd, asset_crs)
+        if x_res is None or y_res is None:
+            x_res, y_res = _get_asset_resolution(
+                item, asset, asset_proj_ext, src_dst, asset_crs
+            )
 
         # Skip if we couldn't determine resolution
         if x_res is None or y_res is None:
+            logger.debug(
+                "No resolution for band %r (asset %r, crs %s) in item %r; "
+                "it is ignored when estimating output dimensions",
+                band_name,
+                resolution_asset_name,
+                asset_crs,
+                item.id,
+            )
             continue
 
         # Keyed by the originally requested name, even when the resolution
