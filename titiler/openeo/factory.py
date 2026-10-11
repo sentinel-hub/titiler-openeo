@@ -3,6 +3,7 @@
 import json
 import logging
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 import morecantile
@@ -97,6 +98,18 @@ class EndpointsFactory(BaseFactory):
         load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
+
+    def _add_service(self, user_id: str, service: Dict[str, Any]) -> str:
+        """Store a new service with its creation time and return its id.
+
+        `created` (RFC 3339) is part of the service metadata in the openEO
+        API. It is kept in the stored service, so all stores return it.
+        """
+        service = {
+            **service,
+            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        return self.services_store.add_service(user_id, service)
 
     def _prepare_service_process(self, process: Dict[str, Any], user) -> None:
         """Validate a service process graph and prepare it for storage, in place.
@@ -704,7 +717,7 @@ class EndpointsFactory(BaseFactory):
                                 continue
 
                             # Create the service
-                            self.services_store.add_service(
+                            self._add_service(
                                 user.user_id, body.model_dump(mode="json")
                             )
 
@@ -1245,7 +1258,7 @@ class EndpointsFactory(BaseFactory):
 
             self._prepare_service_process(service_def["process"], user)
 
-            service_id = self.services_store.add_service(user.user_id, service_def)
+            service_id = self._add_service(user.user_id, service_def)
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")

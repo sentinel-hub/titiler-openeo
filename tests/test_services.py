@@ -1,6 +1,7 @@
 """Test titiler.openeo services."""
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 
 from fastapi import Header
@@ -135,6 +136,18 @@ def test_get_service(app_with_auth):
     assert service["id"] == service_id
     assert service["title"] == service_input["title"]
     assert service["type"] == service_input["type"]
+
+    # `created` is an RFC 3339 datetime set at creation (#254)
+    created = datetime.fromisoformat(service["created"].replace("Z", "+00:00"))
+    assert created.tzinfo is not None
+    assert abs(datetime.now(timezone.utc) - created) < timedelta(minutes=1)
+
+    # The listing returns the same value
+    listed = app_with_auth.get("/services").json()["services"]
+    assert (
+        next(s for s in listed if s["id"] == service_id)["created"]
+        == (service["created"])
+    )
 
     # Make sure we overwrite the Extent Parameters
     load_node = service["process"]["process_graph"]["loadco1"]
