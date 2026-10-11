@@ -15,6 +15,7 @@ from .reduce import _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
+    "array_contains",
     "array_apply",
     "to_image",
     "array_create",
@@ -102,6 +103,92 @@ def array_element(
         )
 
     return numpy.take(array_data, index, axis=0)
+
+
+def _is_bool(v: Any) -> bool:
+    """Return True for Python and numpy booleans."""
+    return isinstance(v, (bool, numpy.bool_))
+
+
+def _is_number(v: Any) -> bool:
+    """Return True for Python and numpy numbers, booleans excluded."""
+    return isinstance(v, (int, float, numpy.number)) and not _is_bool(v)
+
+
+def _strict_eq(a: Any, b: Any) -> bool:
+    """Compare two scalars with the strict typing of the openEO ``eq`` process.
+
+    A string never equals a number and a boolean never equals a number, but an
+    integer equals a float of the same value. A no-data operand never matches.
+    """
+    if a is None or b is None or a is numpy.ma.masked:
+        return False
+    if _is_bool(a) or _is_bool(b):
+        return _is_bool(a) and _is_bool(b) and bool(a) == bool(b)
+    if _is_number(a) and _is_number(b):
+        return bool(a == b)
+    if isinstance(a, str) and isinstance(b, str):
+        return a == b
+    return False
+
+
+def _dtype_accepts(dtype: numpy.dtype, value: Any) -> bool:
+    """Return True if ``value`` can strictly equal elements of ``dtype``."""
+    if _is_bool(value):
+        return dtype.kind == "b"
+    if _is_number(value):
+        return dtype.kind in "iuf"
+    if isinstance(value, str):
+        return dtype.kind in "US"
+    return False
+
+
+def array_contains(data: Any, value: Any) -> Any:
+    """Check whether the array contains a given value.
+
+    For a list, the elements are compared one by one with the strict typing of
+    ``eq``. For a numpy array (e.g. the data of a ``reduce_dimension`` callback),
+    the check reduces the leading axis: a ``(bands, H, W)`` array gives a
+    ``(H, W)`` boolean array and a 1-D array gives a boolean. Masked (no-data)
+    elements never match.
+
+    Args:
+        data: List or array to find the value in
+        value: Value to find. A no-data value (or null) always gives false
+
+    Returns:
+        True if the array contains the value, False otherwise
+
+    Examples:
+        >>> array_contains([1, 2, 3], 2)
+        True
+        >>> array_contains(["A", "B", "C"], "b")
+        False
+        >>> array_contains([1, 2, 3], "2")
+        False
+        >>> array_contains([1, 2, None], None)
+        False
+    """
+    if value is None or value is numpy.ma.masked:
+        return False
+
+    if isinstance(data, (list, tuple)) and any(
+        isinstance(v, numpy.ndarray) for v in data
+    ):
+        data = numpy.ma.stack(data)
+
+    if isinstance(data, numpy.ndarray):
+        reduced_shape = data.shape[1:] if data.ndim > 1 else ()
+        if data.size == 0 or not _dtype_accepts(data.dtype, value):
+            matches = numpy.zeros(reduced_shape, dtype=bool)
+        else:
+            matches = numpy.ma.filled(data == value, False).any(axis=0)
+        return matches if data.ndim > 1 else bool(matches)
+
+    if isinstance(data, (list, tuple)):
+        return any(_strict_eq(v, value) for v in data)
+
+    raise TypeError(f"Unsupported data type for array_contains: {type(data)}")
 
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
