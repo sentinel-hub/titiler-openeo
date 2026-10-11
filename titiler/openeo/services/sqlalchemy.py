@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    case,
     create_engine,
     func,
     select,
@@ -316,14 +317,28 @@ class SQLAlchemyStore(ServicesStore):
             name=user.name,
         )
         table = UserTracking.__table__.c
+        new = stmt.excluded
+        # Concurrent logins can commit out of order: an older event must not
+        # move `last_login` back or overwrite newer profile data.
+        is_latest = new.last_login >= table.last_login
         stmt = stmt.on_conflict_do_update(
             index_elements=[table.user_id, table.provider],
             set_={
-                "last_login": stmt.excluded.last_login,
+                "first_login": case(
+                    (new.first_login < table.first_login, new.first_login),
+                    else_=table.first_login,
+                ),
+                "last_login": case((is_latest, new.last_login), else_=table.last_login),
                 "login_count": table.login_count + 1,
                 # Keep the stored values when the IdP does not send them.
-                "email": func.coalesce(stmt.excluded.email, table.email),
-                "name": func.coalesce(stmt.excluded.name, table.name),
+                "email": case(
+                    (is_latest, func.coalesce(new.email, table.email)),
+                    else_=table.email,
+                ),
+                "name": case(
+                    (is_latest, func.coalesce(new.name, table.name)),
+                    else_=table.name,
+                ),
             },
         )
 

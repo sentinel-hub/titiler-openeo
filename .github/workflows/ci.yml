@@ -20,6 +20,20 @@ jobs:
       matrix:
         python-version: ['3.11', '3.12', '3.13']
 
+    # Runs the multi-replica race tests (tests/test_sqlalchemy_races.py).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
       - name: Install uv
@@ -31,9 +45,11 @@ jobs:
 
       - name: Sync dependencies
         run: |
-          uv sync
+          uv sync --extra postgres
 
       - name: Test titiler.openeo
+        env:
+          TITILER_OPENEO_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: |
           uv run pytest --cov=titiler.openeo --cov-report=xml --cov-append --cov-report=term-missing
 
