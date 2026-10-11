@@ -4,7 +4,7 @@ from typing import Any, Optional, Tuple
 
 import numpy
 
-__all__ = ["if_", "and_", "or_", "lt", "lte", "gt", "gte", "eq", "neq"]
+__all__ = ["if_", "and_", "or_", "lt", "lte", "gt", "gte", "eq", "neq", "is_nodata"]
 
 
 def _shapes_align(a: Tuple[int, ...], b: Tuple[int, ...]) -> bool:
@@ -293,3 +293,38 @@ def neq(x: Any, y: Any) -> bool:
         False
     """
     return x != y
+
+
+def is_nodata(x: Any) -> Any:
+    """Check whether the data is a no-data value.
+
+    A ``null`` value and a masked value are no-data. For an array, the check is
+    done element by element from the array mask, so the result is a boolean
+    array of the same shape. ``NaN`` is not no-data unless it is masked.
+
+    Args:
+        x: The data to check
+
+    Returns:
+        True if the data is a no-data value, False otherwise
+
+    Examples:
+        >>> is_nodata(1)
+        False
+        >>> is_nodata("Test")
+        False
+        >>> is_nodata(None)
+        True
+        >>> is_nodata([None, None])
+        False
+        >>> import numpy as np
+        >>> is_nodata(np.ma.masked_array([1, 2], mask=[True, False]))
+        array([ True, False])
+    """
+    if x is None or x is numpy.ma.masked:
+        return True
+    if isinstance(x, numpy.ma.MaskedArray):
+        return numpy.ma.getmaskarray(x).copy()
+    if isinstance(x, numpy.ndarray):
+        return numpy.zeros(x.shape, dtype=bool)
+    return False
