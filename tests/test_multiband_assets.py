@@ -13,7 +13,11 @@ import pystac
 import pytest
 import rasterio
 
-from titiler.openeo.reader import SimpleSTACReader, _get_cube_resolutions
+from titiler.openeo.reader import (
+    SimpleSTACReader,
+    _get_assets_resolutions,
+    _get_cube_resolutions,
+)
 from titiler.openeo.stacapi import stacApiBackend
 
 FIXTURE = Path("tests/fixtures/eopf/items/sentinel2_l2a.json")
@@ -255,6 +259,46 @@ def test_cube_resolutions_gsd_fallback_covers_assets_with_no_proj_transform(
     assert per_band["AOT_10m"][0][:2] == (10.0, 10.0)
     assert per_band["SCL_20m"][0][:2] == (20.0, 20.0)
     assert per_band["WVP_10m"][0][:2] == (10.0, 10.0)
+
+
+@pytest.fixture
+def geographic_eopf_item(eopf_item) -> pystac.Item:
+    """The same item re-labelled as EPSG:4326 -- `gsd` is still in metres, but
+    the CRS's units are now degrees (issue #381)."""
+    eopf_item.properties["proj:code"] = "EPSG:4326"
+    eopf_item.properties.pop("proj:bbox", None)
+    eopf_item.assets["reflectance"].extra_fields["proj:code"] = "EPSG:4326"
+    return eopf_item
+
+
+def test_gsd_fallback_skipped_for_geographic_crs(geographic_eopf_item):
+    """An asset with only `gsd` gets no resolution in a geographic CRS,
+    rather than 10 metres read as 10 degrees."""
+    with SimpleSTACReader(geographic_eopf_item) as src_dst:
+        resolutions = _get_assets_resolutions(
+            geographic_eopf_item, src_dst, bands=["AOT_10m", "SCL_20m"]
+        )
+
+    assert resolutions == {}
+
+
+def test_band_gsd_skipped_for_geographic_crs(geographic_eopf_item):
+    """A band's own `gsd` is not used in a geographic CRS either; the owning
+    asset's `proj:shape` (in CRS units) is used instead."""
+    with SimpleSTACReader(geographic_eopf_item) as src_dst:
+        resolutions = _get_assets_resolutions(
+            geographic_eopf_item, src_dst, bands=["blue", "coastal"]
+        )
+
+    bbox = geographic_eopf_item.bbox
+    expected = (
+        abs(bbox[2] - bbox[0]) / 10980,
+        abs(bbox[3] - bbox[1]) / 10980,
+    )
+    for name in ("blue", "coastal"):
+        x_res, y_res, crs = resolutions[name]
+        assert crs.is_geographic
+        assert (x_res, y_res) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
