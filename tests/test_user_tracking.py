@@ -100,3 +100,21 @@ def test_get_user_tracking_nonexistent(store_path):
     store = get_store(f"{store_path}")
     tracking = store.get_user_tracking(user_id="nonexistent", provider="basic")
     assert tracking is None
+
+
+def test_sqlalchemy_user_tracking_keeps_info_when_missing():
+    """A login without email or name keeps the stored values (SQLAlchemy store)."""
+    from titiler.openeo.services import get_store
+
+    store = get_store("sqlite:///:memory:")
+    store.track_user_login(
+        user=User(user_id="test_user", email="a@example.com", name="A"),
+        provider="basic",
+    )
+    store.track_user_login(user=User(user_id="test_user"), provider="basic")
+
+    tracking = store.get_user_tracking(user_id="test_user", provider="basic")
+    assert tracking is not None
+    assert tracking["email"] == "a@example.com"
+    assert tracking["name"] == "A"
+    assert tracking["login_count"] == 2
