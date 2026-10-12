@@ -6,6 +6,7 @@ the four call sites it feeds, and -- the property that matters most -- that
 discovery and the read path agree on every name.
 """
 
+import datetime
 import json
 from pathlib import Path
 
@@ -330,3 +331,57 @@ def test_every_advertised_band_is_actually_readable(eopf_collection, eopf_item):
     with SimpleSTACReader(eopf_item) as src:
         for name in advertised:
             src._get_asset_info(name)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Planetary Computer `visual`: a copy of other assets, qualified (issue #440)
+# ---------------------------------------------------------------------------
+
+
+def _pc_like_item() -> pystac.Item:
+    item = pystac.Item(
+        id="pc-like",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        bbox=[0, 0, 1, 1],
+        datetime=datetime.datetime(2026, 8, 7, tzinfo=datetime.timezone.utc),
+        properties={},
+    )
+    visual_bands = [
+        {"name": "B04", "common_name": "red"},
+        {"name": "B03", "common_name": "green"},
+        {"name": "B02", "common_name": "blue"},
+    ]
+    for key, bands in (
+        ("B04", [{"name": "B04", "common_name": "red"}]),
+        ("B03", [{"name": "B03", "common_name": "green"}]),
+        ("B02", [{"name": "B02", "common_name": "blue"}]),
+        ("visual", visual_bands),
+    ):
+        item.add_asset(
+            key,
+            pystac.Asset(
+                href=f"https://example.com/{key}.tif",
+                media_type=pystac.MediaType.COG,
+                roles=["data"],
+                extra_fields={"eo:bands": bands},
+            ),
+        )
+    return item
+
+
+def test_pc_visual_bands_read_from_visual_under_qualified_names():
+    with SimpleSTACReader(_pc_like_item()) as src:
+        red = src._get_asset_info("visual_red")
+        assert red["name"] == "visual"
+        assert red["method_options"]["indexes"] == [1]
+        assert src._get_asset_info("visual_B03")["method_options"]["indexes"] == [2]
+
+        # B04 is still the B04 asset, and a bare `red` is not a band.
+        b04 = src._get_asset_info("B04")
+        assert b04["name"] == "B04"
+        assert "indexes" not in b04["method_options"]
+        with pytest.raises(Exception, match="red"):
+            src._get_asset_info("red")

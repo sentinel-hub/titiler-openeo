@@ -64,8 +64,13 @@ def test_planetary_computer_summaries_mirror_cube_dimensions(pc_collection):
     assert _names(summaries["bands"]) == values
     assert _names(summaries["eo:bands"]) == values
     assert len(values) == len(set(values))
-    for name in ("SCL", "WVP", "AOT", "red", "sunZenithAngles", "viewZenithMean"):
+    for name in ("SCL", "WVP", "AOT", "sunZenithAngles", "viewZenithMean"):
         assert name in values
+    # `visual` holds copies of the B04/B03/B02 assets, so its bands get the
+    # asset key as a prefix (issue #440).
+    for name in ("visual_red", "visual_green", "visual_blue", "visual_B04"):
+        assert name in values
+    assert "red" not in values
 
 
 def test_planetary_computer_band_metadata(pc_collection):
@@ -103,7 +108,7 @@ def test_planetary_computer_band_metadata(pc_collection):
 
     # Band of a multi-band asset: its own metadata, and a description that
     # says it is the `visual` asset's band, not the B04 asset.
-    red = bands["red"]
+    red = bands["visual_red"]
     assert red["eo:common_name"] == "red"
     assert red["eo:center_wavelength"] == 0.665
     assert "'visual'" in red["description"]

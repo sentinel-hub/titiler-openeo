@@ -82,14 +82,32 @@ A collection without a band dimension does not get band summaries.
   summaries. `load_collection` cannot read such a band, so this is correct.
 - `BandSource` has a new optional `description` field.
 
-## 4. Open question: `red`, `green`, `blue` on Planetary Computer
+## 4. Decision: `visual_red`, not `red`, on Planetary Computer
 
 On Planetary Computer, the `visual` asset declares its bands as
 `B04`/`B03`/`B02` with `common_name` `red`/`green`/`blue` and the spectral
 metadata of these bands. But the asset is an 8-bit true-color rendering.
-The cube gives these bands as `red`, `green` and `blue` (ADR 0007). The
-name `red` is also the `eo:common_name` of the `B04` asset.
+Before this ADR, the cube gave these bands as `red`, `green` and `blue`
+(ADR 0007). A user can think that `red` is the red reflectance band, which
+is the `B04` asset.
 
-This ADR does not rename these bands, because saved process graphs can use
-the names. The descriptions now tell the difference. A different name (for
-example `visual_red`) is a separate decision.
+`resolve_asset_bands` now has one more rule. If a band of a multi-band asset
+has a name that is the key of a different asset, the band is a copy of that
+asset. All the names of this band get the asset key as a prefix:
+
+| Before | After |
+| --- | --- |
+| `red`, `green`, `blue` | `visual_red`, `visual_green`, `visual_blue` |
+| `B04` of `visual` (hidden by the `B04` asset) | `visual_B04`, `visual_B03`, `visual_B02` |
+
+Discovery and the read path use the same resolver, so they give the same
+names. Discovery gives all the `item_assets` keys to the resolver, so it
+qualifies the same bands as the read path.
+
+The bands of EOPF `reflectance` do not change: no band name is an asset
+key.
+
+This is a breaking change on Planetary Computer: a process graph that loads
+`red`, `green` or `blue` from `sentinel-2-l2a` must use `visual_red`,
+`visual_green` and `visual_blue`, or the reflectance bands `B04`, `B03`
+and `B02`.

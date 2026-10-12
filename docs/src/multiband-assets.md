@@ -48,9 +48,10 @@ guess which one `load_collection` will honor:
 The two summaries always have one entry for each value of the band
 dimension, with the same names in the same order
 ([ADR 0010](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0010-collection-band-summaries.md)).
-The description of a band in a multi-band asset names that asset, for
-example "Band 'red' (STAC name 'B04') of the multi-band asset 'visual'
-(True color image). It is not the 'B04' asset."
+The description of a band in a multi-band asset names that asset. For
+example, the description of `visual_red` on Planetary Computer is "Band 4 -
+Red. Band 'red' (STAC name 'B04') of the multi-band asset 'visual' (True
+color image). It is not the 'B04' asset."
 
 `GET /collections/sentinel-2-l2a` lists `red` and `b04` side by side, each
 with the same `gsd`/`eo:center_wavelength` values, rather than only the
@@ -65,6 +66,20 @@ same alias, neither silently wins: both are qualified as
 `name` colliding elsewhere does not force its common name to qualify too,
 and vice versa. An alias that is unique across the item is always left
 bare.
+
+## Bands that copy another asset
+
+Some multi-band assets hold copies of bands that are also assets. On
+Planetary Computer, the `visual` asset is an 8-bit true-color image. It
+declares its bands as `B04`, `B03` and `B02` (common names `red`, `green`
+and `blue`), and `B04`, `B03` and `B02` are also assets with the
+reflectance values.
+
+If a band has a name that is the key of a different asset, all the names of
+that band get the asset key as a prefix. On Planetary Computer, the bands of
+`visual` are `visual_red`, `visual_green` and `visual_blue` (and
+`visual_B04`, `visual_B03`, `visual_B02`). They are not `red`, `green` and
+`blue`. Use `B04`, `B03` and `B02` for reflectance.
 
 ## Worked example
 
@@ -106,8 +121,10 @@ legacy `eo:bands`) and carries no rendering role (`visual`, `overview`,
 `thumbnail`); a true-colour composite like `TCI` still resolves as one
 asset, since its bands are fixed RGB channels rather than independently
 requestable data. Today this applies to EOPF's Sentinel-2 L2A collection
-(`api.explorer.eopf.copernicus.eu/stac`); CDSE, Earth Search and Planetary
-Computer publish one asset per band already, so nothing changes for them.
+(`api.explorer.eopf.copernicus.eu/stac`), and to the `visual` asset of
+Planetary Computer, which has the role `data` (see "Bands that copy another
+asset"). CDSE and Earth Search publish one asset per band, so nothing
+changes for them.
 
 ## Design reference
 

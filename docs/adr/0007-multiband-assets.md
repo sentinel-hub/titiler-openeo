@@ -10,7 +10,9 @@
 > **Update (2026-10-12):** `_add_band_summaries` is replaced by
 > `_sync_band_summaries`, which rebuilds `summaries.bands` and
 > `summaries.eo:bands` from `cube:dimensions`. See
-> [ADR 0010](0010-collection-band-summaries.md).
+> [ADR 0010](0010-collection-band-summaries.md). ADR 0010 also adds a
+> naming rule: a band with the name of a different asset gets the asset
+> key as a prefix (Planetary Computer `visual_red`, not `red`).
 
 ## 1. Context
 

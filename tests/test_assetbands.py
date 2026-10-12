@@ -195,6 +195,62 @@ def test_a_raw_name_colliding_elsewhere_is_qualified_independently():
     assert resolved["reflectance_b_b02"].asset_key == "reflectance_b"
 
 
+#: Planetary Computer's `visual`: a true-colour rendering with role `data`
+#: (so it expands) that declares the bands of the B04/B03/B02 assets.
+PC_VISUAL: Fact = (
+    "visual",
+    [
+        {"name": "B04", "common_name": "red"},
+        {"name": "B03", "common_name": "green"},
+        {"name": "B02", "common_name": "blue"},
+    ],
+)
+
+
+def test_a_band_named_like_another_asset_is_qualified():
+    """`visual`'s red is a copy of the B04 asset, not B04 reflectance: all
+    its names get the asset key as a prefix (issue #440)."""
+    resolved = resolve_asset_bands(
+        _facts(PC_VISUAL, ("B04", [{"name": "B04"}]), ("B03", []), ("B02", []))
+    )
+
+    assert set(resolved) == {
+        "visual_red",
+        "visual_B04",
+        "visual_green",
+        "visual_B03",
+        "visual_blue",
+        "visual_B02",
+    }
+    assert resolved["visual_red"].asset_key == "visual"
+    # The name inside the asset is unchanged: `_get_options` resolves it.
+    assert resolved["visual_red"].band_name == "red"
+    assert resolved["visual_B04"] is resolved["visual_red"]
+
+
+def test_asset_keys_outside_the_facts_also_qualify():
+    """Discovery gives only the data assets as facts, and the other keys in
+    `asset_keys`; it must get the same names as the read path."""
+    only_visual = resolve_asset_bands(_facts(PC_VISUAL))
+    with_keys = resolve_asset_bands(_facts(PC_VISUAL), ["B04", "B03", "B02"])
+
+    assert "red" in only_visual
+    assert set(with_keys) == {
+        "visual_red",
+        "visual_B04",
+        "visual_green",
+        "visual_B03",
+        "visual_blue",
+        "visual_B02",
+    }
+
+
+def test_only_the_band_named_like_an_asset_is_qualified():
+    resolved = resolve_asset_bands(_facts(PC_VISUAL, ("B04", [{"name": "B04"}])))
+
+    assert {"visual_red", "visual_B04", "green", "B03", "blue", "B02"} == set(resolved)
+
+
 def test_resolve_asset_band_singular_matches_the_plural_result():
     resolved = resolve_asset_band("blue", _facts(MULTI_BAND_CUBE))
     assert resolved is not None

@@ -41,6 +41,11 @@ are load-bearing rather than cautious:
   and the one already used elsewhere in this codebase to draw the same
   distinction (``stacapi.py``'s own ``"data" in roles`` check).
 
+An expanded band that declares the key of a *different* asset as its name
+(Planetary Computer's ``visual`` declares ``B04``, also an asset) gets the
+asset key as a prefix on all its names: ``visual_red``, not ``red`` -- see
+`resolve_asset_bands`.
+
 Any other asset with two or more declared bands expands -- publishing a
 ``bands`` array at all is itself the catalogue's declaration that these are
 worth describing individually, and there is no more reliable signal to
@@ -133,6 +138,7 @@ def asset_band_facts(assets: Mapping[str, Any]) -> List[AssetBandFacts]:
 
 def resolve_asset_bands(
     assets: Iterable[AssetBandFacts],
+    asset_keys: Iterable[str] = (),
 ) -> Dict[str, ResolvedAssetBand]:
     """Map each band published inside a multi-band asset to where it lives.
 
@@ -156,8 +162,23 @@ def resolve_asset_bands(
     colliding elsewhere does not force its display name to qualify too, and
     vice versa. Aliases unique across the item are left bare, so the common
     case reads as the catalogue wrote it.
+
+    A band with an alias that is the key of a *different* asset is a copy of
+    that asset, not that asset: Planetary Computer's ``visual`` asset holds
+    an 8-bit true-colour rendering of ``B04``/``B03``/``B02`` and declares
+    them with these names, and ``B04`` is also an asset (issue #440). *All*
+    the aliases of such a band are qualified, so ``red`` becomes
+    ``visual_red`` and ``visual``'s ``B04`` becomes ``visual_B04``. A bare
+    ``red`` would read as the red reflectance band, which it is not.
+
+    ``asset_keys`` gives more asset keys to check for this rule, in addition
+    to the keys in ``assets``. Discovery uses it: it gives only the data
+    assets in ``assets``, but must qualify the same names as the read path,
+    which gives all the assets of the item.
     """
-    candidates: List[Tuple[str, ResolvedAssetBand]] = []
+    assets = list(assets)
+    all_keys = {key for key, _ in assets} | set(asset_keys)
+    candidates: List[Tuple[str, ResolvedAssetBand, bool]] = []
     seen: Dict[str, int] = {}
 
     for asset_key, bands in assets:
@@ -172,19 +193,25 @@ def resolve_asset_bands(
             aliases = {name}
             if raw_name := band.get("name"):
                 aliases.add(raw_name)
+            copy_of_asset = any(a in all_keys and a != asset_key for a in aliases)
             for alias in aliases:
-                candidates.append((alias, resolved))
+                candidates.append((alias, resolved, copy_of_asset))
                 seen[alias] = seen.get(alias, 0) + 1
 
     return {
-        (alias if seen[alias] == 1 else f"{resolved.asset_key}_{alias}"): resolved
-        for alias, resolved in candidates
+        (
+            alias
+            if seen[alias] == 1 and not copy_of_asset
+            else f"{resolved.asset_key}_{alias}"
+        ): resolved
+        for alias, resolved, copy_of_asset in candidates
     }
 
 
 def resolve_asset_band(
     band_name: str,
     assets: Iterable[AssetBandFacts],
+    asset_keys: Iterable[str] = (),
 ) -> Optional[ResolvedAssetBand]:
     """``resolve_asset_bands`` for a single name, or ``None`` if it is not one."""
-    return resolve_asset_bands(assets).get(band_name)
+    return resolve_asset_bands(assets, asset_keys).get(band_name)

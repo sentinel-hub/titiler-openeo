@@ -157,7 +157,7 @@ def _inner_band_fields(
     The description always names the asset. Planetary Computer's ``visual``
     asset, for example, declares its bands as ``B04``/``B03``/``B02`` with
     the spectral metadata of those bands, but holds an 8-bit true-colour
-    rendering of them: ``red`` is not the ``B04`` asset.
+    rendering of them: ``visual_red`` is not the ``B04`` asset.
     """
     fields = _band_fields(resolved.metadata)
     if "gsd" not in fields and asset.get("gsd") is not None:
@@ -330,7 +330,7 @@ class stacApiBackend:
             for key, asset in item_assets.items()
             if _is_data_asset(asset.get("type"), asset.get("roles"))
         }
-        inner_bands = resolve_asset_bands(asset_band_facts(data_assets))
+        inner_bands = resolve_asset_bands(asset_band_facts(data_assets), item_assets)
         derived = describe_bands(
             collection.get("id") or "",
             [(k, a.get("type"), a.get("roles") or []) for k, a in item_assets.items()],
@@ -459,7 +459,9 @@ class stacApiBackend:
             # the asset key -- see titiler/openeo/assetbands.py. Single-band and
             # band-less assets are absent from this mapping and keep their key
             # above, which is what stops existing catalogues being renamed.
-            inner_bands = resolve_asset_bands(asset_band_facts(data_assets))
+            inner_bands = resolve_asset_bands(
+                asset_band_facts(data_assets), (key for key, _, _ in asset_facts)
+            )
             band_names.difference_update(r.asset_key for r in inner_bands.values())
             band_names.update(inner_bands)
 
