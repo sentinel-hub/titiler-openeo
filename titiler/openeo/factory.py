@@ -27,7 +27,7 @@ from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
-from .processes.implementations.formats import file_formats_document
+from .processes.implementations.formats import encode_result, file_formats_document
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
@@ -57,29 +57,6 @@ class EndpointsFactory(BaseFactory):
     cache_tiles_private: str = ApiSettings.model_fields["cache_tiles_private"].default
     cache_tile_errors: str = ApiSettings.model_fields["cache_tile_errors"].default
     load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
-
-    def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
-        for _, node in process_graph.items():
-            if node["process_id"] == "save_result":
-                if node["arguments"]["format"] == "PNG":
-                    return "image/png"
-                elif node["arguments"]["format"] == "JPEG":
-                    return "image/jpeg"
-                elif node["arguments"]["format"] == "JPEG":
-                    return "image/jpg"
-                elif node["arguments"]["format"] == "GTiff":
-                    return "image/tiff"
-                elif node["arguments"]["format"] == "txt":
-                    return "text/plain"
-                elif (
-                    node["arguments"]["format"] == "json"
-                    or node["arguments"]["format"] == "metajson"
-                ):
-                    return "application/json"
-                else:
-                    return "application/PNG"
-
-        raise ValueError("Couldn't find a `save_result` process in the process graph")
 
     def get_load_nodes(self, process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find all `load_collection` processes"""
@@ -1536,21 +1513,9 @@ class EndpointsFactory(BaseFactory):
                 parameters=process.get("parameters"),
                 results_cache=results_cache,
             )
-            result = pg_callable(named_parameters=parameters)
+            result = encode_result(pg_callable(named_parameters=parameters))
 
-            media_type = result.media_type if hasattr(result, "media_type") else None
-            if not media_type and isinstance(result, str):
-                media_type = "text/plain"
-            elif not media_type:
-                media_type = "application/octet-stream"
-
-            data = result.data if hasattr(result, "data") else result
-
-            # if the result is not a SaveResultData object, convert it to one
-            # if not isinstance(result, SaveResultData):
-            #     result = save_result(result, "GTiff")
-
-            return Response(data, media_type=media_type)
+            return Response(result.data, media_type=result.media_type)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
@@ -1696,8 +1661,6 @@ class EndpointsFactory(BaseFactory):
             service_extent = configuration.get("extent")
             self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
 
-            media_type = self._get_media_type(process["process_graph"])
-
             parsed_graph = OpenEOProcessGraph(pg_data=process)
             results_cache = make_results_cache(parsed_graph)
             process_registry = plan_process_registry(
@@ -1717,4 +1680,6 @@ class EndpointsFactory(BaseFactory):
                     e.headers = error_headers  # type: ignore[attr-defined]
                 raise
 
-            return Response(img.data, media_type=media_type, headers=tile_headers)
+            # A tile graph without `save_result` gets PNG, the format of web map tiles.
+            img = encode_result(img, raster_format="PNG")
+            return Response(img.data, media_type=img.media_type, headers=tile_headers)

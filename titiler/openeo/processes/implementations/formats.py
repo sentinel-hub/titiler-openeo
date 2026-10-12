@@ -11,8 +11,9 @@ there must be an openEO process.
 import csv
 import io
 import json
+import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable, Dict, Literal, Mapping, Optional, Tuple
 
 import numpy
@@ -246,14 +247,48 @@ def _encode_image(data: Any, fmt: OutputFormat, options: Dict) -> bytes:
     return image_data.render(img_format=fmt.name.lower(), **options)
 
 
+def _to_json_safe(obj: Any) -> Any:
+    """Return a copy of the data that holds only JSON types.
+
+    Vector cube values are keyed by `datetime` and are numpy scalars, masked
+    values or NaN when a geometry has no valid pixel. Dates become ISO 8601
+    strings, and masked or non-finite numbers become `null`.
+    """
+    if isinstance(obj, dict):
+        return {
+            key if isinstance(key, str) else str(_to_json_safe(key)): _to_json_safe(
+                value
+            )
+            for key, value in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_safe(value) for value in obj]
+    # Test the masked constant before ndarray: it is an ndarray subclass.
+    if obj is numpy.ma.masked:
+        return None
+    if isinstance(obj, numpy.ndarray):
+        return _to_json_safe(obj.tolist())
+    if isinstance(obj, numpy.generic):
+        return _to_json_safe(obj.item())
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    return obj
+
+
+def _json_bytes(data: Any) -> bytes:
+    return json.dumps(_to_json_safe(data), allow_nan=False).encode("utf-8")
+
+
 def _encode_image_metadata(data: Any, fmt: OutputFormat, options: Dict) -> bytes:
     """Write the metadata of a raster image as JSON."""
-    return json.dumps(_as_image(data, fmt).metadata or {}).encode("utf-8")
+    return _json_bytes(_as_image(data, fmt).metadata or {})
 
 
 def _encode_json(data: Any, fmt: OutputFormat, options: Dict) -> bytes:
     """Write the data as JSON."""
-    return json.dumps(data).encode("utf-8")
+    return _json_bytes(data)
 
 
 def _encode_feature_csv(data: Dict, fmt: OutputFormat, options: Dict) -> bytes:
@@ -263,8 +298,9 @@ def _encode_feature_csv(data: Dict, fmt: OutputFormat, options: Dict) -> bytes:
     writer.writerow(["date", "feature_index", "value"])
     for idx, feature in enumerate(data.get("features", [])):
         values_dict = feature.get("properties", {}).get("values", {})
-        for date, value in values_dict.items():
-            writer.writerow([date, idx, value])
+        for label, value in values_dict.items():
+            # Same ISO 8601 dates as the JSON output; a masked value is empty.
+            writer.writerow([_to_json_safe(label), idx, _to_json_safe(value)])
     return output.getvalue().encode("utf-8")
 
 
@@ -340,8 +376,13 @@ OUTPUT_FORMATS: Tuple[OutputFormat, ...] = (
         description="JSON document. A vector cube is written as a GeoJSON FeatureCollection.",
         media_type="application/json",
         encoders={"vector": _encode_json, "other": _encode_json},
-        aliases=("geojson",),
-        hidden=True,
+    ),
+    OutputFormat(
+        name="GeoJSON",
+        title="GeoJSON",
+        description="A vector cube as a GeoJSON FeatureCollection. The `values` property of each feature maps the ISO 8601 dates to the aggregated values.",
+        media_type="application/geo+json",
+        encoders={"vector": _encode_json},
     ),
     OutputFormat(
         name="CSV",
@@ -349,7 +390,6 @@ OUTPUT_FORMATS: Tuple[OutputFormat, ...] = (
         description="A vector cube as a table with the columns `date`, `feature_index` and `value`.",
         media_type="text/csv",
         encoders={"vector": _encode_feature_csv},
-        hidden=True,
     ),
     OutputFormat(
         name="metajson",
@@ -407,6 +447,21 @@ def encode(data: Any, format: str, options: Optional[Dict] = None) -> SaveResult
     return SaveResultData(
         data=encoder(data, fmt, dict(options or {})), media_type=fmt.media_type
     )
+
+
+def encode_result(result: Any, raster_format: str = "GTiff") -> SaveResultData:
+    """Return the encoded result of a process graph.
+
+    A graph without `save_result` returns the data itself. Encode it in a
+    default format: `raster_format` for a raster, JSON for other data.
+    """
+    if isinstance(result, SaveResultData):
+        return result
+    if isinstance(result, str):
+        return encode(result, "txt")
+    if data_kind(result) == "raster":
+        return encode(result, raster_format)
+    return encode(result, "JSON")
 
 
 def file_formats_document() -> Dict[str, Any]:

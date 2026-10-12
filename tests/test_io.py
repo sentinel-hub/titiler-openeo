@@ -275,3 +275,21 @@ def test_save_result_feature_collection():
     assert csv_result.media_type == "text/csv"
     assert b"date,feature_index,value" in csv_result.data
     assert b"2021-01-01,0,1.0" in csv_result.data
+
+
+@pytest.mark.parametrize("format", ["JSON", "GeoJSON", "CSV"])
+def test_save_result_aggregate_spatial_output(format):
+    """The datetime keys of aggregate_spatial values don't break any vector format (#439)."""
+    data = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"values": {datetime(2023, 1, 5): numpy.float32(1.5)}},
+            }
+        ],
+    }
+
+    result = save_result(data, format)
+    assert b"2023-01-05T00:00:00" in result.data
+    assert b"1.5" in result.data
