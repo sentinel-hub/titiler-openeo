@@ -92,7 +92,7 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     Raises:
         ValueError: If ImageData objects have incompatible properties
     """
-    # Get all ImageData objects from the RasterStack
+    # Get all ImageData objects from the RasterStack (in the same order as keys())
     # For RasterStack, this will execute all tasks but only when needed for saving
     image_data_list = list(data.values())
 
@@ -116,10 +116,11 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
         if img.crs != crs:
             raise ValueError("All images in RasterStack must have the same CRS")
 
-    # Stack all arrays into a single multi-band array
-    # Each input array should be (1, height, width), and we want (bands, height, width)
+    # Stack every band of every slice into one (bands, height, width) array:
+    # the output has the bands of the first date, then the bands of the next one.
     arrays = []
-    for img in image_data_list:
+    band_names_list = []
+    for key, img in zip(data.keys(), image_data_list):
         # Preserve the native dtype and mask: GTiff is a DATA format. Casting to
         # uint8 here collapses float index/reflectance values (e.g. NDVI in
         # [-1, 1] -> all zeros). See issue #296.
@@ -127,19 +128,25 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
         # If array is 2D (height, width), add band dimension
         if arr.ndim == 2:
             arr = arr[numpy.newaxis, ...]
-        # If array has multiple bands, take first band
-        elif arr.shape[0] > 1:
-            arr = arr[0:1, ...]
         arrays.append(arr)
+
+        # A single-band slice is named by its date; the bands of a multi-band
+        # slice by date and band.
+        if arr.shape[0] == 1:
+            band_names_list.append(str(key))
+        else:
+            names = img.band_descriptions
+            if len(names) != arr.shape[0]:
+                names = [f"b{idx + 1}" for idx in range(arr.shape[0])]
+            band_names_list.extend(f"{key}_{name}" for name in names)
 
     # Stack along band dimension
     stacked_array = numpy.ma.concatenate(arrays, axis=0)
 
     # Prepare metadata
-    band_names_list = [str(key) for key in data.keys()]
     combined_metadata: Dict[str, Any] = {
         "band_names": band_names_list.copy(),
-        "original_keys": band_names_list.copy(),
+        "original_keys": [str(key) for key in data.keys()],
     }
 
     # Add any metadata from the original images

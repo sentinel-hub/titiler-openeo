@@ -63,6 +63,34 @@ def test_handle_raster_geotiff():
     assert len(result.band_descriptions) == 2
 
 
+def test_handle_raster_geotiff_multiband():
+    """Every band of every slice is kept, named by date and band."""
+    data = {
+        datetime(2023, 1, 1): ImageData(
+            numpy.ma.array(numpy.full((2, 2, 2), 1, dtype="float32")),
+            band_descriptions=["red", "nir"],
+        ),
+        datetime(2023, 1, 2): ImageData(
+            numpy.ma.array(numpy.full((2, 2, 2), 2, dtype="float32")),
+            band_descriptions=["red", "nir"],
+        ),
+    }
+
+    result = _handle_raster_geotiff(data)
+    assert result.array.shape == (4, 2, 2)
+    assert result.array[:, 0, 0].tolist() == [1, 1, 2, 2]
+    assert result.band_descriptions == [
+        "2023-01-01 00:00:00_red",
+        "2023-01-01 00:00:00_nir",
+        "2023-01-02 00:00:00_red",
+        "2023-01-02 00:00:00_nir",
+    ]
+    assert result.metadata["original_keys"] == [
+        "2023-01-01 00:00:00",
+        "2023-01-02 00:00:00",
+    ]
+
+
 def test_handle_raster_geotiff_validation():
     """Test validation in _handle_raster_geotiff."""
     # Create 2x2 and 2x3 images for validation testing
