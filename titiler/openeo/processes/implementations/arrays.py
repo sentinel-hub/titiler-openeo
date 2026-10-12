@@ -11,7 +11,12 @@ from rio_tiler.models import ImageData
 from ...errors import OpenEOException
 from .core import process
 from .data_model import RasterStack
-from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
+from .reduce import (
+    REDUCED_TEMPORAL_SENTINEL,
+    _callback_results_cache,
+    _normalize_to_naive_utc,
+    _reset_results_cache,
+)
 
 __all__ = [
     "array_element",
@@ -674,6 +679,21 @@ def merge_cubes(
     if target_height is None or target_width is None:
         raise ValueError("cube1 has no spatial dimensions")
 
+    # The resolver is invoked once PER timestamp and overlapping band, but the
+    # executor memoizes each callback node in a results_cache SHARED across those
+    # calls. Without intervention every call after the first returns the first
+    # call's result, so e.g. the mask of a partial-coverage date spreads to every
+    # date (#449). Snapshot the cache now and reset it before each call, so each
+    # call recomputes while upstream entries are preserved (no re-reads).
+    resolver: Optional[Callable] = None
+    if overlap_resolver is not None:
+        resolver_cache = _callback_results_cache(overlap_resolver)
+        cache_baseline = dict(resolver_cache or {})
+
+        def resolver(**kwargs: Any) -> Any:
+            _reset_results_cache(resolver_cache, cache_baseline)
+            return overlap_resolver(**kwargs)
+
     def _match_size(img: ImageData) -> ImageData:
         if img.height != target_height or img.width != target_width:
             logging.warning(
@@ -712,7 +732,7 @@ def merge_cubes(
             static2 = _match_size(cube2[norm_to_key2[REDUCED_TEMPORAL_SENTINEL]])
             for key in sorted(keys1):
                 merged_images[key] = _merge_images_bands(
-                    cube1[norm_to_key1[key]], static2, overlap_resolver, context
+                    cube1[norm_to_key1[key]], static2, resolver, context
                 )
         else:
             static1 = cube1[norm_to_key1[REDUCED_TEMPORAL_SENTINEL]]
@@ -720,7 +740,7 @@ def merge_cubes(
                 merged_images[key] = _merge_images_bands(
                     static1,
                     _match_size(cube2[norm_to_key2[key]]),
-                    overlap_resolver,
+                    resolver,
                     context,
                 )
         return RasterStack.from_images(merged_images)
@@ -742,7 +762,7 @@ def merge_cubes(
             merged_images[key] = _merge_images_bands(
                 cube1[norm_to_key1[key]],
                 _match_size(cube2[norm_to_key2[key]]),
-                overlap_resolver,
+                resolver,
                 context,
             )
 

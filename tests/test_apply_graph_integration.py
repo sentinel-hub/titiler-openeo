@@ -1251,3 +1251,60 @@ def test_aggregate_temporal_two_date_labels_via_graph():
         "2024-04-15",
         "2024-05-15",
     ]
+
+
+def test_merge_cubes_overlap_resolver_runs_per_timestamp():
+    """merge_cubes must call the overlap_resolver again for each timestamp and band.
+
+    Regression for #449: the executor memoizes the resolver's callback nodes, so
+    every timestamp after the first got the first timestamp's resolved image. With
+    partial-coverage dates, the first date's mask then spread to all dates.
+    """
+
+    def _cube(offset: float) -> RasterStack:
+        return RasterStack.from_images(
+            {
+                datetime(2023, 2, day): ImageData(
+                    np.ma.array(
+                        np.stack(
+                            [
+                                np.full((2, 2), day + offset, np.float32),
+                                np.full((2, 2), 10 * (day + offset), np.float32),
+                            ]
+                        )
+                    ),
+                    band_descriptions=["B03", "B04"],
+                )
+                for day in (1, 2, 3)
+            }
+        )
+
+    pg = {
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_parameter": "a"},
+                "cube2": {"from_parameter": "b"},
+                "overlap_resolver": {
+                    "process_graph": {
+                        "add": {
+                            "process_id": "add",
+                            "arguments": {
+                                "x": {"from_parameter": "x"},
+                                "y": {"from_parameter": "y"},
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, a=_cube(0.0), b=_cube(100.0))
+
+    assert len(result) == 3
+    for day, img in zip((1, 2, 3), result.values()):
+        expected = 2 * day + 100
+        np.testing.assert_array_equal(img.array[0], np.full((2, 2), expected))
+        np.testing.assert_array_equal(img.array[1], np.full((2, 2), 10 * expected))
