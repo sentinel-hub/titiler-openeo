@@ -3,6 +3,7 @@
 from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
+import numpy
 import pyproj
 import pystac
 from attrs import define, field
@@ -19,9 +20,11 @@ from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
+from rasterio.features import bounds as geometry_bounds
 from rasterio.warp import transform_bounds
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
+from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
@@ -33,11 +36,13 @@ from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
     OutputLimitExceeded,
+    ProcessParameterInvalid,
     STACLoadError,
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .processes.implementations.data_model import RasterStack
+from .processes.implementations.data_model import RasterStack, compute_cutline_mask
+from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
@@ -60,6 +65,45 @@ collection_cache: TTLCache = TTLCache(
 #: a spectral band even though it is not a raster (docs/adr/0002-band-sources.md
 #: S1.2, consequence 4).
 _ARCHIVE_MEDIA_TYPES = frozenset({"application/zip"})
+
+
+def _geojson_spatial_extent(
+    geojson: Dict[str, Any],
+    process_id: str,
+) -> Tuple[BoundingBox, List[Dict[str, Any]]]:
+    """Return the bounding box and the polygons of a GeoJSON spatial extent.
+
+    openEO `load_collection` and `load_stac`: the data is loaded for the
+    bounding box of the geometries, and the pixels outside the polygons are set
+    to no data. GeoJSON coordinates are in EPSG:4326. Empty geometries are
+    ignored.
+    """
+    try:
+        geometries = _extract_geometries_from_mask(geojson)
+    except ValueError as e:
+        raise ProcessParameterInvalid(
+            f"Parameter 'spatial_extent' in process '{process_id}': {e}"
+        ) from e
+
+    geometries = [geom for geom in geometries if geom.get("coordinates")]
+    if not geometries:
+        raise ProcessParameterInvalid(
+            f"Parameter 'spatial_extent' in process '{process_id}': "
+            "the GeoJSON contains no Polygon or MultiPolygon geometry."
+        )
+
+    west, south, east, north = zip(*(geometry_bounds(geom) for geom in geometries))
+    bbox = BoundingBox(
+        west=min(west), south=min(south), east=max(east), north=max(north)
+    )
+    return bbox, geometries
+
+
+def _mask_outside_polygons(img: ImageData, polygons: List[Dict[str, Any]]) -> ImageData:
+    """Set the pixels whose centre is outside the polygons to no data."""
+    outside = compute_cutline_mask(polygons, img.width, img.height, img.bounds, img.crs)
+    img.array[:, outside] = numpy.ma.masked
+    return img
 
 
 @define
@@ -864,7 +908,7 @@ class LoadCollection:
     def load_collection(
         self,
         id: str,
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -879,7 +923,9 @@ class LoadCollection:
 
         Args:
             id: Collection ID
-            spatial_extent: Bounding box for the output (coordinates in its own CRS)
+            spatial_extent: Bounding box for the output (coordinates in its own
+                CRS), or GeoJSON polygons: the data is loaded for their bounding
+                box and the pixels outside the polygons are set to no data.
             temporal_extent: Temporal filter
             bands: Band names to load
             properties: Metadata filters
@@ -889,6 +935,12 @@ class LoadCollection:
             named_parameters: Named parameters for process graph evaluation
             target_crs: Target CRS for output. If None, uses native CRS from source images.
         """
+        polygons: Optional[List[Dict[str, Any]]] = None
+        if spatial_extent is not None and not isinstance(spatial_extent, BoundingBox):
+            spatial_extent, polygons = _geojson_spatial_extent(
+                spatial_extent, "load_collection"
+            )
+
         # Retrieve up to one item beyond the configured processing limit so the
         # guard below can detect genuine overflow. Without an explicit max_items
         # the STAC search silently caps at the first page (100, newest-first),
@@ -973,6 +1025,7 @@ class LoadCollection:
             width: int,
             height: int,
             tile_buffer: Optional[float],
+            polygons: Optional[List[Dict[str, Any]]],
         ):
             """Create a closure that loads data for a date group."""
 
@@ -1006,6 +1059,9 @@ class LoadCollection:
                     bbox,
                     **mosaic_kwargs,
                 )
+                if polygons:
+                    # GeoJSON spatial extent: no data outside the polygons.
+                    img = _mask_outside_polygons(img, polygons)
                 return img
 
             return task
@@ -1022,6 +1078,7 @@ class LoadCollection:
                 width,
                 height,
                 tile_buffer,
+                polygons,
             )
             # Collect all geometries from items for cutline mask computation (union of footprints)
             geometries = [
@@ -1088,7 +1145,7 @@ class LoadStac:
     def _handle_collection_or_catalog(
         self,
         stac_obj: Union[pystac.Collection, pystac.Catalog],
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -1262,7 +1319,7 @@ class LoadStac:
     def load_stac(
         self,
         url: str,
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -1276,7 +1333,9 @@ class LoadStac:
 
         Args:
             url: URL to a static STAC catalog or a STAC API Collection
-            spatial_extent: Optional bounding box to limit the data
+            spatial_extent: Optional bounding box to limit the data, or GeoJSON
+                polygons: the data is loaded for their bounding box and the
+                pixels outside the polygons are set to no data.
             temporal_extent: Optional temporal interval to limit the data
             bands: Optional list of band names to include
             properties: Optional metadata properties to filter by
@@ -1293,6 +1352,15 @@ class LoadStac:
             TemporalExtentEmpty: If the temporal extent is empty
             NotImplementedError: If spatial_extent is not provided
         """
+        # Validate a GeoJSON extent before any read. A Collection or Catalog
+        # gets the GeoJSON itself: load_collection applies it.
+        bbox_extent: Optional[BoundingBox] = None
+        polygons: Optional[List[Dict[str, Any]]] = None
+        if isinstance(spatial_extent, BoundingBox):
+            bbox_extent = spatial_extent
+        elif spatial_extent is not None:
+            bbox_extent, polygons = _geojson_spatial_extent(spatial_extent, "load_stac")
+
         # Load the STAC catalog or item from the URL
         stac_obj = self._load_stac_object(url)
 
@@ -1333,19 +1401,25 @@ class LoadStac:
             raise NoDataAvailable("There is no data available for the given extents.")
 
         # Process spatial extent
-        if spatial_extent:
-            return self._process_spatial_extent(
+        if bbox_extent:
+            stack = self._process_spatial_extent(
                 items,
-                spatial_extent,
+                bbox_extent,
                 bands=bands,
                 width=width,
                 height=height,
                 tile_buffer=tile_buffer,
             )
+            if polygons:
+                # GeoJSON spatial extent: no data outside the polygons, lazily.
+                return stack.map_tasks(
+                    lambda key, realize: _mask_outside_polygons(realize(), polygons)
+                )
+            return stack
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height
+            items, bbox_extent, bands, width, height
         )
 
         # Extract values from the result
