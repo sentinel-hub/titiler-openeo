@@ -655,6 +655,20 @@ class TestMergeCubesTemporalBroadcast:
         assert img.band_descriptions == ["B03", "B04"]
         np.testing.assert_array_equal(img.array, 2.0)
 
+    def test_cube_without_bands_resolver_returns_list(self):
+        """A resolver result that is not an array is converted to one."""
+        s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "B04"])
+        dem = self._static(fill=2.0)
+
+        def list_resolver(x, y, context=None):
+            return (x * y).tolist()
+
+        result = merge_cubes(cube1=s2, cube2=dem, overlap_resolver=list_resolver)
+
+        img = result[self.DATES[0]]
+        assert img.band_descriptions == ["B03", "B04"]
+        np.testing.assert_array_equal(img.array, 2.0)
+
     def test_cube_without_bands_requires_resolver(self):
         """A cube without band labels overlaps every band, so a resolver is needed."""
         s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "B04"])

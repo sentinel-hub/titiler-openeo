@@ -244,6 +244,54 @@ def test_array_element(sample_raster_stack):
     np.testing.assert_array_equal(result, first)
 
 
+def test_array_element_stack_label(sample_raster_stack):
+    """An ISO date label selects the time step with that datetime key."""
+    second = sample_raster_stack[datetime(2021, 1, 2)].array
+
+    np.testing.assert_array_equal(
+        array_element(sample_raster_stack, label="2021-01-02"), second
+    )
+
+
+@pytest.mark.parametrize("label", ["2021-01-03", "not-a-date"])
+def test_array_element_stack_label_not_found(sample_raster_stack, label):
+    """A label that is not a time step of the stack raises KeyError."""
+    with pytest.raises(KeyError, match="not found"):
+        array_element(sample_raster_stack, label=label)
+
+
+def test_array_element_stack_index_out_of_bounds(sample_raster_stack):
+    """An index past the last time step raises IndexError."""
+    with pytest.raises(IndexError, match="out of bounds"):
+        array_element(sample_raster_stack, 2)
+
+
+@pytest.mark.parametrize(
+    "parsed_type,value,expected",
+    [
+        ("Year", "2024", "2024"),
+        ("Date", "2024-06-02", "2024-06-02"),
+        ("DateTime", "2024-06-02T10:00:00Z", "2024-06-02T10:00:00+00:00"),
+        ("Time", "10:00:00Z", "10:00:00"),
+    ],
+)
+def test_temporal_to_label(parsed_type, value, expected):
+    """Values parsed from date and time strings are serialized back to strings."""
+    from openeo_pg_parser_networkx import pg_schema
+
+    from titiler.openeo.processes.implementations.core import _temporal_to_label
+
+    parsed = getattr(pg_schema, parsed_type).model_validate(value)
+    assert _temporal_to_label(parsed) == expected
+
+
+def test_temporal_to_label_passes_other_values():
+    """A value without isoformat is returned unchanged."""
+    from titiler.openeo.processes.implementations.core import _temporal_to_label
+
+    assert _temporal_to_label(5) == 5
+
+
 def test_reduce_dimension_spectral(sample_raster_stack):
     """Test reducing spectral dimension of RasterStack."""
 

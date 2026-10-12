@@ -106,10 +106,8 @@ def _find_stack_label(keys: List[Any], label: Any) -> Any:
     """Return the RasterStack key that matches ``label``.
 
     Stack keys are datetimes, while a label from a process graph is usually an
-    ISO 8601 string, so compare both forms.
+    ISO 8601 string, so parse the label before the comparison.
     """
-    if label in keys:
-        return label
     try:
         wanted = _coerce_temporal_label(label)
     except LabelsNotEnumerated:
