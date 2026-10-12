@@ -5,10 +5,12 @@ from datetime import datetime, timezone
 
 import numpy
 import pytest
+from openeo_pg_parser_networkx.process_registry import Process
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import FormatUnsuitable
 from titiler.openeo.models.openapi import FileFormats
+from titiler.openeo.processes.implementations.core import process
 from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.formats import (
     OUTPUT_FORMATS,
@@ -227,3 +229,59 @@ def test_result_without_save_result(app_with_auth):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
     assert response.json() == collection
+
+
+@pytest.mark.parametrize(
+    "save_format,media_type",
+    [
+        (None, "image/png"),
+        ("png", "image/png"),
+        ("gtiff", "image/tiff"),
+        ("jpg", "image/jpeg"),
+    ],
+)
+def test_xyz_tile_media_type(app_with_auth, save_format, media_type):
+    """XYZ tiles take the media type from the encoded result.
+
+    Format names are case-insensitive, and a graph without save_result gives PNG.
+    """
+
+    @process
+    def test_tile_image() -> ImageData:
+        return ImageData(
+            numpy.ma.array(numpy.full((1, 256, 256), 7, dtype="uint8")),
+            bounds=(-180, -85, 180, 85),
+            crs="epsg:4326",
+        )
+
+    app_with_auth.app.endpoints.process_registry[None]["test_tile_image"] = Process(
+        implementation=test_tile_image,
+        spec={"id": "test_tile_image", "parameters": []},
+    )
+
+    process_graph = {
+        "image": {"process_id": "test_tile_image", "arguments": {}, "result": True}
+    }
+    if save_format:
+        process_graph["image"].pop("result")
+        process_graph["save"] = {
+            "process_id": "save_result",
+            "arguments": {"data": {"from_node": "image"}, "format": save_format},
+            "result": True,
+        }
+
+    response = app_with_auth.post(
+        "/services",
+        json={
+            "process": {"process_graph": process_graph},
+            "type": "xyz",
+            "configuration": {},
+        },
+    )
+    assert response.status_code == 201, response.text
+    service_id = response.headers["location"].split("/")[-1]
+
+    tile = app_with_auth.get(f"/services/xyz/{service_id}/tiles/0/0/0")
+    assert tile.status_code == 200, tile.text
+    assert tile.headers["content-type"] == media_type
+    assert len(tile.content) > 0
