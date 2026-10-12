@@ -195,6 +195,14 @@ def _resolve_special_parameter(
 
     if effective_type == BoundingBox:
         return _convert_to_bounding_box(param_value)
+    # A parameter that takes a bounding box or GeoJSON (load_collection
+    # spatial_extent): convert only the dicts that are a bounding box.
+    if (
+        _accepts_type(param_type, BoundingBox)
+        and isinstance(param_value, dict)
+        and "west" in param_value
+    ):
+        return _convert_to_bounding_box(param_value)
     if effective_type == TemporalInterval:
         return _convert_to_temporal_interval(param_value)
 
