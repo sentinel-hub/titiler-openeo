@@ -5,6 +5,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 from rasterio.errors import RasterioIOError
+from rasterio.io import MemoryFile
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import RasterStack
@@ -166,3 +167,10 @@ def test_save_result_geotiff(sample_raster_stack):
     assert isinstance(result, SaveResultData)
     assert result.media_type == "image/tiff"
     assert isinstance(result.data, bytes)
+
+    # 2 dates x 3 bands: every band of every date is written, in date order.
+    with MemoryFile(result.data) as memfile, memfile.open() as dataset:
+        assert dataset.count == 6
+        stack = list(sample_raster_stack.values())
+        np.testing.assert_array_equal(dataset.read(1), stack[0].array[0])
+        np.testing.assert_array_equal(dataset.read(6), stack[1].array[2])
