@@ -82,32 +82,50 @@ A collection without a band dimension does not get band summaries.
   summaries. `load_collection` cannot read such a band, so this is correct.
 - `BandSource` has a new optional `description` field.
 
-## 4. Decision: `visual_red`, not `red`, on Planetary Computer
+## 4. Decision: data before visuals, common names as second names
 
 On Planetary Computer, the `visual` asset declares its bands as
 `B04`/`B03`/`B02` with `common_name` `red`/`green`/`blue` and the spectral
 metadata of these bands. But the asset is an 8-bit true-color rendering.
 Before this ADR, the cube gave these bands as `red`, `green` and `blue`
-(ADR 0007). A user can think that `red` is the red reflectance band, which
-is the `B04` asset.
+(ADR 0007). A user who loads `red` expects the red reflectance band, which
+is the `B04` asset, but got the 8-bit band.
 
-`resolve_asset_bands` now has one more rule. If a band of a multi-band asset
-has a name that is the key of a different asset, the band is a copy of that
-asset. All the names of this band get the asset key as a prefix:
+The project is in development (no production users), so we change the
+names. Two rules are added to `resolve_asset_bands`:
 
-| Before | After |
+1. **Copies of other assets.** If a band of a multi-band asset has a name
+   that is the key of a different asset, the band is a copy of that asset.
+   It gets only one name: its common name with the asset key as a prefix
+   (`visual_red`). It does not get its STAC `name` as a second name
+   (`visual_B04`), because that name looks too much like `B04`.
+2. **Common names of single-band assets.** A data asset with exactly one
+   band also gets the common name of the band as a second name, if no other
+   single-band asset has the same common name. The asset key stays the main
+   name.
+
+Common names do not replace the asset keys. They are not unique (on
+Planetary Computer, `B05`, `B06`, `B07` and `B8A` are all `rededge`; on CDSE,
+`B02_10m`, `B02_20m` and `B02_60m` are all `blue`), and some bands do not
+have one (`B09`, `SCL`, `AOT`, `WVP`). A common name that is already an
+asset key (Earth Search `red`) or already a band name of a multi-band asset
+(EOPF `blue`) does not change.
+
+Result on Planetary Computer `sentinel-2-l2a`:
+
+| Name | Reads |
 | --- | --- |
-| `red`, `green`, `blue` | `visual_red`, `visual_green`, `visual_blue` |
-| `B04` of `visual` (hidden by the `B04` asset) | `visual_B04`, `visual_B03`, `visual_B02` |
+| `B04`, `red` | the `B04` asset (reflectance) |
+| `B03`, `green`; `B02`, `blue` | the `B03`/`B02` assets |
+| `B08`, `nir`; `B01`, `coastal`; `B11`, `swir16`; `B12`, `swir22` | these assets |
+| `B05`, `B06`, `B07`, `B8A` | these assets (no `rededge`) |
+| `visual_red`, `visual_green`, `visual_blue` | bands 1, 2, 3 of `visual` (8-bit) |
 
-Discovery and the read path use the same resolver, so they give the same
-names. Discovery gives all the `item_assets` keys to the resolver, so it
-qualifies the same bands as the read path.
+The second names are in `cube:dimensions` and in both summaries, with the
+metadata of their asset, so that discovery and the read path agree. A band
+picker shows the same data two times (`B04` and `red`). EOPF already does
+this (`red` and `b04`), and a process graph that uses `red` now reads
+reflectance on Planetary Computer and on EOPF.
 
-The bands of EOPF `reflectance` do not change: no band name is an asset
-key.
-
-This is a breaking change on Planetary Computer: a process graph that loads
-`red`, `green` or `blue` from `sentinel-2-l2a` must use `visual_red`,
-`visual_green` and `visual_blue`, or the reflectance bands `B04`, `B03`
-and `B02`.
+Discovery gives all the `item_assets` keys to the resolver, so it gives the
+same names as the read path, which gives all the assets of the item.

@@ -507,7 +507,15 @@ class SimpleSTACReader(MultiBaseReader):
                     f"'{asset_name}' is not valid, should be one of "
                     f"{sorted(set(self.assets) | set(self._derived_bands) | set(self._inner_bands))}"
                 )
-            asset = {**asset, "name": resolved.asset_key, "bands": [resolved.band_name]}
+            if resolved.whole_asset:
+                # The common name of a single-band asset: read all of it.
+                asset = {**asset, "name": resolved.asset_key}
+            else:
+                asset = {
+                    **asset,
+                    "name": resolved.asset_key,
+                    "bands": [resolved.band_name],
+                }
             asset_name = resolved.asset_key
 
         asset_info = self.input.assets[asset_name]

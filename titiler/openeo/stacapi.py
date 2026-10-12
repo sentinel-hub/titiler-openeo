@@ -296,8 +296,9 @@ class stacApiBackend:
         resolved with the same precedence as the read path
         (``SimpleSTACReader._get_asset_info``):
 
-        1. an ``item_assets`` key: the asset's title/description and gsd,
-           plus the spectral fields of its band if it has exactly one;
+        1. an ``item_assets`` key, or the common name of a single-band asset:
+           the asset's title/description and gsd, plus the spectral fields of
+           its band if it has exactly one;
         2. a band inside a multi-band asset (titiler/openeo/assetbands.py):
            that band's own metadata, and a description that names the asset;
         3. a band derived by a band source (docs/adr/0002-band-sources.md):
@@ -344,6 +345,12 @@ class stacApiBackend:
         for name in band_names:
             if name in item_assets:
                 fields = _asset_band_fields(item_assets[name])
+            elif name in inner_bands and inner_bands[name].whole_asset:
+                key = inner_bands[name].asset_key
+                fields = _asset_band_fields(item_assets[key])
+                fields["description"] = (
+                    f"{fields['description']}. " if fields.get("description") else ""
+                ) + f"Common name of the '{key}' asset."
             elif name in inner_bands:
                 resolved = inner_bands[name]
                 fields = _inner_band_fields(
@@ -462,7 +469,9 @@ class stacApiBackend:
             inner_bands = resolve_asset_bands(
                 asset_band_facts(data_assets), (key for key, _, _ in asset_facts)
             )
-            band_names.difference_update(r.asset_key for r in inner_bands.values())
+            band_names.difference_update(
+                r.asset_key for r in inner_bands.values() if not r.whole_asset
+            )
             band_names.update(inner_bands)
 
             # Bands derived from non-raster assets (e.g. Sentinel-1 GRD's

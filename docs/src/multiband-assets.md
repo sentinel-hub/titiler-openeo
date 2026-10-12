@@ -75,11 +75,22 @@ declares its bands as `B04`, `B03` and `B02` (common names `red`, `green`
 and `blue`), and `B04`, `B03` and `B02` are also assets with the
 reflectance values.
 
-If a band has a name that is the key of a different asset, all the names of
-that band get the asset key as a prefix. On Planetary Computer, the bands of
-`visual` are `visual_red`, `visual_green` and `visual_blue` (and
-`visual_B04`, `visual_B03`, `visual_B02`). They are not `red`, `green` and
-`blue`. Use `B04`, `B03` and `B02` for reflectance.
+If a band has a name that is the key of a different asset, it gets only one
+name: its common name with the asset key as a prefix. On Planetary
+Computer, the bands of `visual` are `visual_red`, `visual_green` and
+`visual_blue`.
+
+## Common names of single-band assets
+
+Data comes before visuals. A data asset with exactly one band also gets the
+common name of its band as a second name, if no other single-band asset has
+that common name. On Planetary Computer, `red` is the `B04` asset
+(reflectance), `nir` is `B08`, and so on. `rededge` is not a name, because
+four assets (`B05`, `B06`, `B07`, `B8A`) have it. On CDSE, `blue` is not a
+name, because `B02_10m`, `B02_20m` and `B02_60m` all have it.
+
+So `"bands": ["red"]` reads red reflectance on Planetary Computer and on
+EOPF.
 
 ## Worked example
 
@@ -123,8 +134,10 @@ asset, since its bands are fixed RGB channels rather than independently
 requestable data. Today this applies to EOPF's Sentinel-2 L2A collection
 (`api.explorer.eopf.copernicus.eu/stac`), and to the `visual` asset of
 Planetary Computer, which has the role `data` (see "Bands that copy another
-asset"). CDSE and Earth Search publish one asset per band, so nothing
-changes for them.
+asset"). CDSE and Earth Search publish one asset per band. On Earth
+Search, the asset keys are already common names (`red`, `nir`), so nothing
+changes. On CDSE, a common name is a second name only for a band with one
+resolution (see "Common names of single-band assets").
 
 ## Design reference
 

@@ -68,9 +68,14 @@ def test_planetary_computer_summaries_mirror_cube_dimensions(pc_collection):
         assert name in values
     # `visual` holds copies of the B04/B03/B02 assets, so its bands get the
     # asset key as a prefix (issue #440).
-    for name in ("visual_red", "visual_green", "visual_blue", "visual_B04"):
+    for name in ("visual_red", "visual_green", "visual_blue"):
         assert name in values
-    assert "red" not in values
+    assert "visual_B04" not in values
+    # The common name of a single-band data asset is a second name for it,
+    # if no other asset has it: `red` is B04, `rededge` (4 assets) is none.
+    for name in ("red", "green", "blue", "nir", "coastal", "swir16", "swir22"):
+        assert name in values
+    assert "rededge" not in values
 
 
 def test_planetary_computer_band_metadata(pc_collection):
@@ -114,6 +119,14 @@ def test_planetary_computer_band_metadata(pc_collection):
     assert "'visual'" in red["description"]
     assert "True color image" in red["description"]
     assert "not the 'B04' asset" in red["description"]
+
+    # Common name of a single-band asset: the metadata of that asset.
+    assert bands["red"] == {
+        **bands["B04"],
+        "name": "red",
+        "description": "Band 4 - Red - 10m. Common name of the 'B04' asset.",
+    }
+    assert eo_bands["red"]["common_name"] == "red"
 
     # Derived band: a description from its band source.
     assert "Sun zenith angle" in bands["sunZenithAngles"]["description"]

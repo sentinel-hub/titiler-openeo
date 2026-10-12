@@ -208,24 +208,17 @@ PC_VISUAL: Fact = (
 
 
 def test_a_band_named_like_another_asset_is_qualified():
-    """`visual`'s red is a copy of the B04 asset, not B04 reflectance: all
-    its names get the asset key as a prefix (issue #440)."""
+    """`visual`'s red is a copy of the B04 asset, not B04 reflectance: it gets
+    only its display name, with the asset key as a prefix (issue #440)."""
     resolved = resolve_asset_bands(
         _facts(PC_VISUAL, ("B04", [{"name": "B04"}]), ("B03", []), ("B02", []))
     )
 
-    assert set(resolved) == {
-        "visual_red",
-        "visual_B04",
-        "visual_green",
-        "visual_B03",
-        "visual_blue",
-        "visual_B02",
-    }
+    assert set(resolved) == {"visual_red", "visual_green", "visual_blue"}
     assert resolved["visual_red"].asset_key == "visual"
     # The name inside the asset is unchanged: `_get_options` resolves it.
     assert resolved["visual_red"].band_name == "red"
-    assert resolved["visual_B04"] is resolved["visual_red"]
+    assert not resolved["visual_red"].whole_asset
 
 
 def test_asset_keys_outside_the_facts_also_qualify():
@@ -235,20 +228,79 @@ def test_asset_keys_outside_the_facts_also_qualify():
     with_keys = resolve_asset_bands(_facts(PC_VISUAL), ["B04", "B03", "B02"])
 
     assert "red" in only_visual
-    assert set(with_keys) == {
-        "visual_red",
-        "visual_B04",
-        "visual_green",
-        "visual_B03",
-        "visual_blue",
-        "visual_B02",
-    }
+    assert set(with_keys) == {"visual_red", "visual_green", "visual_blue"}
 
 
 def test_only_the_band_named_like_an_asset_is_qualified():
     resolved = resolve_asset_bands(_facts(PC_VISUAL, ("B04", [{"name": "B04"}])))
 
-    assert {"visual_red", "visual_B04", "green", "B03", "blue", "B02"} == set(resolved)
+    assert {"visual_red", "green", "B03", "blue", "B02"} == set(resolved)
+
+
+# ---------------------------------------------------------------------------
+# Common names of single-band assets (issue #440)
+# ---------------------------------------------------------------------------
+
+
+def test_common_name_of_a_single_band_asset_is_a_second_name():
+    """Data before visuals: `red` is the B04 reflectance asset, and the
+    `visual` copy is `visual_red`."""
+    resolved = resolve_asset_bands(
+        _facts(
+            PC_VISUAL,
+            ("B04", [{"name": "B04", "common_name": "red"}]),
+            ("B03", [{"name": "B03", "eo:common_name": "green"}]),
+            ("B02", [{"name": "B02", "common_name": "blue"}]),
+            ("SCL", []),
+        )
+    )
+
+    assert set(resolved) == {
+        "red",
+        "green",
+        "blue",
+        "visual_red",
+        "visual_green",
+        "visual_blue",
+    }
+    assert resolved["red"].asset_key == "B04"
+    assert resolved["red"].whole_asset
+    assert resolved["green"].asset_key == "B03"
+
+
+def test_a_common_name_of_several_assets_is_not_a_name():
+    """Planetary Computer: B05, B06, B07, B8A are all `rededge`. CDSE:
+    B02_10m, B02_20m, B02_60m are all `blue`. None of them gets it."""
+    resolved = resolve_asset_bands(
+        _facts(
+            ("B05", [{"name": "B05", "common_name": "rededge"}]),
+            ("B06", [{"name": "B06", "common_name": "rededge"}]),
+            ("B02_10m", [{"name": "B02", "common_name": "blue"}]),
+            ("B02_20m", [{"name": "B02", "common_name": "blue"}]),
+        )
+    )
+
+    assert resolved == {}
+
+
+def test_a_common_name_that_is_an_asset_key_is_not_changed():
+    """Earth Search: the `red` asset holds `B04` with common name `red`."""
+    resolved = resolve_asset_bands(
+        _facts(("red", [{"name": "B04", "common_name": "red"}])), ["nir"]
+    )
+
+    assert resolved == {}
+
+
+def test_a_multi_band_name_keeps_its_name_before_a_common_name():
+    """EOPF `reflectance` already has `blue`: a single-band asset with the
+    same common name does not take it."""
+    resolved = resolve_asset_bands(
+        _facts(MULTI_BAND_CUBE, ("B02_10m", [{"name": "B02", "common_name": "blue"}]))
+    )
+
+    assert resolved["blue"].asset_key == "reflectance"
+    assert not resolved["blue"].whole_asset
 
 
 def test_resolve_asset_band_singular_matches_the_plural_result():

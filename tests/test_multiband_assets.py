@@ -372,16 +372,61 @@ def _pc_like_item() -> pystac.Item:
     return item
 
 
-def test_pc_visual_bands_read_from_visual_under_qualified_names():
+def test_pc_red_reads_b04_and_visual_red_reads_visual():
     with SimpleSTACReader(_pc_like_item()) as src:
-        red = src._get_asset_info("visual_red")
-        assert red["name"] == "visual"
-        assert red["method_options"]["indexes"] == [1]
-        assert src._get_asset_info("visual_B03")["method_options"]["indexes"] == [2]
+        visual_red = src._get_asset_info("visual_red")
+        assert visual_red["name"] == "visual"
+        assert visual_red["method_options"]["indexes"] == [1]
+        assert src._get_asset_info("visual_green")["method_options"]["indexes"] == [2]
 
-        # B04 is still the B04 asset, and a bare `red` is not a band.
-        b04 = src._get_asset_info("B04")
-        assert b04["name"] == "B04"
-        assert "indexes" not in b04["method_options"]
-        with pytest.raises(Exception, match="red"):
-            src._get_asset_info("red")
+        # Data before visuals: `red` is the whole B04 asset, same as `B04`.
+        for name in ("B04", "red"):
+            info = src._get_asset_info(name)
+            assert info["name"] == "B04"
+            assert "indexes" not in info["method_options"]
+
+        # No second name for the same 8-bit band.
+        with pytest.raises(Exception, match="visual_B04"):
+            src._get_asset_info("visual_B04")
+
+
+def test_every_advertised_pc_band_is_readable():
+    """Same property as above, for Planetary Computer: common names, the
+    qualified `visual` bands and the derived angle bands."""
+    data = json.loads(
+        Path(
+            "tests/fixtures/sentinel2/collections/planetary_computer_full.json"
+        ).read_text()
+    )
+    collection = pystac.Collection.from_dict(data)
+    backend = stacApiBackend.__new__(stacApiBackend)
+    advertised = set(backend.getdimensions(collection)["spectral"].to_dict()["values"])
+
+    item = pystac.Item(
+        id="pc-like",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        bbox=[0, 0, 1, 1],
+        datetime=datetime.datetime(2026, 8, 7, tzinfo=datetime.timezone.utc),
+        properties={},
+        collection="sentinel-2-l2a",
+    )
+    for key, asset in data["item_assets"].items():
+        item.add_asset(
+            key,
+            pystac.Asset(
+                href=f"https://example.com/{key}",
+                media_type=asset.get("type"),
+                roles=asset.get("roles"),
+                extra_fields={
+                    k: v for k, v in asset.items() if k not in ("type", "roles")
+                },
+            ),
+        )
+
+    assert {"red", "visual_red", "sunZenithAngles"} <= advertised
+    with SimpleSTACReader(item) as src:
+        for name in advertised:
+            src._get_asset_info(name)  # must not raise
