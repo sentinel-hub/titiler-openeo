@@ -9,6 +9,7 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from ...errors import OpenEOException
+from .callbacks import recompute_each_call
 from .core import process
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
@@ -548,40 +549,31 @@ def _merge_images_bands(
     bands1 = list(img1.band_descriptions)
     bands2 = list(img2.band_descriptions)
 
-    # If neither image has band names, all data overlaps
-    if not bands1 and not bands2:
+    def _resolve(x: numpy.ndarray, y: numpy.ndarray) -> numpy.ndarray:
         if overlap_resolver is None:
             raise OverlapResolverMissing()
-        resolved = overlap_resolver(x=img1.array, y=img2.array, context=context)
-        if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
-            resolved = numpy.asarray(resolved)
+        return numpy.asanyarray(overlap_resolver(x=x, y=y, context=context))
+
+    def _image(array: numpy.ndarray, band_names: List[str]) -> ImageData:
         return ImageData(
-            resolved,
+            array,
             assets=(img1.assets or []) + (img2.assets or []),
             crs=img1.crs,
             bounds=img1.bounds,
-            band_descriptions=bands1,
+            band_descriptions=band_names,
             metadata=img1.metadata or {},
         )
 
-    # A single-band image without band names comes from a cube that has no
-    # bands dimension (e.g. reduced with array_element). Per spec example 4, it
-    # is merged with each band of the other cube, so the resolver gets all bands.
-    unnamed = img1 if not bands1 else img2 if not bands2 else None
-    if unnamed is not None and unnamed.count == 1:
-        if overlap_resolver is None:
-            raise OverlapResolverMissing()
-        resolved = overlap_resolver(x=img1.array, y=img2.array, context=context)
-        if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
-            resolved = numpy.asarray(resolved)
-        return ImageData(
-            resolved,
-            assets=(img1.assets or []) + (img2.assets or []),
-            crs=img1.crs,
-            bounds=img1.bounds,
-            band_descriptions=bands1 or bands2,
-            metadata=img1.metadata or {},
-        )
+    # Without band names on either side, all data overlaps. A single-band image
+    # without band names comes from a cube that has no bands dimension (e.g.
+    # reduced with array_element); per spec example 4 it is merged with each band
+    # of the other cube. In both cases the resolver gets the whole images.
+    if (
+        (not bands1 and not bands2)
+        or (not bands1 and img1.count == 1)
+        or (not bands2 and img2.count == 1)
+    ):
+        return _image(_resolve(img1.array, img2.array), bands1 or bands2)
 
     # Find overlapping and unique bands
     set1 = set(bands1)
@@ -600,13 +592,9 @@ def _merge_images_bands(
         band_data_1 = img1.array[idx : idx + 1]  # shape (1, h, w)
 
         if band_name in overlapping:
-            # Find matching band in cube2
-            assert overlap_resolver is not None  # guarded above
             idx2 = bands2.index(band_name)
             band_data_2 = img2.array[idx2 : idx2 + 1]  # shape (1, h, w)
-            resolved = overlap_resolver(x=band_data_1, y=band_data_2, context=context)
-            if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
-                resolved = numpy.asarray(resolved)
+            resolved = _resolve(band_data_1, band_data_2)
             # Ensure 3D shape
             if resolved.ndim == 2:
                 resolved = resolved[numpy.newaxis, :, :]
@@ -621,16 +609,7 @@ def _merge_images_bands(
         result_arrays.append(img2.array[idx2 : idx2 + 1])
         result_band_names.append(band_name)
 
-    merged_array = numpy.ma.concatenate(result_arrays, axis=0)
-
-    return ImageData(
-        merged_array,
-        assets=(img1.assets or []) + (img2.assets or []),
-        crs=img1.crs,
-        bounds=img1.bounds,
-        band_descriptions=result_band_names,
-        metadata=img1.metadata or {},
-    )
+    return _image(numpy.ma.concatenate(result_arrays, axis=0), result_band_names)
 
 
 @process
@@ -674,6 +653,13 @@ def merge_cubes(
     if target_height is None or target_width is None:
         raise ValueError("cube1 has no spatial dimensions")
 
+    # The resolver is invoked once PER timestamp and overlapping band; without
+    # this every call after the first returns the first call's result (#449, see
+    # callbacks.py).
+    resolver = (
+        recompute_each_call(overlap_resolver) if overlap_resolver is not None else None
+    )
+
     def _match_size(img: ImageData) -> ImageData:
         if img.height != target_height or img.width != target_width:
             logging.warning(
@@ -698,51 +684,31 @@ def merge_cubes(
 
     norm_to_key1 = {_norm(k): k for k in cube1.keys()}
     norm_to_key2 = {_norm(k): k for k in cube2.keys()}
-    keys1 = set(norm_to_key1)
-    keys2 = set(norm_to_key2)
-
-    merged_images: Dict[datetime, ImageData] = {}
 
     # A temporally-reduced cube has no temporal dimension. When only one of the
     # two cubes is reduced, `t` is not an overlapping dimension: the reduced cube
     # is merged with each time step of the other cube (spec example 4, #436).
     reduced = {REDUCED_TEMPORAL_SENTINEL}
-    if (keys1 == reduced) != (keys2 == reduced):
-        if keys2 == reduced:
-            static2 = _match_size(cube2[norm_to_key2[REDUCED_TEMPORAL_SENTINEL]])
-            for key in sorted(keys1):
-                merged_images[key] = _merge_images_bands(
-                    cube1[norm_to_key1[key]], static2, overlap_resolver, context
-                )
-        else:
-            static1 = cube1[norm_to_key1[REDUCED_TEMPORAL_SENTINEL]]
-            for key in sorted(keys2):
-                merged_images[key] = _merge_images_bands(
-                    static1,
-                    _match_size(cube2[norm_to_key2[key]]),
-                    overlap_resolver,
-                    context,
-                )
-        return RasterStack.from_images(merged_images)
+    if set(norm_to_key2) == reduced and set(norm_to_key1) != reduced:
+        norm_to_key2 = dict.fromkeys(
+            norm_to_key1, norm_to_key2[REDUCED_TEMPORAL_SENTINEL]
+        )
+    elif set(norm_to_key1) == reduced and set(norm_to_key2) != reduced:
+        norm_to_key1 = dict.fromkeys(
+            norm_to_key2, norm_to_key1[REDUCED_TEMPORAL_SENTINEL]
+        )
 
-    for key in sorted(keys1 | keys2):
-        in_cube1 = key in keys1
-        in_cube2 = key in keys2
-
-        if in_cube1 and not in_cube2:
-            # Timestamp only in cube1
+    merged_images: Dict[datetime, ImageData] = {}
+    for key in sorted(norm_to_key1.keys() | norm_to_key2.keys()):
+        if key not in norm_to_key2:
             merged_images[key] = cube1[norm_to_key1[key]]
-
-        elif in_cube2 and not in_cube1:
-            # Timestamp only in cube2 - resize to match cube1 spatial dims
+        elif key not in norm_to_key1:
             merged_images[key] = _match_size(cube2[norm_to_key2[key]])
-
         else:
-            # Timestamp in both cubes - merge bands
             merged_images[key] = _merge_images_bands(
                 cube1[norm_to_key1[key]],
                 _match_size(cube2[norm_to_key2[key]]),
-                overlap_resolver,
+                resolver,
                 context,
             )
 

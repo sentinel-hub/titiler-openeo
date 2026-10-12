@@ -12,6 +12,7 @@ from rasterio.warp import calculate_default_transform
 from rasterio.warp import reproject as rio_reproject
 from rio_tiler.utils import resize_array
 
+from .callbacks import call_reducer, recompute_each_call
 from .data_model import ImageData, RasterStack, compute_cutline_mask
 
 __all__ = [
@@ -169,25 +170,12 @@ def _process_geometries(geometries: Union[Dict, Any]) -> Tuple[List[Any], List[D
     return features, properties
 
 
-def _extract_geometry(feature: Any) -> Any:
-    """Extract geometry from a feature.
-
-    Args:
-        feature: A GeoJSON feature or geometry.
-
-    Returns:
-        The geometry object.
-    """
-    if isinstance(feature, Dict) and "geometry" in feature:
-        return feature["geometry"]
-    return feature
-
-
 def _apply_reducer_to_image(
     img: ImageData,
     geom_obj: Any,
     reducer: Callable,
     target_dimension: Optional[str] = None,
+    context: Optional[Any] = None,
 ) -> Any:
     """Apply reducer to each band of an ImageData object.
 
@@ -196,28 +184,21 @@ def _apply_reducer_to_image(
         geom_obj: A GeoJSON geometry dict or object with __geo_interface__ property.
         reducer: A reducer function.
         target_dimension: Optional dimension name to store additional information.
+        context: Additional data to be passed to the reducer.
 
     Returns:
         The result of the reducer for a single-band image. For a multi-band
         image, a dict that maps each band name to the result of its band, in
         band order. None if the geometry covers no pixel.
     """
-    # Get coverage array for the geometry
-    # Handle both dict and objects with __geo_interface__
     geom_dict = geom_obj if isinstance(geom_obj, dict) else geom_obj.__geo_interface__
-    coverage = img.get_coverage_array(geom_dict)
-
-    # Get values where coverage > 0
-    mask = coverage > 0
+    mask = img.get_coverage_array(geom_dict) > 0
     if not numpy.any(mask):
         return None
 
     band_results = []
-    for band_idx in range(img.count):
-        band_data = img.array[band_idx]
-        result = reducer(data=band_data[mask])
-
-        # Store results with additional information if target_dimension is provided
+    for band_data in img.array:
+        result = call_reducer(reducer, band_data[mask], context)
         if target_dimension is not None:
             valid_count = numpy.sum(~numpy.ma.getmaskarray(band_data)[mask])
             result = {
@@ -232,77 +213,6 @@ def _apply_reducer_to_image(
 
     # The bands dimension is kept (openEO aggregate_spatial).
     return dict(zip(img.band_descriptions, band_results, strict=True))
-
-
-def _apply_reducer_to_raster_stack(
-    data: RasterStack,
-    geom_obj: Any,
-    reducer: Callable,
-    target_dimension: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Apply reducer to a RasterStack.
-
-    Args:
-        data: A RasterStack object.
-        geom_obj: A GeoJSON geometry dict or object with __geo_interface__ property.
-        reducer: A reducer function.
-        target_dimension: Optional dimension name to store additional information.
-
-    Returns:
-        A dictionary mapping keys to reducer results.
-    """
-    stack_results = {}
-
-    for key, img in data.items():
-        result = _apply_reducer_to_image(img, geom_obj, reducer, target_dimension)
-        if result is not None:
-            stack_results[key] = result
-
-    return stack_results
-
-
-def _create_feature_collection(
-    features: List[Any],
-    properties: List[Dict],
-    results: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Create a GeoJSON FeatureCollection from features, properties, and results.
-
-    Args:
-        features: A list of GeoJSON features.
-        properties: A list of properties for each feature.
-        results: A dictionary mapping feature indices to reducer results.
-
-    Returns:
-        A GeoJSON FeatureCollection.
-    """
-    # Initialize with explicit typing for features list
-    features_list: List[Dict[str, Any]] = []
-    feature_collection: Dict[str, Any] = {
-        "type": "FeatureCollection",
-        "features": features_list,
-    }
-
-    for idx, feature in enumerate(features):
-        idx_str = str(idx)
-        if idx_str in results:
-            # Extract geometry from feature
-            geometry = _extract_geometry(feature)
-
-            # Create a new feature with geometry, properties, and values
-            new_feature = {
-                "type": "Feature",
-                "geometry": geometry,
-                "properties": properties[idx].copy() if idx < len(properties) else {},
-            }
-
-            # Add values to properties
-            new_feature["properties"]["values"] = results[idx_str]
-
-            # Add to feature collection
-            features_list.append(new_feature)
-
-    return feature_collection
 
 
 def aggregate_spatial(
@@ -322,37 +232,40 @@ def aggregate_spatial(
         context: Additional data to be passed to the reducer.
 
     Returns:
-        A vector data cube with the computed results.
-
-    Raises:
-        TargetDimensionExists: If a dimension with the specified target dimension name already exists.
+        A vector data cube as a GeoJSON FeatureCollection. Each feature keeps
+        its properties and gets a ``values`` property that maps each date to
+        its result. A geometry that covers no pixel on any date is left out.
     """
-    # Check if target_dimension exists
-    if target_dimension is not None:
-        # In a real implementation, we would check if the dimension exists
-        # For now, we'll just assume it doesn't
-        pass
-
-    # Process geometries
     features, properties = _process_geometries(geometries)
 
-    # Initialize results
-    results = {}
+    # The reducer is invoked once per geometry, date and band; the executor only
+    # skips its cache for the reducer's first node (see callbacks.py).
+    reducer = recompute_each_call(reducer)
 
-    # Process each geometry
-    for idx, feature in enumerate(features):
-        # Extract geometry (already a GeoJSON dict)
-        geom = _extract_geometry(feature)
-
-        # Apply reducer to the RasterStack
-        stack_results = _apply_reducer_to_raster_stack(
-            data, geom, reducer, target_dimension
+    features_list: List[Dict[str, Any]] = []
+    for feature, feature_properties in zip(features, properties, strict=True):
+        geom = (
+            feature["geometry"]
+            if isinstance(feature, Dict) and "geometry" in feature
+            else feature
         )
-        if stack_results:
-            results[str(idx)] = stack_results
+        values = {}
+        for key, img in data.items():
+            result = _apply_reducer_to_image(
+                img, geom, reducer, target_dimension, context
+            )
+            if result is not None:
+                values[key] = result
+        if values:
+            features_list.append(
+                {
+                    "type": "Feature",
+                    "geometry": geom,
+                    "properties": {**feature_properties, "values": values},
+                }
+            )
 
-    # Create and return GeoJSON FeatureCollection
-    return _create_feature_collection(features, properties, results)
+    return {"type": "FeatureCollection", "features": features_list}
 
 
 def resample_spatial(
