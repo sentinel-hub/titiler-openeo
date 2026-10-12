@@ -1308,3 +1308,183 @@ def test_merge_cubes_overlap_resolver_runs_per_timestamp():
         expected = 2 * day + 100
         np.testing.assert_array_equal(img.array[0], np.full((2, 2), expected))
         np.testing.assert_array_equal(img.array[1], np.full((2, 2), 10 * expected))
+
+
+def test_aggregate_spatial_multi_node_reducer_runs_per_geometry_date_band():
+    """aggregate_spatial must recompute a reducer of more than one node on each call.
+
+    The executor skips its cache only for the reducer's first node (``mean``), so
+    ``multiply`` returned the first call's result for every geometry, date and band.
+    """
+    from rasterio.crs import CRS
+
+    def _img(value: float) -> ImageData:
+        return ImageData(
+            np.ma.array(
+                np.stack(
+                    [
+                        np.full((4, 4), value, np.float32),
+                        np.full((4, 4), 10 * value, np.float32),
+                    ]
+                )
+            ),
+            crs=CRS.from_epsg(4326),
+            bounds=(0, 0, 4, 4),
+            band_descriptions=["B03", "B04"],
+        )
+
+    stack = RasterStack.from_images(
+        {datetime(2023, 2, 1): _img(1.0), datetime(2023, 2, 2): _img(2.0)}
+    )
+    square = {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+    }
+    pg = {
+        "agg": {
+            "process_id": "aggregate_spatial",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "geometries": square,
+                "reducer": {
+                    "process_graph": {
+                        "m": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "x": {
+                            "process_id": "multiply",
+                            "arguments": {"x": {"from_node": "m"}, "y": 2},
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    values = result["features"][0]["properties"]["values"]
+    assert values == {
+        datetime(2023, 2, 1): {"B03": 2.0, "B04": 20.0},
+        datetime(2023, 2, 2): {"B03": 4.0, "B04": 40.0},
+    }
+
+
+def test_aggregate_spatial_passes_context_to_reducer():
+    """aggregate_spatial must pass ``context`` to the reducer (openEO spec)."""
+    from rasterio.crs import CRS
+
+    img = ImageData(
+        np.ma.array(np.full((1, 4, 4), 3.0, np.float32)),
+        crs=CRS.from_epsg(4326),
+        bounds=(0, 0, 4, 4),
+        band_descriptions=["B03"],
+    )
+    stack = RasterStack.from_images({datetime(2023, 2, 1): img})
+    pg = {
+        "agg": {
+            "process_id": "aggregate_spatial",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "geometries": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]],
+                },
+                "reducer": {
+                    "process_graph": {
+                        "m": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "x": {
+                            "process_id": "multiply",
+                            "arguments": {
+                                "x": {"from_node": "m"},
+                                "y": {"from_parameter": "context"},
+                            },
+                            "result": True,
+                        },
+                    }
+                },
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    values = result["features"][0]["properties"]["values"]
+    assert values == {datetime(2023, 2, 1): 30.0}
+
+
+_MEAN_TIMES_CONTEXT = {
+    "process_graph": {
+        "m": {
+            "process_id": "mean",
+            "arguments": {"data": {"from_parameter": "data"}},
+        },
+        "x": {
+            "process_id": "multiply",
+            "arguments": {
+                "x": {"from_node": "m"},
+                "y": {"from_parameter": "context"},
+            },
+            "result": True,
+        },
+    }
+}
+
+
+def test_aggregate_temporal_passes_context_to_reducer():
+    """aggregate_temporal must pass ``context`` to the reducer (openEO spec)."""
+    pg = {
+        "agg": {
+            "process_id": "aggregate_temporal",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "intervals": [["2024-06-01", "2024-07-01"]],
+                "reducer": _MEAN_TIMES_CONTEXT,
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+
+    np.testing.assert_allclose(np.asarray(result.first.array), 50.0)
+
+
+@pytest.mark.parametrize("dimension", ["t", "bands"])
+def test_reduce_dimension_passes_context_to_reducer(dimension):
+    """reduce_dimension must pass ``context`` to the reducer (openEO spec)."""
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((2, 2, 2), 3, np.float32)),
+                band_descriptions=["B03", "B04"],
+            ),
+            datetime(2024, 6, 2): ImageData(
+                np.ma.array(np.full((2, 2, 2), 5, np.float32)),
+                band_descriptions=["B03", "B04"],
+            ),
+        }
+    )
+    pg = {
+        "red": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": dimension,
+                "reducer": _MEAN_TIMES_CONTEXT,
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    expected = [40.0] if dimension == "t" else [30.0, 50.0]
+    got = sorted(float(np.asarray(img.array).mean()) for img in result.values())
+    assert got == expected
