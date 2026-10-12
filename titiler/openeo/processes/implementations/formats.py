@@ -299,15 +299,32 @@ def _encode_json(data: Any, fmt: OutputFormat, options: Dict) -> bytes:
 
 
 def _encode_feature_csv(data: Dict, fmt: OutputFormat, options: Dict) -> bytes:
-    """Write a vector cube as CSV, with date, feature_index and value columns."""
+    """Write a vector cube as CSV, with date and feature_index columns.
+
+    A scalar value goes in the `value` column. A dict value (one entry per
+    band of a multi-band cube) gives one column per key.
+    """
+    rows = [
+        (label, idx, value)
+        for idx, feature in enumerate(data.get("features", []))
+        for label, value in feature.get("properties", {}).get("values", {}).items()
+    ]
+
+    columns: Dict[str, None] = {}
+    for _, _, value in rows:
+        for key in value if isinstance(value, dict) else ["value"]:
+            columns[key] = None
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["date", "feature_index", "value"])
-    for idx, feature in enumerate(data.get("features", [])):
-        values_dict = feature.get("properties", {}).get("values", {})
-        for label, value in values_dict.items():
-            # Same ISO 8601 dates as the JSON output; a masked value is empty.
-            writer.writerow([_to_json_safe(label), idx, _to_json_safe(value)])
+    writer.writerow(["date", "feature_index", *(columns or ["value"])])
+    for label, idx, value in rows:
+        cells = value if isinstance(value, dict) else {"value": value}
+        # Same ISO 8601 dates as the JSON output; a masked value is empty.
+        writer.writerow(
+            [_to_json_safe(label), idx]
+            + [_to_json_safe(cells.get(column)) for column in columns]
+        )
     return output.getvalue().encode("utf-8")
 
 
@@ -387,14 +404,14 @@ OUTPUT_FORMATS: Tuple[OutputFormat, ...] = (
     OutputFormat(
         name="GeoJSON",
         title="GeoJSON",
-        description="A vector cube as a GeoJSON FeatureCollection. The `values` property of each feature maps the ISO 8601 dates to the aggregated values.",
+        description="A vector cube as a GeoJSON FeatureCollection. The `values` property of each feature maps the ISO 8601 dates to the aggregated values. For a cube with more than one band, each value maps the band names to the values of the bands.",
         media_type="application/geo+json",
         encoders={"vector": _encode_json},
     ),
     OutputFormat(
         name="CSV",
         title="Comma-Separated Values (CSV)",
-        description="A vector cube as a table with the columns `date`, `feature_index` and `value`.",
+        description="A vector cube as a table with the columns `date`, `feature_index` and `value`. For a cube with more than one band, there is one column for each band, in place of `value`.",
         media_type="text/csv",
         encoders={"vector": _encode_feature_csv},
     ),

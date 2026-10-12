@@ -189,7 +189,7 @@ def _apply_reducer_to_image(
     reducer: Callable,
     target_dimension: Optional[str] = None,
 ) -> Any:
-    """Apply reducer to an ImageData object.
+    """Apply reducer to each band of an ImageData object.
 
     Args:
         img: An ImageData object.
@@ -198,42 +198,40 @@ def _apply_reducer_to_image(
         target_dimension: Optional dimension name to store additional information.
 
     Returns:
-        The result of applying the reducer.
+        The result of the reducer for a single-band image. For a multi-band
+        image, a dict that maps each band name to the result of its band, in
+        band order. None if the geometry covers no pixel.
     """
     # Get coverage array for the geometry
     # Handle both dict and objects with __geo_interface__
     geom_dict = geom_obj if isinstance(geom_obj, dict) else geom_obj.__geo_interface__
     coverage = img.get_coverage_array(geom_dict)
 
+    # Get values where coverage > 0
+    mask = coverage > 0
+    if not numpy.any(mask):
+        return None
+
+    band_results = []
     for band_idx in range(img.count):
-        # Get band data
         band_data = img.array[band_idx]
+        result = reducer(data=band_data[mask])
 
-        # Get values where coverage > 0
-        mask = coverage > 0
-        if numpy.any(mask):
-            band_values = band_data[mask]
+        # Store results with additional information if target_dimension is provided
+        if target_dimension is not None:
+            valid_count = numpy.sum(~numpy.ma.getmaskarray(band_data)[mask])
+            result = {
+                "value": result,
+                "total_count": int(numpy.sum(mask)),
+                "valid_count": int(valid_count),
+            }
+        band_results.append(result)
 
-            # If there are no valid values, skip
-            if len(band_values) == 0:
-                return None
+    if len(band_results) == 1:
+        return band_results[0]
 
-            result = reducer(data=band_values)
-
-            # Store results with additional information if target_dimension is provided
-            if target_dimension is not None:
-                # Count total and valid pixels
-                total_count = numpy.sum(coverage > 0)
-                valid_count = numpy.sum(~numpy.ma.getmaskarray(band_data)[coverage > 0])
-
-                return {
-                    "value": result,
-                    "total_count": int(total_count),
-                    "valid_count": int(valid_count),
-                }
-            return result
-
-    return None
+    # The bands dimension is kept (openEO aggregate_spatial).
+    return dict(zip(img.band_descriptions, band_results, strict=True))
 
 
 def _apply_reducer_to_raster_stack(
