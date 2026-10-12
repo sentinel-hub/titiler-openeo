@@ -7,35 +7,30 @@ import pytest
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import RasterStack
-from titiler.openeo.processes.implementations.io import (
-    SaveResultData,
-    _handle_json_format,
-    _handle_raster_geotiff,
-    _handle_text_format,
-    save_result,
-)
+from titiler.openeo.processes.implementations.formats import _handle_raster_geotiff
+from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 
 
 def test_handle_text_format():
-    """Test _handle_text_format function."""
+    """Test the txt format."""
     # Test with simple string
-    result = _handle_text_format("test")
+    result = save_result("test", "txt")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "text/plain"
     assert result.data == b"test"
 
     # Test with dictionary
     data = {"key": "value", "num": 123}
-    result = _handle_text_format(data)
+    result = save_result(data, "txt")
     assert result.media_type == "text/plain"
     assert b"key" in result.data
     assert b"value" in result.data
 
 
 def test_handle_json_format():
-    """Test _handle_json_format function."""
+    """Test the JSON format."""
     data = {"name": "test", "values": [1, 2, 3]}
-    result = _handle_json_format(data, "json")
+    result = save_result(data, "json")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "application/json"
     assert b'"name": "test"' in result.data

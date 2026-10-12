@@ -161,6 +161,18 @@ class ProcessParameterRequired(OpenEOException):
         )
 
 
+class FormatUnsuitable(OpenEOException):
+    """The output format can't store the data, or the back-end doesn't support it."""
+
+    def __init__(self, message: str):
+        """Initialize error with the unsuitable output format."""
+        super().__init__(
+            message=message,
+            code="FormatUnsuitable",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class FeatureUnsupported(OpenEOException):
     """The functionality (process, parameter, ...) is not supported by this back-end."""
 

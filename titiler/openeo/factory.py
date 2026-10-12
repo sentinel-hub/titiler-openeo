@@ -27,6 +27,7 @@ from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
+from .processes.implementations.formats import file_formats_document
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
@@ -362,58 +363,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_file_formats(request: Request):
             """Lists supported input and output file formats."""
-            return {
-                "input": {},
-                "output": {
-                    "JPEG": {
-                        "gis_data_types": ["raster"],
-                        "title": " Joint Photographic Experts Group",
-                        "description": "JPEG is an image format that uses lossy compression and is one of the most widely used image formats. Compared to other EO raster formats, it is less flexible and standardized regarding number of bands, embedding geospatial metadata, etc.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": ["byte"],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                    "PNG": {
-                        "gis_data_types": ["raster"],
-                        "title": "Portable Network Graphics (PNG)",
-                        "description": "PNG is a popular raster format used for graphics on the web. Compared to other EO raster formats, it is less flexible and standardized regarding number of bands, embedding geospatial metadata, etc.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": ["byte", "uint16"],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                    "GTiff": {
-                        "gis_data_types": ["raster"],
-                        "title": "GeoTIFF",
-                        "description": "GeoTIFF is a public domain metadata standard which allows georeferencing information to be embedded within a TIFF file. The potential additional information includes map projection, coordinate systems, ellipsoids, datums, and everything else necessary to establish the exact spatial reference for the file.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": [
-                                    "byte",
-                                    "uint16",
-                                    "int16",
-                                    "uint32",
-                                    "int32",
-                                    "float32",
-                                    "float64",
-                                ],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                },
-            }
+            return file_formats_document()
 
         if isinstance(self.auth, OIDCAuth):
 
