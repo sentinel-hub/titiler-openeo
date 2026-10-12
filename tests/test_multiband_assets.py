@@ -61,7 +61,7 @@ def eopf_item() -> pystac.Item:
 @pytest.fixture
 def eopf_collection(eopf_item: pystac.Item) -> pystac.Collection:
     """A minimal collection whose item_assets mirror the fixture item's own
-    assets -- the shape `getdimensions`/`_add_band_summaries` read."""
+    assets -- the shape `getdimensions`/`_sync_band_summaries` read."""
     collection = pystac.Collection(
         id=eopf_item.collection_id or "sentinel-2-l2a",
         description="EOPF Sentinel-2 L2A (test fixture)",
@@ -99,15 +99,22 @@ def test_getdimensions_expands_reflectance_into_its_bands(eopf_collection):
 
 
 # ---------------------------------------------------------------------------
-# Discovery: _add_band_summaries
+# Discovery: _sync_band_summaries
 # ---------------------------------------------------------------------------
 
 
-def test_add_band_summaries_expands_reflectance_with_spectral_metadata(
+def _summarised(collection: pystac.Collection) -> dict:
+    """The collection as `get_collection` returns it."""
+    backend = stacApiBackend(url="https://example.com")
+    col_dict = backend.add_data_cubes_if_missing(collection).to_dict()
+    backend._fix_collection(col_dict)
+    return col_dict
+
+
+def test_sync_band_summaries_expands_reflectance_with_spectral_metadata(
     eopf_collection,
 ):
-    collection = eopf_collection.to_dict()
-    stacApiBackend._add_band_summaries(collection)
+    collection = _summarised(eopf_collection)
 
     summaries = {b["name"]: b for b in collection["summaries"]["bands"]}
 
@@ -127,15 +134,21 @@ def test_add_band_summaries_expands_reflectance_with_spectral_metadata(
     assert summaries["b02"]["gsd"] == 10
 
 
-def test_add_band_summaries_leaves_bandless_assets_out(eopf_collection):
-    """Pre-existing behaviour, unaffected by multi-band expansion:
-    AOT_10m/SCL_20m/WVP_10m/thumbnail carry no `bands`/`eo:bands` at all, so
-    they were never eligible for a summaries.bands entry."""
-    collection = eopf_collection.to_dict()
-    stacApiBackend._add_band_summaries(collection)
+def test_sync_band_summaries_mirror_the_band_dimension(eopf_collection):
+    """Band-less data assets (AOT_10m/SCL_20m/WVP_10m) are bands of the cube,
+    so they get a summary entry too (issue #440). The multi-band asset key and
+    the thumbnail are not bands of the cube, so they get none."""
+    collection = _summarised(eopf_collection)
 
-    names = {b["name"] for b in collection["summaries"]["bands"]}
-    assert names.isdisjoint(UNCHANGED_ASSET_KEYS | {"reflectance", "thumbnail"})
+    values = collection["cube:dimensions"]["spectral"]["values"]
+    names = [b["name"] for b in collection["summaries"]["bands"]]
+    assert names == values
+    assert names == [b["name"] for b in collection["summaries"]["eo:bands"]]
+    assert UNCHANGED_ASSET_KEYS <= set(names)
+    assert set(names).isdisjoint({"reflectance", "thumbnail"})
+
+    blue = {b["name"]: b for b in collection["summaries"]["bands"]}["blue"]
+    assert "multi-band asset 'reflectance'" in blue["description"]
 
 
 # ---------------------------------------------------------------------------

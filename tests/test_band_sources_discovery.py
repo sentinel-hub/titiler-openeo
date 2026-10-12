@@ -12,7 +12,12 @@ from pathlib import Path
 import pystac
 import pytest
 
-from titiler.openeo.bandsources import BAND_SOURCES, BandSource, derive_bands
+from titiler.openeo.bandsources import (
+    BAND_SOURCES,
+    BandSource,
+    derive_bands,
+    describe_bands,
+)
 from titiler.openeo.stacapi import stacApiBackend
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sar" / "collections"
@@ -61,6 +66,53 @@ def test_derive_bands_formats_named_groups_into_band_names():
     assets = [("noise-vv", "application/xml", ["metadata"])]
 
     assert derive_bands("my-collection", assets, [source]) == ["vv_noise_lut"]
+
+
+def test_describe_bands_formats_description_template():
+    """Summaries describe a derived band with its source's template (#440)."""
+    assets = [("noise-vv", "application/xml", ["metadata"])]
+    source = BandSource(
+        collection=re.compile("my-collection"),
+        media_types=frozenset({"application/xml"}),
+        roles=frozenset({"metadata"}),
+        asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
+        bands=(("{pol}_noise_lut", "noise"),),
+        description="{quantity} of {pol} ({band})",
+    )
+
+    assert describe_bands("my-collection", assets, [source]) == {
+        "vv_noise_lut": "noise of vv (vv_noise_lut)"
+    }
+
+
+def test_describe_bands_has_a_default_description():
+    assets = [("noise-vv", "application/xml", ["metadata"])]
+    source = BandSource(
+        collection=re.compile("my-collection"),
+        media_types=frozenset({"application/xml"}),
+        roles=frozenset({"metadata"}),
+        asset=re.compile(r"noise-(?P<pol>[a-z]{2})"),
+        bands=(("{pol}_noise_lut", "noise"),),
+    )
+
+    descriptions = describe_bands("my-collection", assets, [source])
+
+    assert set(descriptions) == set(derive_bands("my-collection", assets, [source]))
+    assert "'noise-vv'" in descriptions["vv_noise_lut"]
+
+
+@pytest.mark.parametrize("fixture_name", [p.values[0] for p in CATALOGUES])
+def test_shipped_registry_describes_every_derived_band(fixture_name):
+    collection = _load_collection(fixture_name)
+    assets = [
+        (key, asset.get("type"), asset.get("roles") or [])
+        for key, asset in collection.to_dict()["item_assets"].items()
+    ]
+
+    descriptions = describe_bands(collection.id, assets, BAND_SOURCES)
+
+    assert set(descriptions) == set(derive_bands(collection.id, assets, BAND_SOURCES))
+    assert all(descriptions.values())
 
 
 def test_derive_bands_requires_matching_media_type():

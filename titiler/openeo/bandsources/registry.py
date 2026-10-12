@@ -32,6 +32,7 @@ import re
 from dataclasses import dataclass
 from typing import (
     Callable,
+    Dict,
     FrozenSet,
     Iterable,
     Iterator,
@@ -51,6 +52,7 @@ __all__ = [
     "ResolvedBand",
     "SiblingCandidateFacts",
     "derive_bands",
+    "describe_bands",
     "resolve_band",
     "pick_nominal_sibling_by_resolution",
 ]
@@ -121,6 +123,11 @@ class BandSource:
     before its reader exists (increment 1's shipped state for every band this
     registry currently described) -- ``resolve_band`` treats that the same as
     "no source matched".
+
+    ``description`` is a human-readable template for the bands' entries in a
+    collection's ``summaries`` (issue #440), formatted like the name templates
+    plus ``{band}`` and ``{quantity}``. ``None`` gives a generic description
+    naming the asset the band is derived from.
     """
 
     collection: "re.Pattern[str]"
@@ -132,6 +139,7 @@ class BandSource:
         Union[str, Callable[[Sequence[SiblingCandidateFacts]], Optional[str]]]
     ] = None
     reader: Optional[Type[BaseReader]] = None
+    description: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +215,34 @@ def derive_bands(
     ):
         names.update(band_names)
     return sorted(names)
+
+
+def describe_bands(
+    collection_id: str,
+    assets: Iterable[AssetFacts],
+    sources: Sequence[BandSource],
+) -> Dict[str, str]:
+    """Return a description for each band ``derive_bands`` returns.
+
+    Same arguments as ``derive_bands``. When two sources give the same name,
+    the first match wins, as in ``resolve_band``.
+    """
+    descriptions: Dict[str, str] = {}
+    for source, asset_key, groups, band_names in _iter_matches(
+        collection_id, assets, sources
+    ):
+        for band_name, (_template, quantity) in zip(band_names, source.bands):
+            if band_name in descriptions:
+                continue
+            if source.description:
+                descriptions[band_name] = source.description.format(
+                    **groups, band=band_name, quantity=quantity
+                )
+            else:
+                descriptions[band_name] = (
+                    f"{band_name}: derived from the '{asset_key}' asset ({quantity})"
+                )
+    return descriptions
 
 
 def resolve_band(

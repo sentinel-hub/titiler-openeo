@@ -7,6 +7,11 @@
 
 ---
 
+> **Update (2026-10-12):** `_add_band_summaries` is replaced by
+> `_sync_band_summaries`, which rebuilds `summaries.bands` and
+> `summaries.eo:bands` from `cube:dimensions`. See
+> [ADR 0010](0010-collection-band-summaries.md).
+
 ## 1. Context
 
 Every catalogue this backend read until now gave each band its own STAC

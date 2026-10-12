@@ -41,8 +41,16 @@ guess which one `load_collection` will honor:
 
 - `cube:dimensions.spectral.values`, the datacube extension's band
   dimension
-- `summaries.bands`, with per-band metadata (common name, wavelength,
-  ground sample distance) attached identically under either name
+- `summaries.bands` (STAC 1.1) and `summaries.eo:bands` (eo extension
+  v1.x), with the same metadata (common name, wavelength, ground sample
+  distance) under either name
+
+The two summaries always have one entry for each value of the band
+dimension, with the same names in the same order
+([ADR 0010](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0010-collection-band-summaries.md)).
+The description of a band in a multi-band asset names that asset, for
+example "Band 'red' (STAC name 'B04') of the multi-band asset 'visual'
+(True color image). It is not the 'B04' asset."
 
 `GET /collections/sentinel-2-l2a` lists `red` and `b04` side by side, each
 with the same `gsd`/`eo:center_wavelength` values, rather than only the

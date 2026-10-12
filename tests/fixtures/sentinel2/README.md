@@ -57,6 +57,16 @@ Sentinel-2, same as it does for Sentinel-1 (`tests/fixtures/sar/README.md`).
 All three currently use the collection id `sentinel-2-l2a` — verified live,
 not assumed.
 
+## `collections/planetary_computer_full.json`
+
+The real Planetary Computer `sentinel-2-l2a` collection, fetched live
+2026-10-12, used by `tests/test_band_summaries.py` (issue #440, ADR 0010).
+All `item_assets` are kept with their `eo:bands`, titles and `gsd`, and the
+`summaries` that relate to bands (`eo:bands`, `gsd`) plus platform fields.
+Dropped: `links`, `assets`, `keywords`, `providers` and the `msft:*` fields.
+It has the 13 upstream `eo:bands`, the 3-band `visual` asset, the band-less
+`AOT`/`SCL`/`WVP` assets and the `granule-metadata` asset of the angle bands.
+
 ## `items/{cdse,earth_search,planetary_computer}.json`
 
 Trimmed real STAC items — one per catalogue, fetched live 2026-08-07 — used

@@ -1,7 +1,7 @@
 """Stac API backend."""
 
 from threading import Lock
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import numpy
 import pyproj
@@ -30,8 +30,8 @@ from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
 from urllib3 import Retry
 
-from .assetbands import asset_band_facts, resolve_asset_bands
-from .bandsources import BAND_SOURCES, derive_bands
+from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
+from .bandsources import BAND_SOURCES, derive_bands, describe_bands
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -65,6 +65,124 @@ collection_cache: TTLCache = TTLCache(
 #: a spectral band even though it is not a raster (docs/adr/0002-band-sources.md
 #: S1.2, consequence 4).
 _ARCHIVE_MEDIA_TYPES = frozenset({"application/zip"})
+
+
+#: Spectral fields of a band, by their eo extension v1.x names.
+_SPECTRAL_FIELDS = ("common_name", "center_wavelength", "full_width_half_max")
+
+
+def _is_data_asset(media_type: Optional[str], roles: Optional[Sequence[str]]) -> bool:
+    """Whether an asset is read as raster data, i.e. can give cube bands."""
+    return "data" in (roles or ()) and media_type not in _ARCHIVE_MEDIA_TYPES
+
+
+def _band_dimension_values(collection: Dict) -> List[str]:
+    """The values of the first ``bands`` dimension of ``cube:dimensions``."""
+    dimensions = collection.get("cube:dimensions")
+    if not isinstance(dimensions, dict):
+        return []
+    for dimension in dimensions.values():
+        if isinstance(dimension, dict) and dimension.get("type") == "bands":
+            return list(dimension.get("values") or [])
+    return []
+
+
+def _band_fields(band: Mapping[str, Any]) -> Dict[str, Any]:
+    """The metadata of one STAC band object (STAC 1.1 ``bands`` or eo v1.x
+    ``eo:bands``), under the eo v1.x names plus ``description``/``gsd``."""
+    fields: Dict[str, Any] = {}
+    for k in _SPECTRAL_FIELDS:
+        value = band.get(f"eo:{k}")
+        if value is None:
+            value = band.get(k)
+        if value is not None:
+            fields[k] = value
+    for k in ("description", "gsd"):
+        if band.get(k) is not None:
+            fields[k] = band[k]
+    return fields
+
+
+def _upstream_band_fields(summaries: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Band metadata from the upstream ``summaries.bands``/``summaries.eo:bands``,
+    by band name."""
+    upstream: Dict[str, Dict[str, Any]] = {}
+    for key in ("bands", "eo:bands"):
+        for band in summaries.get(key) or []:
+            if isinstance(band, dict) and band.get("name"):
+                fields = upstream.setdefault(band["name"], {})
+                for k, v in _band_fields(band).items():
+                    fields.setdefault(k, v)
+    return upstream
+
+
+def _summary_entries(
+    name: str, fields: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """One band as a ``summaries.bands`` (STAC 1.1) entry and as a
+    ``summaries.eo:bands`` (eo extension v1.x) entry."""
+    entry: Dict[str, Any] = {"name": name}
+    eo_entry: Dict[str, Any] = {"name": name}
+    if "description" in fields:
+        entry["description"] = eo_entry["description"] = fields["description"]
+    for k in _SPECTRAL_FIELDS:
+        if k in fields:
+            entry[f"eo:{k}"] = eo_entry[k] = fields[k]
+    if "gsd" in fields:
+        entry["gsd"] = fields["gsd"]
+    return entry, eo_entry
+
+
+def _asset_band_fields(asset: Dict[str, Any]) -> Dict[str, Any]:
+    """Band metadata for a band that is an ``item_assets`` key."""
+    asset_bands = asset.get("bands") or asset.get("eo:bands") or []
+    # The spectral fields of a band apply to the asset only when it holds
+    # exactly one band; a composite (e.g. a true-colour TCI) gets none.
+    fields = _band_fields(asset_bands[0]) if len(asset_bands) == 1 else {}
+    description = asset.get("description") or asset.get("title")
+    if description:
+        fields["description"] = description
+    if "gsd" not in fields and asset.get("gsd") is not None:
+        fields["gsd"] = asset["gsd"]
+    return fields
+
+
+def _inner_band_fields(
+    resolved: ResolvedAssetBand,
+    asset: Dict[str, Any],
+    item_assets: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Band metadata for a band inside a multi-band asset.
+
+    The description always names the asset. Planetary Computer's ``visual``
+    asset, for example, declares its bands as ``B04``/``B03``/``B02`` with
+    the spectral metadata of those bands, but holds an 8-bit true-colour
+    rendering of them: ``red`` is not the ``B04`` asset.
+    """
+    fields = _band_fields(resolved.metadata)
+    if "gsd" not in fields and asset.get("gsd") is not None:
+        fields["gsd"] = asset["gsd"]
+
+    raw_name = resolved.metadata.get("name")
+    text = f"Band '{resolved.band_name}'"
+    if raw_name and raw_name != resolved.band_name:
+        text += f" (STAC name '{raw_name}')"
+    text += f" of the multi-band asset '{resolved.asset_key}'"
+    asset_label = asset.get("title") or asset.get("description")
+    if asset_label:
+        text += f" ({asset_label})"
+    data_type = resolved.metadata.get("data_type")
+    if data_type:
+        text += f", data type {data_type}"
+    text += "."
+    for other in (raw_name, resolved.band_name):
+        if other and other != resolved.asset_key and other in item_assets:
+            text += f" It is not the '{other}' asset."
+            break
+    if fields.get("description"):
+        text = f"{fields['description']}. {text}"
+    fields["description"] = text
+    return fields
 
 
 def _geojson_spatial_extent(
@@ -158,106 +276,92 @@ class stacApiBackend:
 
     def _fix_collection(self, collection: Dict) -> None:
         self._normalize_summaries(collection)
-        self._add_band_summaries(collection)
+        self._sync_band_summaries(collection)
         return
 
     @staticmethod
-    def _add_band_summaries(collection: Dict) -> None:
-        """Populate summaries.bands from item_assets band metadata.
+    def _sync_band_summaries(collection: Dict) -> None:
+        """Rebuild summaries.bands and summaries.eo:bands from cube:dimensions.
 
-        openEO Studio's band parser currently only reads summaries.bands
-        (rich per-band objects); it does not yet fall back to the datacube
-        extension's cube:dimensions bands dimension that ``getdimensions``
-        produces below. Until that parser fix lands
-        (https://github.com/developmentseed/openeo-studio/pull/103), derive
-        the same per-band objects here from item_assets band metadata, so
-        collections with no pre-existing summaries.bands still show their
-        bands in the UI.
+        openEO API 1.3.0 makes ``cube:dimensions`` required and its band
+        dimension the list of band names; the band fields in ``summaries``
+        must describe the same bands, in the same order. Clients rely on
+        this: openEO Studio and the openEO Web Editor take their band picker
+        from ``summaries.bands``, and the openEO Python client compares
+        ``summaries.eo:bands`` with ``cube:dimensions`` (issue #440).
 
-        Each item_asset becomes exactly one summaries.bands entry, named
-        after its item_assets key (e.g. "B02_10m", "B02_20m", "TCI_10m") --
-        the same identifier already used for the cube:dimensions "spectral"
-        values in ``getdimensions`` below. Asset keys are unique by
-        construction, so every asset shows up (including the same physical
-        band published at several resolutions) without name collisions.
+        The band dimension (built by ``getdimensions``, or published upstream)
+        is the single source of truth. Both summaries get exactly one entry
+        per band-dimension value, with the metadata that exists for it --
+        resolved with the same precedence as the read path
+        (``SimpleSTACReader._get_asset_info``):
 
-        The exception is an asset publishing several bands at once, which
-        becomes one entry *per band*, named as ``getdimensions`` names it
-        (titiler/openeo/assetbands.py). These must agree: a band advertised
-        here that ``load_collection`` cannot resolve is worse than one that is
-        never advertised.
+        1. an ``item_assets`` key: the asset's title/description and gsd,
+           plus the spectral fields of its band if it has exactly one;
+        2. a band inside a multi-band asset (titiler/openeo/assetbands.py):
+           that band's own metadata, and a description that names the asset;
+        3. a band derived by a band source (docs/adr/0002-band-sources.md):
+           the band source's description.
+
+        Upstream ``summaries.eo:bands``/``summaries.bands`` entries fill
+        missing fields, matched by name only: they never decide the list.
+        A collection without a band dimension is left unchanged.
+
+        ``summaries.bands`` uses the STAC 1.1 field names
+        (``eo:common_name``, ...); ``summaries.eo:bands`` uses the eo
+        extension v1.x shape (``common_name``, ...).
         """
+        band_names = _band_dimension_values(collection)
+        if not band_names:
+            return
+
         summaries = collection.get("summaries")
         if not isinstance(summaries, dict):
             summaries = {}
             collection["summaries"] = summaries
-        if summaries.get("bands"):
-            return
 
-        item_assets = collection.get("item_assets") or {}
-        inner_bands = resolve_asset_bands(asset_band_facts(item_assets))
-        multi_band_assets = {r.asset_key for r in inner_bands.values()}
+        item_assets = {
+            key: asset
+            for key, asset in (collection.get("item_assets") or {}).items()
+            if isinstance(asset, dict)
+        }
+        data_assets = {
+            key: asset
+            for key, asset in item_assets.items()
+            if _is_data_asset(asset.get("type"), asset.get("roles"))
+        }
+        inner_bands = resolve_asset_bands(asset_band_facts(data_assets))
+        derived = describe_bands(
+            collection.get("id") or "",
+            [(k, a.get("type"), a.get("roles") or []) for k, a in item_assets.items()],
+            BAND_SOURCES,
+        )
 
-        def _spectral(band: Dict[str, Any]) -> Dict[str, Any]:
-            """The eo:* fields a band entry carries, under their prefixed names."""
-            fields: Dict[str, Any] = {}
+        upstream = _upstream_band_fields(summaries)
 
-            common_name = band.get("eo:common_name") or band.get("common_name")
-            if common_name:
-                fields["eo:common_name"] = common_name
+        bands: List[Dict[str, Any]] = []
+        eo_bands: List[Dict[str, Any]] = []
+        for name in band_names:
+            if name in item_assets:
+                fields = _asset_band_fields(item_assets[name])
+            elif name in inner_bands:
+                resolved = inner_bands[name]
+                fields = _inner_band_fields(
+                    resolved, data_assets[resolved.asset_key], item_assets
+                )
+            elif name in derived:
+                fields = {"description": derived[name]}
+            else:
+                fields = {}
+            for k, v in upstream.get(name, {}).items():
+                fields.setdefault(k, v)
 
-            center_wavelength = band.get("eo:center_wavelength") or band.get(
-                "center_wavelength"
-            )
-            if center_wavelength is not None:
-                fields["eo:center_wavelength"] = center_wavelength
+            entry, eo_entry = _summary_entries(name, fields)
+            bands.append(entry)
+            eo_bands.append(eo_entry)
 
-            fwhm = band.get("eo:full_width_half_max") or band.get("full_width_half_max")
-            if fwhm is not None:
-                fields["eo:full_width_half_max"] = fwhm
-
-            return fields
-
-        band_summaries: List[Dict] = []
-
-        # One entry per band for assets holding several, named exactly as
-        # `getdimensions` names them. Each band carries its own spectral
-        # metadata and gsd, so unlike the composite case below there is no
-        # ambiguity about which band the fields describe.
-        for name, resolved in inner_bands.items():
-            band = dict(resolved.metadata)
-            entry: Dict[str, Any] = {
-                "name": name,
-                "description": band.get("description")
-                or band.get("title")
-                or f"{resolved.asset_key} band {resolved.band_name}",
-                **_spectral(band),
-            }
-            if band.get("gsd") is not None:
-                entry["gsd"] = band["gsd"]
-            band_summaries.append(entry)
-
-        for key, asset in item_assets.items():
-            if key in multi_band_assets:
-                continue  # already expanded, band by band, above
-
-            asset_bands = asset.get("eo:bands") or asset.get("bands")
-            if not asset_bands:
-                continue
-
-            description = asset.get("description") or asset.get("title") or key
-            entry = {"name": key, "description": description}
-
-            # Per-band spectral metadata (common name, wavelength, ...) only
-            # unambiguously applies to single-band assets; composite assets
-            # (e.g. a true-colour image with 3 component bands) skip it.
-            if len(asset_bands) == 1:
-                entry.update(_spectral(asset_bands[0]))
-
-            band_summaries.append(entry)
-
-        if band_summaries:
-            summaries["bands"] = band_summaries
+        summaries["bands"] = bands
+        summaries["eo:bands"] = eo_bands
 
     @staticmethod
     def _normalize_summaries(collection: Dict):
@@ -344,7 +448,7 @@ class stacApiBackend:
             for key, asset in collection.ext.item_assets.items():
                 roles = asset.roles or []
                 asset_facts.append((key, asset.media_type, roles))
-                if "data" in roles and asset.media_type not in _ARCHIVE_MEDIA_TYPES:
+                if _is_data_asset(asset.media_type, roles):
                     # `.to_dict()`, not the `AssetDefinition` itself: it has no
                     # `.extra_fields` (unlike `pystac.Asset`), so `bands` is
                     # otherwise invisible to `assetbands.asset_band_facts`.
