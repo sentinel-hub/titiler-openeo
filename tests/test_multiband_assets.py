@@ -6,6 +6,7 @@ the four call sites it feeds, and -- the property that matters most -- that
 discovery and the read path agree on every name.
 """
 
+import datetime
 import json
 from pathlib import Path
 
@@ -61,7 +62,7 @@ def eopf_item() -> pystac.Item:
 @pytest.fixture
 def eopf_collection(eopf_item: pystac.Item) -> pystac.Collection:
     """A minimal collection whose item_assets mirror the fixture item's own
-    assets -- the shape `getdimensions`/`_add_band_summaries` read."""
+    assets -- the shape `getdimensions`/`_sync_band_summaries` read."""
     collection = pystac.Collection(
         id=eopf_item.collection_id or "sentinel-2-l2a",
         description="EOPF Sentinel-2 L2A (test fixture)",
@@ -99,15 +100,22 @@ def test_getdimensions_expands_reflectance_into_its_bands(eopf_collection):
 
 
 # ---------------------------------------------------------------------------
-# Discovery: _add_band_summaries
+# Discovery: _sync_band_summaries
 # ---------------------------------------------------------------------------
 
 
-def test_add_band_summaries_expands_reflectance_with_spectral_metadata(
+def _summarised(collection: pystac.Collection) -> dict:
+    """The collection as `get_collection` returns it."""
+    backend = stacApiBackend(url="https://example.com")
+    col_dict = backend.add_data_cubes_if_missing(collection).to_dict()
+    backend._fix_collection(col_dict)
+    return col_dict
+
+
+def test_sync_band_summaries_expands_reflectance_with_spectral_metadata(
     eopf_collection,
 ):
-    collection = eopf_collection.to_dict()
-    stacApiBackend._add_band_summaries(collection)
+    collection = _summarised(eopf_collection)
 
     summaries = {b["name"]: b for b in collection["summaries"]["bands"]}
 
@@ -127,15 +135,21 @@ def test_add_band_summaries_expands_reflectance_with_spectral_metadata(
     assert summaries["b02"]["gsd"] == 10
 
 
-def test_add_band_summaries_leaves_bandless_assets_out(eopf_collection):
-    """Pre-existing behaviour, unaffected by multi-band expansion:
-    AOT_10m/SCL_20m/WVP_10m/thumbnail carry no `bands`/`eo:bands` at all, so
-    they were never eligible for a summaries.bands entry."""
-    collection = eopf_collection.to_dict()
-    stacApiBackend._add_band_summaries(collection)
+def test_sync_band_summaries_mirror_the_band_dimension(eopf_collection):
+    """Band-less data assets (AOT_10m/SCL_20m/WVP_10m) are bands of the cube,
+    so they get a summary entry too (issue #440). The multi-band asset key and
+    the thumbnail are not bands of the cube, so they get none."""
+    collection = _summarised(eopf_collection)
 
-    names = {b["name"] for b in collection["summaries"]["bands"]}
-    assert names.isdisjoint(UNCHANGED_ASSET_KEYS | {"reflectance", "thumbnail"})
+    values = collection["cube:dimensions"]["spectral"]["values"]
+    names = [b["name"] for b in collection["summaries"]["bands"]]
+    assert names == values
+    assert names == [b["name"] for b in collection["summaries"]["eo:bands"]]
+    assert UNCHANGED_ASSET_KEYS <= set(names)
+    assert set(names).isdisjoint({"reflectance", "thumbnail"})
+
+    blue = {b["name"]: b for b in collection["summaries"]["bands"]}["blue"]
+    assert "multi-band asset 'reflectance'" in blue["description"]
 
 
 # ---------------------------------------------------------------------------
@@ -315,5 +329,104 @@ def test_every_advertised_band_is_actually_readable(eopf_collection, eopf_item):
     advertised = set(dims["spectral"].to_dict()["values"])
 
     with SimpleSTACReader(eopf_item) as src:
+        for name in advertised:
+            src._get_asset_info(name)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Planetary Computer `visual`: a copy of other assets, qualified (issue #440)
+# ---------------------------------------------------------------------------
+
+
+def _pc_like_item() -> pystac.Item:
+    item = pystac.Item(
+        id="pc-like",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        bbox=[0, 0, 1, 1],
+        datetime=datetime.datetime(2026, 8, 7, tzinfo=datetime.timezone.utc),
+        properties={},
+    )
+    visual_bands = [
+        {"name": "B04", "common_name": "red"},
+        {"name": "B03", "common_name": "green"},
+        {"name": "B02", "common_name": "blue"},
+    ]
+    for key, bands in (
+        ("B04", [{"name": "B04", "common_name": "red"}]),
+        ("B03", [{"name": "B03", "common_name": "green"}]),
+        ("B02", [{"name": "B02", "common_name": "blue"}]),
+        ("visual", visual_bands),
+    ):
+        item.add_asset(
+            key,
+            pystac.Asset(
+                href=f"https://example.com/{key}.tif",
+                media_type=pystac.MediaType.COG,
+                roles=["data"],
+                extra_fields={"eo:bands": bands},
+            ),
+        )
+    return item
+
+
+def test_pc_red_reads_b04_and_visual_red_reads_visual():
+    with SimpleSTACReader(_pc_like_item()) as src:
+        visual_red = src._get_asset_info("visual_red")
+        assert visual_red["name"] == "visual"
+        assert visual_red["method_options"]["indexes"] == [1]
+        assert src._get_asset_info("visual_green")["method_options"]["indexes"] == [2]
+
+        # Data before visuals: `red` is the whole B04 asset, same as `B04`.
+        for name in ("B04", "red"):
+            info = src._get_asset_info(name)
+            assert info["name"] == "B04"
+            assert "indexes" not in info["method_options"]
+
+        # No second name for the same 8-bit band.
+        with pytest.raises(Exception, match="visual_B04"):
+            src._get_asset_info("visual_B04")
+
+
+def test_every_advertised_pc_band_is_readable():
+    """Same property as above, for Planetary Computer: common names, the
+    qualified `visual` bands and the derived angle bands."""
+    data = json.loads(
+        Path(
+            "tests/fixtures/sentinel2/collections/planetary_computer_full.json"
+        ).read_text()
+    )
+    collection = pystac.Collection.from_dict(data)
+    backend = stacApiBackend.__new__(stacApiBackend)
+    advertised = set(backend.getdimensions(collection)["spectral"].to_dict()["values"])
+
+    item = pystac.Item(
+        id="pc-like",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        bbox=[0, 0, 1, 1],
+        datetime=datetime.datetime(2026, 8, 7, tzinfo=datetime.timezone.utc),
+        properties={},
+        collection="sentinel-2-l2a",
+    )
+    for key, asset in data["item_assets"].items():
+        item.add_asset(
+            key,
+            pystac.Asset(
+                href=f"https://example.com/{key}",
+                media_type=asset.get("type"),
+                roles=asset.get("roles"),
+                extra_fields={
+                    k: v for k, v in asset.items() if k not in ("type", "roles")
+                },
+            ),
+        )
+
+    assert {"red", "visual_red", "sunZenithAngles"} <= advertised
+    with SimpleSTACReader(item) as src:
         for name in advertised:
             src._get_asset_info(name)  # must not raise

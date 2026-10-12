@@ -25,7 +25,9 @@ are load-bearing rather than cautious:
 
 * An asset with **no** ``bands`` array keeps its asset key (EOPF's own
   ``AOT_10m``/``SCL_20m``/``WVP_10m`` are this shape).
-* An asset with **exactly one** band keeps its asset key too. Single-band assets
+* An asset with **exactly one** band keeps its asset key too, and gets its
+  common name as a second name when no other asset has it (issue #440).
+  Single-band assets
   routinely name the band differently from the key -- CDSE publishes
   ``B02_10m`` holding a band named ``B02``, earth-search publishes ``blue``
   holding ``B02`` -- so expanding them would silently rename bands that saved
@@ -40,6 +42,12 @@ are load-bearing rather than cautious:
   otherwise perfectly ordinary multi-band data asset is not obliged to carry)
   and the one already used elsewhere in this codebase to draw the same
   distinction (``stacapi.py``'s own ``"data" in roles`` check).
+
+An expanded band that declares the key of a *different* asset as its name
+(Planetary Computer's ``visual`` declares ``B04``, also an asset) is a copy
+of that asset. It gets only one name, with the asset key as a prefix:
+``visual_red``. The bare ``red`` is for the data band ``B04`` -- see
+`resolve_asset_bands`.
 
 Any other asset with two or more declared bands expands -- publishing a
 ``bands`` array at all is itself the catalogue's declaration that these are
@@ -85,6 +93,10 @@ class ResolvedAssetBand:
     #: resolution estimation needs -- a multi-band asset's own ``gsd`` describes
     #: only its finest band, so it is the wrong number for the others.
     metadata: Mapping[str, Any]
+    #: ``True`` when the name is the common name of a single-band asset (e.g.
+    #: ``red`` for Planetary Computer's ``B04``): the name gives the whole
+    #: asset, so a reader opens it without a ``bands`` option.
+    whole_asset: bool = False
 
 
 #: Asset roles that mark a rendering/preview product rather than independently
@@ -133,8 +145,10 @@ def asset_band_facts(assets: Mapping[str, Any]) -> List[AssetBandFacts]:
 
 def resolve_asset_bands(
     assets: Iterable[AssetBandFacts],
+    asset_keys: Iterable[str] = (),
 ) -> Dict[str, ResolvedAssetBand]:
-    """Map each band published inside a multi-band asset to where it lives.
+    """Map each band published inside a multi-band asset, and each common
+    name of a single-band asset, to where it lives.
 
     Assets keeping their key (see the module docstring) are absent from the
     result, so a caller's ``band_name in resolved`` is exactly the question "is
@@ -156,8 +170,27 @@ def resolve_asset_bands(
     colliding elsewhere does not force its display name to qualify too, and
     vice versa. Aliases unique across the item are left bare, so the common
     case reads as the catalogue wrote it.
+
+    A band with an alias that is the key of a *different* asset is a copy of
+    that asset, not that asset: Planetary Computer's ``visual`` asset holds
+    an 8-bit true-colour rendering of ``B04``/``B03``/``B02`` and declares
+    them with these names, and ``B04`` is also an asset (issue #440). Such a
+    band gets only its display name, qualified: ``visual_red``. Data comes
+    before visuals: the bare ``red`` is for the reflectance band.
+
+    A single-band asset also gets its common name as a second name, if
+    exactly one single-band asset has it (``red`` for Planetary Computer's
+    ``B04``) -- see `_common_name_aliases`. The asset key stays its main
+    name. The result marks these with ``whole_asset``.
+
+    ``asset_keys`` gives more asset keys to check for this rule, in addition
+    to the keys in ``assets``. Discovery uses it: it gives only the data
+    assets in ``assets``, but must qualify the same names as the read path,
+    which gives all the assets of the item.
     """
-    candidates: List[Tuple[str, ResolvedAssetBand]] = []
+    assets = list(assets)
+    all_keys = {key for key, _ in assets} | set(asset_keys)
+    candidates: List[Tuple[str, ResolvedAssetBand, bool]] = []
     seen: Dict[str, int] = {}
 
     for asset_key, bands in assets:
@@ -172,19 +205,61 @@ def resolve_asset_bands(
             aliases = {name}
             if raw_name := band.get("name"):
                 aliases.add(raw_name)
+            copy_of_asset = any(a in all_keys and a != asset_key for a in aliases)
+            if copy_of_asset:
+                # Only the display name: `visual_B04` next to `B04` would
+                # add a second confusing name for the same 8-bit band.
+                aliases = {name}
             for alias in aliases:
-                candidates.append((alias, resolved))
+                candidates.append((alias, resolved, copy_of_asset))
                 seen[alias] = seen.get(alias, 0) + 1
 
+    resolved_bands = {
+        (
+            alias
+            if seen[alias] == 1 and not copy_of_asset
+            else f"{resolved.asset_key}_{alias}"
+        ): resolved
+        for alias, resolved, copy_of_asset in candidates
+    }
+    resolved_bands.update(_common_name_aliases(assets, all_keys, resolved_bands))
+    return resolved_bands
+
+
+def _common_name_aliases(
+    assets: Sequence[AssetBandFacts],
+    taken: Iterable[str],
+    resolved_bands: Mapping[str, ResolvedAssetBand],
+) -> Dict[str, ResolvedAssetBand]:
+    """The common name of each single-band asset, as a second name for it.
+
+    Only a common name that exactly one single-band asset has: Planetary
+    Computer's ``rededge`` (B05, B06, B07, B8A) and CDSE's ``blue`` (B02_10m,
+    B02_20m, B02_60m) get no alias. A common name that is already an asset key
+    (Earth Search's ``red``) or a name above is not changed.
+    """
+    owners: Dict[str, List[Tuple[str, Mapping[str, Any]]]] = {}
+    for asset_key, bands in assets:
+        if len(bands) != 1:
+            continue
+        common_name = bands[0].get("eo:common_name") or bands[0].get("common_name")
+        if common_name:
+            owners.setdefault(common_name, []).append((asset_key, bands[0]))
+
+    taken = set(taken) | set(resolved_bands)
     return {
-        (alias if seen[alias] == 1 else f"{resolved.asset_key}_{alias}"): resolved
-        for alias, resolved in candidates
+        common_name: ResolvedAssetBand(
+            found[0][0], common_name, found[0][1], whole_asset=True
+        )
+        for common_name, found in owners.items()
+        if len(found) == 1 and common_name not in taken
     }
 
 
 def resolve_asset_band(
     band_name: str,
     assets: Iterable[AssetBandFacts],
+    asset_keys: Iterable[str] = (),
 ) -> Optional[ResolvedAssetBand]:
     """``resolve_asset_bands`` for a single name, or ``None`` if it is not one."""
-    return resolve_asset_bands(assets).get(band_name)
+    return resolve_asset_bands(assets, asset_keys).get(band_name)

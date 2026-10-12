@@ -47,6 +47,10 @@ BAND_SOURCES_S2 = [
         ),
         sibling=pick_nominal_sibling_by_resolution,
         reader=ViewAngleMeanReader,
+        description=(
+            "Mean viewing {quantity} angle (degrees) of all the bands, from the "
+            "granule metadata (MTD_TL.xml). One value for each item."
+        ),
     ),
     # Sun_Angles_Grid is a real 23x23, 5000m-step spatial grid --
     # SunAngleGridReader bilinearly interpolates it at the destination grid.
@@ -61,5 +65,9 @@ BAND_SOURCES_S2 = [
         ),
         sibling=pick_nominal_sibling_by_resolution,
         reader=SunAngleGridReader,
+        description=(
+            "Sun {quantity} angle (degrees), interpolated from the 5 km grid in "
+            "the granule metadata (MTD_TL.xml)."
+        ),
     ),
 ]

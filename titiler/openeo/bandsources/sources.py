@@ -52,6 +52,10 @@ BAND_SOURCES = [
         ),
         sibling="{pol}",
         reader=CalibrationBandReader,
+        description=(
+            "'{quantity}' of the {pol} polarisation, "
+            "from the calibration annotation."
+        ),
     ),
     # One noise annotation yields the thermal-noise LUT (annotation.NoiseLUT).
     # NoiseBandReader has exactly one quantity, so it ignores `quantity`.
@@ -63,5 +67,9 @@ BAND_SOURCES = [
         bands=(("{pol}_noise_lut", "noise"),),
         sibling="{pol}",
         reader=NoiseBandReader,
+        description=(
+            "Thermal noise lookup table of the {pol} polarisation, from the "
+            "noise annotation."
+        ),
     ),
 ]
