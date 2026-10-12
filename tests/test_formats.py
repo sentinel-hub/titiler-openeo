@@ -285,3 +285,36 @@ def test_xyz_tile_media_type(app_with_auth, save_format, media_type):
     assert tile.status_code == 200, tile.text
     assert tile.headers["content-type"] == media_type
     assert len(tile.content) > 0
+
+
+def test_encode_multiband_vector_cube_csv():
+    """A multi-band vector cube gives one CSV column per band."""
+    cube = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [0.14, 42.83]},
+                "properties": {
+                    "values": {
+                        T1: {"B03": numpy.float32(0.25), "B04": numpy.ma.masked},
+                        T2: {"B03": 1, "B04": 2},
+                    }
+                },
+            }
+        ],
+    }
+    lines = encode(cube, "CSV").data.decode().splitlines()
+    assert lines == [
+        "date,feature_index,B03,B04",
+        "2023-01-05T10:56:21+00:00,0,0.25,",
+        "2023-01-10T10:56:21+00:00,0,1,2",
+    ]
+
+
+def test_encode_empty_vector_cube_csv():
+    """A vector cube without values gives only the header."""
+    cube = {"type": "FeatureCollection", "features": []}
+    assert encode(cube, "CSV").data.decode().splitlines() == [
+        "date,feature_index,value"
+    ]
