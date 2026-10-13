@@ -242,3 +242,39 @@ def test_slope_web_mercator_uses_ground_metres(lat):
     )
     result = _first(slope(RasterStack.from_images({datetime(2024, 1, 1): img})))
     np.testing.assert_allclose(result.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-3)
+
+
+def test_slope_without_crs_uses_pixel_size_in_crs_units():
+    """Without a CRS the pixel size is taken as metres, with no scale factor."""
+    img = _first(_plane_stack(0.1, 0.0))
+    nocrs = ImageData(img.array, bounds=img.bounds)
+    stack = RasterStack.from_images({datetime(2024, 1, 1): nocrs})
+    result = _first(slope(stack))
+    np.testing.assert_allclose(result.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-5)
+    assert result.band_descriptions == ["b1_slope"]
+
+
+def test_slope_falls_back_to_crs_units_when_scale_factors_fail(monkeypatch, caplog):
+    """If pyproj cannot compute the scale factors, the CRS units are used."""
+    import pyproj
+
+    def fail(*args, **kwargs):
+        raise pyproj.exceptions.ProjError("no factors")
+
+    monkeypatch.setattr(pyproj.Proj, "get_factors", fail)
+    with caplog.at_level("WARNING"):
+        result = _first(slope(_plane_stack(0.1, 0.0)))
+    np.testing.assert_allclose(result.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-5)
+    assert "scale factors" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "kernel,border,match",
+    [
+        ([1, 1, 1], 0, "two-dimensional"),
+        ([[1, 1, 1]], "mirror", "Unsupported border"),
+    ],
+)
+def test_apply_kernel_invalid_arguments(kernel, border, match):
+    with pytest.raises(ValueError, match=match):
+        apply_kernel(_kernel_stack(np.zeros((3, 3))), kernel, border=border)

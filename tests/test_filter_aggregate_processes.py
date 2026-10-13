@@ -440,3 +440,98 @@ def test_new_processes_registered():
         "apply_kernel",
     ):
         assert process_registry[name].spec["id"] == name
+
+
+# --- edge cases --------------------------------------------------------------
+
+
+def test_array_interpolate_linear_small_and_integer_inputs():
+    assert array_interpolate_linear([]) == []
+    single = np.array([1.0])
+    assert array_interpolate_linear(single) is single
+    data = np.ma.MaskedArray([1, 0, 3], mask=[False, True, False])
+    result = array_interpolate_linear(data)
+    assert result.dtype == np.float32
+    assert result.tolist() == [1.0, 2.0, 3.0]
+
+
+def test_comparisons_unwrap_parsed_dates():
+    """lt/lte/gt/gte compare a datetime with a date parsed from the graph."""
+    from openeo_pg_parser_networkx.pg_schema import DateTime
+
+    from titiler.openeo.processes.implementations.logic import gt, gte, lt, lte
+
+    parsed = DateTime.model_validate("2024-06-03T00:00:00Z")
+    early = datetime(2024, 6, 1, tzinfo=parsed.root.tzinfo)
+    assert lt(early, parsed) and lte(early, parsed)
+    assert not gt(early, parsed) and not gte(early, parsed)
+
+
+def test_sum_plain_ndarray_and_bad_type():
+    np.testing.assert_array_equal(sum_(np.array([[1, 2], [3, 4]])), [4, 6])
+    with pytest.raises(TypeError):
+        sum_("abc")
+
+
+@pytest.mark.parametrize(
+    "period,ts,start",
+    [
+        ("hour", datetime(2024, 6, 1, 13, 45), datetime(2024, 6, 1, 13)),
+        ("day", datetime(2024, 6, 1, 13, 45), datetime(2024, 6, 1)),
+        ("year", datetime(2024, 6, 1), datetime(2024, 1, 1)),
+    ],
+)
+def test_period_intervals_hour_day_year(period, ts, start):
+    intervals = _period_intervals([ts], period)
+    assert intervals[0][0] == start.isoformat()
+
+
+def test_period_intervals_unsupported_period():
+    with pytest.raises(ValueError, match="Unsupported period"):
+        _period_intervals([datetime(2024, 6, 1)], "fortnight")
+
+
+def test_aggregate_temporal_period_empty_cube():
+    with pytest.raises(ValueError, match="non-empty"):
+        empty = RasterStack(tasks=[], timestamp_fn=lambda asset: asset["datetime"])
+        aggregate_temporal_period(empty, "month", sum_)
+
+
+def _without_stack_metadata(stack: RasterStack) -> RasterStack:
+    """Drop the stack-level metadata, so processes read it from a slice."""
+    stack._band_names = []
+    stack._width = stack._height = None
+    return stack
+
+
+def test_filter_bands_reads_band_names_from_slice():
+    stack = _without_stack_metadata(_daily_stack([1], bands=("B02", "B03")))
+    img = next(iter(filter_bands(stack, bands=["B03"]).values()))
+    assert img.band_descriptions == ["B03"]
+
+
+def test_filter_bbox_reads_grid_from_slice():
+    stack = _without_stack_metadata(
+        RasterStack.from_images(
+            {
+                datetime(2024, 6, 1): ImageData(
+                    np.ma.MaskedArray(np.ones((1, 10, 10), np.float32)),
+                    crs=CRS.from_epsg(4326),
+                    bounds=(0, 0, 10, 10),
+                )
+            }
+        )
+    )
+    img = next(
+        iter(filter_bbox(stack, BoundingBox(west=2, south=2, east=5, north=5)).values())
+    )
+    assert img.bounds == (2.0, 2.0, 5.0, 5.0)
+
+
+@pytest.mark.parametrize("dimension", ["t", "bands"])
+def test_filter_labels_no_match_raises(dimension):
+    def never(*args, **kwargs):
+        return False
+
+    with pytest.raises(OpenEOException, match="matches the condition"):
+        filter_labels(_daily_stack([1, 2]), never, dimension)
