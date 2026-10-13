@@ -17,6 +17,10 @@ from titiler.openeo.processes.implementations.focal import (
 )
 
 UTM = CRS.from_epsg(32631)
+# The grid is on the UTM central meridian, where the scale factor is 0.9996:
+# the ground pixel is 0.04 % larger than in CRS units.
+UTM_X0, UTM_Y0 = 500000.0, 4700000.0
+UTM_RTOL = 1e-3
 
 
 def _plane_stack(dz_dx: float, dz_dy: float, res: float = 20.0) -> RasterStack:
@@ -28,7 +32,7 @@ def _plane_stack(dz_dx: float, dz_dy: float, res: float = 20.0) -> RasterStack:
     img = ImageData(
         np.ma.MaskedArray(z[np.newaxis].astype("float32")),
         crs=UTM,
-        bounds=(0, 0, size * res, size * res),
+        bounds=(UTM_X0, UTM_Y0, UTM_X0 + size * res, UTM_Y0 + size * res),
         band_descriptions=["dem"],
     )
     return RasterStack.from_images({datetime(2024, 1, 1): img})
@@ -42,7 +46,7 @@ def test_slope_uses_pixel_size_in_metres():
     """A 10% grade gives atan(0.1) on a 20 m grid, not 20 times steeper."""
     result = _first(slope(_plane_stack(0.1, 0.0)))
     inner = result.array[0, 1:-1, 1:-1]
-    np.testing.assert_allclose(inner, np.arctan(0.1), rtol=1e-5)
+    np.testing.assert_allclose(inner, np.arctan(0.1), rtol=UTM_RTOL)
     assert result.band_descriptions == ["dem_slope"]
     assert result.array.dtype == np.float32
 
@@ -148,15 +152,15 @@ def test_apply_kernel_border_modes(border, expected):
     assert result.array[0, 0, 0] == pytest.approx(expected)
 
 
-def test_apply_kernel_replaces_invalid_and_keeps_nodata():
-    """NaN and no-data are replaced for the sum; no-data stays no-data."""
+def test_apply_kernel_replaces_invalid_before_convolution():
+    """NaN and no-data are replaced before the sum; every pixel gets a value."""
     data = np.ma.MaskedArray(
         [[[1.0, np.nan, 1.0]]], mask=[[[False, False, True]]], dtype="float32"
     )
     stack = RasterStack.from_images({datetime(2024, 1, 1): ImageData(data)})
     result = _first(apply_kernel(stack, [[1, 1, 1]], replace_invalid=5))
-    assert result.array.data[0, 0, 0] == pytest.approx(0 + 1 + 5)
-    assert np.ma.getmaskarray(result.array)[0, 0].tolist() == [False, False, True]
+    assert result.array.data[0, 0].tolist() == pytest.approx([6, 11, 10])
+    assert not np.ma.getmaskarray(result.array).any()
 
 
 def test_apply_kernel_even_kernel_raises():
@@ -185,7 +189,7 @@ def test_terrain_processes_via_graph():
     )
     result = callable_(named_parameters={"data": _plane_stack(0.1, 0.0)})
     img = _first(result)
-    np.testing.assert_allclose(img.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-5)
+    np.testing.assert_allclose(img.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=UTM_RTOL)
     assert img.band_descriptions == ["dem_slope"]
 
 
@@ -211,6 +215,30 @@ def test_slope_is_lazy_on_a_task_stack():
     assert calls == []
     assert result.band_names == ["dem_slope"]
     np.testing.assert_allclose(
-        _first(result).array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-5
+        _first(result).array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=UTM_RTOL
     )
     assert calls == [1]
+
+
+@pytest.mark.parametrize("lat", [42.8, 60.0])
+def test_slope_web_mercator_uses_ground_metres(lat):
+    """On EPSG:3857 (XYZ tiles) one unit is cos(lat) ground metres.
+
+    Without the scale factor, a 10% grade at 42.8° N gives 4.20° instead of
+    5.71°, and at 60° N half the true tan(slope).
+    """
+    import pyproj
+
+    res, size = 20.0, 7
+    x0, y0 = pyproj.Transformer.from_crs(4326, 3857, always_xy=True).transform(2.0, lat)
+    north = y0 + size * res / 2
+    rows = north - (np.arange(size) + 0.5) * res
+    ground_north = (rows - rows[-1]) * np.cos(np.deg2rad(lat))
+    z = np.broadcast_to((0.1 * ground_north)[:, np.newaxis], (size, size))
+    img = ImageData(
+        np.ma.MaskedArray(z[np.newaxis].astype("float64")),
+        crs=CRS.from_epsg(3857),
+        bounds=(x0 - size * res / 2, north - size * res, x0 + size * res / 2, north),
+    )
+    result = _first(slope(RasterStack.from_images({datetime(2024, 1, 1): img})))
+    np.testing.assert_allclose(result.array[0, 1:-1, 1:-1], np.arctan(0.1), rtol=1e-3)

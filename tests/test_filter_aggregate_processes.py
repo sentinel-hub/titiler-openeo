@@ -104,16 +104,35 @@ def test_sum_rasterstack_counts_snow_days():
 # --- array_interpolate_linear ------------------------------------------------
 
 
-def test_array_interpolate_linear_spec_examples():
-    assert array_interpolate_linear([None, 1, None, 6, None, -8]) == [
-        None,
-        1.0,
-        3.5,
-        6.0,
-        -1.0,
-        -8.0,
-    ]
-    assert array_interpolate_linear([None, 1, None, None]) == [None, 1.0, None, None]
+# Official openEO test cases (openeo-processes tests/array_interpolate_linear.json5).
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        ([None, 1, None, 6, None, -8], [None, 1, 3.5, 6, -1, -8]),
+        ([1, np.nan, 6, np.nan, -8, np.nan], [1, 3.5, 6, -1, -8, np.nan]),
+        (
+            [-np.inf, np.nan, 0.1, np.nan, 0.2, np.nan, np.inf],
+            [-np.inf, -np.inf, 0.1, 0.15, 0.2, np.inf, np.inf],
+        ),
+        ([None, 1, None, None], [None, 1, None, None]),
+        ([None, None, None], [None, None, None]),
+        ({"a": 1.0, "b": np.nan, "c": 2.0}, {"a": 1.0, "b": 1.5, "c": 2.0}),
+        ({1: 1.0, 3: None, 4: 4.0}, {1: 1.0, 3: 3.0, 4: 4.0}),
+    ],
+)
+def test_array_interpolate_linear_official_cases(data, expected):
+    result = array_interpolate_linear(data)
+    if isinstance(expected, dict):
+        assert list(result) == list(expected)
+        result, expected = list(result.values()), list(expected.values())
+    assert len(result) == len(expected)
+    for got, want in zip(result, expected):
+        if want is None:
+            assert got is None
+        elif np.isnan(want):
+            assert np.isnan(got)
+        else:
+            assert got == pytest.approx(want)
 
 
 def test_array_interpolate_linear_per_pixel_along_time():
@@ -138,8 +157,20 @@ def test_array_interpolate_linear_per_pixel_along_time():
 
 
 def test_apply_dimension_array_interpolate_linear_via_graph():
-    """Gap filling of a daily time series with apply_dimension(t)."""
-    stack = _daily_stack([1, 0, 0, 4])
+    """Gap filling along t uses the dates as weights, not the indices.
+
+    Dates on June 1, 2, 4 and 8: the gaps on June 2 and 4 are 1/7 and 3/7 of
+    the way from 1 to 8 (index weights would give 1/3 and 2/3).
+    """
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, day): ImageData(
+                np.ma.MaskedArray(np.full((1, 2, 2), v, np.float32)),
+                band_descriptions=["B1"],
+            )
+            for day, v in [(1, 1), (2, 0), (4, 0), (8, 8)]
+        }
+    )
     for key in list(stack.keys())[1:3]:
         stack[key].array.mask = True
     pg = {
@@ -163,7 +194,7 @@ def test_apply_dimension_array_interpolate_linear_via_graph():
     }
     result = _run(pg, data=stack)
     values = [float(img.array[0, 0, 0]) for img in result.values()]
-    assert values == pytest.approx([1.0, 2.0, 3.0, 4.0])
+    assert values == pytest.approx([1.0, 2.0, 4.0, 8.0])
 
 
 # --- aggregate_temporal_period -----------------------------------------------

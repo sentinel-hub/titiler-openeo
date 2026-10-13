@@ -1,11 +1,15 @@
 """titiler.openeo.processes dem."""
 
+import logging
 from typing import List, Optional, Tuple
 
 import numpy
+import pyproj
 from rasterio import windows
 
 from .data_model import ImageData, RasterStack
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["aspect", "hillshade", "slope"]
 
@@ -13,38 +17,67 @@ __all__ = ["aspect", "hillshade", "slope"]
 EARTH_RADIUS = 6371008.8
 
 
-def _pixel_size(img: ImageData) -> Tuple[numpy.ndarray, float]:
-    """Return the pixel size in metres as ``(dx per row, dy)``.
+def _pixel_size(img: ImageData) -> Tuple[numpy.ndarray, numpy.ndarray]:
+    """Return the ground pixel size in metres for each row, as ``(dx, dy)``.
 
-    For a projected CRS the size comes from the bounds and is the same for all
-    rows. For a geographic CRS the size in degrees is converted to metres on a
+    For a geographic CRS the size in degrees is converted to metres on a
     sphere, and the east-west size shrinks with the cosine of the row latitude.
+
+    For a projected CRS the size in CRS units is converted to metres with the
+    unit factor (for example US feet), then divided by the projection scale
+    factors at the centre of each row. This matters for Web Mercator (EPSG:3857,
+    the CRS of XYZ tiles): one unit is only cos(latitude) ground metres, so
+    without this correction a slope at 60° N would be half as steep.
     """
     west, south, east, north = img.bounds
     res_x = (east - west) / img.width
     res_y = (north - south) / img.height
+    rows_y = north - (numpy.arange(img.height) + 0.5) * res_y
+
     if img.crs is not None and img.crs.is_geographic:
         metres_per_degree = numpy.pi / 180.0 * EARTH_RADIUS
-        latitudes = north - (numpy.arange(img.height) + 0.5) * res_y
-        dx = res_x * metres_per_degree * numpy.cos(numpy.deg2rad(latitudes))
-        return dx, res_y * metres_per_degree
-    return numpy.full(img.height, res_x), res_y
+        dx = res_x * metres_per_degree * numpy.cos(numpy.deg2rad(rows_y))
+        return dx, numpy.full(img.height, res_y * metres_per_degree)
+
+    dx = numpy.full(img.height, res_x, dtype="float64")
+    dy = numpy.full(img.height, res_y, dtype="float64")
+    if img.crs is None:
+        return dx, dy
+
+    unit_factor = img.crs.linear_units_factor[1]
+    try:
+        crs = pyproj.CRS.from_user_input(img.crs.to_wkt())
+        to_lonlat = pyproj.Transformer.from_crs(crs, crs.geodetic_crs, always_xy=True)
+        lon, lat = to_lonlat.transform(
+            numpy.full(img.height, (west + east) / 2.0), rows_y
+        )
+        factors = pyproj.Proj(crs).get_factors(lon, lat, errcheck=True)
+        parallel_scale = numpy.asarray(factors.parallel_scale, dtype="float64")
+        meridional_scale = numpy.asarray(factors.meridional_scale, dtype="float64")
+    except pyproj.exceptions.ProjError:
+        logger.warning(
+            "Cannot compute the scale factors of %s; slope and aspect use the "
+            "pixel size in CRS units.",
+            img.crs,
+        )
+        return dx * unit_factor, dy * unit_factor
+    return dx * unit_factor / parallel_scale, dy * unit_factor / meridional_scale
 
 
 def _gradients(img: ImageData) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
     """Return the east and north elevation gradients of each band, and their mask.
 
-    The gradients use central differences (``numpy.gradient``) with the pixel
-    size in metres, so the elevation must be in metres too. The result has the
-    grid of the input. A pixel is masked when it is on the 1-pixel border or
-    when one of its neighbours is no-data, as with GDAL ``gdaldem``.
+    The gradients use central differences (``numpy.gradient``) with the ground
+    pixel size in metres, so the elevation must be in metres too. The result
+    has the grid of the input. A pixel is masked when it is on the 1-pixel
+    border or when one of its neighbours is no-data, as with GDAL ``gdaldem``.
     """
     z = numpy.ma.masked_invalid(img.array.astype("float64")).filled(numpy.nan)
     dx, dy = _pixel_size(img)
     dz_drow, dz_dcol = numpy.gradient(z, axis=(1, 2))
     # Rows go from north to south, so the north gradient has the opposite sign.
     dz_dx = dz_dcol / dx[numpy.newaxis, :, numpy.newaxis]
-    dz_dy = -dz_drow / dy
+    dz_dy = -dz_drow / dy[numpy.newaxis, :, numpy.newaxis]
 
     mask = numpy.isnan(dz_dx) | numpy.isnan(dz_dy)
     mask[:, [0, -1], :] = True

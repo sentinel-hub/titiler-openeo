@@ -59,7 +59,9 @@ def _convolve(
     result *= factor
 
     return ImageData(
-        numpy.ma.MaskedArray(result, mask=numpy.ma.getmaskarray(img.array)),
+        # The spec replaces invalid values before the convolution, so every
+        # output pixel has a value, also where the input was no-data.
+        numpy.ma.MaskedArray(result, mask=numpy.zeros(result.shape, dtype=bool)),
         assets=img.assets,
         crs=img.crs,
         bounds=img.bounds,
@@ -81,8 +83,8 @@ def apply_kernel(
 
     The kernel is flipped (a true convolution, as ``scipy.ndimage.convolve``).
     The sum is multiplied by ``factor``. NaN, infinite and no-data values are
-    replaced by ``replace_invalid`` before the convolution. No-data pixels of
-    the input stay no-data in the output.
+    replaced by ``replace_invalid`` before the convolution, so every output
+    pixel has a value, also where the input was no-data.
 
     Args:
         data: RasterStack to process

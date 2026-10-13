@@ -83,27 +83,26 @@
   },
   "examples": [
     {
-      "description": "Filters the data cube to only contain data from platform Sentinel-2A. This example assumes that the data cube has a dimension `platform` so that computations can distinguish between Sentinel-2A and Sentinel-2B data.",
+      "description": "Keeps only the data from June 2020 onwards. Temporal labels are compared as date-times.",
       "arguments": {
         "data": {
           "from_parameter": "sentinel2_data"
         },
         "condition": {
           "process_graph": {
-            "eq": {
-              "process_id": "eq",
+            "gte": {
+              "process_id": "gte",
               "arguments": {
                 "x": {
                   "from_parameter": "value"
                 },
-                "y": "Sentinel-2A",
-                "case_sensitive": false
+                "y": "2020-06-01T00:00:00Z"
               },
               "result": true
             }
           }
         },
-        "dimension": "platform"
+        "dimension": "t"
       }
     }
   ],
