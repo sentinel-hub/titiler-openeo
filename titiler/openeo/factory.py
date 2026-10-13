@@ -48,20 +48,28 @@ def _schema_allows_null(schema: Any) -> bool:
 
     The schema can be a dict or a list of alternatives, and ``type`` can be a
     string or a list (e.g. ``load_collection``'s ``temporal_extent`` lists
-    ``{"type": "null", "title": "No filter"}``).
+    ``{"type": "null", "title": "No filter"}``). A schema without a type
+    constraint (e.g. ``{}`` or ``{"description": "Any data type."}``) accepts
+    every value, ``null`` too.
     """
     if isinstance(schema, list):
         return any(_schema_allows_null(s) for s in schema)
     if not isinstance(schema, dict):
         return False
-    types = schema.get("type")
-    if types == "null" or (isinstance(types, list) and "null" in types):
-        return True
-    return any(
-        _schema_allows_null(s)
-        for key in ("anyOf", "oneOf")
-        for s in schema.get(key) or []
-    )
+    if "type" in schema:
+        types = schema["type"]
+        return types == "null" or (isinstance(types, list) and "null" in types)
+    if "anyOf" in schema or "oneOf" in schema:
+        return any(
+            _schema_allows_null(s)
+            for key in ("anyOf", "oneOf")
+            for s in schema.get(key) or []
+        )
+    if "enum" in schema:
+        return None in schema["enum"]
+    if "const" in schema:
+        return schema["const"] is None
+    return True
 
 
 def _missing_required_parameters(

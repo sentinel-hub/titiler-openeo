@@ -2,6 +2,8 @@
 
 import pytest
 
+from titiler.openeo.factory import _schema_allows_null
+
 
 def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store_type):
     """List returns user-scoped UDPs with pagination and trimmed fields."""
@@ -446,3 +448,41 @@ def test_validation_flags_null_for_non_nullable_required_param(app_no_auth):
     assert any(
         e["code"] == "ProcessParameterRequired" and "'id'" in e["message"] for e in errs
     )
+
+
+@pytest.mark.parametrize(
+    "schema,expected",
+    [
+        ({"type": "null"}, True),
+        ({"type": ["string", "null"]}, True),
+        ([{"type": "string"}, {"type": "null", "title": "No filter"}], True),
+        ({"anyOf": [{"type": "number"}, {"type": "null"}]}, True),
+        ({"oneOf": [{"type": "number"}]}, False),
+        ({"type": "string"}, False),
+        ({}, True),
+        ({"description": "Any data type."}, True),
+        ({"enum": ["a", None]}, True),
+        ({"enum": ["a"]}, False),
+        ({"const": None}, True),
+        ({"const": "a"}, False),
+        (None, False),
+        ("null", False),
+    ],
+)
+def test_schema_allows_null(schema, expected):
+    """`_schema_allows_null` reads dict, list, `type` list and anyOf/oneOf schemas."""
+    assert _schema_allows_null(schema) is expected
+
+
+def test_validation_accepts_null_for_unconstrained_required_param(app_no_auth):
+    """A required parameter with a schema without type accepts `null`."""
+    graph = {
+        "node1": {
+            "process_id": "constant",
+            "arguments": {"x": None},
+            "result": True,
+        }
+    }
+    resp = app_no_auth.post("/validation", json={"process_graph": graph})
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []
