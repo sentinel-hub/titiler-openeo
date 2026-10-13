@@ -1,5 +1,6 @@
 """TiTiler.openeo data models."""
 
+import copy
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -37,6 +38,32 @@ from rio_tiler.types import BBox
 # NOTE: RasterStack is now a class, not a type alias. The class is defined below.
 
 T = TypeVar("T")
+
+
+def _label_bands(img: Any, band_names: Optional[List[str]]) -> Any:
+    """Return ``img`` with ``band_names`` as its band descriptions.
+
+    The stack's ``band_names`` are the labels of the band dimension (for
+    example the collection band names given to ``load_collection``). The images
+    a reader returns carry their own descriptions instead (rio-tiler names them
+    ``<asset>_b<index>``), and a process that rebuilds a stack from its images
+    reads the labels back from these descriptions. So every image that leaves
+    the stack must carry the stack labels.
+
+    The image is left as is when the number of labels does not match its band
+    count, and is copied (not changed in place) because the same ImageData can
+    be shared by other stacks.
+    """
+    if (
+        not isinstance(img, ImageData)
+        or not band_names
+        or len(band_names) != img.count
+        or list(img.band_descriptions or []) == list(band_names)
+    ):
+        return img
+    labelled = copy.copy(img)
+    labelled.band_descriptions = list(band_names)
+    return labelled
 
 
 def _normalize_to_naive_utc(dt: datetime) -> datetime:
@@ -437,17 +464,16 @@ class RasterStack(Dict[datetime, ImageData]):
                 task_fn, _ = self._tasks[task_index]
 
                 # Create a closure that captures the task_fn for this specific item
-                def make_task_executor(tf: Any) -> Callable[[], ImageData]:
+                def make_task_executor(
+                    key: datetime, tf: Any
+                ) -> Callable[[], ImageData]:
                     def executor() -> ImageData:
-                        if isinstance(tf, Future):
-                            return tf.result()
-                        else:
-                            return tf()
+                        return self._execute_task(key, tf)
 
                     return executor
 
                 self._image_refs[timestamp] = ImageRef.from_task(
-                    task_fn=make_task_executor(task_fn),
+                    task_fn=make_task_executor(timestamp, task_fn),
                     width=self._width,
                     height=self._height,
                     bounds=self._bounds,
@@ -478,12 +504,14 @@ class RasterStack(Dict[datetime, ImageData]):
             task_func: The task function or Future to execute
 
         Returns:
-            ImageData: The result of the task execution
+            ImageData: The result of the task execution, labelled with the
+            stack band names
         """
         if isinstance(task_func, Future):
-            return task_func.result()
+            img = task_func.result()
         else:
-            return task_func()
+            img = task_func()
+        return _label_bands(img, self._band_names)
 
     def _execute_selected_tasks(self, selected_keys: Set[datetime]) -> None:
         """Execute tasks for the selected keys only with concurrent execution.
@@ -540,7 +568,7 @@ class RasterStack(Dict[datetime, ImageData]):
         ):
             timestamp = self._timestamp_fn(asset)
             with self._cache_lock:
-                self._data_cache[timestamp] = data
+                self._data_cache[timestamp] = _label_bands(data, self._band_names)
 
     def timestamps(self) -> List[datetime]:
         """Return list of timestamps in the stack (keys are timestamps)."""
@@ -934,6 +962,11 @@ class RasterStack(Dict[datetime, ImageData]):
         # sync and a stack never mixes tz-aware and tz-naive datetimes (e.g. an
         # aware load_collection key combined with a naive datetime.now()).
         images = {_normalize_to_naive_utc(dt): img for dt, img in images.items()}
+        if kwargs.get("band_names"):
+            images = {
+                dt: _label_bands(img, kwargs["band_names"])
+                for dt, img in images.items()
+            }
 
         # Get first image for dimension parameters
         first_key = next(iter(images))

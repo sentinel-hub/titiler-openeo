@@ -42,7 +42,7 @@ KEY REQUIREMENTS:
 (bands moved to the front, broadcasting across time) for exactly this reason.
 """
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import morecantile
 import numpy
@@ -52,6 +52,23 @@ from .callbacks import DIMENSION_LABELS_PARAMETER
 from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
+
+
+def _dimension_labels(labels: Optional[Sequence[Any]], count: int) -> List[str]:
+    """Labels of a dimension after ``apply_dimension`` computed ``count`` values.
+
+    Per the openEO ``apply_dimension`` spec, the labels are preserved when the
+    number of values is unchanged. Otherwise they become incrementing integers
+    starting from zero, which ``rename_labels`` can change afterwards.
+    """
+    if labels and len(labels) == count:
+        return [str(label) for label in labels]
+    return [str(i) for i in range(count)]
+
+
+def _band_count(array: numpy.ndarray) -> int:
+    """Band count of an ImageData built from ``array`` (2-D is one band)."""
+    return 1 if array.ndim == 2 else array.shape[0]
 
 
 def _stack_rasterstack(data: RasterStack) -> numpy.ma.MaskedArray:
@@ -263,7 +280,9 @@ def _apply_temporal_dimension(
                 assets=[key],
                 crs=first_ref.crs,
                 bounds=first_ref.bounds,
-                band_descriptions=first_ref.band_names if first_ref.band_names else [],
+                band_descriptions=_dimension_labels(
+                    first_ref.band_names, _band_count(result_array[i])
+                ),
                 metadata={
                     "applied_dimension": "temporal",
                 },
@@ -286,11 +305,8 @@ def _apply_temporal_dimension(
         # else: 3-D already has the leading axis acting as the band axis.
 
         # Name the new bands after the source timestamps when each contributes one
-        # band; otherwise let ImageData assign default band names.
-        if collapsed.shape[0] == len(data):
-            band_descriptions = [str(key) for key in data.keys()]
-        else:
-            band_descriptions = []
+        # band; otherwise number them from zero (apply_dimension spec).
+        band_descriptions = _dimension_labels(list(data.keys()), collapsed.shape[0])
 
         result_img = ImageData(
             collapsed,
@@ -357,7 +373,9 @@ def _apply_spectral_dimension_single_image(
         assets=data.assets,
         crs=data.crs,
         bounds=data.bounds,
-        band_descriptions=data.band_descriptions if data.band_descriptions else [],
+        band_descriptions=_dimension_labels(
+            data.band_descriptions, _band_count(result_array)
+        ),
         metadata={
             "applied_dimension": "spectral",
         },
@@ -437,6 +455,10 @@ def _apply_spectral_dimension_stack(
             f"(expected {len(keys)}, got {per_time.shape[0]})."
         )
 
+    # The band labels are preserved only when the band count is unchanged.
+    labels = _dimension_labels(
+        data.band_names or images[0].band_descriptions, per_time.shape[1]
+    )
     result = {}
     for i, (key, img) in enumerate(zip(keys, images)):
         result[key] = ImageData(
@@ -444,7 +466,7 @@ def _apply_spectral_dimension_stack(
             assets=img.assets,
             crs=img.crs,
             bounds=img.bounds,
-            band_descriptions=img.band_names if img.band_names else [],
+            band_descriptions=labels,
             metadata={
                 "applied_dimension": "spectral",
             },

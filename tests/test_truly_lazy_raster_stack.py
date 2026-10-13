@@ -456,7 +456,11 @@ class TestMapTasksAndGetSourceItems:
 
         def transform(passed_key, realize):
             assert passed_key == datetime(2021, 1, 1)
-            assert realize() is image  # realize() runs the *original* task
+            # realize() runs the *original* task; the result carries the
+            # stack band names as its labels.
+            realized = realize()
+            assert realized.array is image.array
+            assert realized.band_descriptions == stack.band_names
             return transformed
 
         new_stack = stack.map_tasks(transform)
@@ -466,7 +470,8 @@ class TestMapTasksAndGetSourceItems:
         result = new_stack[key]
 
         mock_future.result.assert_called_once()
-        assert result is transformed
+        assert result.array is transformed.array
+        assert result.band_descriptions == new_stack.band_names
 
     def test_map_tasks_realize_does_not_populate_original_cache(self):
         """realize() must not leak into the original stack's cache (see docstring:
