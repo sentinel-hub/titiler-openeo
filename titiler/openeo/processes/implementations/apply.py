@@ -80,6 +80,7 @@ def apply(
     data: RasterStack,
     process: Callable,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Apply a unary process to every value in a RasterStack.
 
@@ -88,6 +89,10 @@ def apply(
     callback maps over every value, then the result is split back per timestamp.
     Calling the callback per image (the previous design) returned the first image's
     cached result for every subsequent image.
+
+    The enclosing ``named_parameters`` (set by the executor) are forwarded to the
+    callback, so that it can use a parameter of the enclosing process graph
+    (e.g. a UDP or service parameter, ``gt(x, {"from_parameter": "threshold"})``).
     """
     keys = list(data.keys())
     if not keys:
@@ -99,7 +104,11 @@ def apply(
         process(
             stacked,
             positional_parameters={"x": 0},
-            named_parameters={"x": stacked, "context": context},
+            named_parameters={
+                **(named_parameters or {}),
+                "x": stacked,
+                "context": context,
+            },
         )
     )
 

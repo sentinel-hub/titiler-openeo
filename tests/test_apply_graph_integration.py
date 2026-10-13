@@ -1488,3 +1488,77 @@ def test_reduce_dimension_passes_context_to_reducer(dimension):
     expected = [40.0] if dimension == "t" else [30.0, 50.0]
     got = sorted(float(np.asarray(img.array).mean()) for img in result.values())
     assert got == expected
+
+
+def _gt_threshold_callback(param: str) -> dict:
+    """A callback graph `gt(<param>, threshold)` using a graph-level parameter."""
+    return {
+        "process_graph": {
+            "gt1": {
+                "process_id": "gt",
+                "arguments": {
+                    "x": {"from_parameter": param},
+                    "y": {"from_parameter": "threshold"},
+                },
+                "result": True,
+            }
+        }
+    }
+
+
+def test_apply_callback_references_graph_parameter():
+    """An apply callback can use a parameter of the enclosing graph (#453)."""
+    pg = {
+        "apply1": {
+            "process_id": "apply",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "process": _gt_threshold_callback("x"),
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack(), threshold=4)
+    by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
+    assert by_ts[datetime(2024, 6, 1)] == [False] * 4
+    assert by_ts[datetime(2024, 6, 2)] == [True] * 4
+    assert by_ts[datetime(2024, 6, 3)] == [True] * 4
+
+
+@pytest.mark.parametrize("dimension", ["t", "bands"])
+def test_reduce_dimension_reducer_references_graph_parameter(dimension):
+    """A reduce_dimension reducer can use a parameter of the enclosing graph (#453)."""
+    pg = {
+        "max1": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": dimension,
+                "reducer": {
+                    "process_graph": {
+                        "max1": {
+                            "process_id": "max",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "gt1": {
+                            "process_id": "gt",
+                            "arguments": {
+                                "x": {"from_node": "max1"},
+                                "y": {"from_parameter": "threshold"},
+                            },
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack(), threshold=4)
+    values = [v.array.data.ravel().tolist() for v in result.values()]
+    if dimension == "t":
+        # Temporal max is 7 > 4.
+        assert values == [[True] * 4]
+    else:
+        # Each image has one band: its value (3, 7, 5) is compared to 4.
+        assert values == [[False] * 4, [True] * 4, [True] * 4]

@@ -43,6 +43,52 @@ STAC_VERSION = "1.0.0"
 CALLER_PARAMETERS = ("_openeo_user", "_openeo_tile_store")
 
 
+def _schema_allows_null(schema: Any) -> bool:
+    """Return True if a parameter JSON schema accepts ``null``.
+
+    The schema can be a dict or a list of alternatives, and ``type`` can be a
+    string or a list (e.g. ``load_collection``'s ``temporal_extent`` lists
+    ``{"type": "null", "title": "No filter"}``). A schema without a type
+    constraint (e.g. ``{}`` or ``{"description": "Any data type."}``) accepts
+    every value, ``null`` too.
+    """
+    if isinstance(schema, list):
+        return any(_schema_allows_null(s) for s in schema)
+    if not isinstance(schema, dict):
+        return False
+    if "type" in schema:
+        types = schema["type"]
+        return types == "null" or (isinstance(types, list) and "null" in types)
+    if "anyOf" in schema or "oneOf" in schema:
+        return any(
+            _schema_allows_null(s)
+            for key in ("anyOf", "oneOf")
+            for s in schema.get(key) or []
+        )
+    if "enum" in schema:
+        return None in schema["enum"]
+    if "const" in schema:
+        return schema["const"] is None
+    return True
+
+
+def _missing_required_parameters(
+    required_params: List[Dict[str, Any]], args: Dict[str, Any]
+) -> List[str]:
+    """Return the names of required parameters that the arguments do not set.
+
+    A required parameter is missing if it is not in ``args``, or if its value is
+    ``null`` and its schema does not accept ``null``. A required parameter can
+    accept ``null`` (e.g. ``temporal_extent: null`` means "no filter").
+    """
+    return [
+        p["name"]
+        for p in required_params
+        if p["name"] not in args
+        or (args[p["name"]] is None and not _schema_allows_null(p.get("schema")))
+    ]
+
+
 @define(kw_only=True)
 class EndpointsFactory(BaseFactory):
     """OpenEO Endpoints Factory."""
@@ -921,19 +967,18 @@ class EndpointsFactory(BaseFactory):
 
                 spec = self.process_registry[process_id].spec
                 required_params = [
-                    p["name"]
+                    p
                     for p in spec.get("parameters", [])
                     if not p.get("optional", False)
                 ]
                 args = node_dict.get("arguments", {}) or {}
-                for param_name in required_params:
-                    if param_name not in args or args.get(param_name) is None:
-                        errors.append(
-                            {
-                                "code": "ProcessParameterRequired",
-                                "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
-                            }
-                        )
+                for param_name in _missing_required_parameters(required_params, args):
+                    errors.append(
+                        {
+                            "code": "ProcessParameterRequired",
+                            "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
+                        }
+                    )
 
             if errors:
                 return {"errors": errors}
@@ -1035,7 +1080,7 @@ class EndpointsFactory(BaseFactory):
                 if process_id in self.process_registry[None]:
                     spec = self.process_registry[process_id].spec
                     required_params = [
-                        p["name"]
+                        p
                         for p in spec.get("parameters", [])
                         if not p.get("optional", False)
                     ]
@@ -1064,17 +1109,16 @@ class EndpointsFactory(BaseFactory):
                     # specify a default value. Optional parameters SHOULD
                     # always specify a default value.").
                     required_params = [
-                        p["name"]
+                        p
                         for p in referenced_udp.get("parameters") or []
                         if "default" not in p
                     ]
 
                 args = node_dict.get("arguments", {}) or {}
-                for param_name in required_params:
-                    if param_name not in args or args.get(param_name) is None:
-                        raise InvalidProcessGraph(
-                            f"Required parameter '{param_name}' missing for process '{process_id}'"
-                        )
+                for param_name in _missing_required_parameters(required_params, args):
+                    raise InvalidProcessGraph(
+                        f"Required parameter '{param_name}' missing for process '{process_id}'"
+                    )
 
             # Validate argument schema against a resolved copy, so a reference to
             # another stored UDP doesn't fail here for lack of a predefined

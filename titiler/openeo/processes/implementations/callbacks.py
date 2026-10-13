@@ -72,21 +72,30 @@ def _accepts_named_parameters(callback: Callable) -> bool:
     )
 
 
-def call_reducer(reducer: Callable, data: Any, context: Optional[Any] = None) -> Any:
+def call_reducer(
+    reducer: Callable,
+    data: Any,
+    context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
+) -> Any:
     """Call a reducer callback with ``data`` and, if given, ``context``.
 
     A callback graph resolves ``{"from_parameter": ...}`` references from
     ``named_parameters``, not from keyword arguments, so ``context`` is also
-    passed there (as ``apply`` does) when the reducer accepts it. A plain Python
-    reducer gets ``context`` as a keyword argument, and only ``data`` when there
-    is no context.
+    passed there (as ``apply`` does) when the reducer accepts it. The enclosing
+    ``named_parameters`` (e.g. the parameters of a UDP or a service) are
+    forwarded too, with ``data`` and ``context`` on top. A plain Python reducer
+    gets ``context`` as a keyword argument, and only ``data`` when there is no
+    context.
     """
-    if context is None:
+    if context is None and not named_parameters:
         return reducer(data=data)
     if not _accepts_named_parameters(reducer):
+        if context is None:
+            return reducer(data=data)
         return reducer(data=data, context=context)
     return reducer(
         data=data,
         context=context,
-        named_parameters={"data": data, "context": context},
+        named_parameters={**(named_parameters or {}), "data": data, "context": context},
     )
