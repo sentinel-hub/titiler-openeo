@@ -18,6 +18,7 @@ __all__ = [
     "array_element",
     "array_contains",
     "array_apply",
+    "array_interpolate_linear",
     "to_image",
     "array_create",
     "create_data_cube",
@@ -799,3 +800,70 @@ def array_apply(
     )
 
     return numpy.asanyarray(result)
+
+
+def array_interpolate_linear(data: ArrayLike) -> ArrayLike:
+    """Fill NaN and no-data values by linear interpolation along the array.
+
+    The interpolation is along the leading axis (the time axis in an
+    ``apply_dimension(dimension="t")`` callback), for each pixel. The x axis of
+    the interpolants is the array index, so the labels are taken as equally
+    spaced. Leading and trailing NaN and no-data values are not changed.
+
+    Args:
+        data: An array of numbers (a list, an ndarray or a masked array)
+
+    Returns:
+        An array of the same shape with the gaps filled. A list gives a list.
+
+    Examples:
+        >>> array_interpolate_linear([None, 1, None, 6, None, -8])
+        [None, 1.0, 3.5, 6.0, -1.0, -8.0]
+        >>> array_interpolate_linear([None, 1, None, None])
+        [None, 1.0, None, None]
+    """
+    if isinstance(data, (list, tuple)):
+        values = numpy.ma.masked_invalid(
+            numpy.array([numpy.nan if v is None else v for v in data], dtype="float64")
+        )
+        if values.size == 0:
+            return []
+        filled = numpy.ma.asanyarray(array_interpolate_linear(values))
+        return [
+            None if m else float(v)
+            for v, m in zip(filled.data, numpy.ma.getmaskarray(filled))
+        ]
+
+    arr = numpy.ma.asanyarray(data)
+    if arr.ndim == 0 or arr.shape[0] < 2:
+        return data
+    if not numpy.issubdtype(arr.dtype, numpy.floating):
+        arr = arr.astype("float32")
+
+    invalid = numpy.ma.getmaskarray(arr) | numpy.isnan(arr.filled(numpy.nan))
+    n = arr.shape[0]
+    index = numpy.arange(n).reshape((n,) + (1,) * (arr.ndim - 1))
+
+    # For each element, the index of the previous and of the next valid value.
+    prev_idx = numpy.maximum.accumulate(numpy.where(invalid, -1, index), axis=0)
+    next_idx = numpy.flip(
+        numpy.minimum.accumulate(
+            numpy.flip(numpy.where(invalid, n, index), axis=0), axis=0
+        ),
+        axis=0,
+    )
+    gap = invalid & (prev_idx >= 0) & (next_idx < n)
+    if not gap.any():
+        return data
+
+    values = arr.filled(numpy.nan)
+    y0 = numpy.take_along_axis(values, numpy.clip(prev_idx, 0, n - 1), axis=0)
+    y1 = numpy.take_along_axis(values, numpy.clip(next_idx, 0, n - 1), axis=0)
+    with numpy.errstate(invalid="ignore", divide="ignore"):
+        weight = (index - prev_idx) / (next_idx - prev_idx)
+        interpolated = y0 + (y1 - y0) * weight
+
+    result = numpy.where(gap, interpolated, values).astype(arr.dtype)
+    return numpy.ma.MaskedArray(
+        result, mask=numpy.ma.getmaskarray(arr) & ~gap, fill_value=arr.fill_value
+    )

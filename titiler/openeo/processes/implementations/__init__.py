@@ -5,6 +5,7 @@ from .arrays import *  # noqa
 from .data_model import ImageRef, RasterStack  # noqa
 from .dem import *  # noqa
 from .filter import *  # noqa
+from .focal import *  # noqa
 from .get_param_item import *  # noqa
 from .image import *  # noqa
 from .indices import *  # noqa

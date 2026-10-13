@@ -885,6 +885,30 @@ class RasterStack(Dict[datetime, ImageData]):
         kwargs.update(overrides)
         return RasterStack(tasks=new_tasks, **kwargs)
 
+    def map_images(
+        self, func: Callable[[ImageData], ImageData], **overrides: Any
+    ) -> "RasterStack":
+        """Apply ``func`` to each slice, lazily when the stack still has read tasks.
+
+        A stack built by :meth:`from_images` (or a subset of one) has no-op tasks
+        and holds its images on the refs only, so :meth:`map_tasks` cannot realize
+        it. Such a stack is mapped eagerly; any other stack is mapped lazily.
+
+        Args:
+            func: Called with each slice's ``ImageData``; returns the new slice.
+            overrides: Stack-level metadata to replace on the new stack (e.g.
+                ``band_names``, or ``width``/``height``/``bounds`` for a crop).
+
+        Returns:
+            RasterStack: A new stack of the same keys.
+        """
+        refs = self.get_image_refs()
+        if refs and all(ref.realized for _, ref in refs):
+            return RasterStack.from_images(
+                {key: func(ref.realize()) for key, ref in refs}, **overrides
+            )
+        return self.map_tasks(lambda _key, realize: func(realize()), **overrides)
+
     @classmethod
     def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
         """Create a RasterStack from pre-loaded ImageData instances.

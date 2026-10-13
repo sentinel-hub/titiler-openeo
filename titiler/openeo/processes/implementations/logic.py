@@ -3,8 +3,32 @@
 from typing import Any, Optional, Tuple
 
 import numpy
+from openeo_pg_parser_networkx.pg_schema import Date, DateTime, Time, Year
 
-__all__ = ["if_", "and_", "or_", "lt", "lte", "gt", "gte", "eq", "neq", "is_nodata"]
+__all__ = [
+    "if_",
+    "and_",
+    "or_",
+    "not_",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "eq",
+    "neq",
+    "is_nodata",
+]
+
+
+def _unwrap_temporal(value: Any) -> Any:
+    """Return the datetime inside a value that the graph parser made from a date string.
+
+    The graph parser turns a date string such as ``"2024-06-03"`` into a
+    ``Date``/``DateTime`` wrapper, which does not compare with a datetime.
+    """
+    if isinstance(value, (Year, Date, DateTime, Time)):
+        return value.root
+    return value
 
 
 def _shapes_align(a: Tuple[int, ...], b: Tuple[int, ...]) -> bool:
@@ -167,6 +191,39 @@ def or_(x: Any, y: Any) -> Any:
 or_.__name__ = "or"
 
 
+def not_(x: Any) -> Any:
+    """Logical NOT operation.
+
+    No-data values are passed through: ``None`` gives ``None``, and masked
+    array elements stay masked.
+
+    Args:
+        x: Boolean value or array to invert
+
+    Returns:
+        The inverted boolean value or array
+
+    Examples:
+        >>> not_(True)
+        False
+        >>> not_(False)
+        True
+        >>> not_(None) is None
+        True
+        >>> import numpy as np
+        >>> not_(np.array([True, False]))
+        array([False,  True])
+    """
+    if x is None:
+        return None
+    if isinstance(x, numpy.ndarray):
+        return numpy.logical_not(x)
+    return not bool(x)
+
+
+not_.__name__ = "not"
+
+
 def lt(x: Any, y: Any) -> bool:
     """Less than comparison.
 
@@ -185,7 +242,7 @@ def lt(x: Any, y: Any) -> bool:
         >>> lt(1, 1)
         False
     """
-    return x < y
+    return _unwrap_temporal(x) < _unwrap_temporal(y)
 
 
 def lte(x: Any, y: Any) -> bool:
@@ -204,7 +261,7 @@ def lte(x: Any, y: Any) -> bool:
         >>> lte(1, 1)
         True
     """
-    return x <= y
+    return _unwrap_temporal(x) <= _unwrap_temporal(y)
 
 
 def gt(x: Any, y: Any) -> bool:
@@ -225,7 +282,7 @@ def gt(x: Any, y: Any) -> bool:
         >>> gt(1, 1)
         False
     """
-    return x > y
+    return _unwrap_temporal(x) > _unwrap_temporal(y)
 
 
 def gte(x: Any, y: Any) -> bool:
@@ -246,7 +303,7 @@ def gte(x: Any, y: Any) -> bool:
         >>> gte(1, 1)
         True
     """
-    return x >= y
+    return _unwrap_temporal(x) >= _unwrap_temporal(y)
 
 
 def eq(x: Any, y: Any) -> bool:
@@ -269,7 +326,7 @@ def eq(x: Any, y: Any) -> bool:
         >>> eq("a", "b")
         False
     """
-    return x == y
+    return _unwrap_temporal(x) == _unwrap_temporal(y)
 
 
 def neq(x: Any, y: Any) -> bool:
@@ -292,7 +349,7 @@ def neq(x: Any, y: Any) -> bool:
         >>> neq("a", "a")
         False
     """
-    return x != y
+    return _unwrap_temporal(x) != _unwrap_temporal(y)
 
 
 def is_nodata(x: Any) -> Any:
