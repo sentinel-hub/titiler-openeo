@@ -306,6 +306,7 @@ def _reduce_temporal_dimension(
     data: RasterStack,
     reducer: Callable,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Reduce the temporal dimension of a RasterStack.
 
@@ -333,7 +334,7 @@ def _reduce_temporal_dimension(
 
     # Note: The reducer will determine how much data it actually needs
     # Some reducers might be able to work with partial data
-    reduced_array = call_reducer(reducer, data, context)
+    reduced_array = call_reducer(reducer, data, context, named_parameters)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_array, dict):
@@ -450,6 +451,7 @@ def _reduce_spectral_dimension_stack(
     data: RasterStack,
     reducer: Callable,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Reduce the spectral dimension of a RasterStack.
 
@@ -527,7 +529,7 @@ def _reduce_spectral_dimension_stack(
     # Input shape: (bands, time, height, width)
     # Expected output shape: (time, height, width) for full reduction
     #                    or: (reduced_bands, time, height, width) for partial reduction
-    reduced_data = call_reducer(reducer, transposed_data, context)
+    reduced_data = call_reducer(reducer, transposed_data, context, named_parameters)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_data, dict):
@@ -1123,6 +1125,7 @@ def reduce_dimension(
     reducer: Callable,
     dimension: str,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> Union[RasterStack, ImageData]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
@@ -1131,6 +1134,9 @@ def reduce_dimension(
         reducer: A reducer function to apply on the specified dimension
         dimension: The name of the dimension over which to reduce
         context: Additional data to be passed to the reducer
+        named_parameters: Enclosing-scope parameters injected by the process
+                          executor; forwarded to the reducer so that it can use
+                          a parameter of the enclosing process graph.
 
     Returns:
         A data cube with the newly computed values, missing the given dimension
@@ -1144,12 +1150,14 @@ def reduce_dimension(
 
     # Handle temporal dimension
     if dim_lower in ["t", "temporal", "time"]:
-        return _reduce_temporal_dimension(data, reducer, context)
+        return _reduce_temporal_dimension(data, reducer, context, named_parameters)
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
         # Use unified stack reduction for both single and multi-image cases
-        return _reduce_spectral_dimension_stack(data, reducer, context)
+        return _reduce_spectral_dimension_stack(
+            data, reducer, context, named_parameters
+        )
 
     # Unsupported dimension
     else:

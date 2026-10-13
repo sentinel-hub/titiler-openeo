@@ -401,3 +401,48 @@ def test_validation_flags_missing_required_param(app_no_auth):
     assert resp.status_code == 200
     errs = resp.json()["errors"]
     assert any("ProcessParameterRequired" in e["code"] for e in errs)
+
+
+def _load_collection_graph(temporal_extent):
+    return {
+        "dem": {
+            "process_id": "load_collection",
+            "arguments": {
+                "id": "cop-dem-glo-30",
+                "spatial_extent": {
+                    "west": 0.12,
+                    "south": 42.82,
+                    "east": 0.16,
+                    "north": 42.85,
+                },
+                "temporal_extent": temporal_extent,
+                "bands": ["data"],
+            },
+        },
+        "save": {
+            "process_id": "save_result",
+            "arguments": {"data": {"from_node": "dem"}, "format": "GTiff"},
+            "result": True,
+        },
+    }
+
+
+def test_validation_accepts_null_for_nullable_required_param(app_no_auth):
+    """`temporal_extent: null` is a valid value ("no filter"), not a missing one (#452)."""
+    resp = app_no_auth.post(
+        "/validation", json={"process_graph": _load_collection_graph(None)}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []
+
+
+def test_validation_flags_null_for_non_nullable_required_param(app_no_auth):
+    """`null` is still missing when the schema of the parameter does not accept it."""
+    graph = _load_collection_graph(["2021-04-22", "2021-04-23"])
+    graph["dem"]["arguments"]["id"] = None
+    resp = app_no_auth.post("/validation", json={"process_graph": graph})
+    assert resp.status_code == 200
+    errs = resp.json()["errors"]
+    assert any(
+        e["code"] == "ProcessParameterRequired" and "'id'" in e["message"] for e in errs
+    )
