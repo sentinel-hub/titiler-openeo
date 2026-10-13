@@ -48,6 +48,7 @@ import morecantile
 import numpy
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
+from .callbacks import DIMENSION_LABELS_PARAMETER
 from .data_model import ImageData, RasterStack
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
@@ -154,6 +155,8 @@ def apply_dimension(
         if len(data) <= 1:
             return data
 
+        # The callback's data is a labeled array: give it the temporal labels.
+        named_parameters[DIMENSION_LABELS_PARAMETER] = list(data.keys())
         return _apply_temporal_dimension(
             data, process, positional_parameters, named_parameters, target_dimension
         )

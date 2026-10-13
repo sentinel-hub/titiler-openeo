@@ -9,7 +9,7 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from ...errors import OpenEOException
-from .callbacks import recompute_each_call
+from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
 from .core import process
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
@@ -18,6 +18,7 @@ __all__ = [
     "array_element",
     "array_contains",
     "array_apply",
+    "array_interpolate_linear",
     "to_image",
     "array_create",
     "create_data_cube",
@@ -799,3 +800,126 @@ def array_apply(
     )
 
     return numpy.asanyarray(result)
+
+
+def _label_positions(labels: Optional[List[Any]], n: int) -> Optional[numpy.ndarray]:
+    """Return the labels as numeric x positions, or None to use the indices.
+
+    Numeric labels are used as they are and temporal labels as seconds. Other
+    labels (for example band names) have no inherent distance, so the indices
+    are used.
+    """
+    if labels is None or len(labels) != n:
+        return None
+    if all(isinstance(v, datetime) for v in labels):
+        epoch = datetime(1970, 1, 1)
+        return numpy.array(
+            [(_normalize_to_naive_utc(v) - epoch).total_seconds() for v in labels],
+            dtype="float64",
+        )
+    if all(_is_number(v) for v in labels):
+        return numpy.array(labels, dtype="float64")
+    return None
+
+
+def _interpolate_leading_axis(
+    arr: numpy.ma.MaskedArray, x: Optional[numpy.ndarray]
+) -> numpy.ma.MaskedArray:
+    """Fill NaN and no-data values along axis 0 by linear interpolation.
+
+    ``x`` holds the position of each element along axis 0; None uses the
+    indices. Infinite values are valid values, as in the openEO spec.
+    """
+    if not numpy.issubdtype(arr.dtype, numpy.floating):
+        arr = arr.astype("float32")
+
+    invalid = numpy.ma.getmaskarray(arr) | numpy.isnan(arr.filled(numpy.nan))
+    n = arr.shape[0]
+    index = numpy.arange(n).reshape((n,) + (1,) * (arr.ndim - 1))
+
+    # For each element, the index of the previous and of the next valid value.
+    prev_idx = numpy.maximum.accumulate(numpy.where(invalid, -1, index), axis=0)
+    next_idx = numpy.flip(
+        numpy.minimum.accumulate(
+            numpy.flip(numpy.where(invalid, n, index), axis=0), axis=0
+        ),
+        axis=0,
+    )
+    gap = invalid & (prev_idx >= 0) & (next_idx < n)
+    if not gap.any():
+        return arr
+
+    positions = numpy.arange(n, dtype="float64") if x is None else x
+    prev_safe = numpy.clip(prev_idx, 0, n - 1)
+    next_safe = numpy.clip(next_idx, 0, n - 1)
+    values = arr.filled(numpy.nan)
+    y0 = numpy.take_along_axis(values, prev_safe, axis=0)
+    y1 = numpy.take_along_axis(values, next_safe, axis=0)
+    x_here = positions.reshape(index.shape)
+    with numpy.errstate(invalid="ignore", divide="ignore"):
+        weight = (x_here - positions[prev_safe]) / (
+            positions[next_safe] - positions[prev_safe]
+        )
+        # This form keeps an infinite end value: (-inf, 0.1) gives -inf.
+        interpolated = y0 * (1 - weight) + y1 * weight
+
+    result = numpy.where(gap, interpolated, values).astype(arr.dtype)
+    return numpy.ma.MaskedArray(
+        result, mask=numpy.ma.getmaskarray(arr) & ~gap, fill_value=arr.fill_value
+    )
+
+
+def _interpolate_list(values: List[Any], labels: Optional[List[Any]]) -> List[Any]:
+    """Interpolate a Python list, where None is no-data."""
+    if not values:
+        return []
+    arr = numpy.ma.MaskedArray(
+        [numpy.nan if v is None else v for v in values],
+        mask=[v is None for v in values],
+        dtype="float64",
+    )
+    filled = _interpolate_leading_axis(arr, _label_positions(labels, len(values)))
+    mask = numpy.ma.getmaskarray(filled)
+    return [None if m else float(v) for v, m in zip(filled.data, mask)]
+
+
+def array_interpolate_linear(
+    data: ArrayLike, named_parameters: Optional[Dict[str, Any]] = None
+) -> ArrayLike:
+    """Fill NaN and no-data values by linear interpolation along the array.
+
+    The interpolation is along the leading axis (the time axis in an
+    ``apply_dimension(dimension="t")`` callback), for each pixel. The x axis of
+    the interpolants is the label of each element when the labels are numbers
+    or dates, so irregular dates get correct weights; otherwise it is the
+    index. Leading and trailing NaN and no-data values are not changed.
+    Infinite values are valid values.
+
+    Args:
+        data: An array of numbers: a list, a dict (labeled array), an ndarray
+            or a masked array
+        named_parameters: Set by the executor. ``apply_dimension`` puts the
+            labels of the dimension in it.
+
+    Returns:
+        An array of the same shape with the gaps filled. A list gives a list
+        and a dict gives a dict.
+
+    Examples:
+        >>> array_interpolate_linear([None, 1, None, 6, None, -8])
+        [None, 1.0, 3.5, 6.0, -1.0, -8.0]
+        >>> array_interpolate_linear({1: 1.0, 3: None, 4: 4.0})
+        {1: 1.0, 3: 3.0, 4: 4.0}
+    """
+    labels = (named_parameters or {}).get(DIMENSION_LABELS_PARAMETER)
+
+    if isinstance(data, dict):
+        keys = list(data.keys())
+        return dict(zip(keys, _interpolate_list(list(data.values()), keys)))
+    if isinstance(data, (list, tuple)):
+        return _interpolate_list(list(data), None)
+
+    arr = numpy.ma.asanyarray(data)
+    if arr.ndim == 0 or arr.shape[0] < 2:
+        return data
+    return _interpolate_leading_axis(arr, _label_positions(labels, arr.shape[0]))

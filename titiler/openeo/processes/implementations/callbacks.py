@@ -15,6 +15,12 @@ cannot be vectorized, wrap the callback with :func:`recompute_each_call`.
 import inspect
 from typing import Any, Callable, Dict, Optional
 
+# Named parameter that ``apply_dimension`` sets to the labels of the dimension,
+# so that a callback process (e.g. ``array_interpolate_linear``) can use the
+# labels of its labeled array. The leading underscore keeps it out of the way of
+# real process parameters.
+DIMENSION_LABELS_PARAMETER = "_dimension_labels"
+
 
 def _callback_results_cache(callback: Callable) -> Optional[Dict[Any, Any]]:
     """Return the openEO executor's shared ``results_cache`` backing a callback.

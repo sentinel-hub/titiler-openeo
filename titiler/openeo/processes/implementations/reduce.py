@@ -55,7 +55,12 @@ from .data_model import ImageRef, RasterStack, _normalize_to_naive_utc
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["aggregate_temporal", "apply_pixel_selection", "reduce_dimension"]
+__all__ = [
+    "aggregate_temporal",
+    "aggregate_temporal_period",
+    "apply_pixel_selection",
+    "reduce_dimension",
+]
 
 # Mapping of reducer function names to their corresponding PixelSelectionMethod names
 # This enables _reduce_temporal_dimension to use the efficient streaming approach
@@ -988,6 +993,129 @@ def aggregate_temporal(
         raise ValueError("No data matched any of the specified intervals")
 
     return RasterStack.from_images(result_images)
+
+
+def _add_months(dt: datetime, months: int) -> datetime:
+    """Return the first day of the month ``months`` after the month of ``dt``."""
+    total = dt.year * 12 + (dt.month - 1) + months
+    return datetime(total // 12, total % 12 + 1, 1)
+
+
+def _period_start(ts: datetime, period: str) -> datetime:
+    """Return the start of the calendar period that contains ``ts``."""
+    day = datetime(ts.year, ts.month, ts.day)
+    if period == "hour":
+        return datetime(ts.year, ts.month, ts.day, ts.hour)
+    if period == "day":
+        return day
+    if period == "week":
+        return day - timedelta(days=day.weekday())  # ISO 8601 weeks start Monday
+    if period == "dekad":
+        return datetime(ts.year, ts.month, min((ts.day - 1) // 10, 2) * 10 + 1)
+    if period == "month":
+        return datetime(ts.year, ts.month, 1)
+    if period == "season":
+        # DJF, MAM, JJA, SON: December starts the season of the next year.
+        return _add_months(datetime(ts.year, ts.month, 1), -(ts.month % 3))
+    if period == "tropical-season":
+        # NDJFMA and MJJASO.
+        return _add_months(datetime(ts.year, ts.month, 1), -((ts.month - 5) % 6))
+    if period == "year":
+        return datetime(ts.year, 1, 1)
+    if period == "decade":
+        return datetime(ts.year - ts.year % 10, 1, 1)
+    if period == "decade-ad":
+        return datetime(ts.year - (ts.year - 1) % 10, 1, 1)
+    raise ValueError(f"Unsupported period '{period}'.")
+
+
+def _next_period(start: datetime, period: str) -> datetime:
+    """Return the start of the period after the one that starts at ``start``."""
+    if period == "hour":
+        return start + timedelta(hours=1)
+    if period == "day":
+        return start + timedelta(days=1)
+    if period == "week":
+        return start + timedelta(days=7)
+    if period == "dekad":
+        return start + timedelta(days=10) if start.day < 21 else _add_months(start, 1)
+    months = {
+        "month": 1,
+        "season": 3,
+        "tropical-season": 6,
+        "year": 12,
+        "decade": 120,
+        "decade-ad": 120,
+    }
+    return _add_months(start, months[period])
+
+
+def _period_intervals(
+    timestamps: List[datetime], period: str
+) -> List[List[Optional[str]]]:
+    """Return the contiguous period intervals from the first to the last timestamp.
+
+    Periods without data are included, so that the output dimension has a
+    label for each period of the extent (the reducer gives no-data for them).
+    """
+    start = _period_start(min(timestamps), period)
+    last = max(timestamps)
+    intervals: List[List[Optional[str]]] = []
+    while start <= last:
+        end = _next_period(start, period)
+        intervals.append([start.isoformat(), end.isoformat()])
+        start = end
+    return intervals
+
+
+def aggregate_temporal_period(
+    data: RasterStack,
+    period: Literal[
+        "hour",
+        "day",
+        "week",
+        "dekad",
+        "month",
+        "season",
+        "tropical-season",
+        "year",
+        "decade",
+        "decade-ad",
+    ],
+    reducer: Callable,
+    dimension: Optional[str] = None,
+    context: Optional[Any] = None,
+) -> RasterStack:
+    """Computes a temporal aggregation based on calendar hierarchies.
+
+    The periods are built from the period of the first timestamp to the period
+    of the last timestamp, then passed to :func:`aggregate_temporal`. Each
+    output label is the start of its period (for example ``2020-06-01`` for
+    the month of June 2020, or ``2019-12-01`` for the DJF season of 2020).
+
+    Args:
+        data: The source data cube.
+        period: The time intervals to aggregate: ``hour``, ``day``, ``week``
+            (ISO 8601), ``dekad``, ``month``, ``season``, ``tropical-season``,
+            ``year``, ``decade`` or ``decade-ad``.
+        reducer: A reducer to be applied for the values contained in each period.
+        dimension: The name of the temporal dimension for aggregation.
+        context: Additional data to be passed to the reducer.
+
+    Returns:
+        A new data cube with one temporal label per period.
+
+    Raises:
+        DimensionNotAvailable: If the specified dimension does not exist.
+    """
+    if not data:
+        raise ValueError("Expected a non-empty data cube")
+    if dimension is not None and dimension.lower() not in ["t", "temporal", "time"]:
+        raise DimensionNotAvailable(dimension)
+
+    # The dimension is checked above; the cube has a single temporal dimension.
+    intervals = _period_intervals(data.timestamps(), period)
+    return aggregate_temporal(data, intervals, reducer, context=context)
 
 
 def reduce_dimension(
