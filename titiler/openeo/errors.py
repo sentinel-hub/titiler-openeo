@@ -115,8 +115,9 @@ class ExceptionHandler:
         https://github.com/Open-EO/openeo-api/blob/master/errors.json).
         """
         self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
-        # This handler runs outside the app middleware, so the cache-control
-        # middleware does not see its responses: set the header here.
+        # Starlette can also call this handler outside the app middleware
+        # (when `UnhandledExceptionMiddleware` re-raises), so the cache-control
+        # middleware may not see its responses: set the header here.
         headers = {"Cache-Control": "no-store"}
         if isinstance(exc, (ValueError, TypeError)):
             return JSONResponse(

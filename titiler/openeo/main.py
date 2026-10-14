@@ -15,7 +15,7 @@ from .auth import get_auth
 from .errors import ExceptionHandler, OpenEOException
 from .factory import EndpointsFactory
 from .health import register_health_endpoints
-from .middleware import DynamicCacheControlMiddleware
+from .middleware import DynamicCacheControlMiddleware, UnhandledExceptionMiddleware
 from .processes import PROCESS_SPECIFICATIONS, process_registry
 from .services import get_store, get_tile_store, get_udp_store
 from .settings import ApiSettings, AuthSettings, BackendSettings, SigningSettings
@@ -74,12 +74,26 @@ def create_app():
         debug=api_settings.debug,
     )
 
+    # Create exception handler instance
+    exception_handler = ExceptionHandler(logger=logging.getLogger(__name__))
+
+    # Added before CORSMiddleware so that it is inside it: error responses for
+    # unhandled exceptions then also get the CORS headers (issue #368).
+    app.add_middleware(
+        UnhandledExceptionMiddleware,
+        handler=exception_handler.general_exception_handler,
+    )
+
     # Set all CORS enabled origins
     if api_settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=api_settings.cors_origins,
-            allow_credentials=True,
+            # The CORS specification forbids credentials with a wildcard
+            # origin, and Starlette then omits `Access-Control-Allow-Origin`.
+            # openEO uses the `Authorization` header, not cookies, so a
+            # wildcard deployment does not need credentials (issue #368).
+            allow_credentials="*" not in api_settings.cors_origins,
             allow_methods=api_settings.cors_allow_methods,
             allow_headers=["*"],
             expose_headers=["*"],
@@ -161,9 +175,6 @@ def create_app():
         stac_client=stac_client,
         auth=auth,
     )
-
-    # Create exception handler instance
-    exception_handler = ExceptionHandler(logger=logging.getLogger(__name__))
 
     # Add OpenEO-specific exception handlers
     app.add_exception_handler(
