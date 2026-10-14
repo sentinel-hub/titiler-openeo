@@ -245,11 +245,22 @@ def _resolve_asset_href(
     return signer(href) if signer is not None else href
 
 
+def _to_pystac_item(item: Union[pystac.Item, Dict[str, Any]]) -> pystac.Item:
+    """Return ``item`` as a ``pystac.Item``.
+
+    `load_stac` and `load_url` hand `_reader` plain STAC dicts, while
+    `load_collection` hands it `pystac.Item`s (issue #383).
+    """
+    if isinstance(item, dict):
+        return pystac.Item.from_dict(item)
+    return item
+
+
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
     """Simplified STAC Reader."""
 
-    input: pystac.Item = attr.ib()
+    input: pystac.Item = attr.ib(converter=_to_pystac_item)
 
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
     minzoom: int = attr.ib(default=None)
@@ -1451,12 +1462,14 @@ def _inherit_derived_band_masks(
     return img
 
 
-def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
+def _reader(
+    item: Union[pystac.Item, Dict[str, Any]], bbox: BBox, **kwargs: Any
+) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
 
     Args:
-        item: STAC item dictionary (converted to pystac.Item by SimpleSTACReader)
+        item: STAC item, as a ``pystac.Item`` or a plain dict
         bbox: Bounding box to read
         **kwargs: Additional keyword arguments to pass to the reader
 

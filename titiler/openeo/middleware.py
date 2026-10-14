@@ -1,7 +1,9 @@
-"""Cache control middleware for titiler-openeo."""
+"""Middlewares for titiler-openeo."""
 
-from typing import Sequence
+from typing import Callable, Sequence
 
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .settings import ApiSettings
@@ -103,3 +105,49 @@ class DynamicCacheControlMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+class UnhandledExceptionMiddleware:
+    """Middleware to turn unhandled exceptions into error responses.
+
+    Starlette runs a handler registered for ``Exception`` in
+    ``ServerErrorMiddleware``, which is outside all user middleware. Its
+    response therefore has no CORS headers, and a browser client sees a
+    "NetworkError" and not the openEO error body (issue #368). Add this
+    middleware before ``CORSMiddleware`` so that it is inside it.
+    """
+
+    def __init__(
+        self, app: ASGIApp, handler: Callable[[Request, Exception], Response]
+    ) -> None:
+        """Initialize middleware.
+
+        Args:
+            app: The ASGI application
+            handler: Makes the error response for an unhandled exception
+        """
+        self.app = app
+        self.handler = handler
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Call the app and send an error response if it raises."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception as exc:
+            # Too late to send a different response: let the server handle it.
+            if response_started:
+                raise
+            response = self.handler(Request(scope), exc)
+            await response(scope, receive, send)

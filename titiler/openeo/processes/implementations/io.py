@@ -1,10 +1,12 @@
 """titiler.openeo.processes."""
 
-from datetime import datetime
-from typing import Any, Dict, Optional, Union
+from datetime import datetime, timezone
+from typing import Dict, Optional, Union
 
 import numpy
-from rio_tiler.constants import MAX_THREADS
+import pystac
+from pystac.extensions.projection import ProjectionExtension
+from rio_tiler.constants import MAX_THREADS, WGS84_CRS
 from rio_tiler.io import COGReader
 from rio_tiler.tasks import create_tasks
 
@@ -42,39 +44,63 @@ def load_url(
     # user-supplied URL cannot widen what gets signed.
     signer_key = SigningSettings().asset_signer or None
 
-    # Create a dummy STAC item for the COG, stamped so the read path resolves
-    # the same credential the metadata open below uses.
-    item: Dict[str, Any] = {
-        "type": "Feature",
-        "id": "cog",
-        "bbox": None,  # Will be set from the COG metadata
-        "properties": {},
-        "assets": {
-            "data": {
-                "href": url,
-                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
-            }
-        },
-    }
-    stamp_signer_key(item, signer_key)
-
-    # Get metadata from COG to set bbox, dimensions, and CRS. This open is
-    # outside any reader, so it signs the href itself.
+    # Get metadata from COG to build the item and set dimensions and CRS. This
+    # open is outside any reader, so it signs the href itself.
     signer = get_signer(signer_key)
     with COGReader(signer(url) if signer else url) as cog:
-        item["bbox"] = [float(x) for x in cog.bounds]
         cog_width = cog.dataset.width
         cog_height = cog.dataset.height
         cog_crs = cog.dataset.crs
         cog_bounds = tuple(float(x) for x in cog.bounds)
+        geographic_bounds = [float(x) for x in cog.get_geographic_bounds(WGS84_CRS)]
+        cog_transform = list(cog.dataset.transform)[:6]
 
-    # Create the tasks
+    # Build a valid STAC item for the COG, so `_reader` can parse it into the
+    # `pystac.Item` that `SimpleSTACReader` needs. The `proj:*` fields let the
+    # reader use the native grid; without them it takes the bbox as WGS84.
+    west, south, east, north = geographic_bounds
+    item = pystac.Item(
+        id="cog",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [west, south],
+                    [east, south],
+                    [east, north],
+                    [west, north],
+                    [west, south],
+                ]
+            ],
+        },
+        bbox=geographic_bounds,
+        datetime=datetime.now(timezone.utc),
+        properties={},
+    )
+    # No media type: any raster GDAL opens is accepted, not only COGs.
+    item.add_asset("data", pystac.Asset(href=url))
+    proj = ProjectionExtension.ext(item, add_if_missing=True)
+    proj.shape = [cog_height, cog_width]
+    proj.transform = cog_transform
+    if cog_crs.to_epsg():
+        proj.epsg = cog_crs.to_epsg()
+    else:
+        proj.wkt2 = cog_crs.to_wkt()
+
+    # Stamped so the read path resolves the same credential as the open above.
+    item_dict = stamp_signer_key(item.to_dict(), signer_key)
+
+    # Create the tasks, read on the native grid of the COG
     tasks = create_tasks(
         _reader,
-        [item],
+        [item_dict],
         MAX_THREADS,
-        item["bbox"],
+        cog_bounds,
         assets=["data"],
+        bounds_crs=cog_crs,
+        dst_crs=cog_crs,
+        width=cog_width,
+        height=cog_height,
     )
 
     # Return a RasterStack that will only execute the tasks when accessed

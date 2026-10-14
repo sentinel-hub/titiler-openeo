@@ -18,6 +18,7 @@ Key Design Decisions:
 
 import inspect
 import logging
+import types
 from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Union, get_args, get_origin
 
@@ -120,6 +121,15 @@ def _resolve_positional_args(
     return tuple(resolved)
 
 
+def _is_union(param_type: Any) -> bool:
+    """Check if a type is a Union, written as ``Union[A, B]`` or ``A | B``.
+
+    ``get_origin`` returns ``typing.Union`` for the first form and
+    ``types.UnionType`` for the PEP 604 form, so both must be accepted.
+    """
+    return get_origin(param_type) in (Union, types.UnionType)
+
+
 def _is_optional_type(param_type: Any) -> Tuple[bool, Any]:
     """Check if a type is Optional[T] and extract the underlying type.
 
@@ -129,7 +139,7 @@ def _is_optional_type(param_type: Any) -> Tuple[bool, Any]:
     Returns:
         (is_optional, underlying_type): If optional, underlying_type is the non-None type
     """
-    if get_origin(param_type) is not Union:
+    if not _is_union(param_type):
         return False, param_type
 
     args = get_args(param_type)
@@ -213,7 +223,7 @@ def _accepts_type(param_type: Any, target: type) -> bool:
     """Return True if ``param_type`` is ``target`` or a Union that contains it."""
     if param_type is target:
         return True
-    if get_origin(param_type) is Union:
+    if _is_union(param_type):
         return any(_accepts_type(t, target) for t in get_args(param_type))
     return False
 
@@ -408,7 +418,7 @@ def _type_to_openeo_name(param_type: Any) -> str:
         return "array"
 
     # Handle Union/Optional
-    if get_origin(param_type) is Union:
+    if _is_union(param_type):
         return _handle_union_types(get_args(param_type))
 
     # Handle dict types
@@ -464,9 +474,7 @@ def _is_rasterstack_type_expected(param_type: Any) -> bool:
     Plain dict annotations do not qualify — RasterStack is a specialized
     datacube type that should be explicitly declared.
     """
-    origin = get_origin(param_type)
-
-    if origin is Union:
+    if _is_union(param_type):
         actual_types = [a for a in get_args(param_type) if a is not type(None)]
         return any(t is RasterStack for t in actual_types)
 

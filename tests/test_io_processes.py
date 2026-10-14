@@ -3,9 +3,14 @@
 from datetime import datetime
 
 import numpy as np
+import pystac
 import pytest
+import rasterio
+import rasterio.warp
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from rasterio.errors import RasterioIOError
 from rasterio.io import MemoryFile
+from rasterio.transform import from_origin
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import RasterStack
@@ -14,12 +19,32 @@ from titiler.openeo.processes.implementations.io import (
     load_url,
     save_result,
 )
+from titiler.openeo.stacapi import LoadStac
 
 
 @pytest.fixture
 def cog_url():
     """URL to a sample COG."""
     return "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2019_2573-1160/swissalti3d_2019_2573-1160_0.5_2056_5728.tif"
+
+
+@pytest.fixture
+def local_cog(tmp_path):
+    """A small single-band GeoTIFF in UTM, with values 0..99."""
+    path = tmp_path / "tiny.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=10,
+        height=10,
+        count=1,
+        dtype="uint16",
+        crs="EPSG:32631",
+        transform=from_origin(500000, 5000000, 10, 10),
+    ) as dst:
+        dst.write(np.arange(100, dtype="uint16").reshape(1, 10, 10))
+    return str(path)
 
 
 @pytest.fixture
@@ -82,6 +107,55 @@ def test_load_url(cog_url):
 
     # Access should be lazy, so no actual data loaded yet
     assert "data" in result
+
+
+def test_load_url_reads_data(local_cog):
+    """Evaluating a load_url stack reads the COG on its native grid (issue #383)."""
+    stack = load_url(local_cog)
+
+    img = stack.first
+    assert img.crs == "EPSG:32631"
+    assert img.array.shape == (1, 10, 10)
+    np.testing.assert_array_equal(
+        img.array.data, np.arange(100, dtype="uint16").reshape(1, 10, 10)
+    )
+
+
+def test_load_stac_single_item_reads_data(monkeypatch, local_cog):
+    """Evaluating a load_stac stack built from a single Item URL works (issue #383)."""
+    item = pystac.Item(
+        id="tiny",
+        geometry={
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        },
+        bbox=[0, 0, 1, 1],
+        datetime=datetime(2021, 1, 1),
+        properties={},
+    )
+    item.add_asset("B01", pystac.Asset(href=local_cog, media_type="image/tiff"))
+    with rasterio.open(local_cog) as src:
+        item.bbox = list(
+            rasterio.warp.transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+        )
+    monkeypatch.setattr(LoadStac, "_load_stac_object", lambda self, url: item)
+
+    stack = LoadStac().load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=BoundingBox(
+            west=item.bbox[0],
+            south=item.bbox[1],
+            east=item.bbox[2],
+            north=item.bbox[3],
+        ),
+        bands=["B01"],
+        width=10,
+        height=10,
+    )
+
+    img = stack.first
+    assert img.array.shape == (1, 10, 10)
+    assert not np.ma.getmaskarray(img.array).all()
 
 
 @pytest.mark.vcr()
