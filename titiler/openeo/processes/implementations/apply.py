@@ -304,9 +304,10 @@ def _apply_temporal_dimension(
             collapsed = collapsed[numpy.newaxis, ...]
         # else: 3-D already has the leading axis acting as the band axis.
 
-        # Name the new bands after the source timestamps when each contributes one
-        # band; otherwise number them from zero (apply_dimension spec).
-        band_descriptions = _dimension_labels(list(data.keys()), collapsed.shape[0])
+        # The target dimension is not the source dimension, so the labels are
+        # always incrementing integers from zero (apply_dimension spec), also
+        # when there is one band per timestamp.
+        band_descriptions = _dimension_labels(None, collapsed.shape[0])
 
         result_img = ImageData(
             collapsed,
