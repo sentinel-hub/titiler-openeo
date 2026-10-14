@@ -541,6 +541,10 @@ def test_apply_dimension_temporal_to_spectral_collapses_via_graph():
     assert img.array.shape == (3, 2, 2)  # 3 timestamps -> 3 spectral bands (renderable)
     # band values are the per-timestamp inputs * 10
     np.testing.assert_allclose([img.array[b].mean() for b in range(3)], [2.0, 5.0, 8.0])
+    # The target dimension is not the source dimension: the labels are integers
+    # from zero, not the timestamps (apply_dimension spec).
+    assert img.band_descriptions == ["0", "1", "2"]
+    assert result.band_names == ["0", "1", "2"]
 
 
 def test_aggregate_temporal_distinct_per_interval_via_graph():
