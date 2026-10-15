@@ -3,6 +3,7 @@
 import logging
 import time
 import warnings
+from contextlib import ExitStack
 from threading import Lock
 from typing import (
     Any,
@@ -66,7 +67,11 @@ class Dims(TypedDict):
     height: int
     bounds_crs: rasterio.crs.CRS
     crs: rasterio.crs.CRS
+    #: The bounding box in ``bounds_crs``, as requested or as the union of the
+    #: items' bounds.
     bbox: List[float]
+    #: ``bbox`` reprojected to ``crs`` -- the grid the output is read on.
+    output_bbox: List[float]
 
 
 @attr.s
@@ -1019,14 +1024,14 @@ def _get_native_crs_from_item(
 
 
 def _get_target_crs_bbox(
-    items: List[pystac.Item],
+    readers: Sequence[SimpleSTACReader],
     spatial_extent: Optional[BoundingBox],
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
 ) -> Tuple[rasterio.crs.CRS, rasterio.crs.CRS, List[float]]:
     """Get bounds CRS, target CRS, and bbox from items and spatial extent.
 
     Args:
-        items: List of STAC items
+        readers: One opened reader per STAC item (see `_estimate_output_dimensions`)
         spatial_extent: Optional bounding box for the output
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
 
@@ -1058,25 +1063,23 @@ def _get_target_crs_bbox(
     native_crs: Optional[rasterio.crs.CRS] = None
 
     # Process each item to update bbox and find native CRS
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            item_bbox = src_dst.bounds
-            if item_bbox:
-                if not spatial_extent:
-                    if not target_bbox:
-                        target_bbox = list(item_bbox)
-                    else:
-                        # Compute union of two bounding boxes
-                        target_bbox = [
-                            min(target_bbox[0], item_bbox[0]),  # west
-                            min(target_bbox[1], item_bbox[1]),  # south
-                            max(target_bbox[2], item_bbox[2]),  # east
-                            max(target_bbox[3], item_bbox[3]),  # north
-                        ]
+    for src_dst in readers:
+        item_bbox = src_dst.bounds
+        if item_bbox and not spatial_extent:
+            if not target_bbox:
+                target_bbox = list(item_bbox)
+            else:
+                # Compute union of two bounding boxes
+                target_bbox = [
+                    min(target_bbox[0], item_bbox[0]),  # west
+                    min(target_bbox[1], item_bbox[1]),  # south
+                    max(target_bbox[2], item_bbox[2]),  # east
+                    max(target_bbox[3], item_bbox[3]),  # north
+                ]
 
-            # Capture native CRS from first item
-            if native_crs is None:
-                native_crs = _get_native_crs_from_item(item, src_dst.crs)
+        # Capture native CRS from first item
+        if native_crs is None:
+            native_crs = _get_native_crs_from_item(src_dst.input, src_dst.crs)
 
     if not target_bbox:
         raise ValueError("No valid bounding box found in items")
@@ -1101,47 +1104,44 @@ def _get_target_crs_bbox(
 
 
 def _get_cube_resolutions(
-    items: List[Dict],
+    readers: Sequence[SimpleSTACReader],
     target_crs: rasterio.crs.CRS,
     target_bbox: List[float],
     bands: Optional[list[str]],
 ) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
-    """Get resolutions for each datetime and band combination."""
+    """Get resolutions for each datetime and band combination.
+
+    ``readers`` are the opened readers `_estimate_output_dimensions` built, one
+    per item; each reader's ``input`` is the item itself.
+    """
     cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
 
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
-            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
-                if x_res is None or y_res is None:
-                    continue
+    for src_dst in readers:
+        asset_resolutions = _get_assets_resolutions(src_dst.input, src_dst, bands)
+        for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
+            if x_res is None or y_res is None:
+                continue
 
-                x_val: float = float(x_res)
-                y_val: float = float(y_res)
+            x_val: float = float(x_res)
+            y_val: float = float(y_res)
 
-                if asset_crs != target_crs:
-                    reprojected = _reproject_resolution(
-                        asset_crs,
-                        target_crs,
-                        target_bbox,
-                        x_val,
-                        y_val,
-                    )
-                    if reprojected[0] is None or reprojected[1] is None:
-                        continue
-                    x_val = float(reprojected[0])
-                    y_val = float(reprojected[1])
-
-                item_datetime = src_dst.input.datetime.isoformat()
-                if item_datetime not in cube_resolutions:
-                    cube_resolutions[item_datetime] = {}
-
-                if band_name not in cube_resolutions[item_datetime]:
-                    cube_resolutions[item_datetime][band_name] = []
-
-                cube_resolutions[item_datetime][band_name].append(
-                    (x_val, y_val, target_bbox)
+            if asset_crs != target_crs:
+                reprojected = _reproject_resolution(
+                    asset_crs,
+                    target_crs,
+                    target_bbox,
+                    x_val,
+                    y_val,
                 )
+                if reprojected[0] is None or reprojected[1] is None:
+                    continue
+                x_val = float(reprojected[0])
+                y_val = float(reprojected[1])
+
+            item_datetime = src_dst.input.datetime.isoformat()
+            cube_resolutions.setdefault(item_datetime, {}).setdefault(
+                band_name, []
+            ).append((x_val, y_val, target_bbox))
 
     return cube_resolutions
 
@@ -1180,21 +1180,31 @@ def _estimate_output_dimensions(
         same credential the read path does. It gets it the same way: from the key
         the item was stamped with at ingest (ADR 0005 S2.2).
     """
-    # Get bounds CRS, target CRS, and bbox
-    bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
-        items, spatial_extent, target_crs
-    )
+    # One reader per item, built once and shared by both helpers below. Building
+    # a `SimpleSTACReader` is not free: `__attrs_post_init__` resolves derived
+    # and inner bands and, for SAR items, opens an asset header
+    # (`_item_has_untrustworthy_proj`). The readers hold no file handles, so
+    # keeping them all open for the duration of the estimate costs only memory.
+    with ExitStack() as stack:
+        readers = [stack.enter_context(SimpleSTACReader(item)) for item in items]
 
-    # Reproject bbox to output CRS for resolution/dimension calculations
-    if bounds_crs != output_crs:
-        output_bbox = list(
-            transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+        # Get bounds CRS, target CRS, and bbox
+        bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
+            readers, spatial_extent, target_crs
         )
-    else:
-        output_bbox = target_bbox
 
-    # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(items, output_crs, output_bbox, bands)
+        # Reproject bbox to output CRS for resolution/dimension calculations
+        if bounds_crs != output_crs:
+            output_bbox = list(
+                transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+            )
+        else:
+            output_bbox = target_bbox
+
+        # Get resolutions for each datetime and band
+        cube_resolutions = _get_cube_resolutions(
+            readers, output_crs, output_bbox, bands
+        )
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -1229,6 +1239,7 @@ def _estimate_output_dimensions(
         bounds_crs=bounds_crs,
         crs=output_crs,
         bbox=target_bbox,
+        output_bbox=output_bbox,
     )
 
 

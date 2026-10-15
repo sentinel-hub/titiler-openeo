@@ -21,7 +21,6 @@ from pystac.extensions import item_assets as ia
 from pystac_client import Client
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
-from rasterio.warp import transform_bounds
 from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
@@ -1111,15 +1110,9 @@ class LoadCollection:
         bbox = dimensions["bbox"]
         bounds_crs = dimensions["bounds_crs"]
         output_crs = dimensions["crs"]
-
-        # Reproject bbox from bounds_crs to output_crs for the RasterStack bounds
-        # This ensures the output GeoTIFF has coordinates in the correct CRS
-        if bounds_crs != output_crs:
-            output_bbox = list(
-                transform_bounds(bounds_crs, output_crs, *bbox, densify_pts=21)
-            )
-        else:
-            output_bbox = bbox
+        # `bbox` in `output_crs`: the RasterStack bounds, so the output GeoTIFF
+        # has coordinates in the correct CRS.
+        output_bbox = dimensions["output_bbox"]
 
         # Group items by date
         items_by_date: dict[str, list[Item]] = {}
