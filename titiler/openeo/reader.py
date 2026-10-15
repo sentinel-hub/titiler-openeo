@@ -300,7 +300,15 @@ def _item_datetime(item: pystac.Item) -> datetime:
 
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
-    """Simplified STAC Reader."""
+    """Simplified STAC Reader.
+
+    This is the class a backend subclasses when it needs another per-asset
+    reader (e.g. one that routes Zarr media types to its own reader): override
+    `_get_reader`/`_get_options`, then pass the subclass as ``reader_cls`` to
+    `LoadCollection`/`LoadStac`. Every read and every dimension estimate is
+    built with it; nothing in this module needs to be copied
+    (issue #379, docs/adr/0011-backend-reader-seam.md).
+    """
 
     input: pystac.Item = attr.ib(converter=_to_pystac_item)
 
@@ -772,6 +780,18 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
+#: The asset reader class a read or a dimension estimate is built with. Every
+#: function taking one accepts ``None`` and resolves it to `SimpleSTACReader`
+#: *at call time*: tests monkeypatch ``reader.SimpleSTACReader``, which a
+#: def-time default would freeze (ADR 0011 S2.3).
+ReaderCls = Type[SimpleSTACReader]
+
+
+def _default_reader_cls(reader_cls: Optional[ReaderCls]) -> ReaderCls:
+    """``reader_cls`` or the module's `SimpleSTACReader`, looked up now."""
+    return reader_cls if reader_cls is not None else SimpleSTACReader
+
+
 def _get_asset_crs(
     item: pystac.Item,
     asset: pystac.Asset,
@@ -1241,6 +1261,7 @@ def _estimate_output_dimensions(
     height: Optional[int] = None,
     check_max_pixels: bool = True,
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
+    reader_cls: Optional[ReaderCls] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -1253,6 +1274,9 @@ def _estimate_output_dimensions(
         height: Optional user-specified height
         check_max_pixels: Whether to check pixel count limit
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
+        reader_cls: The reader class to open each item with; `SimpleSTACReader`
+            by default. A backend passes the same subclass it reads with, so the
+            estimate sees the same bounds, CRS and inner bands the read will.
 
     Returns:
         Dictionary containing:
@@ -1272,8 +1296,9 @@ def _estimate_output_dimensions(
     # and inner bands and, for SAR items, opens an asset header
     # (`_item_has_untrustworthy_proj`). The readers hold no file handles, so
     # keeping them all open for the duration of the estimate costs only memory.
+    reader_cls = _default_reader_cls(reader_cls)
     with ExitStack() as stack:
-        readers = [stack.enter_context(SimpleSTACReader(item)) for item in items]
+        readers = [stack.enter_context(reader_cls(item)) for item in items]
 
         # Get bounds CRS, target CRS, and bbox
         bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
@@ -1576,7 +1601,11 @@ def _inherit_derived_band_masks(
 
 
 def _reader(
-    item: Union[pystac.Item, Dict[str, Any]], bbox: BBox, **kwargs: Any
+    item: Union[pystac.Item, Dict[str, Any]],
+    bbox: BBox,
+    *,
+    reader_cls: Optional[ReaderCls] = None,
+    **kwargs: Any,
 ) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
@@ -1584,6 +1613,12 @@ def _reader(
     Args:
         item: STAC item, as a ``pystac.Item`` or a plain dict
         bbox: Bounding box to read
+        reader_cls: The reader class to open ``item`` with; `SimpleSTACReader`
+            by default. This is the one supported way for a backend to change
+            the asset reader -- it reaches here as an ordinary ``mosaic_reader``
+            / ``create_tasks`` keyword, which is why it is keyword-only and
+            consumed before ``**kwargs`` is forwarded to ``part()``
+            (issue #379, docs/adr/0011-backend-reader-seam.md).
         **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
@@ -1595,6 +1630,7 @@ def _reader(
         below rebuilds the reader, a token that expired mid-read is re-minted
         rather than reused (docs/adr/0005-asset-href-signing.md S3.1).
     """
+    reader_cls = _default_reader_cls(reader_cls)
     max_retries = 10
     retry_delay = 1.0  # seconds
     retries = 0
@@ -1617,7 +1653,7 @@ def _reader(
         # Before each read and each retry: stop if the client went away.
         raise_if_cancelled()
         try:
-            with SimpleSTACReader(item) as src_dst:
+            with reader_cls(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")

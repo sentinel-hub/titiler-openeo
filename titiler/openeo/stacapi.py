@@ -2,7 +2,7 @@
 
 import logging
 from threading import Lock
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Type, Union
 from urllib.parse import urljoin
 
 import numpy
@@ -47,7 +47,12 @@ from .errors import (
 from .processes.implementations.data_model import RasterStack, compute_cutline_mask
 from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
-from .reader import _estimate_output_dimensions, _item_datetime, _reader
+from .reader import (
+    SimpleSTACReader,
+    _estimate_output_dimensions,
+    _item_datetime,
+    _reader,
+)
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 from .signing import stamp_signer_key
 
@@ -810,6 +815,14 @@ class LoadCollection:
     #: time is what keeps a short-lived credential fresh across retries.
     signer_key: Optional[str] = field(default=None)
 
+    #: The asset reader class every read and every dimension estimate of this
+    #: loader is built with. A backend that needs another reader (e.g. one that
+    #: routes Zarr media types to its own per-asset reader) subclasses
+    #: `SimpleSTACReader` and passes the subclass here, instead of copying
+    #: `_reader` or `load_collection` (issue #379, ADR 0011). `None` -- the
+    #: default -- means `SimpleSTACReader`, resolved at call time.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
+
     def _resolve_parameter_reference(
         self,
         value: Any,
@@ -1333,6 +1346,7 @@ class LoadCollection:
             width,
             height,
             target_crs=target_crs,
+            reader_cls=self.reader_cls,
         )
 
         # Extract values from the result
@@ -1390,6 +1404,8 @@ class LoadCollection:
                     # DN from one source item with LUT values from another. A
                     # value-driven method (Highest/Lowest) would not preserve that.
                     "pixel_selection": PixelSelectionMethod["first"].value(),
+                    # Forwarded by mosaic_reader to `_reader`, which consumes it.
+                    "reader_cls": self.reader_cls,
                 }
 
                 img, _ = mosaic_reader(
@@ -1466,6 +1482,11 @@ class LoadStac:
     #: credential onto a host this deployment never meant to reach.
     signer_key: Optional[str] = field(default=None)
 
+    #: See `LoadCollection.reader_cls`. Forwarded to every read this class
+    #: makes, including the `LoadCollection` it delegates Collections and
+    #: Catalogs to.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
+
     def _load_stac_object(self, url: str) -> pystac.STACObject:
         """Load a STAC object from a URL.
 
@@ -1513,10 +1534,14 @@ class LoadStac:
         """
         collection_id = stac_obj.id
         stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
-        # The delegate inherits this instance's signer: handing off to a
-        # LoadCollection for a user-supplied catalogue must not silently drop
-        # the credential path.
-        load_collection = LoadCollection(stac_api=stac_api, signer_key=self.signer_key)
+        # The delegate inherits this instance's signer and reader class: handing
+        # off to a LoadCollection for a user-supplied catalogue must not
+        # silently drop the credential path or the backend's reader.
+        load_collection = LoadCollection(
+            stac_api=stac_api,
+            signer_key=self.signer_key,
+            reader_cls=self.reader_cls,
+        )
 
         return load_collection.load_collection(
             id=collection_id,
@@ -1647,6 +1672,7 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            reader_cls=self.reader_cls,
         )
 
         return RasterStack(
@@ -1764,7 +1790,7 @@ class LoadStac:
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, bbox_extent, bands, width, height
+            items, bbox_extent, bands, width, height, reader_cls=self.reader_cls
         )
 
         # Extract values from the result
@@ -1783,5 +1809,6 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            reader_cls=self.reader_cls,
         )
         return img
