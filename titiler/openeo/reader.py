@@ -3,6 +3,7 @@
 import logging
 import time
 import warnings
+from contextlib import ExitStack
 from threading import Lock
 from typing import (
     Any,
@@ -66,7 +67,11 @@ class Dims(TypedDict):
     height: int
     bounds_crs: rasterio.crs.CRS
     crs: rasterio.crs.CRS
+    #: The bounding box in ``bounds_crs``, as requested or as the union of the
+    #: items' bounds.
     bbox: List[float]
+    #: ``bbox`` reprojected to ``crs`` -- the grid the output is read on.
+    output_bbox: List[float]
 
 
 @attr.s
@@ -258,7 +263,15 @@ def _to_pystac_item(item: Union[pystac.Item, Dict[str, Any]]) -> pystac.Item:
 
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
-    """Simplified STAC Reader."""
+    """Simplified STAC Reader.
+
+    This is the class a backend subclasses when it needs another per-asset
+    reader (e.g. one that routes Zarr media types to its own reader): override
+    `_get_reader`/`_get_options`, then pass the subclass as ``reader_cls`` to
+    `LoadCollection`/`LoadStac`. Every read and every dimension estimate is
+    built with it; nothing in this module needs to be copied
+    (issue #379, docs/adr/0011-backend-reader-seam.md).
+    """
 
     input: pystac.Item = attr.ib(converter=_to_pystac_item)
 
@@ -680,6 +693,18 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
+#: The asset reader class a read or a dimension estimate is built with. Every
+#: function taking one accepts ``None`` and resolves it to `SimpleSTACReader`
+#: *at call time*: tests monkeypatch ``reader.SimpleSTACReader``, which a
+#: def-time default would freeze (ADR 0011 S2.3).
+ReaderCls = Type[SimpleSTACReader]
+
+
+def _default_reader_cls(reader_cls: Optional[ReaderCls]) -> ReaderCls:
+    """``reader_cls`` or the module's `SimpleSTACReader`, looked up now."""
+    return reader_cls if reader_cls is not None else SimpleSTACReader
+
+
 def _get_asset_crs(
     item: pystac.Item,
     asset: pystac.Asset,
@@ -958,8 +983,8 @@ def _check_pixel_limit(
     For mosaics, items with the same datetime are counted only once since they
     will be combined into a single mosaic.
     """
-    from .settings import ProcessingSettings
-
+    # A fresh instance, not the module-level one: the limit is read from the
+    # environment at call time (tests set it with `monkeypatch.setenv`).
     processing_settings = ProcessingSettings()
 
     width_int = int(width or 0)
@@ -1019,14 +1044,14 @@ def _get_native_crs_from_item(
 
 
 def _get_target_crs_bbox(
-    items: List[pystac.Item],
+    readers: Sequence[SimpleSTACReader],
     spatial_extent: Optional[BoundingBox],
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
 ) -> Tuple[rasterio.crs.CRS, rasterio.crs.CRS, List[float]]:
     """Get bounds CRS, target CRS, and bbox from items and spatial extent.
 
     Args:
-        items: List of STAC items
+        readers: One opened reader per STAC item (see `_estimate_output_dimensions`)
         spatial_extent: Optional bounding box for the output
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
 
@@ -1058,25 +1083,23 @@ def _get_target_crs_bbox(
     native_crs: Optional[rasterio.crs.CRS] = None
 
     # Process each item to update bbox and find native CRS
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            item_bbox = src_dst.bounds
-            if item_bbox:
-                if not spatial_extent:
-                    if not target_bbox:
-                        target_bbox = list(item_bbox)
-                    else:
-                        # Compute union of two bounding boxes
-                        target_bbox = [
-                            min(target_bbox[0], item_bbox[0]),  # west
-                            min(target_bbox[1], item_bbox[1]),  # south
-                            max(target_bbox[2], item_bbox[2]),  # east
-                            max(target_bbox[3], item_bbox[3]),  # north
-                        ]
+    for src_dst in readers:
+        item_bbox = src_dst.bounds
+        if item_bbox and not spatial_extent:
+            if not target_bbox:
+                target_bbox = list(item_bbox)
+            else:
+                # Compute union of two bounding boxes
+                target_bbox = [
+                    min(target_bbox[0], item_bbox[0]),  # west
+                    min(target_bbox[1], item_bbox[1]),  # south
+                    max(target_bbox[2], item_bbox[2]),  # east
+                    max(target_bbox[3], item_bbox[3]),  # north
+                ]
 
-            # Capture native CRS from first item
-            if native_crs is None:
-                native_crs = _get_native_crs_from_item(item, src_dst.crs)
+        # Capture native CRS from first item
+        if native_crs is None:
+            native_crs = _get_native_crs_from_item(src_dst.input, src_dst.crs)
 
     if not target_bbox:
         raise ValueError("No valid bounding box found in items")
@@ -1101,47 +1124,44 @@ def _get_target_crs_bbox(
 
 
 def _get_cube_resolutions(
-    items: List[Dict],
+    readers: Sequence[SimpleSTACReader],
     target_crs: rasterio.crs.CRS,
     target_bbox: List[float],
     bands: Optional[list[str]],
 ) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
-    """Get resolutions for each datetime and band combination."""
+    """Get resolutions for each datetime and band combination.
+
+    ``readers`` are the opened readers `_estimate_output_dimensions` built, one
+    per item; each reader's ``input`` is the item itself.
+    """
     cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
 
-    for item in items:
-        with SimpleSTACReader(item) as src_dst:
-            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
-            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
-                if x_res is None or y_res is None:
-                    continue
+    for src_dst in readers:
+        asset_resolutions = _get_assets_resolutions(src_dst.input, src_dst, bands)
+        for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
+            if x_res is None or y_res is None:
+                continue
 
-                x_val: float = float(x_res)
-                y_val: float = float(y_res)
+            x_val: float = float(x_res)
+            y_val: float = float(y_res)
 
-                if asset_crs != target_crs:
-                    reprojected = _reproject_resolution(
-                        asset_crs,
-                        target_crs,
-                        target_bbox,
-                        x_val,
-                        y_val,
-                    )
-                    if reprojected[0] is None or reprojected[1] is None:
-                        continue
-                    x_val = float(reprojected[0])
-                    y_val = float(reprojected[1])
-
-                item_datetime = src_dst.input.datetime.isoformat()
-                if item_datetime not in cube_resolutions:
-                    cube_resolutions[item_datetime] = {}
-
-                if band_name not in cube_resolutions[item_datetime]:
-                    cube_resolutions[item_datetime][band_name] = []
-
-                cube_resolutions[item_datetime][band_name].append(
-                    (x_val, y_val, target_bbox)
+            if asset_crs != target_crs:
+                reprojected = _reproject_resolution(
+                    asset_crs,
+                    target_crs,
+                    target_bbox,
+                    x_val,
+                    y_val,
                 )
+                if reprojected[0] is None or reprojected[1] is None:
+                    continue
+                x_val = float(reprojected[0])
+                y_val = float(reprojected[1])
+
+            item_datetime = src_dst.input.datetime.isoformat()
+            cube_resolutions.setdefault(item_datetime, {}).setdefault(
+                band_name, []
+            ).append((x_val, y_val, target_bbox))
 
     return cube_resolutions
 
@@ -1154,6 +1174,7 @@ def _estimate_output_dimensions(
     height: Optional[int] = None,
     check_max_pixels: bool = True,
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
+    reader_cls: Optional[ReaderCls] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -1166,6 +1187,9 @@ def _estimate_output_dimensions(
         height: Optional user-specified height
         check_max_pixels: Whether to check pixel count limit
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
+        reader_cls: The reader class to open each item with; `SimpleSTACReader`
+            by default. A backend passes the same subclass it reads with, so the
+            estimate sees the same bounds, CRS and inner bands the read will.
 
     Returns:
         Dictionary containing:
@@ -1180,21 +1204,32 @@ def _estimate_output_dimensions(
         same credential the read path does. It gets it the same way: from the key
         the item was stamped with at ingest (ADR 0005 S2.2).
     """
-    # Get bounds CRS, target CRS, and bbox
-    bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
-        items, spatial_extent, target_crs
-    )
+    # One reader per item, built once and shared by both helpers below. Building
+    # a `SimpleSTACReader` is not free: `__attrs_post_init__` resolves derived
+    # and inner bands and, for SAR items, opens an asset header
+    # (`_item_has_untrustworthy_proj`). The readers hold no file handles, so
+    # keeping them all open for the duration of the estimate costs only memory.
+    reader_cls = _default_reader_cls(reader_cls)
+    with ExitStack() as stack:
+        readers = [stack.enter_context(reader_cls(item)) for item in items]
 
-    # Reproject bbox to output CRS for resolution/dimension calculations
-    if bounds_crs != output_crs:
-        output_bbox = list(
-            transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+        # Get bounds CRS, target CRS, and bbox
+        bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
+            readers, spatial_extent, target_crs
         )
-    else:
-        output_bbox = target_bbox
 
-    # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(items, output_crs, output_bbox, bands)
+        # Reproject bbox to output CRS for resolution/dimension calculations
+        if bounds_crs != output_crs:
+            output_bbox = list(
+                transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+            )
+        else:
+            output_bbox = target_bbox
+
+        # Get resolutions for each datetime and band
+        cube_resolutions = _get_cube_resolutions(
+            readers, output_crs, output_bbox, bands
+        )
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -1229,6 +1264,7 @@ def _estimate_output_dimensions(
         bounds_crs=bounds_crs,
         crs=output_crs,
         bbox=target_bbox,
+        output_bbox=output_bbox,
     )
 
 
@@ -1462,8 +1498,23 @@ def _inherit_derived_band_masks(
     return img
 
 
+def _asset_names(assets: Sequence[AssetType]) -> List[str]:
+    """The asset name of each requested asset.
+
+    ``assets`` may mix plain names with rio-tiler asset dicts
+    (``{"name": ..., "bands": [...]}``), which is what a backend's
+    `LoadCollection._bands_to_assets` produces. The post-read steps in
+    `_reader` key on names, so they see the same thing either way.
+    """
+    return [asset["name"] if isinstance(asset, dict) else asset for asset in assets]
+
+
 def _reader(
-    item: Union[pystac.Item, Dict[str, Any]], bbox: BBox, **kwargs: Any
+    item: Union[pystac.Item, Dict[str, Any]],
+    bbox: BBox,
+    *,
+    reader_cls: Optional[ReaderCls] = None,
+    **kwargs: Any,
 ) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
@@ -1471,6 +1522,12 @@ def _reader(
     Args:
         item: STAC item, as a ``pystac.Item`` or a plain dict
         bbox: Bounding box to read
+        reader_cls: The reader class to open ``item`` with; `SimpleSTACReader`
+            by default. This is the one supported way for a backend to change
+            the asset reader -- it reaches here as an ordinary ``mosaic_reader``
+            / ``create_tasks`` keyword, which is why it is keyword-only and
+            consumed before ``**kwargs`` is forwarded to ``part()``
+            (issue #379, docs/adr/0011-backend-reader-seam.md).
         **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
@@ -1482,6 +1539,7 @@ def _reader(
         below rebuilds the reader, a token that expired mid-read is re-minted
         rather than reused (docs/adr/0005-asset-href-signing.md S3.1).
     """
+    reader_cls = _default_reader_cls(reader_cls)
     max_retries = 10
     retry_delay = 1.0  # seconds
     retries = 0
@@ -1502,17 +1560,18 @@ def _reader(
 
     while True:
         try:
-            with SimpleSTACReader(item) as src_dst:
+            with reader_cls(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")
-                if requested:
+                requested_names = _asset_names(requested) if requested else None
+                if requested_names:
                     # getattr, not a direct attribute access: some tests
                     # substitute a minimal stand-in for SimpleSTACReader that
                     # does not carry this (SimpleSTACReader-internal) attribute
                     # -- treat that the same as "no derived bands".
                     img = _inherit_derived_band_masks(
-                        img, getattr(src_dst, "_derived_bands", {}), requested
+                        img, getattr(src_dst, "_derived_bands", {}), requested_names
                     )
 
                 # Apply scale/offset (per band, from the deployment's ordered
@@ -1525,7 +1584,7 @@ def _reader(
                     img = _apply_scale_offset(
                         img,
                         item,
-                        kwargs.get("assets"),
+                        requested_names,
                         sources=sources,
                         plugin_pairs=_plugin_pairs_for(src_dst),
                     )

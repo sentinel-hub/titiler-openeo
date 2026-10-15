@@ -245,9 +245,10 @@ def test_cube_resolutions_use_each_bands_own_gsd(eopf_item):
     target_crs = rasterio.crs.CRS.from_epsg(32627)
     target_bbox = list(eopf_item.bbox)
 
-    resolutions = _get_cube_resolutions(
-        [eopf_item], target_crs, target_bbox, list(EXPECTED_BANDS)
-    )
+    with SimpleSTACReader(eopf_item) as src_dst:
+        resolutions = _get_cube_resolutions(
+            [src_dst], target_crs, target_bbox, list(EXPECTED_BANDS)
+        )
     (per_band,) = resolutions.values()
 
     for name, expected_gsd in EXPECTED_BANDS.items():
@@ -265,9 +266,10 @@ def test_cube_resolutions_gsd_fallback_covers_assets_with_no_proj_transform(
     target_crs = rasterio.crs.CRS.from_epsg(32627)
     target_bbox = list(eopf_item.bbox)
 
-    resolutions = _get_cube_resolutions(
-        [eopf_item], target_crs, target_bbox, ["AOT_10m", "SCL_20m", "WVP_10m"]
-    )
+    with SimpleSTACReader(eopf_item) as src_dst:
+        resolutions = _get_cube_resolutions(
+            [src_dst], target_crs, target_bbox, ["AOT_10m", "SCL_20m", "WVP_10m"]
+        )
     (per_band,) = resolutions.values()
 
     assert per_band["AOT_10m"][0][:2] == (10.0, 10.0)
