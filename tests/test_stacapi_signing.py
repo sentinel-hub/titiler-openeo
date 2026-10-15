@@ -183,7 +183,7 @@ def test_load_stac_passes_its_signer_to_the_delegate():
     captured = {}
 
     class _Delegate:
-        def __init__(self, stac_api, signer_key=None):
+        def __init__(self, stac_api, signer_key=None, reader_cls=None):
             captured["signer_key"] = signer_key
 
         def load_collection(self, **kwargs):
