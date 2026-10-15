@@ -209,3 +209,64 @@ def test_load_stac_single_item_reads_with_its_reader_cls(monkeypatch):
     )
     assert isinstance(stack.first, ImageData)
     assert RecordingReader.built == ["item"]
+
+
+# ---------------------------------------------------------------------------
+# The two other things a backend used to copy `load_collection` for
+# ---------------------------------------------------------------------------
+
+
+def test_bands_to_assets_override_reaches_mosaic_reader_only(monkeypatch):
+    """The override's result is what is read; `bands` still labels the output."""
+
+    class ParsingLoadCollection(LoadCollection):
+        def _bands_to_assets(self, bands):
+            return [
+                {"name": b.split("|")[0], "bands": [b.split("|")[1]]}
+                for b in bands or []
+            ]
+
+    captured = {}
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        captured.update(kwargs)
+        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+
+    monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
+    items = [Item.from_dict(_item_dict())]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    loader = ParsingLoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="c", spatial_extent=BBOX, bands=["B01|b1"], width=5, height=5
+    )
+    next(iter(stack.values()))
+
+    assert captured["assets"] == [{"name": "B01", "bands": ["b1"]}]
+    assert stack.band_names == ["B01|b1"]
+
+
+def test_empty_date_group_is_skipped_not_fatal(monkeypatch):
+    """A date whose items yield no pixels drops out of the stack with a warning."""
+    from rio_tiler.errors import EmptyMosaicError
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        if items[0].id == "empty":
+            raise EmptyMosaicError("nothing here")
+        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+
+    monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
+    items = [
+        Item.from_dict(_item_dict("full", "2021-01-01T00:00:00Z")),
+        Item.from_dict(_item_dict("empty", "2021-01-02T00:00:00Z")),
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="c", spatial_extent=BBOX, bands=["B01"], width=5, height=5
+    )
+
+    # Keys are known up front (lazy stack); only the realised values shrink.
+    assert len(stack.keys()) == 2
+    assert len(list(stack.values())) == 1
