@@ -15,13 +15,21 @@ Verified live on 2026-10-08 against Planetary Computer products of baselines
 02.12, 03.00 and 05.13: all share the layout parsed here, under
 `General_Info/Product_Image_Characteristics`.
 
+The same file gives the DN that marks no data (`Special_Values` with
+`SPECIAL_VALUE_TEXT` NODATA, 0 on all three baselines). Planetary Computer
+does not publish it in STAC or in the COG header either, so without it the
+swath border (DN 0) is read as valid and becomes -0.1 after the offset
+(#463). `SATURATED` is not returned: a saturated pixel holds real, clipped
+data, and its value changes between baselines (65535 in 03.00, 32767 in
+05.13).
+
 Parsed with `defusedxml` and matched by local tag name, for the same reasons
 as `sentinel2/tile_metadata.py`.
 """
 
 import re
 from threading import Condition
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, NamedTuple, Optional
 from xml.etree.ElementTree import Element
 
 from cachetools import LRUCache, cached
@@ -36,7 +44,9 @@ from .registry import ProductScaleOffset, ScaleOffsetPlugin
 __all__ = [
     "SENTINEL2_BOA",
     "parse_product_scale_offset",
+    "parse_product_nodata",
     "get_product_scale_offset",
+    "get_product_nodata",
     "band_key",
 ]
 
@@ -98,6 +108,21 @@ def parse_product_scale_offset(xml_bytes: bytes) -> ProductScaleOffset:
     return pairs
 
 
+def parse_product_nodata(xml_bytes: bytes) -> Optional[float]:
+    """The NODATA DN from `MTD_MSIL2A.xml` `Special_Values`, or None."""
+    root = ET.fromstring(xml_bytes)
+    for e in _iter_named(root, "Special_Values"):
+        text = index = None
+        for child in e:
+            if _local_name(child.tag) == "SPECIAL_VALUE_TEXT":
+                text = (child.text or "").strip()
+            elif _local_name(child.tag) == "SPECIAL_VALUE_INDEX":
+                index = (child.text or "").strip()
+        if text == "NODATA" and index:
+            return float(index)
+    return None
+
+
 def band_key(asset: Mapping[str, Any]) -> Optional[str]:
     """The physical band of a data asset, from its `eo:bands`/`bands` name.
 
@@ -116,6 +141,11 @@ def band_key(asset: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+class _Product(NamedTuple):
+    pairs: ProductScaleOffset
+    nodata: Optional[float]
+
+
 _product_cache: LRUCache = LRUCache(maxsize=_settings.product_metadata_cache_maxsize)
 _product_cache_condition = Condition()
 
@@ -125,19 +155,41 @@ _product_cache_condition = Condition()
     key=lambda href, fetch_href=None, fetcher=None: hashkey(href),
     condition=_product_cache_condition,
 )
+def _get_product(
+    href: str,
+    fetch_href: Optional[str] = None,
+    fetcher: Optional[AssetFetcher] = None,
+) -> _Product:
+    """Fetch and parse a product's `MTD_MSIL2A.xml`, cached by ``href``.
+
+    ``href`` is the unsigned href and is the cache key; ``fetch_href`` is the
+    href actually fetched (e.g. with a SAS token). Keying on the unsigned href
+    keeps the entry across token renewals: the file never changes. One fetch
+    serves both the scale/offset pairs and the nodata value.
+    """
+    fetcher = fetcher or get_default_fetcher()
+    xml_bytes = fetcher.fetch(fetch_href or href)
+    return _Product(
+        parse_product_scale_offset(xml_bytes), parse_product_nodata(xml_bytes)
+    )
+
+
 def get_product_scale_offset(
     href: str,
     fetch_href: Optional[str] = None,
     fetcher: Optional[AssetFetcher] = None,
 ) -> ProductScaleOffset:
-    """Fetch and parse a product's `MTD_MSIL2A.xml`, cached by ``href``.
+    """The per-band scale/offset pairs of a product (see `_get_product`)."""
+    return _get_product(href, fetch_href, fetcher).pairs
 
-    ``href`` is the unsigned href and is the cache key; ``fetch_href`` is the
-    href actually fetched (e.g. with a SAS token). Keying on the unsigned href
-    keeps the entry across token renewals: the file never changes.
-    """
-    fetcher = fetcher or get_default_fetcher()
-    return parse_product_scale_offset(fetcher.fetch(fetch_href or href))
+
+def get_product_nodata(
+    href: str,
+    fetch_href: Optional[str] = None,
+    fetcher: Optional[AssetFetcher] = None,
+) -> Optional[float]:
+    """The NODATA DN of a product (see `_get_product`)."""
+    return _get_product(href, fetch_href, fetcher).nodata
 
 
 SENTINEL2_BOA = ScaleOffsetPlugin(
@@ -148,4 +200,5 @@ SENTINEL2_BOA = ScaleOffsetPlugin(
     roles=frozenset({"metadata"}),
     load=get_product_scale_offset,
     band_key=band_key,
+    nodata=get_product_nodata,
 )

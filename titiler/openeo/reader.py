@@ -9,6 +9,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -51,7 +52,7 @@ from .bandsources import (
 from .cancellation import cancellable_sleep, raise_if_cancelled
 from .errors import OutputLimitExceeded
 from .scaleoffset import PLUGINS as SCALE_OFFSET_PLUGINS
-from .scaleoffset import ProductScaleOffset, find_metadata_asset
+from .scaleoffset import ProductScaleOffset, ScaleOffsetPlugin, find_metadata_asset
 from .settings import ProcessingSettings
 from .signing import HrefSigner, signer_for_item
 
@@ -606,7 +607,42 @@ class SimpleSTACReader(MultiBaseReader):
             if asset_nodata is not None:
                 info["method_options"]["nodata"] = asset_nodata
 
+        # Last, a scale/offset plugin's product metadata (#463): Planetary
+        # Computer's Sentinel-2 L2A gives the NODATA DN only in
+        # `MTD_MSIL2A.xml`. It must be a read option, not a mask set after
+        # the read: the warp then also leaves those pixels out when it
+        # resamples, and after the BOA offset DN 0 is -0.1, which cannot be
+        # told apart from a valid negative reflectance.
+        if "nodata" not in info["method_options"]:
+            plugin_nodata = self._plugin_nodata(extras)
+            if plugin_nodata is not None:
+                info["method_options"]["nodata"] = plugin_nodata
+
         return info
+
+    def _plugin_nodata(self, extras: Mapping[str, Any]) -> Optional[float]:
+        """The nodata DN that the item's scale/offset plugins give for an asset.
+
+        Only the plugins the deployment lists for this collection
+        (`_scale_offset_sources`), and only for an asset the plugin knows
+        (its ``band_key`` is not None): e.g. SCL is left as it is.
+        """
+        for name in _scale_offset_sources(self.input):
+            plugin = SCALE_OFFSET_PLUGINS.get(name)
+            if plugin is None or plugin.nodata is None:
+                continue
+            if plugin.band_key(extras) is None:
+                continue
+            nodata = _load_from_plugin(
+                plugin,
+                self.input,
+                plugin.nodata,
+                self.signer,
+                self.band_source_fetcher,
+            )
+            if nodata is not None:
+                return nodata
+        return None
 
     # The regular STAC Reader doesn't have a `read` method
     def read(
@@ -1305,26 +1341,41 @@ def _is_identity(pair: Tuple[float, float]) -> bool:
 PluginPairs = Callable[[str], Optional[ProductScaleOffset]]
 
 
-def _plugin_pairs_for(src_dst: Any) -> PluginPairs:
-    """Load a plugin's pairs for the item ``src_dst`` reads.
+def _load_from_plugin(
+    plugin: ScaleOffsetPlugin,
+    item: pystac.Item,
+    loader: Callable[[str, str, Any], Any],
+    signer: Optional[HrefSigner],
+    fetcher: Any,
+) -> Any:
+    """Call ``loader`` (one of ``plugin``'s) on the item's metadata asset.
 
     Finds the plugin's metadata asset on the item, signs its href with the
     reader's signer, and fetches it with the reader's band-source fetcher --
     the same path the derived-band readers use for their XML. The unsigned
-    href is the plugin's cache key.
+    href is the plugin's cache key. None when the plugin does not apply.
     """
+    asset = find_metadata_asset(plugin, item)
+    if asset is None:
+        return None
+    return loader(
+        _resolve_asset_href(asset), _resolve_asset_href(asset, signer), fetcher
+    )
+
+
+def _plugin_pairs_for(src_dst: Any) -> PluginPairs:
+    """Load a plugin's pairs for the item ``src_dst`` reads (`_load_from_plugin`)."""
     item = getattr(src_dst, "input", None)
 
     def load(name: str) -> Optional[ProductScaleOffset]:
         if not isinstance(item, pystac.Item):
             return None
         plugin = SCALE_OFFSET_PLUGINS[name]
-        asset = find_metadata_asset(plugin, item)
-        if asset is None:
-            return None
-        return plugin.load(
-            _resolve_asset_href(asset),
-            _resolve_asset_href(asset, getattr(src_dst, "signer", None)),
+        return _load_from_plugin(
+            plugin,
+            item,
+            plugin.load,
+            getattr(src_dst, "signer", None),
             getattr(src_dst, "band_source_fetcher", None),
         )
 

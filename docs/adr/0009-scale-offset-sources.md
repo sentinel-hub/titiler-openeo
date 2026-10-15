@@ -81,7 +81,9 @@ A plugin (`titiler/openeo/scaleoffset/`) has:
 - a metadata asset pattern, media types and roles, matched in the same way as
   a band source (ADR 0002);
 - `load(href, fetch_href, fetcher)`, which returns `{band key: (scale, offset)}`;
-- `band_key(asset fields)`.
+- `band_key(asset fields)`;
+- optionally, `nodata(href, fetch_href, fetcher)`, which returns the DN that
+  marks no data in the bands the plugin knows, or None (see 2.5).
 
 The reader signs the asset href with the item's signer and fetches it with the
 band-source fetcher. This is the same path as the Sentinel-2 angle bands
@@ -104,6 +106,8 @@ The first plugin is `sentinel2-boa`:
 - It maps a data asset to a physical band by its `eo:bands[0].name`. This
   name is `B04` on all three catalogues, whatever the asset key.
 - It was checked on baselines 02.12, 03.00 and 05.13.
+- It also gives the NODATA DN from `Special_Values` (0 on all baselines).
+  One fetch serves the pairs and the nodata value.
 
 Source names are a `Literal` in `settings.py`, so an unknown name fails at
 startup. A test makes sure that the `Literal` and the plugin registry agree.
@@ -113,6 +117,33 @@ startup. A test makes sure that the `Literal` and the plugin registry agree.
 A plugin that applies but cannot fetch or parse its file raises. The read
 fails and does not return raw DN without an error. `_reader` retries only on
 `RasterioIOError`, so such an error is not retried.
+
+### 2.5 Nodata from a plugin (#463)
+
+Planetary Computer `sentinel-2-l2a` gives the NODATA DN in neither STAC nor
+the COG header. Without it, the pixels outside the swath (DN 0) are not
+masked. The BOA offset then changes them to -0.1, and they hide valid pixels
+of the next scene in a mosaic.
+
+The order of the nodata sources for an asset is:
+
+1. STAC: `raster:bands[].nodata`, then the asset `nodata`;
+2. the first plugin in the collection's scale/offset sources (2.1) that knows
+   the band and gives a nodata value;
+3. the COG header (rio-tiler's default).
+
+The plugin value is a read option (`nodata`), not a mask set after the read.
+Thus the warp also leaves the pixels out when it resamples, and the mask is
+on the DN, before `_apply_scale_offset`. After the offset, -0.1 cannot be told
+apart from a valid negative reflectance.
+
+The plugin value is looked up in `_get_asset_info`, at read time. The file is
+the one that the scale/offset step fetches, and the cache is the same, so the
+fetch happens one time for each product. A band that the plugin does not know
+(for example `SCL`) gets no plugin nodata and causes no fetch.
+
+`SATURATED` is not masked. A saturated pixel holds real, clipped data, and its
+value changes between baselines (65535 in 03.00, 32767 in 05.13).
 
 ## 3. Consequences
 

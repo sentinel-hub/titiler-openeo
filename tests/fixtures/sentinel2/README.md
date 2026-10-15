@@ -33,6 +33,7 @@ plugin, ADR 0009):
 
 Trimmed to `General_Info/Product_Info` (URI, type, baseline) and the parts of
 `General_Info/Product_Image_Characteristics` that the parser reads:
+`Special_Values` (NODATA and SATURATED, added 2026-10-15 for #463),
 `QUANTIFICATION_VALUES_LIST`, `BOA_ADD_OFFSET_VALUES_LIST` and
 `Spectral_Information_List` (attributes only). The values are real, not
 synthetic. 51 KB -> 2.5 KB.
