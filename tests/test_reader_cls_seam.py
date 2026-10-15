@@ -270,3 +270,24 @@ def test_empty_date_group_is_skipped_not_fatal(monkeypatch):
     # Keys are known up front (lazy stack); only the realised values shrink.
     assert len(stack.keys()) == 2
     assert len(list(stack.values())) == 1
+
+
+def test_reader_accepts_asset_dicts_from_bands_to_assets(monkeypatch):
+    """The post-read steps key on asset names, so rio-tiler asset dicts
+    (what a backend's `_bands_to_assets` produces) must work end to end:
+    here the asset-level `raster:scale`/`raster:offset` of `B01` is applied."""
+    monkeypatch.setattr(reader_module.processing_settings, "apply_scale_offset", True)
+    monkeypatch.setattr(
+        reader_module.processing_settings, "scale_offset_sources", ["stac"]
+    )
+    item = _item_dict()
+    item["assets"]["B01"].update({"raster:scale": 0.5, "raster:offset": 1.0})
+
+    img = _reader(
+        item,
+        (0, 0, 1, 1),
+        reader_cls=RecordingReader,
+        assets=[{"name": "B01", "bands": ["b1"]}],
+    )
+    assert img.array.dtype == "float32"
+    assert float(img.array[0, 0, 0]) == 1.0

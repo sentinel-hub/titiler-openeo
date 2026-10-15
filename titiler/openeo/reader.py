@@ -983,8 +983,8 @@ def _check_pixel_limit(
     For mosaics, items with the same datetime are counted only once since they
     will be combined into a single mosaic.
     """
-    from .settings import ProcessingSettings
-
+    # A fresh instance, not the module-level one: the limit is read from the
+    # environment at call time (tests set it with `monkeypatch.setenv`).
     processing_settings = ProcessingSettings()
 
     width_int = int(width or 0)
@@ -1498,6 +1498,17 @@ def _inherit_derived_band_masks(
     return img
 
 
+def _asset_names(assets: Sequence[AssetType]) -> List[str]:
+    """The asset name of each requested asset.
+
+    ``assets`` may mix plain names with rio-tiler asset dicts
+    (``{"name": ..., "bands": [...]}``), which is what a backend's
+    `LoadCollection._bands_to_assets` produces. The post-read steps in
+    `_reader` key on names, so they see the same thing either way.
+    """
+    return [asset["name"] if isinstance(asset, dict) else asset for asset in assets]
+
+
 def _reader(
     item: Union[pystac.Item, Dict[str, Any]],
     bbox: BBox,
@@ -1553,13 +1564,14 @@ def _reader(
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")
-                if requested:
+                requested_names = _asset_names(requested) if requested else None
+                if requested_names:
                     # getattr, not a direct attribute access: some tests
                     # substitute a minimal stand-in for SimpleSTACReader that
                     # does not carry this (SimpleSTACReader-internal) attribute
                     # -- treat that the same as "no derived bands".
                     img = _inherit_derived_band_masks(
-                        img, getattr(src_dst, "_derived_bands", {}), requested
+                        img, getattr(src_dst, "_derived_bands", {}), requested_names
                     )
 
                 # Apply scale/offset (per band, from the deployment's ordered
@@ -1572,7 +1584,7 @@ def _reader(
                     img = _apply_scale_offset(
                         img,
                         item,
-                        kwargs.get("assets"),
+                        requested_names,
                         sources=sources,
                         plugin_pairs=_plugin_pairs_for(src_dst),
                     )
