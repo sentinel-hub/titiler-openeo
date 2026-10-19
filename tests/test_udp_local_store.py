@@ -85,14 +85,6 @@ def test_user_isolation_on_upsert_and_delete(udp_store: LocalUdpStore):
         process_graph={"process_id": "noop"},
     )
 
-    # Another user cannot overwrite the same id
-    with pytest.raises(ValueError):
-        udp_store.upsert_udp(
-            user_id="user2",
-            udp_id=udp_id,
-            process_graph={"process_id": "noop"},
-        )
-
     # Another user cannot delete it
     with pytest.raises(ValueError):
         udp_store.delete_udp(user_id="user2", udp_id=udp_id)
@@ -100,6 +92,36 @@ def test_user_isolation_on_upsert_and_delete(udp_store: LocalUdpStore):
     # Original user can delete
     assert udp_store.delete_udp(user_id="user1", udp_id=udp_id) is True
     assert udp_store.get_udp(user_id="user1", udp_id=udp_id) is None
+
+
+def test_same_udp_id_for_different_users(udp_store):
+    """Two users can each hold a UDP with the same id (#469)."""
+    udp_id = "ndvi"
+    udp_store.upsert_udp(
+        user_id="user1", udp_id=udp_id, process_graph={"process_id": "one"}
+    )
+    udp_store.upsert_udp(
+        user_id="user2", udp_id=udp_id, process_graph={"process_id": "two"}
+    )
+
+    udp1 = udp_store.get_udp(user_id="user1", udp_id=udp_id)
+    udp2 = udp_store.get_udp(user_id="user2", udp_id=udp_id)
+    assert udp1["process_graph"] == {"process_id": "one"}
+    assert udp2["process_graph"] == {"process_id": "two"}
+    assert [u["id"] for u in udp_store.list_udps(user_id="user2")] == [udp_id]
+
+    # Replacing one user's UDP leaves the other user's UDP unchanged
+    udp_store.upsert_udp(
+        user_id="user2", udp_id=udp_id, process_graph={"process_id": "three"}
+    )
+    udp1 = udp_store.get_udp(user_id="user1", udp_id=udp_id)
+    assert udp1["process_graph"] == {"process_id": "one"}
+
+    # Deleting one user's UDP leaves the other user's UDP in place
+    assert udp_store.delete_udp(user_id="user1", udp_id=udp_id) is True
+    assert udp_store.get_udp(user_id="user1", udp_id=udp_id) is None
+    udp2 = udp_store.get_udp(user_id="user2", udp_id=udp_id)
+    assert udp2["process_graph"] == {"process_id": "three"}
 
 
 def test_list_with_pagination(udp_store: LocalUdpStore):

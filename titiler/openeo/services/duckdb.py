@@ -271,6 +271,63 @@ def _deserialize_json(value: Optional[Any]) -> Optional[Any]:
     return value
 
 
+_UDP_COLUMNS = """
+    id VARCHAR NOT NULL,
+    user_id VARCHAR NOT NULL,
+    process_graph JSON NOT NULL,
+    summary VARCHAR,
+    description VARCHAR,
+    parameters JSON,
+    returns JSON,
+    categories JSON,
+    deprecated BOOLEAN DEFAULT FALSE,
+    experimental BOOLEAN DEFAULT FALSE,
+    exceptions JSON,
+    examples JSON,
+    links JSON,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (user_id, id)
+"""
+
+_UDP_COLUMN_NAMES = (
+    "id, user_id, process_graph, summary, description, parameters, returns, "
+    "categories, deprecated, experimental, exceptions, examples, links, "
+    "created_at, updated_at"
+)
+
+
+def _migrate_udp_primary_key(con: Any) -> None:
+    """Key an older `udp_definitions` table on `(user_id, id)`.
+
+    Older tables are keyed on `id` alone, which lets only one user hold an id
+    (#469). DuckDB cannot drop a primary key, so the table is rebuilt.
+    """
+    row = con.execute(
+        """
+        SELECT constraint_column_names
+        FROM duckdb_constraints()
+        WHERE table_name = 'udp_definitions' AND constraint_type = 'PRIMARY KEY'
+        """
+    ).fetchone()
+    if row is None or sorted(row[0]) == ["id", "user_id"]:
+        return
+
+    con.execute("BEGIN TRANSACTION")
+    try:
+        con.execute(f"CREATE TABLE udp_definitions_new ({_UDP_COLUMNS})")
+        con.execute(
+            f"INSERT INTO udp_definitions_new ({_UDP_COLUMN_NAMES}) "
+            f"SELECT {_UDP_COLUMN_NAMES} FROM udp_definitions"
+        )
+        con.execute("DROP TABLE udp_definitions")
+        con.execute("ALTER TABLE udp_definitions_new RENAME TO udp_definitions")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+
+
 @define(kw_only=True)
 class DuckDBUdpStore(UdpStore):
     """DuckDB UDP Store."""
@@ -280,27 +337,8 @@ class DuckDBUdpStore(UdpStore):
     def __attrs_post_init__(self):
         """Post init: create UDP table if not exists."""
         with duckdb.connect(self.store) as con:
-            con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS udp_definitions (
-                    id VARCHAR PRIMARY KEY,
-                    user_id VARCHAR NOT NULL,
-                    process_graph JSON NOT NULL,
-                    summary VARCHAR,
-                    description VARCHAR,
-                    parameters JSON,
-                    returns JSON,
-                    categories JSON,
-                    deprecated BOOLEAN DEFAULT FALSE,
-                    experimental BOOLEAN DEFAULT FALSE,
-                    exceptions JSON,
-                    examples JSON,
-                    links JSON,
-                    created_at TIMESTAMP NOT NULL,
-                    updated_at TIMESTAMP NOT NULL
-                );
-                """
-            )
+            con.execute(f"CREATE TABLE IF NOT EXISTS udp_definitions ({_UDP_COLUMNS})")
+            _migrate_udp_primary_key(con)
 
     def list_udps(
         self, user_id: str, limit: int = 100, offset: int = 0
@@ -387,15 +425,12 @@ class DuckDBUdpStore(UdpStore):
         with duckdb.connect(self.store) as con:
             existing = con.execute(
                 """
-                SELECT user_id
+                SELECT id
                 FROM udp_definitions
-                WHERE id = ?
+                WHERE id = ? AND user_id = ?
                 """,
-                [udp_id],
+                [udp_id, user_id],
             ).fetchone()
-
-            if existing is not None and existing[0] != user_id:
-                raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
 
             if existing is not None:
                 con.execute(
@@ -413,7 +448,7 @@ class DuckDBUdpStore(UdpStore):
                         examples = ?,
                         links = ?,
                         updated_at = ?
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                     """,
                     [
                         _serialize_json(process_graph),
@@ -429,6 +464,7 @@ class DuckDBUdpStore(UdpStore):
                         _serialize_json(links),
                         now,
                         udp_id,
+                        user_id,
                     ],
                 )
             else:
