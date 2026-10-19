@@ -357,3 +357,11 @@ def test_collection_links_to_queryables(monkeypatch, app_no_auth):
     ]
     assert len(links) == 1
     assert links[0]["href"].endswith("/collections/sentinel-2-l2a/queryables")
+    # The cached collection is not modified by the request.
+    cached = stacApiBackend(url="https://stac.eoapi.dev").get_collection(
+        "sentinel-2-l2a"
+    )
+    assert all(
+        link.get("rel") != "http://www.opengis.net/def/rel/ogc/1.0/queryables"
+        for link in cached.get("links", [])
+    )

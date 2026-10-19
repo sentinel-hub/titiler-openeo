@@ -1,7 +1,9 @@
 """Tests for GET /collections/{collection_id}/queryables."""
 
+import copy
 from typing import Any, Dict, List
 
+import pystac
 import pytest
 from pystac_client.exceptions import APIError
 
@@ -25,28 +27,55 @@ QUERYABLES: Dict[str, Any] = {
 }
 
 
-class _FakeClient:
+def _api_error(status_code, message="error"):
+    error = APIError(message)
+    error.status_code = status_code
+    return error
+
+
+class _FakeStacIO:
     def __init__(self, result: Any):
         self._result = result
         self.urls: List[str] = []
 
-    def get_queryables_from(self, url: str) -> Dict[str, Any]:
+    def read_json(self, url: str) -> Any:
         self.urls.append(url)
         if isinstance(self._result, Exception):
             raise self._result
-        return dict(self._result)
+        return copy.deepcopy(self._result)
+
+
+class _FakeClient:
+    def __init__(self, result: Any, collection_error: Any = None):
+        self._stac_io = _FakeStacIO(result)
+        self._collection_error = collection_error
+        self.urls = self._stac_io.urls
+
+    def get_collection(self, collection_id: str) -> pystac.Collection:
+        if self._collection_error is not None:
+            raise self._collection_error
+        return pystac.Collection(
+            id=collection_id,
+            description="fake",
+            extent=pystac.Extent(
+                pystac.SpatialExtent([[-180, -90, 180, 90]]),
+                pystac.TemporalExtent([[None, None]]),
+            ),
+        )
 
 
 @pytest.fixture
 def fake_client(monkeypatch, request):
-    fake = _FakeClient(request.param)
+    fake = _FakeClient(*request.param)
     monkeypatch.setattr(stacApiBackend, "client", property(lambda self: fake))
     stacapi.queryables_cache.clear()
+    stacapi.collection_cache.clear()
     yield fake
     stacapi.queryables_cache.clear()
+    stacapi.collection_cache.clear()
 
 
-@pytest.mark.parametrize("fake_client", [QUERYABLES], indirect=True)
+@pytest.mark.parametrize("fake_client", [(QUERYABLES,)], indirect=True)
 def test_queryables_proxies_stac_api(fake_client, app_no_auth):
     response = app_no_auth.get("/collections/sentinel-1-grd/queryables")
 
@@ -66,7 +95,11 @@ def test_queryables_proxies_stac_api(fake_client, app_no_auth):
 
 @pytest.mark.parametrize(
     "fake_client",
-    [APIError("Not Found"), APIError("Invalid response: expected 'properties'")],
+    [
+        (_api_error(404, "Not Found"),),
+        (_api_error(501, "Not Implemented"),),
+        ({"type": "object"},),
+    ],
     indirect=True,
 )
 def test_queryables_fallback_to_empty_schema(fake_client, app_no_auth):
@@ -78,6 +111,57 @@ def test_queryables_fallback_to_empty_schema(fake_client, app_no_auth):
     assert body["type"] == "object"
     assert body["additionalProperties"] is False
     assert body["$schema"] == "https://json-schema.org/draft/2019-09/schema"
+
+
+@pytest.mark.parametrize(
+    "fake_client",
+    [(_api_error(404), _api_error(404, "Collection does not exist"))],
+    indirect=True,
+)
+def test_queryables_unknown_collection(fake_client, app_no_auth):
+    response = app_no_auth.get("/collections/does-not-exist/queryables")
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "ResourceNotFound"
+
+
+@pytest.mark.parametrize(
+    "fake_client",
+    [(_api_error(401, "Unauthorized"),), (_api_error(503, "Unavailable"),)],
+    indirect=True,
+)
+def test_queryables_upstream_errors_are_not_masked(fake_client, app_no_auth):
+    response = app_no_auth.get("/collections/sentinel-2-l2a/queryables")
+
+    assert response.status_code == 500
+    assert len(stacapi.queryables_cache) == 0
+
+
+def test_queryables_keep_relative_refs_resolvable():
+    schema = {
+        "$id": "https://stac.example.com/collections/c/queryables",
+        "properties": {
+            "orbit": {"$ref": "../schemas/orbit.json"},
+            "local": {"$ref": "#/$defs/local"},
+            "nested": {
+                "$id": "https://other.example.com/schemas/",
+                "properties": {"x": {"$ref": "x.json"}},
+            },
+        },
+    }
+
+    out = stacapi._absolutize_refs(schema, "https://ignored.example.com/")
+
+    props = out["properties"]
+    assert (
+        props["orbit"]["$ref"]
+        == "https://stac.example.com/collections/schemas/orbit.json"
+    )
+    assert props["local"]["$ref"] == "#/$defs/local"
+    assert props["nested"]["properties"]["x"]["$ref"] == (
+        "https://other.example.com/schemas/x.json"
+    )
+    assert schema["properties"]["orbit"]["$ref"] == "../schemas/orbit.json"
 
 
 def test_queryables_excluded_collection():

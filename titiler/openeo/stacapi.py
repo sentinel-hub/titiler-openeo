@@ -3,6 +3,7 @@
 import logging
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from urllib.parse import urljoin
 
 import numpy
 import pyproj
@@ -39,6 +40,7 @@ from .errors import (
     NoDataAvailable,
     OutputLimitExceeded,
     ProcessParameterInvalid,
+    ResourceNotFound,
     STACLoadError,
     TemporalExtentEmpty,
     UnsupportedSTACObject,
@@ -71,6 +73,36 @@ logger = logging.getLogger(__name__)
 RESERVED_QUERYABLES = ("datetime", "geometry", "id")
 
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema"
+
+#: STAC API status codes that mean "no queryables for this collection".
+UNSUPPORTED_QUERYABLES_STATUS = (404, 405, 501)
+
+
+def _absolutize_refs(schema: Any, base: str) -> Any:
+    """Return a copy of ``schema`` with relative ``$ref``/``$id`` made absolute.
+
+    The openEO endpoint sets its own ``$id`` on the schema, which changes the
+    base URI. Relative references must keep resolving against the STAC API.
+    Nested ``$id`` values change the base for their sub-schema. Fragment-only
+    references (``#/...``) stay as they are: they point inside the document.
+    """
+    if isinstance(schema, list):
+        return [_absolutize_refs(value, base) for value in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    if isinstance(out.get("$id"), str):
+        base = urljoin(base, out["$id"])
+        out["$id"] = base
+    for key, value in out.items():
+        if key == "$ref" and isinstance(value, str):
+            if not value.startswith("#"):
+                out[key] = urljoin(base, value)
+        elif key != "$id":
+            out[key] = _absolutize_refs(value, base)
+    return out
+
 
 #: Media types that indicate a packaged archive rather than a single raster
 #: asset. CDSE's Sentinel-1 GRD ``Product`` asset has role ``data`` and media
@@ -554,24 +586,35 @@ class stacApiBackend:
 
         Proxies ``{stac_api}/collections/{collection_id}/queryables`` (STAC API
         Filter extension). Returns a schema with no properties when the STAC API
-        does not support queryables for the collection.
+        does not support queryables for an existing collection. Raises
+        ``ResourceNotFound`` for an unknown collection. Other STAC API errors
+        are raised (and thus not cached).
         """
         if collection_id in self.exclude_collections:
             raise ValueError(f"Collection {collection_id} is not available.")
 
         url = f"{self.url.rstrip('/')}/collections/{collection_id}/queryables"
         try:
-            queryables = dict(self.client.get_queryables_from(url))
+            queryables = self.client._stac_io.read_json(url)
         except APIError as e:
+            if getattr(e, "status_code", None) not in UNSUPPORTED_QUERYABLES_STATUS:
+                raise
+            self._ensure_collection_exists(collection_id)
             logger.debug("No queryables for collection %s: %s", collection_id, e)
-            queryables = {"additionalProperties": False}
+            queryables = None
 
-        properties = {
+        if not isinstance(queryables, dict) or not isinstance(
+            queryables.get("properties"), dict
+        ):
+            queryables = {"additionalProperties": False, "properties": {}}
+
+        queryables = _absolutize_refs(queryables, queryables.get("$id") or url)
+
+        queryables["properties"] = {
             name: definition
-            for name, definition in (queryables.get("properties") or {}).items()
+            for name, definition in queryables["properties"].items()
             if name not in RESERVED_QUERYABLES
         }
-        queryables["properties"] = properties
         if isinstance(queryables.get("required"), list):
             queryables["required"] = [
                 name
@@ -585,6 +628,15 @@ class stacApiBackend:
         queryables.setdefault("additionalProperties", True)
 
         return queryables
+
+    def _ensure_collection_exists(self, collection_id: str) -> None:
+        """Raise ResourceNotFound when the STAC API does not know the collection."""
+        try:
+            self.get_collection(collection_id)
+        except APIError as e:
+            if getattr(e, "status_code", None) == 404:
+                raise ResourceNotFound("Collection", collection_id) from e
+            raise
 
     def get_items(
         self,

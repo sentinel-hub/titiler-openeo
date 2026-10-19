@@ -602,7 +602,8 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            collection = self.stac_client.get_collection(collection_id)
+            # Copy: the backend returns a shared cached dictionary.
+            collection = dict(self.stac_client.get_collection(collection_id))
 
             # TODO: add more links
             collection["links"] = [
