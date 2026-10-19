@@ -346,6 +346,8 @@ def test_collection_links_to_queryables(monkeypatch, app_no_auth):
 
     try:
         response = app_no_auth.get("/collections/sentinel-2-l2a")
+        # Inspect the same cached object the endpoint got from the backend.
+        cached = list(stacapi.collection_cache.values())
     finally:
         stacapi.collection_cache.clear()
 
@@ -357,11 +359,9 @@ def test_collection_links_to_queryables(monkeypatch, app_no_auth):
     ]
     assert len(links) == 1
     assert links[0]["href"].endswith("/collections/sentinel-2-l2a/queryables")
-    # The cached collection is not modified by the request.
-    cached = stacApiBackend(url="https://stac.eoapi.dev").get_collection(
-        "sentinel-2-l2a"
-    )
+    # The request did not modify the cached collection.
+    assert len(cached) == 1
     assert all(
         link.get("rel") != "http://www.opengis.net/def/rel/ogc/1.0/queryables"
-        for link in cached.get("links", [])
+        for link in cached[0].get("links", [])
     )

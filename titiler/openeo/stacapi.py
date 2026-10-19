@@ -78,16 +78,43 @@ JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema"
 UNSUPPORTED_QUERYABLES_STATUS = (404, 405, 501)
 
 
+#: JSON Schema keywords whose value is a schema.
+_SCHEMA_KEYWORDS = frozenset(
+    {
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+#: JSON Schema keywords whose value is a list of schemas.
+_SCHEMA_LIST_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+#: JSON Schema keywords whose value is a map of name -> schema.
+_SCHEMA_MAP_KEYWORDS = frozenset(
+    {"$defs", "definitions", "dependentSchemas", "patternProperties", "properties"}
+)
+
+
 def _absolutize_refs(schema: Any, base: str) -> Any:
     """Return a copy of ``schema`` with relative ``$ref``/``$id`` made absolute.
 
     The openEO endpoint sets its own ``$id`` on the schema, which changes the
     base URI. Relative references must keep resolving against the STAC API.
+    ``base`` is the retrieval URL: a root ``$id`` is resolved against it once.
     Nested ``$id`` values change the base for their sub-schema. Fragment-only
     references (``#/...``) stay as they are: they point inside the document.
+
+    Only schema-valued keywords are traversed, so literal values (``const``,
+    ``enum``, ``default``, ``examples``, ...) are never changed.
     """
-    if isinstance(schema, list):
-        return [_absolutize_refs(value, base) for value in schema]
     if not isinstance(schema, dict):
         return schema
 
@@ -95,12 +122,19 @@ def _absolutize_refs(schema: Any, base: str) -> Any:
     if isinstance(out.get("$id"), str):
         base = urljoin(base, out["$id"])
         out["$id"] = base
+    if isinstance(out.get("$ref"), str) and not out["$ref"].startswith("#"):
+        out["$ref"] = urljoin(base, out["$ref"])
+
     for key, value in out.items():
-        if key == "$ref" and isinstance(value, str):
-            if not value.startswith("#"):
-                out[key] = urljoin(base, value)
-        elif key != "$id":
-            out[key] = _absolutize_refs(value, base)
+        if key in _SCHEMA_KEYWORDS:
+            if isinstance(value, list):  # draft-07 tuple form of ``items``
+                out[key] = [_absolutize_refs(v, base) for v in value]
+            else:
+                out[key] = _absolutize_refs(value, base)
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [_absolutize_refs(v, base) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            out[key] = {k: _absolutize_refs(v, base) for k, v in value.items()}
     return out
 
 
@@ -608,7 +642,7 @@ class stacApiBackend:
         ):
             queryables = {"additionalProperties": False, "properties": {}}
 
-        queryables = _absolutize_refs(queryables, queryables.get("$id") or url)
+        queryables = _absolutize_refs(queryables, url)
 
         queryables["properties"] = {
             name: definition

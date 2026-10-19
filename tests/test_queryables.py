@@ -164,6 +164,44 @@ def test_queryables_keep_relative_refs_resolvable():
     assert schema["properties"]["orbit"]["$ref"] == "../schemas/orbit.json"
 
 
+def test_queryables_relative_root_id_resolved_once():
+    schema = {
+        "$id": "/collections/c/queryables",
+        "properties": {"orbit": {"$ref": "../schemas/orbit.json"}},
+    }
+
+    out = stacapi._absolutize_refs(
+        schema, "https://stac.example.com/api/collections/c/queryables"
+    )
+
+    assert out["$id"] == "https://stac.example.com/collections/c/queryables"
+    assert out["properties"]["orbit"]["$ref"] == (
+        "https://stac.example.com/collections/schemas/orbit.json"
+    )
+
+
+def test_queryables_literal_values_unchanged():
+    literal = {"$id": "ascending", "$ref": "not-a-ref"}
+    schema = {
+        "$id": "https://stac.example.com/q",
+        "properties": {
+            "a": {"const": literal},
+            "b": {"enum": [literal]},
+            "c": {"default": literal, "examples": [literal]},
+            "d": {"anyOf": [{"$ref": "d.json"}], "items": {"$ref": "i.json"}},
+        },
+    }
+
+    props = stacapi._absolutize_refs(schema, "https://stac.example.com/q")["properties"]
+
+    assert props["a"]["const"] == literal
+    assert props["b"]["enum"] == [literal]
+    assert props["c"]["default"] == literal
+    assert props["c"]["examples"] == [literal]
+    assert props["d"]["anyOf"][0]["$ref"] == "https://stac.example.com/d.json"
+    assert props["d"]["items"]["$ref"] == "https://stac.example.com/i.json"
+
+
 def test_queryables_excluded_collection():
     backend = stacApiBackend(url="https://example.com", exclude_collections=["hidden"])
     with pytest.raises(ValueError):
