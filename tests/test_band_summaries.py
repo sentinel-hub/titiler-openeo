@@ -337,3 +337,31 @@ def test_collections_endpoints_return_the_same_summaries(monkeypatch, app_no_aut
 
     assert from_list["summaries"]["bands"] == from_single["summaries"]["bands"]
     assert from_list["summaries"]["eo:bands"] == from_single["summaries"]["eo:bands"]
+
+
+def test_collection_links_to_queryables(monkeypatch, app_no_auth):
+    fake = _FakeClient(json.loads(PC_FIXTURE.read_text()))
+    monkeypatch.setattr(stacApiBackend, "client", property(lambda self: fake))
+    stacapi.collection_cache.clear()
+
+    try:
+        response = app_no_auth.get("/collections/sentinel-2-l2a")
+        # Inspect the same cached object the endpoint got from the backend.
+        cached = list(stacapi.collection_cache.values())
+    finally:
+        stacapi.collection_cache.clear()
+
+    assert response.status_code == 200
+    links = [
+        link
+        for link in response.json()["links"]
+        if link["rel"] == "http://www.opengis.net/def/rel/ogc/1.0/queryables"
+    ]
+    assert len(links) == 1
+    assert links[0]["href"].endswith("/collections/sentinel-2-l2a/queryables")
+    # The request did not modify the cached collection.
+    assert len(cached) == 1
+    assert all(
+        link.get("rel") != "http://www.opengis.net/def/rel/ogc/1.0/queryables"
+        for link in cached[0].get("links", [])
+    )

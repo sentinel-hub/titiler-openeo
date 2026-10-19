@@ -1,7 +1,9 @@
 """Stac API backend."""
 
+import logging
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from urllib.parse import urljoin
 
 import numpy
 import pyproj
@@ -19,6 +21,7 @@ from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
+from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
 from rasterio.warp import transform_bounds
@@ -37,6 +40,7 @@ from .errors import (
     NoDataAvailable,
     OutputLimitExceeded,
     ProcessParameterInvalid,
+    ResourceNotFound,
     STACLoadError,
     TemporalExtentEmpty,
     UnsupportedSTACObject,
@@ -58,6 +62,176 @@ collections_cache: TTLCache = TTLCache(
 collection_cache: TTLCache = TTLCache(
     maxsize=cache_config.maxsize, ttl=cache_config.ttl
 )
+queryables_cache: TTLCache = TTLCache(
+    maxsize=cache_config.maxsize, ttl=cache_config.ttl
+)
+
+logger = logging.getLogger(__name__)
+
+#: Queryables that ``load_collection`` sets with its own arguments
+#: (``id``, ``spatial_extent`` and ``temporal_extent``).
+RESERVED_QUERYABLES = ("datetime", "geometry", "id")
+
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema"
+
+#: STAC API status codes that mean "no queryables for this collection".
+UNSUPPORTED_QUERYABLES_STATUS = (404, 405, 501)
+
+
+#: JSON Schema keywords whose value is a schema.
+_SCHEMA_KEYWORDS = frozenset(
+    {
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+#: JSON Schema keywords whose value is a list of schemas.
+_SCHEMA_LIST_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+#: JSON Schema keywords whose value is a map of name -> schema.
+_SCHEMA_MAP_KEYWORDS = frozenset(
+    {
+        "$defs",
+        "definitions",
+        "dependencies",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    }
+)
+
+
+def _absolutize_refs(schema: Any, base: str) -> Any:
+    """Return a copy of ``schema`` with relative ``$ref``/``$id`` made absolute.
+
+    The openEO endpoint sets its own ``$id`` on the schema, which changes the
+    base URI. Relative references must keep resolving against the STAC API.
+    ``base`` is the retrieval URL: a root ``$id`` is resolved against it once.
+    Nested ``$id`` values change the base for their sub-schema. Fragment-only
+    references (``#/...``) stay as they are: they point inside the document.
+
+    Only schema-valued keywords are traversed, so literal values (``const``,
+    ``enum``, ``default``, ``examples``, ...) are never changed.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    if isinstance(out.get("$id"), str):
+        base = urljoin(base, out["$id"])
+        out["$id"] = base
+    if isinstance(out.get("$ref"), str) and not out["$ref"].startswith("#"):
+        out["$ref"] = urljoin(base, out["$ref"])
+
+    for key, value in out.items():
+        if key in _SCHEMA_KEYWORDS:
+            if isinstance(value, list):  # draft-07 tuple form of ``items``
+                out[key] = [_absolutize_refs(v, base) for v in value]
+            else:
+                out[key] = _absolutize_refs(value, base)
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [_absolutize_refs(v, base) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            # Non-schema values (e.g. draft-07 array ``dependencies``) are kept.
+            out[key] = {k: _absolutize_refs(v, base) for k, v in value.items()}
+    return out
+
+
+def _rewrite_fragment_refs(schema: Any, mapping: Dict[str, str], used: Set[str]) -> Any:
+    """Return a copy of ``schema`` with fragment ``$ref`` prefixes replaced.
+
+    ``mapping`` maps an old JSON pointer fragment (``#/properties/datetime``) to
+    a new one. The keys of ``mapping`` that are referenced are added to
+    ``used``. Sub-schemas with their own ``$id`` are a new resource, so their
+    fragments are not changed.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    ref = out.get("$ref")
+    if isinstance(ref, str):
+        for old, new in mapping.items():
+            if ref == old or ref.startswith(old + "/"):
+                out["$ref"] = new + ref[len(old) :]
+                used.add(old)
+                break
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, dict) and "$id" in value:
+            return value
+        return _rewrite_fragment_refs(value, mapping, used)
+
+    for key, value in out.items():
+        if key in _SCHEMA_KEYWORDS:
+            out[key] = (
+                [walk(v) for v in value] if isinstance(value, list) else walk(value)
+            )
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [walk(v) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            out[key] = {k: walk(v) for k, v in value.items()}
+    return out
+
+
+def _remove_reserved_queryables(schema: Dict) -> Dict:
+    """Remove the reserved queryables from ``schema['properties']``.
+
+    A kept queryable can reference a removed one (for example ``start_datetime``
+    with ``$ref: "#/properties/datetime"``). The referenced definitions move to
+    ``$defs`` and the references are rewritten, so that no reference dangles.
+    """
+    properties = schema["properties"]
+    removed = {
+        name: properties[name] for name in RESERVED_QUERYABLES if name in properties
+    }
+
+    out = dict(schema)
+    out["properties"] = {
+        name: definition
+        for name, definition in properties.items()
+        if name not in removed
+    }
+    if isinstance(out.get("required"), list):
+        out["required"] = [name for name in out["required"] if name not in removed]
+    if not removed:
+        return out
+
+    defs = dict(out.get("$defs") or {})
+    mapping: Dict[str, str] = {}
+    for name in removed:
+        key = name if name not in defs else f"reserved-{name}"
+        mapping[f"#/properties/{name}"] = f"#/$defs/{key}"
+
+    # Move the referenced definitions. Repeat, because a moved definition can
+    # reference another removed one.
+    moved: Set[str] = set()
+    while True:
+        used: Set[str] = set()
+        _rewrite_fragment_refs({**out, "$defs": defs}, mapping, used)
+        new = used - moved
+        if not new:
+            break
+        for old in new:
+            name = old.removeprefix("#/properties/")
+            defs[mapping[old].removeprefix("#/$defs/")] = removed[name]
+        moved |= new
+
+    if not moved:
+        return out
+
+    out["$defs"] = defs
+    return _rewrite_fragment_refs(out, {old: mapping[old] for old in moved}, set())
+
 
 #: Media types that indicate a packaged archive rather than a single raster
 #: asset. CDSE's Sentinel-1 GRD ``Product`` asset has role ``data`` and media
@@ -528,6 +702,60 @@ class stacApiBackend:
         self._fix_collection(col_dict)
 
         return col_dict
+
+    @cached(  # type: ignore
+        queryables_cache,
+        key=lambda self, collection_id, **kwargs: hashkey(
+            self.url, collection_id, **kwargs
+        ),
+        lock=Lock(),
+    )
+    def get_queryables(self, collection_id: str, **kwargs) -> Dict:
+        """Return the queryables (JSON Schema) of a STAC Collection.
+
+        Proxies ``{stac_api}/collections/{collection_id}/queryables`` (STAC API
+        Filter extension). Returns a schema with no properties when the STAC API
+        does not support queryables for an existing collection. Raises
+        ``ResourceNotFound`` for an unknown collection. Other STAC API errors
+        are raised (and thus not cached).
+        """
+        if collection_id in self.exclude_collections:
+            raise ValueError(f"Collection {collection_id} is not available.")
+
+        url = f"{self.url.rstrip('/')}/collections/{collection_id}/queryables"
+        try:
+            queryables = self.client._stac_io.read_json(url)
+        except APIError as e:
+            if getattr(e, "status_code", None) not in UNSUPPORTED_QUERYABLES_STATUS:
+                raise
+            self._ensure_collection_exists(collection_id)
+            logger.debug("No queryables for collection %s: %s", collection_id, e)
+            queryables = None
+
+        if not isinstance(queryables, dict) or not isinstance(
+            queryables.get("properties"), dict
+        ):
+            queryables = {"additionalProperties": False, "properties": {}}
+
+        queryables = _absolutize_refs(queryables, url)
+
+        queryables = _remove_reserved_queryables(queryables)
+
+        queryables.setdefault("$schema", JSON_SCHEMA_DIALECT)
+        queryables.setdefault("type", "object")
+        queryables.setdefault("title", f"Queryables for {collection_id}")
+        queryables.setdefault("additionalProperties", True)
+
+        return queryables
+
+    def _ensure_collection_exists(self, collection_id: str) -> None:
+        """Raise ResourceNotFound when the STAC API does not know the collection."""
+        try:
+            self.get_collection(collection_id)
+        except APIError as e:
+            if getattr(e, "status_code", None) == 404:
+                raise ResourceNotFound("Collection", collection_id) from e
+            raise
 
     def get_items(
         self,

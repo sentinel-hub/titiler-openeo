@@ -602,12 +602,55 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            collection = self.stac_client.get_collection(collection_id)
+            # Copy: the backend returns a shared cached dictionary.
+            collection = dict(self.stac_client.get_collection(collection_id))
 
-            # TODO: add links
-            collection["links"] = []
+            # TODO: add more links
+            collection["links"] = [
+                {
+                    "href": self.url_for(
+                        request,
+                        "openeo_collection_queryables",
+                        collection_id=collection_id,
+                    ),
+                    "rel": "http://www.opengis.net/def/rel/ogc/1.0/queryables",
+                    "type": "application/schema+json",
+                    "title": "Queryables",
+                }
+            ]
 
             return collection
+
+        # Queryables
+        # Ref: https://api.openeo.org/#tag/EO-Data-Discovery/operation/list-collection-queryables
+        @self.router.get(
+            r"/collections/{collection_id}/queryables",
+            response_class=JSONResponse,
+            summary="Metadata filters for a specific dataset",
+            operation_id="list-collection-queryables",
+            responses={
+                200: {
+                    "content": {
+                        "application/schema+json": {},
+                    },
+                },
+            },
+            tags=["EO Data Discovery"],
+        )
+        def openeo_collection_queryables(
+            request: Request,
+            collection_id: Annotated[
+                str,
+                Path(description="STAC Collection Identifier"),
+            ],
+        ):
+            """Lists the properties that can be used in the `properties` argument of `load_collection`."""
+            queryables = dict(self.stac_client.get_queryables(collection_id))
+            queryables["$id"] = str(request.url)
+
+            return JSONResponse(
+                content=queryables, media_type="application/schema+json"
+            )
 
         #############################################################################################
         # L3 - Advanced https://openeo.org/documentation/1.0/developers/profiles/api.html#l3-advanced
