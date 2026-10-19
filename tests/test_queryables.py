@@ -202,6 +202,64 @@ def test_queryables_literal_values_unchanged():
     assert props["d"]["items"]["$ref"] == "https://stac.example.com/i.json"
 
 
+def test_queryables_dependencies_refs_resolved():
+    schema = {
+        "properties": {
+            "metadata": {
+                "dependencies": {
+                    "orbit": {"$ref": "../schemas/orbit.json"},
+                    "platform": ["constellation"],
+                }
+            }
+        }
+    }
+
+    out = stacapi._absolutize_refs(schema, "https://stac.example.com/a/queryables")
+
+    deps = out["properties"]["metadata"]["dependencies"]
+    assert deps["orbit"]["$ref"] == "https://stac.example.com/schemas/orbit.json"
+    assert deps["platform"] == ["constellation"]
+
+
+def test_reserved_queryables_referenced_are_kept_in_defs():
+    datetime_def = {"type": "string", "format": "date-time"}
+    schema = {
+        "$defs": {"datetime": {"type": "integer"}},
+        "properties": {
+            "id": {"type": "string"},
+            "datetime": datetime_def,
+            "geometry": {"$ref": "#/properties/id"},
+            "start_datetime": {"$ref": "#/properties/datetime"},
+            "range": {"anyOf": [{"$ref": "#/properties/geometry"}]},
+            "other": {"$id": "https://x.example.com/", "$ref": "#/properties/id"},
+        },
+        "required": ["datetime", "start_datetime"],
+    }
+
+    out = stacapi._remove_reserved_queryables(schema)
+
+    props = out["properties"]
+    assert set(props) == {"start_datetime", "range", "other"}
+    assert out["required"] == ["start_datetime"]
+    # Existing $defs entry is kept; the moved one gets another key.
+    assert out["$defs"]["datetime"] == {"type": "integer"}
+    assert props["start_datetime"]["$ref"] == "#/$defs/reserved-datetime"
+    assert out["$defs"]["reserved-datetime"] == datetime_def
+    # geometry is moved, and its own reference to id is moved too.
+    assert props["range"]["anyOf"][0]["$ref"] == "#/$defs/geometry"
+    assert out["$defs"]["geometry"] == {"$ref": "#/$defs/id"}
+    assert out["$defs"]["id"] == {"type": "string"}
+    # A sub-schema with its own $id is a new resource: not changed.
+    assert props["other"]["$ref"] == "#/properties/id"
+
+
+def test_reserved_queryables_not_referenced_are_dropped():
+    out = stacapi._remove_reserved_queryables(QUERYABLES)
+
+    assert "$defs" not in out
+    assert set(out["properties"]) == {"sat:orbit_state", "sar:polarizations"}
+
+
 def test_queryables_excluded_collection():
     backend = stacApiBackend(url="https://example.com", exclude_collections=["hidden"])
     with pytest.raises(ValueError):

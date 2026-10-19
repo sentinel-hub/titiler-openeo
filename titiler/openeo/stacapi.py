@@ -99,7 +99,14 @@ _SCHEMA_KEYWORDS = frozenset(
 _SCHEMA_LIST_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
 #: JSON Schema keywords whose value is a map of name -> schema.
 _SCHEMA_MAP_KEYWORDS = frozenset(
-    {"$defs", "definitions", "dependentSchemas", "patternProperties", "properties"}
+    {
+        "$defs",
+        "definitions",
+        "dependencies",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    }
 )
 
 
@@ -134,8 +141,96 @@ def _absolutize_refs(schema: Any, base: str) -> Any:
         elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
             out[key] = [_absolutize_refs(v, base) for v in value]
         elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            # Non-schema values (e.g. draft-07 array ``dependencies``) are kept.
             out[key] = {k: _absolutize_refs(v, base) for k, v in value.items()}
     return out
+
+
+def _rewrite_fragment_refs(schema: Any, mapping: Dict[str, str], used: Set[str]) -> Any:
+    """Return a copy of ``schema`` with fragment ``$ref`` prefixes replaced.
+
+    ``mapping`` maps an old JSON pointer fragment (``#/properties/datetime``) to
+    a new one. The keys of ``mapping`` that are referenced are added to
+    ``used``. Sub-schemas with their own ``$id`` are a new resource, so their
+    fragments are not changed.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    ref = out.get("$ref")
+    if isinstance(ref, str):
+        for old, new in mapping.items():
+            if ref == old or ref.startswith(old + "/"):
+                out["$ref"] = new + ref[len(old) :]
+                used.add(old)
+                break
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, dict) and "$id" in value:
+            return value
+        return _rewrite_fragment_refs(value, mapping, used)
+
+    for key, value in out.items():
+        if key in _SCHEMA_KEYWORDS:
+            out[key] = (
+                [walk(v) for v in value] if isinstance(value, list) else walk(value)
+            )
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [walk(v) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            out[key] = {k: walk(v) for k, v in value.items()}
+    return out
+
+
+def _remove_reserved_queryables(schema: Dict) -> Dict:
+    """Remove the reserved queryables from ``schema['properties']``.
+
+    A kept queryable can reference a removed one (for example ``start_datetime``
+    with ``$ref: "#/properties/datetime"``). The referenced definitions move to
+    ``$defs`` and the references are rewritten, so that no reference dangles.
+    """
+    properties = schema["properties"]
+    removed = {
+        name: properties[name] for name in RESERVED_QUERYABLES if name in properties
+    }
+
+    out = dict(schema)
+    out["properties"] = {
+        name: definition
+        for name, definition in properties.items()
+        if name not in removed
+    }
+    if isinstance(out.get("required"), list):
+        out["required"] = [name for name in out["required"] if name not in removed]
+    if not removed:
+        return out
+
+    defs = dict(out.get("$defs") or {})
+    mapping: Dict[str, str] = {}
+    for name in removed:
+        key = name if name not in defs else f"reserved-{name}"
+        mapping[f"#/properties/{name}"] = f"#/$defs/{key}"
+
+    # Move the referenced definitions. Repeat, because a moved definition can
+    # reference another removed one.
+    moved: Set[str] = set()
+    while True:
+        used: Set[str] = set()
+        _rewrite_fragment_refs({**out, "$defs": defs}, mapping, used)
+        new = used - moved
+        if not new:
+            break
+        for old in new:
+            name = old.removeprefix("#/properties/")
+            defs[mapping[old].removeprefix("#/$defs/")] = removed[name]
+        moved |= new
+
+    if not moved:
+        return out
+
+    out["$defs"] = defs
+    return _rewrite_fragment_refs(out, {old: mapping[old] for old in moved}, set())
 
 
 #: Media types that indicate a packaged archive rather than a single raster
@@ -644,17 +739,7 @@ class stacApiBackend:
 
         queryables = _absolutize_refs(queryables, url)
 
-        queryables["properties"] = {
-            name: definition
-            for name, definition in queryables["properties"].items()
-            if name not in RESERVED_QUERYABLES
-        }
-        if isinstance(queryables.get("required"), list):
-            queryables["required"] = [
-                name
-                for name in queryables["required"]
-                if name not in RESERVED_QUERYABLES
-            ]
+        queryables = _remove_reserved_queryables(queryables)
 
         queryables.setdefault("$schema", JSON_SCHEMA_DIALECT)
         queryables.setdefault("type", "object")
