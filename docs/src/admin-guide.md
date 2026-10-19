@@ -156,6 +156,12 @@ The caching system can be tuned through the following settings:
 - `TITILER_OPENEO_CACHE_MAXSIZE`: Maximum number of items in cache
 - `TITILER_OPENEO_CACHE_DISABLE`: Disable caching entirely
 
+These settings apply to the collection list, the collection metadata and the collection queryables.
+
+### Collection Queryables
+
+`GET /collections/{collection_id}/queryables` returns the properties that a client can use in the `properties` argument of `load_collection`. The backend gets them from the STAC API endpoint `{stac_api}/collections/{collection_id}/queryables` (STAC API Filter extension). It removes `datetime`, `geometry` and `id`, because `load_collection` sets them with `temporal_extent`, `spatial_extent` and `id`. If the STAC API does not supply queryables for the collection, the endpoint returns a valid JSON Schema with an empty `properties` object.
+
 ### Processing Limits
 
 To prevent resource exhaustion:

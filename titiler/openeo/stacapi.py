@@ -1,5 +1,6 @@
 """Stac API backend."""
 
+import logging
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
@@ -19,6 +20,7 @@ from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
+from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
 from rasterio.warp import transform_bounds
@@ -58,6 +60,17 @@ collections_cache: TTLCache = TTLCache(
 collection_cache: TTLCache = TTLCache(
     maxsize=cache_config.maxsize, ttl=cache_config.ttl
 )
+queryables_cache: TTLCache = TTLCache(
+    maxsize=cache_config.maxsize, ttl=cache_config.ttl
+)
+
+logger = logging.getLogger(__name__)
+
+#: Queryables that ``load_collection`` sets with its own arguments
+#: (``id``, ``spatial_extent`` and ``temporal_extent``).
+RESERVED_QUERYABLES = ("datetime", "geometry", "id")
+
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema"
 
 #: Media types that indicate a packaged archive rather than a single raster
 #: asset. CDSE's Sentinel-1 GRD ``Product`` asset has role ``data`` and media
@@ -528,6 +541,50 @@ class stacApiBackend:
         self._fix_collection(col_dict)
 
         return col_dict
+
+    @cached(  # type: ignore
+        queryables_cache,
+        key=lambda self, collection_id, **kwargs: hashkey(
+            self.url, collection_id, **kwargs
+        ),
+        lock=Lock(),
+    )
+    def get_queryables(self, collection_id: str, **kwargs) -> Dict:
+        """Return the queryables (JSON Schema) of a STAC Collection.
+
+        Proxies ``{stac_api}/collections/{collection_id}/queryables`` (STAC API
+        Filter extension). Returns a schema with no properties when the STAC API
+        does not support queryables for the collection.
+        """
+        if collection_id in self.exclude_collections:
+            raise ValueError(f"Collection {collection_id} is not available.")
+
+        url = f"{self.url.rstrip('/')}/collections/{collection_id}/queryables"
+        try:
+            queryables = dict(self.client.get_queryables_from(url))
+        except APIError as e:
+            logger.debug("No queryables for collection %s: %s", collection_id, e)
+            queryables = {"additionalProperties": False}
+
+        properties = {
+            name: definition
+            for name, definition in (queryables.get("properties") or {}).items()
+            if name not in RESERVED_QUERYABLES
+        }
+        queryables["properties"] = properties
+        if isinstance(queryables.get("required"), list):
+            queryables["required"] = [
+                name
+                for name in queryables["required"]
+                if name not in RESERVED_QUERYABLES
+            ]
+
+        queryables.setdefault("$schema", JSON_SCHEMA_DIALECT)
+        queryables.setdefault("type", "object")
+        queryables.setdefault("title", f"Queryables for {collection_id}")
+        queryables.setdefault("additionalProperties", True)
+
+        return queryables
 
     def get_items(
         self,
