@@ -584,6 +584,8 @@ _FEB_10_17 = {
             ["2013-02-01", "2013-03-01"],
             False,
         ),
+        # No date at all: skipped.
+        ({"datetime": None}, ["2013-02-01", "2013-03-01"], False),
     ],
 )
 def test_load_stac_temporal_filter_keeps_items_overlapping_the_extent(
