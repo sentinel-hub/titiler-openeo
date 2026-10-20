@@ -3,6 +3,7 @@
 import logging
 import warnings
 from datetime import datetime
+from functools import partial
 from threading import Lock
 from typing import (
     Any,
@@ -25,6 +26,7 @@ import rasterio
 from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
+from rasterio.enums import MaskFlags
 from rasterio.errors import RasterioIOError
 from rasterio.features import bounds as featureBounds
 from rasterio.features import rasterize
@@ -86,6 +88,13 @@ class OpenEOReader(Reader):
 
     Current overrides:
 
+    **Nodata fallback.** ``fallback_nodata`` is a callable that returns a
+    nodata value (or None). It is called after the dataset is open, and only
+    when the header has no nodata, alpha band or mask and no ``nodata`` option
+    is set. Its value then goes into ``options``, so the read and the warp mask
+    it. ``SimpleSTACReader`` sets it from a scale/offset plugin's product
+    metadata (#463, docs/adr/0009-scale-offset-sources.md S2.5).
+
     **Georeferencing of GCP datasets.** rio-tiler detects GCPs but collapses
     them to a single affine via ``transform.from_gcps()`` and passes it as
     ``src_transform``. Because a ``src_transform`` is supplied, GDAL never sees
@@ -114,6 +123,11 @@ class OpenEOReader(Reader):
     proposed there by rio-tiler's maintainer. When it ships upstream, drop the
     GCP override and keep the class as the customisation point.
     """
+
+    #: See "Nodata fallback" above. Called at most one time, after the open.
+    fallback_nodata: Optional[Callable[[], Optional[float]]] = attr.ib(
+        default=None, kw_only=True
+    )
 
     def __attrs_post_init__(self):
         """Open the dataset, warping from real GCPs when the dataset has them."""
@@ -149,6 +163,18 @@ class OpenEOReader(Reader):
         # thing it changes, rather than duplicating a tail that varies by
         # rio-tiler version.
         super().__attrs_post_init__()
+
+        if (
+            self.fallback_nodata is not None
+            and self.options.get("nodata") is None
+            and self.dataset.nodata is None
+            and all(
+                flags == [MaskFlags.all_valid] for flags in self.dataset.mask_flag_enums
+            )
+        ):
+            nodata = self.fallback_nodata()
+            if nodata is not None:
+                self.options = {**self.options, "nodata": nodata}
 
 
 #: Extensions that are never the measurement raster itself (annotation XML,
@@ -591,7 +617,10 @@ class SimpleSTACReader(MultiBaseReader):
             # - raster:nodata (deprecated but still common in older catalogs)
             nodata_values = []
             for b in bands:
-                nodata = b.get("nodata") or b.get("raster:nodata")
+                # `is None`, not `or`: 0 is a valid nodata value (Sentinel-2).
+                nodata = b.get("nodata")
+                if nodata is None:
+                    nodata = b.get("raster:nodata")
                 if nodata is not None:
                     nodata_values.append(nodata)
 
@@ -609,34 +638,46 @@ class SimpleSTACReader(MultiBaseReader):
 
         # Last, a scale/offset plugin's product metadata (#463): Planetary
         # Computer's Sentinel-2 L2A gives the NODATA DN only in
-        # `MTD_MSIL2A.xml`. It must be a read option, not a mask set after
-        # the read: the warp then also leaves those pixels out when it
-        # resamples, and after the BOA offset DN 0 is -0.1, which cannot be
-        # told apart from a valid negative reflectance.
-        if "nodata" not in info["method_options"]:
-            plugin_nodata = self._plugin_nodata(extras)
-            if plugin_nodata is not None:
-                info["method_options"]["nodata"] = plugin_nodata
+        # `MTD_MSIL2A.xml`. Not a method option: the reader uses it only when
+        # the raster header gives no nodata either, and fetches the file only
+        # then (`OpenEOReader.fallback_nodata`).
+        if (
+            "nodata" not in info["method_options"]
+            and issubclass(self.reader, OpenEOReader)
+            and self._nodata_plugins(extras)
+        ):
+            info["reader_options"]["fallback_nodata"] = partial(
+                self._plugin_nodata, extras
+            )
 
         return info
 
-    def _plugin_nodata(self, extras: Mapping[str, Any]) -> Optional[float]:
-        """The nodata DN that the item's scale/offset plugins give for an asset.
+    def _nodata_plugins(
+        self, extras: Mapping[str, Any]
+    ) -> List[Tuple[ScaleOffsetPlugin, Callable[[str, str, Any], Optional[float]]]]:
+        """The deployment's plugins for this collection that give nodata for an asset.
 
-        Only the plugins the deployment lists for this collection
-        (`_scale_offset_sources`), and only for an asset the plugin knows
-        (its ``band_key`` is not None): e.g. SCL is left as it is.
+        Only the plugins listed for this collection (`_scale_offset_sources`),
+        and only for an asset the plugin knows (its ``band_key`` is not None):
+        e.g. SCL is left as it is. Needs no fetch.
         """
+        plugins = []
         for name in _scale_offset_sources(self.input):
             plugin = SCALE_OFFSET_PLUGINS.get(name)
             if plugin is None or plugin.nodata is None:
                 continue
             if plugin.band_key(extras) is None:
                 continue
+            plugins.append((plugin, plugin.nodata))
+        return plugins
+
+    def _plugin_nodata(self, extras: Mapping[str, Any]) -> Optional[float]:
+        """The nodata DN that the first of `_nodata_plugins` gives, or None."""
+        for plugin, loader in self._nodata_plugins(extras):
             nodata = _load_from_plugin(
                 plugin,
                 self.input,
-                plugin.nodata,
+                loader,
                 self.signer,
                 self.band_source_fetcher,
             )

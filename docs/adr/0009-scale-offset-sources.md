@@ -127,20 +127,27 @@ of the next scene in a mosaic.
 
 The order of the nodata sources for an asset is:
 
-1. STAC: `raster:bands[].nodata`, then the asset `nodata`;
-2. the first plugin in the collection's scale/offset sources (2.1) that knows
-   the band and gives a nodata value;
-3. the COG header (rio-tiler's default).
+1. STAC: `raster:bands[].nodata` (or `raster:nodata`), then the asset
+   `nodata`. A value of 0 is kept;
+2. the raster header: its nodata value, alpha band or mask;
+3. the first plugin in the collection's scale/offset sources (2.1) that knows
+   the band and gives a nodata value.
 
-The plugin value is a read option (`nodata`), not a mask set after the read.
-Thus the warp also leaves the pixels out when it resamples, and the mask is
-on the DN, before `_apply_scale_offset`. After the offset, -0.1 cannot be told
-apart from a valid negative reflectance.
+`SimpleSTACReader._get_asset_info` does no fetch for 3. It gives
+`OpenEOReader` a `fallback_nodata` callable. The reader calls it after it
+opens the dataset, only when 1 and 2 give nothing, and puts the value in its
+`nodata` option. Thus a raster with a header nodata keeps it, and its product
+file is not fetched for the nodata.
 
-The plugin value is looked up in `_get_asset_info`, at read time. The file is
-the one that the scale/offset step fetches, and the cache is the same, so the
-fetch happens one time for each product. A band that the plugin does not know
-(for example `SCL`) gets no plugin nodata and causes no fetch.
+The value is a read option, not a mask set after the read. Thus the warp also
+leaves the pixels out when it resamples, and the mask is on the DN, before
+`_apply_scale_offset`. After the offset, -0.1 cannot be told apart from a
+valid negative reflectance.
+
+The file is the one that the scale/offset step fetches, and the cache is the
+same, so the fetch happens one time for each product. A band that the plugin
+does not know (for example `SCL`) gets no fallback and causes no fetch. A
+reader class that is not an `OpenEOReader` gets no fallback.
 
 `SATURATED` is not masked. A saturated pixel holds real, clipped data, and its
 value changes between baselines (65535 in 03.00, 32767 in 05.13).

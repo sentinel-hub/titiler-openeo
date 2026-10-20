@@ -426,13 +426,7 @@ def test_every_advertised_pc_band_is_readable():
             ),
         )
 
-    class _MtdFetcher:
-        # The `sentinel2-boa` plugin reads the NODATA DN from the
-        # product-metadata asset (#463); serve a real file, not the network.
-        def fetch(self, href):
-            return Path("tests/fixtures/sentinel2/mtd_msil2a_pb0513.xml").read_bytes()
-
     assert {"red", "visual_red", "sunZenithAngles"} <= advertised
-    with SimpleSTACReader(item, band_source_fetcher=_MtdFetcher()) as src:
+    with SimpleSTACReader(item) as src:
         for name in advertised:
             src._get_asset_info(name)  # must not raise

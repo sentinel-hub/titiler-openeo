@@ -47,7 +47,8 @@ class ScaleOffsetPlugin:
     #: ``nodata(href, fetch_href, fetcher)`` -> the DN value that marks no
     #: data in the bands the plugin knows (``band_key`` is not None), or None.
     #: The reader masks that DN at read time, before any scale/offset, when
-    #: STAC gives no nodata (#463). None when the plugin has no such value.
+    #: neither STAC nor the raster header gives a nodata (#463). None when
+    #: the plugin has no such value.
     nodata: Optional[Callable[[str, str, Any], Optional[float]]] = None
 
 
