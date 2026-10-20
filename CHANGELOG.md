@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.20.0 (2026-10-20)
+
+## What's Changed
+* feat(processes): add is_nodata and array_contains processes by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/429
+* chore(main): release titiler-openeo-chart 3.1.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/424
+* fix(api): return the service creation time in `created` by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/431
+* feat(store): add concurrent startup and user tracking tests for SQLAlchemy by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/432
+* fix(api): use gsd as a resolution only in a projected CRS by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/435
+* fix(api): merge_cubes temporal broadcast, array_element over time, date labels by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/442
+* fix(api): vector cube output as JSON/GeoJSON, with an output format registry by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/443
+* fix(processes): enhance aggregate_spatial to handle multi-band vector cubes and output CSV format by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/446
+* fix(api): enhance load_collection to support GeoJSON spatial extents and mask outside polygons by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/447
+* fix(processes): fix reducer callbacks issues + context passing via refactor by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/450
+* fix(api): mirror cube:dimensions bands in collection summaries by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/451
+* feat(processes): add new processes for logical operations, slope calculation, and data manipulation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/456
+* fix(api): enhance parameter validation to accept null for nullable required parameters by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/457
+* chore(deps): bump helm/kind-action from 1.15.0 to 1.15.1 in the all group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/454
+* fix(api): add CORS header tests and improve error handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/461
+* fix(processes): ensure stack band names are preserved and correctly assigned to images by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/460
+* feat(api): add GET /collections/{collection_id}/queryables (#466) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/467
+* feat(api): implement cooperative cancellation for request work by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/471
+* chore(deps): bump the all group with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/468
+* fix(processes): handle STAC items with a null datetime by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/473
+* fix(api): implement NODATA handling from Special_Values in Sentinel-2 plugins by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/464
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.19.0...v0.20.0
+
 ## 0.19.0 (2026-10-08)
 
 ## What's Changed
