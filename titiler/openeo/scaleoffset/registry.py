@@ -44,6 +44,12 @@ class ScaleOffsetPlugin:
     #: A data asset's STAC fields -> its key in the parsed pairs, or None when
     #: the plugin has nothing to say about that asset.
     band_key: Callable[[Mapping[str, Any]], Optional[str]]
+    #: ``nodata(href, fetch_href, fetcher)`` -> the DN value that marks no
+    #: data in the bands the plugin knows (``band_key`` is not None), or None.
+    #: The reader masks that DN at read time, before any scale/offset, when
+    #: neither STAC nor the raster header gives a nodata (#463). None when
+    #: the plugin has no such value.
+    nodata: Optional[Callable[[str, str, Any], Optional[float]]] = None
 
 
 def find_metadata_asset(

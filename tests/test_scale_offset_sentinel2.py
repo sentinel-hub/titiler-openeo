@@ -261,3 +261,154 @@ def test_reader_lazy_stack_does_not_fetch(monkeypatch):
     assert fetcher.calls == []
     assert stack[dt].array.data[0][0, 0] == pytest.approx(0.1, rel=1e-5)
     assert len(fetcher.calls) == 1
+
+
+# --- NODATA from Special_Values (#463) ----------------------------------------------
+@pytest.mark.parametrize("payload", [PB0513, PB0300])
+def test_parse_nodata(payload):
+    assert s2.parse_product_nodata(payload) == 0.0
+
+
+def test_parse_nodata_absent():
+    assert s2.parse_product_nodata(b"<Level-2A_User_Product/>") is None
+
+
+def test_nodata_and_pairs_share_one_fetch():
+    fetcher = _FixtureFetcher()
+    href = "https://example.com/MTD_MSIL2A.xml"
+    assert s2.get_product_nodata(href, fetcher=fetcher) == 0.0
+    assert s2.get_product_scale_offset(href, fetcher=fetcher)["B4"] == pytest.approx(
+        (0.0001, -0.1)
+    )
+    assert len(fetcher.calls) == 1
+
+
+def _set_sources(monkeypatch, sources):
+    settings = reader.processing_settings
+    monkeypatch.setattr(settings, "apply_scale_offset", True)
+    monkeypatch.setattr(settings, "scale_offset_sources", sources)
+    monkeypatch.setattr(settings, "scale_offset_collections", {})
+
+
+def _asset_nodata(item, asset, fetcher):
+    """``(method nodata, plugin fallback value or None)`` for ``asset``."""
+    with reader.SimpleSTACReader(item, band_source_fetcher=fetcher) as src:
+        info = src._get_asset_info(asset)
+    fallback = info["reader_options"].get("fallback_nodata")
+    return info["method_options"].get("nodata"), fallback and fallback()
+
+
+def test_asset_info_plugin_nodata_is_lazy(monkeypatch):
+    _set_sources(monkeypatch, ["stac", "sentinel2-boa", "cog"])
+    fetcher = _FixtureFetcher()
+    with reader.SimpleSTACReader(_mpc_item(), band_source_fetcher=fetcher) as src:
+        info = src._get_asset_info("B04")
+    assert "nodata" not in info["method_options"]
+    assert fetcher.calls == []  # nothing is fetched before the raster is open
+    assert info["reader_options"]["fallback_nodata"]() == 0.0
+    assert len(fetcher.calls) == 1
+
+
+def test_asset_info_plugin_nodata_skips_unknown_band(monkeypatch):
+    # The plugin has no key for SCL: no fallback, and no fetch.
+    _set_sources(monkeypatch, ["sentinel2-boa"])
+    fetcher = _FixtureFetcher()
+    assert _asset_nodata(_mpc_item(), "SCL", fetcher) == (None, None)
+    assert fetcher.calls == []
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"nodata": 7},
+        {"raster:bands": [{"nodata": 0}]},  # 0 must not be lost
+        {"raster:bands": [{"raster:nodata": 0}]},
+    ],
+)
+def test_asset_info_stac_nodata_wins(monkeypatch, fields):
+    _set_sources(monkeypatch, ["sentinel2-boa"])
+    item = _mpc_item()
+    item.assets["B04"].extra_fields.update(fields)
+    fetcher = _FixtureFetcher()
+    expected = fields.get("nodata", 0)
+    assert _asset_nodata(item, "B04", fetcher) == (expected, None)
+    assert fetcher.calls == []
+
+
+@pytest.mark.parametrize("sources", [["stac", "cog"], []])
+def test_asset_info_plugin_not_listed(monkeypatch, sources):
+    _set_sources(monkeypatch, sources)
+    fetcher = _FixtureFetcher()
+    assert _asset_nodata(_mpc_item(), "B04", fetcher) == (None, None)
+    assert fetcher.calls == []
+
+
+def _read_swath_border(monkeypatch, tmp_path, header_nodata=None):
+    """Read an 8x8 B04 GeoTIFF whose 3 left columns are DN 0 (#463).
+
+    The 2 right columns hold ``header_nodata`` when it is given, and the
+    header then declares it. Returns the read and the plugin fetcher.
+    """
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.transform import from_origin
+
+    dn = numpy.full((8, 8), 2000, dtype="uint16")
+    dn[:, :3] = 0  # the swath border
+    if header_nodata is not None:
+        dn[:, 6:] = header_nodata
+    path = tmp_path / "B04.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=8,
+        height=8,
+        count=1,
+        dtype="uint16",
+        crs="EPSG:32631",
+        transform=from_origin(600000, 5000080, 10, 10),
+        nodata=header_nodata,
+    ) as dst:
+        dst.write(dn, 1)
+
+    item = _mpc_item()
+    b04 = item.assets["B04"]
+    b04.href = str(path)
+    for key in ("proj:bbox", "proj:shape", "proj:transform"):
+        b04.extra_fields.pop(key, None)
+    _set_sources(monkeypatch, ["stac", "sentinel2-boa", "cog"])
+    fetcher = _FixtureFetcher()
+    monkeypatch.setattr(s2, "get_default_fetcher", lambda: fetcher)
+
+    out = reader._reader(
+        item,
+        (600000, 5000000, 600080, 5000080),
+        assets=["B04"],
+        bounds_crs=CRS.from_epsg(32631),
+        dst_crs=CRS.from_epsg(32631),
+        max_size=None,
+        height=8,
+        width=8,
+    )
+    return out, fetcher
+
+
+def test_reader_masks_swath_border_before_offset(monkeypatch, tmp_path):
+    """DN 0 outside the swath is masked, not returned as -0.1 (#463)."""
+    out, fetcher = _read_swath_border(monkeypatch, tmp_path)
+    mask = numpy.ma.getmaskarray(out.array)[0]
+    assert mask[:, :3].all()
+    assert not mask[:, 3:].any()
+    assert out.array.data[0][0, 5] == pytest.approx(0.1, rel=1e-5)
+    assert len(fetcher.calls) == 1
+
+
+def test_reader_header_nodata_wins_over_plugin(monkeypatch, tmp_path):
+    """A header nodata is kept, and the product XML is not fetched for it."""
+    out, fetcher = _read_swath_border(monkeypatch, tmp_path, header_nodata=65535)
+    mask = numpy.ma.getmaskarray(out.array)[0]
+    assert mask[:, 6:].all()  # the header's nodata
+    assert not mask[:, :6].any()  # DN 0 is not the nodata of this raster
+    # The plugin XML is still fetched one time, for the scale/offset only.
+    assert len(fetcher.calls) == 1
