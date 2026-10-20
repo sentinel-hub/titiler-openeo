@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-#: Interval, in seconds, between two checks of the client connection.
-DISCONNECT_POLL_INTERVAL = 0.1
-
 _cancel_event: contextvars.ContextVar[Optional[threading.Event]] = (
     contextvars.ContextVar("titiler_openeo_cancel_event", default=None)
 )
@@ -71,13 +68,20 @@ def submit_in_context(
 async def _watch_disconnect(request: Request, event: threading.Event) -> None:
     """Set ``event`` when the client of ``request`` disconnects.
 
+    This waits on the ASGI ``receive`` channel, as Starlette's
+    ``StreamingResponse.listen_for_disconnect`` does. The server returns
+    ``http.disconnect`` as soon as the connection closes, so there is no
+    polling and no delay.
+
     The event is also set when this task is cancelled: if an enclosing scope
     is cancelled (for example at server shutdown), the worker must stop too,
     because ``run_cancellable`` waits for it.
     """
     try:
-        while not await request.is_disconnected():
-            await anyio.sleep(DISCONNECT_POLL_INTERVAL)
+        while True:
+            message = await request.receive()
+            if message["type"] == "http.disconnect":
+                break
     finally:
         event.set()
 
@@ -88,6 +92,10 @@ async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
     ``fn`` sees the cancel flag through ``raise_if_cancelled``. The thread is
     never abandoned: this returns only when ``fn`` has stopped, so the thread
     limit of the server stays correct.
+
+    Call it only after the request body was read (a GET has no body; FastAPI
+    reads the body before the endpoint runs). The watcher reads the ASGI
+    messages, so it would take any body chunk that was not read.
 
     Raises:
         RequestCancelled: the client disconnected and ``fn`` stopped at a
