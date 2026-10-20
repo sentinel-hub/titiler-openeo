@@ -13,10 +13,12 @@ scripts, tests) there is no flag and ``raise_if_cancelled`` does nothing.
 import contextvars
 import logging
 import threading
+import time
 from concurrent.futures import Executor, Future
 from typing import Any, Callable, Optional, TypeVar
 
 import anyio
+import anyio.lowlevel
 from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,18 @@ def raise_if_cancelled() -> None:
         raise RequestCancelled("client disconnected")
 
 
+def cancellable_sleep(seconds: float) -> None:
+    """Sleep ``seconds``, but wake and raise if the request is cancelled.
+
+    Outside a request, this is ``time.sleep``.
+    """
+    event = _cancel_event.get()
+    if event is None:
+        time.sleep(seconds)
+    elif event.wait(seconds):
+        raise RequestCancelled("client disconnected")
+
+
 def submit_in_context(
     executor: Executor, fn: Callable[..., T], *args: Any, **kwargs: Any
 ) -> "Future[T]":
@@ -55,10 +69,17 @@ def submit_in_context(
 
 
 async def _watch_disconnect(request: Request, event: threading.Event) -> None:
-    """Set ``event`` when the client of ``request`` disconnects."""
-    while not await request.is_disconnected():
-        await anyio.sleep(DISCONNECT_POLL_INTERVAL)
-    event.set()
+    """Set ``event`` when the client of ``request`` disconnects.
+
+    The event is also set when this task is cancelled: if an enclosing scope
+    is cancelled (for example at server shutdown), the worker must stop too,
+    because ``run_cancellable`` waits for it.
+    """
+    try:
+        while not await request.is_disconnected():
+            await anyio.sleep(DISCONNECT_POLL_INTERVAL)
+    finally:
+        event.set()
 
 
 async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
@@ -76,6 +97,8 @@ async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
 
     def run() -> T:
         _cancel_event.set(event)
+        # The client can go away while this waits for a free worker thread.
+        raise_if_cancelled()
         return fn()
 
     result: Optional[T] = None
@@ -91,6 +114,9 @@ async def run_cancellable(request: Request, fn: Callable[[], T]) -> T:
             error = exc
         tg.cancel_scope.cancel()
 
+    # If an enclosing scope was cancelled, raise that cancellation, not the
+    # error of the stopped work.
+    await anyio.lowlevel.checkpoint_if_cancelled()
     if error is not None:
         raise error
     return result  # type: ignore[return-value]

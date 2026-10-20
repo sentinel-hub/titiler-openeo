@@ -25,7 +25,6 @@ from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
 from rasterio.warp import transform_bounds
-from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
@@ -1638,10 +1637,13 @@ class LoadStac:
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
         crs = to_rasterio_crs(projcrs)
 
+        # threads=0: lazy tasks. The RasterStack runs them in its own pool,
+        # where they see the cancel flag of the request. With threads > 1,
+        # create_tasks reads all items before it returns.
         tasks = create_tasks(
             _reader,
             items,
-            MAX_THREADS,
+            0,
             bbox,
             assets=bands,
             bounds_crs=crs,

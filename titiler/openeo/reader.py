@@ -1,7 +1,6 @@
 """titiler-openeo custom reader."""
 
 import logging
-import time
 import warnings
 from threading import Lock
 from typing import (
@@ -48,7 +47,7 @@ from .bandsources import (
     derive_bands,
     resolve_band,
 )
-from .cancellation import raise_if_cancelled
+from .cancellation import cancellable_sleep, raise_if_cancelled
 from .errors import OutputLimitExceeded
 from .scaleoffset import PLUGINS as SCALE_OFFSET_PLUGINS
 from .scaleoffset import ProductScaleOffset, find_metadata_asset
@@ -1573,7 +1572,7 @@ def _reader(
                 f"RasterioIOError loading {item_id}: {str(e)}. "
                 f"Retrying in {retry_delay}s... (Attempt {retries}/{max_retries})"
             )
-            time.sleep(retry_delay)
+            cancellable_sleep(retry_delay)
             # Increase delay for next retry (exponential backoff)
             retry_delay *= 2
 

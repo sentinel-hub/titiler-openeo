@@ -8,18 +8,43 @@ from datetime import datetime, timedelta
 import anyio
 import numpy as np
 import pytest
+from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from pystac import Item
 from rio_tiler.models import ImageData
 from starlette.requests import Request
 
 from titiler.openeo import cancellation
 from titiler.openeo.cancellation import (
     RequestCancelled,
+    cancellable_sleep,
     raise_if_cancelled,
     run_cancellable,
     submit_in_context,
 )
 from titiler.openeo.factory import EndpointsFactory
 from titiler.openeo.processes.implementations.data_model import RasterStack
+from titiler.openeo.stacapi import LoadStac
+
+ITEM = {
+    "type": "Feature",
+    "id": "item",
+    "stac_version": "1.0.0",
+    "stac_extensions": [
+        "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+    ],
+    "bbox": [0, 0, 1, 1],
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+    },
+    "properties": {
+        "datetime": "2021-01-01T00:00:00Z",
+        "proj:crs": "EPSG:4326",
+        "proj:transform": [0.0002, 0.0, 0.0, 0.0, -0.0002, 0.0],
+    },
+    "assets": {"B01": {"href": "https://example.com/B01.tif", "type": "image/tiff"}},
+    "links": [],
+}
 
 
 def _image() -> ImageData:
@@ -193,3 +218,96 @@ def test_xyz_tile_returns_499_on_disconnect(app_no_auth, monkeypatch):
     assert len(calls) < 50
     status = next(m["status"] for m in sent if m["type"] == "http.response.start")
     assert status == 499
+
+
+def test_cancellable_sleep_without_request_sleeps():
+    start = time.monotonic()
+    cancellable_sleep(0.05)
+    assert time.monotonic() - start >= 0.05
+
+
+def test_cancellable_sleep_wakes_on_cancel():
+    event = threading.Event()
+    token = cancellation._cancel_event.set(event)
+    try:
+        threading.Timer(0.1, event.set).start()
+        start = time.monotonic()
+        with pytest.raises(RequestCancelled):
+            cancellable_sleep(10)
+        assert time.monotonic() - start < 1.0
+    finally:
+        cancellation._cancel_event.reset(token)
+
+
+def test_run_cancellable_stops_work_when_parent_scope_cancelled():
+    calls: list = []
+
+    async def main():
+        # No disconnect: the enclosing scope is cancelled (e.g. shutdown).
+        with anyio.move_on_after(0.2):
+            await run_cancellable(
+                _request(_receive_disconnect_after(10)),
+                lambda: _slow_checkpointed_work(calls),
+            )
+
+    start = time.monotonic()
+    anyio.run(main)
+
+    assert time.monotonic() - start < 1.0
+    assert len(calls) < 50
+
+
+def test_run_cancellable_does_not_start_work_after_disconnect(monkeypatch):
+    calls: list = []
+    run_sync = anyio.to_thread.run_sync
+
+    async def run_sync_after_wait(fn, *args, **kwargs):
+        # The request waits for a free worker thread; the client goes away.
+        await anyio.sleep(0.3)
+        return await run_sync(fn, *args, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_sync_after_wait)
+
+    async def main():
+        await run_cancellable(
+            _request(_receive_disconnect_after(0.05)), lambda: calls.append(1)
+        )
+
+    with pytest.raises(RequestCancelled):
+        anyio.run(main)
+    assert calls == []
+
+
+def test_load_stac_reads_lazily_with_request_context(monkeypatch):
+    """load_stac tasks run where the stack is read, so they see the flag."""
+    seen = []
+
+    def reader(item, bbox, **kwargs):
+        seen.append(cancellation._cancel_event.get())
+        return ImageData(
+            np.ma.ones((1, 10, 10), dtype="float32"),
+            crs=kwargs["dst_crs"],
+            bounds=tuple(bbox),
+        )
+
+    item = Item.from_dict(ITEM)
+    monkeypatch.setattr(LoadStac, "_load_stac_object", lambda self, url: item)
+    monkeypatch.setattr("titiler.openeo.stacapi._reader", reader)
+
+    stack = LoadStac().load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1),
+        bands=["B01"],
+        width=10,
+        height=10,
+    )
+    # Nothing is read at load time.
+    assert seen == []
+
+    event = threading.Event()
+    token = cancellation._cancel_event.set(event)
+    try:
+        _ = stack.first
+    finally:
+        cancellation._cancel_event.reset(token)
+    assert seen == [event]
