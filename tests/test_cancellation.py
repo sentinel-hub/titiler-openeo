@@ -8,8 +8,10 @@ from datetime import datetime, timedelta
 import anyio
 import numpy as np
 import pytest
+import rasterio
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac import Item
+from rasterio.transform import from_origin
 from rio_tiler.models import ImageData
 from starlette.requests import Request
 
@@ -22,6 +24,7 @@ from titiler.openeo.cancellation import (
     submit_in_context,
 )
 from titiler.openeo.factory import EndpointsFactory
+from titiler.openeo.processes.implementations import io as io_module
 from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.stacapi import LoadStac
 
@@ -311,3 +314,59 @@ def test_load_stac_reads_lazily_with_request_context(monkeypatch):
     finally:
         cancellation._cancel_event.reset(token)
     assert seen == [event]
+
+
+@pytest.fixture
+def local_cog(tmp_path):
+    """A small single-band GeoTIFF."""
+    path = tmp_path / "tiny.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=10,
+        height=10,
+        count=1,
+        dtype="uint16",
+        crs="EPSG:32631",
+        transform=from_origin(500000, 5000000, 10, 10),
+    ) as dst:
+        dst.write(np.arange(100, dtype="uint16").reshape(1, 10, 10))
+    return str(path)
+
+
+def test_load_url_reads_lazily_with_request_context(monkeypatch, local_cog):
+    """load_url reads where the stack is read, so its read sees the flag."""
+    seen = []
+    real_reader = io_module._reader
+
+    def reader(*args, **kwargs):
+        seen.append(cancellation._cancel_event.get())
+        return real_reader(*args, **kwargs)
+
+    monkeypatch.setattr(io_module, "_reader", reader)
+
+    stack = io_module.load_url(local_cog)
+    # Nothing is read at load time.
+    assert seen == []
+
+    event = threading.Event()
+    token = cancellation._cancel_event.set(event)
+    try:
+        _ = stack.first
+    finally:
+        cancellation._cancel_event.reset(token)
+    assert seen == [event]
+
+
+def test_load_url_read_stops_when_cancelled(local_cog):
+    stack = io_module.load_url(local_cog)
+
+    event = threading.Event()
+    event.set()
+    token = cancellation._cancel_event.set(event)
+    try:
+        with pytest.raises(RequestCancelled):
+            _ = stack.first
+    finally:
+        cancellation._cancel_event.reset(token)
