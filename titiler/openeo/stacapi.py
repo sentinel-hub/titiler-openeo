@@ -35,6 +35,7 @@ from urllib3 import Retry
 
 from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
 from .bandsources import BAND_SOURCES, derive_bands, describe_bands
+from .cancellation import raise_if_cancelled
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -1299,6 +1300,9 @@ class LoadCollection:
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
+
+        # The STAC search can be slow: stop here if the client went away.
+        raise_if_cancelled()
 
         # Check the items limit. Fail loudly when the extent genuinely contains
         # more items than allowed rather than silently truncating the result.

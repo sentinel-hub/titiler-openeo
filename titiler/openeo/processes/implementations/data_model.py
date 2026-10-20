@@ -31,6 +31,8 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import TaskType, filter_tasks
 from rio_tiler.types import BBox
 
+from ...cancellation import raise_if_cancelled, submit_in_context
+
 # https://openeo.org/documentation/1.0/developers/backends/performance.html#datacube-processing
 # Here it is important to note that openEO does not enforce or define how the datacube should look like on the backend.
 # The datacube can be a set of files, or arrays in memory distributed over a cluster.
@@ -507,6 +509,7 @@ class RasterStack(Dict[datetime, ImageData]):
             ImageData: The result of the task execution, labelled with the
             stack band names
         """
+        raise_if_cancelled()
         if isinstance(task_func, Future):
             img = task_func.result()
         else:
@@ -538,28 +541,35 @@ class RasterStack(Dict[datetime, ImageData]):
 
         # Execute tasks concurrently
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            # Submit all tasks
+            # Submit all tasks. Each one runs in a copy of this context, so it
+            # sees the cancel flag of the request.
             key_to_future = {
-                key: executor.submit(self._execute_task, key, task_func)
+                key: submit_in_context(executor, self._execute_task, key, task_func)
                 for key, (task_func, _asset) in key_task_pairs
             }
 
             # Collect results as they complete
-            for key, future in key_to_future.items():
-                try:
-                    data = future.result()
-                    with self._cache_lock:
-                        self._data_cache[key] = data
-                except self._allowed_exceptions as e:
-                    # Log task failures for visibility in production scenarios
-                    logging.warning(
-                        "Task execution failed for key '%s' during concurrent execution: %s. "
-                        "This item will be skipped, which may result in incomplete data.",
-                        key,
-                        str(e),
-                    )
-                    # Skip failed tasks, don't cache them
-                    continue
+            try:
+                for key, future in key_to_future.items():
+                    try:
+                        data = future.result()
+                        with self._cache_lock:
+                            self._data_cache[key] = data
+                    except self._allowed_exceptions as e:
+                        # Log task failures for visibility in production scenarios
+                        logging.warning(
+                            "Task execution failed for key '%s' during concurrent execution: %s. "
+                            "This item will be skipped, which may result in incomplete data.",
+                            key,
+                            str(e),
+                        )
+                        # Skip failed tasks, don't cache them
+                        continue
+            except BaseException:
+                # The result is lost (cancelled request or failed task): do not
+                # start the queued reads. Reads in progress complete.
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
 
     def _execute_all_tasks(self) -> None:
         """Execute all tasks and populate the cache (for backward compatibility)."""

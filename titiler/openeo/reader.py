@@ -48,6 +48,7 @@ from .bandsources import (
     derive_bands,
     resolve_band,
 )
+from .cancellation import raise_if_cancelled
 from .errors import OutputLimitExceeded
 from .scaleoffset import PLUGINS as SCALE_OFFSET_PLUGINS
 from .scaleoffset import ProductScaleOffset, find_metadata_asset
@@ -1501,6 +1502,8 @@ def _reader(
     logger.debug(f"Loading STAC item: {item_id} (datetime: {item_datetime})")
 
     while True:
+        # Before each read and each retry: stop if the client went away.
+        raise_if_cancelled()
         try:
             with SimpleSTACReader(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
