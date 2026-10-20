@@ -1,7 +1,9 @@
 """Test titiler.openeo.stacapi."""
 
+from datetime import datetime
+
 import pytest
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Item
 from rio_tiler.models import ImageData
 
@@ -354,6 +356,43 @@ def test_load_collection_groups_same_datetime_items_into_one_slice(monkeypatch):
     assert len(stack.get_source_items(keys[0])) == 2
 
 
+def _range_only_item_dict(start: str, end: str) -> dict:
+    """A STAC item with ``"datetime": null`` and only a start/end range."""
+    item = _stac_item_dict(start)
+    item["properties"].update(datetime=None, start_datetime=start, end_datetime=end)
+    return item
+
+
+def test_load_collection_keys_range_only_items_by_start_datetime(monkeypatch):
+    """Items with ``"datetime": null`` are keyed by their ``start_datetime``.
+
+    STAC allows a null datetime when start_datetime/end_datetime are set, and
+    composites such as Planetary Computer's MODIS collections are published that
+    way. Regression for #472: these items failed with
+    ``'NoneType' object has no attribute 'isoformat'``.
+    """
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    items = [
+        Item.from_dict(
+            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+        ),
+        Item.from_dict(_stac_item_dict("2013-02-18T00:00:00Z")),
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+    stack = loader.load_collection(
+        id="test",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        width=64,
+        height=64,
+    )
+
+    assert stack.timestamps() == [datetime(2013, 2, 10), datetime(2013, 2, 18)]
+
+
 # A triangle over the lower-left half of the [0, 0, 1, 1] square.
 _TRIANGLE = {
     "type": "FeatureCollection",
@@ -504,6 +543,41 @@ def test_load_stac_geojson_spatial_extent_single_item(monkeypatch):
     mask = numpy.ma.getmaskarray(img.array)[0]
     assert mask[numpy.triu_indices(10, k=1)].all()
     assert not mask[numpy.tril_indices(10, k=-1)].any()
+
+
+def test_load_stac_temporal_filter_keeps_range_only_items(monkeypatch):
+    """The temporal filter falls back to ``start_datetime`` when ``datetime`` is null.
+
+    Regression for #472: such items were silently dropped, so load_stac raised
+    NoDataAvailable for an extent that covers them.
+    """
+    import numpy
+
+    monkeypatch.setattr(
+        LoadStac,
+        "_load_stac_object",
+        lambda self, url: Item.from_dict(
+            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+        ),
+    )
+    monkeypatch.setattr(
+        "titiler.openeo.stacapi._reader",
+        lambda item, bbox, **kwargs: ImageData(
+            numpy.ma.ones((1, 10, 10), dtype="float32"),
+            crs=kwargs["dst_crs"],
+            bounds=tuple(bbox),
+        ),
+    )
+
+    stack = LoadStac().load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        temporal_extent=TemporalInterval(["2013-02-01", "2013-03-01"]),
+        width=10,
+        height=10,
+    )
+
+    assert stack.timestamps() == [datetime(2013, 2, 10)]
 
 
 def test_load_stac_passes_geojson_to_collection(monkeypatch):

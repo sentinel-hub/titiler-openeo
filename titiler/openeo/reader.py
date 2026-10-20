@@ -3,6 +3,7 @@
 import logging
 import time
 import warnings
+from datetime import datetime
 from threading import Lock
 from typing import (
     Any,
@@ -254,6 +255,15 @@ def _to_pystac_item(item: Union[pystac.Item, Dict[str, Any]]) -> pystac.Item:
     if isinstance(item, dict):
         return pystac.Item.from_dict(item)
     return item
+
+
+def _item_datetime(item: pystac.Item) -> datetime:
+    """Return the item's ``datetime``, or its ``start_datetime`` if that is null.
+
+    STAC allows ``"datetime": null`` when ``start_datetime`` and
+    ``end_datetime`` are set, and pystac then requires both (issue #472).
+    """
+    return item.datetime or item.common_metadata.start_datetime
 
 
 @attr.s
@@ -1132,7 +1142,7 @@ def _get_cube_resolutions(
                     x_val = float(reprojected[0])
                     y_val = float(reprojected[1])
 
-                item_datetime = src_dst.input.datetime.isoformat()
+                item_datetime = _item_datetime(src_dst.input).isoformat()
                 if item_datetime not in cube_resolutions:
                     cube_resolutions[item_datetime] = {}
 

@@ -48,7 +48,7 @@ from .errors import (
 from .processes.implementations.data_model import RasterStack, compute_cutline_mask
 from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
-from .reader import _estimate_output_dimensions, _reader
+from .reader import _estimate_output_dimensions, _item_datetime, _reader
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 from .signing import stamp_signer_key
 
@@ -1352,7 +1352,7 @@ class LoadCollection:
         # Group items by date
         items_by_date: dict[str, list[Item]] = {}
         for item in items:
-            date = item.datetime.isoformat()
+            date = _item_datetime(item).isoformat()
             if date not in items_by_date:
                 items_by_date[date] = []
             items_by_date[date].append(item)
@@ -1432,7 +1432,9 @@ class LoadCollection:
                     task_fn,
                     {
                         "id": date,
-                        "datetime": date_items[0].datetime if date_items else None,
+                        "datetime": _item_datetime(date_items[0])
+                        if date_items
+                        else None,
                         "geometry": geometries if geometries else None,
                         # The source items behind this date group's mosaic. Carried
                         # so processes that need per-item STAC metadata (asset
@@ -1559,7 +1561,8 @@ class LoadStac:
 
         filtered_items = []
         for item in items:
-            item_datetime = item.get("properties", {}).get("datetime")
+            props = item.get("properties", {})
+            item_datetime = props.get("datetime") or props.get("start_datetime")
             if not item_datetime:
                 continue
 
