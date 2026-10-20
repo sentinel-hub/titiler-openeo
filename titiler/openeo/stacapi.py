@@ -25,7 +25,6 @@ from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
 from rasterio.warp import transform_bounds
-from rio_tiler.constants import MAX_THREADS
 from rio_tiler.errors import TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
@@ -35,6 +34,7 @@ from urllib3 import Retry
 
 from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
 from .bandsources import BAND_SOURCES, derive_bands, describe_bands
+from .cancellation import raise_if_cancelled
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
@@ -1300,6 +1300,9 @@ class LoadCollection:
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
 
+        # The STAC search can be slow: stop here if the client went away.
+        raise_if_cancelled()
+
         # Check the items limit. Fail loudly when the extent genuinely contains
         # more items than allowed rather than silently truncating the result.
         if len(items) > processing_settings.max_items:
@@ -1634,10 +1637,13 @@ class LoadStac:
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
         crs = to_rasterio_crs(projcrs)
 
+        # threads=0: lazy tasks. The RasterStack runs them in its own pool,
+        # where they see the cancel flag of the request. With threads > 1,
+        # create_tasks reads all items before it returns.
         tasks = create_tasks(
             _reader,
             items,
-            MAX_THREADS,
+            0,
             bbox,
             assets=bands,
             bounds_crs=crs,

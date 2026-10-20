@@ -23,6 +23,7 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
+from .cancellation import RequestCancelled, run_cancellable
 from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
 from .models import openapi
 from .models import udp as udp_models
@@ -300,6 +301,131 @@ class EndpointsFactory(BaseFactory):
                 raise TileOutsideBounds(
                     f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
                 )
+
+    def _render_xyz_tile(
+        self,
+        request: Request,
+        service_id: str,
+        z: int,
+        x: int,
+        y: int,
+        user: Optional[User],
+    ) -> Response:
+        """Render one tile of an XYZ service.
+
+        Sync and blocking: the route runs it in a worker thread with
+        ``run_cancellable``.
+        """
+        from titiler.openeo.services.auth import ServiceAuthorizationManager
+
+        service = self.services_store.get_service(service_id)
+        if service is None:
+            raise HTTPException(404, f"Could not find service: {service_id}")
+
+        # Authorize service access
+        auth_manager = ServiceAuthorizationManager()
+        auth_manager.authorize(service, user)
+
+        if service.get("enabled") is False:
+            raise HTTPException(404, f"Service is disabled: {service_id}")
+
+        tile_headers, error_headers = self._tile_cache_headers(service)
+
+        # Get service configuration
+        configuration = service.get("configuration")
+        if not isinstance(configuration, dict):
+            configuration = {}
+        tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
+        tilesize = configuration.get("tile_size", 256)
+        tms = morecantile.tms.get(tilematrixset)
+
+        minzoom = configuration.get("minzoom")
+        if minzoom is None:
+            minzoom = tms.minzoom
+        maxzoom = configuration.get("maxzoom")
+        if maxzoom is None:
+            maxzoom = tms.maxzoom
+        if z < minzoom or z > maxzoom:
+            raise HTTPException(
+                400,
+                f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+                headers=error_headers,
+            )
+
+        process = deepcopy(service["process"])
+
+        load_nodes = self.get_load_nodes(process["process_graph"])
+
+        # Check that nodes have spatial-extent
+        assert all(
+            node["arguments"].get("spatial_extent") for node in load_nodes
+        ), "Invalid `load` process, Missing spatial_extent"
+        # Force size to tile size
+        for node in load_nodes:
+            node["arguments"]["width"] = tilesize
+            node["arguments"]["height"] = tilesize
+
+        tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
+
+        # Parse query parameters for dynamic parameter substitution
+        query_params = self._parse_query_parameters(request)
+        if self.tile_store:
+            query_params["_openeo_tile_store"] = self.tile_store
+
+        query_params["_openeo_user"] = user
+
+        parameters = {
+            "spatial_extent_west": tile_bounds[0],
+            "spatial_extent_south": tile_bounds[1],
+            "spatial_extent_east": tile_bounds[2],
+            "spatial_extent_north": tile_bounds[3],
+            "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+            "target_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+            "bounding_box": BoundingBox(
+                west=tile_bounds[0],
+                east=tile_bounds[2],
+                south=tile_bounds[1],
+                north=tile_bounds[3],
+                crs=tms.crs.to_epsg(),
+            ),
+            "tile_x": x,
+            "tile_y": y,
+            "tile_z": z,
+            **query_params,  # Merge query parameters, they override tile params if same name
+        }
+
+        # now,with the default parameters from the service configuration, We will fill the default values
+        for param in process.get("parameters") or []:
+            param_name = param.get("name")
+            if param_name and param_name not in parameters:
+                default_value = param.get("default")
+                if default_value is not None:
+                    parameters[param_name] = default_value
+
+        # Validate tile bounds against service extent
+        service_extent = configuration.get("extent")
+        self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
+
+        parsed_graph = OpenEOProcessGraph(pg_data=process)
+        results_cache = make_results_cache(parsed_graph)
+        process_registry = plan_process_registry(parsed_graph, self.process_registry)
+        pg_callable = parsed_graph.to_callable(
+            process_registry=process_registry,
+            parameters=process.get("parameters"),
+            results_cache=results_cache,
+            # parameters=args,  # Use built-in parameter substitution instead of manual
+        )
+
+        try:
+            img = pg_callable(named_parameters=parameters)
+        except NoDataAvailable as e:
+            if error_headers:
+                e.headers = error_headers  # type: ignore[attr-defined]
+            raise
+
+        # A tile graph without `save_result` gets PNG, the format of web map tiles.
+        img = encode_result(img, raster_format="PNG")
+        return Response(img.data, media_type=img.media_type, headers=tile_headers)
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -1629,7 +1755,7 @@ class EndpointsFactory(BaseFactory):
             operation_id="tile-service",
             tags=["Secondary Services"],
         )
-        def openeo_xyz_service(
+        async def openeo_xyz_service(
             request: Request,
             service_id: Annotated[
                 str,
@@ -1657,116 +1783,24 @@ class EndpointsFactory(BaseFactory):
             ],
             user=Depends(self.auth.validate_optional),
         ):
-            """Create map tile."""
-            from titiler.openeo.services.auth import ServiceAuthorizationManager
+            """Create map tile.
 
-            service = self.services_store.get_service(service_id)
-            if service is None:
-                raise HTTPException(404, f"Could not find service: {service_id}")
-
-            # Authorize service access
-            auth_manager = ServiceAuthorizationManager()
-            auth_manager.authorize(service, user)
-
-            if service.get("enabled") is False:
-                raise HTTPException(404, f"Service is disabled: {service_id}")
-
-            tile_headers, error_headers = self._tile_cache_headers(service)
-
-            # Get service configuration
-            configuration = service.get("configuration")
-            if not isinstance(configuration, dict):
-                configuration = {}
-            tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
-            tilesize = configuration.get("tile_size", 256)
-            tms = morecantile.tms.get(tilematrixset)
-
-            minzoom = configuration.get("minzoom")
-            if minzoom is None:
-                minzoom = tms.minzoom
-            maxzoom = configuration.get("maxzoom")
-            if maxzoom is None:
-                maxzoom = tms.maxzoom
-            if z < minzoom or z > maxzoom:
-                raise HTTPException(
-                    400,
-                    f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
-                    headers=error_headers,
-                )
-
-            process = deepcopy(service["process"])
-
-            load_nodes = self.get_load_nodes(process["process_graph"])
-
-            # Check that nodes have spatial-extent
-            assert all(
-                node["arguments"].get("spatial_extent") for node in load_nodes
-            ), "Invalid `load` process, Missing spatial_extent"
-            # Force size to tile size
-            for node in load_nodes:
-                node["arguments"]["width"] = tilesize
-                node["arguments"]["height"] = tilesize
-
-            tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
-
-            # Parse query parameters for dynamic parameter substitution
-            query_params = self._parse_query_parameters(request)
-            if self.tile_store:
-                query_params["_openeo_tile_store"] = self.tile_store
-
-            query_params["_openeo_user"] = user
-
-            parameters = {
-                "spatial_extent_west": tile_bounds[0],
-                "spatial_extent_south": tile_bounds[1],
-                "spatial_extent_east": tile_bounds[2],
-                "spatial_extent_north": tile_bounds[3],
-                "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                "target_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                "bounding_box": BoundingBox(
-                    west=tile_bounds[0],
-                    east=tile_bounds[2],
-                    south=tile_bounds[1],
-                    north=tile_bounds[3],
-                    crs=tms.crs.to_epsg(),
-                ),
-                "tile_x": x,
-                "tile_y": y,
-                "tile_z": z,
-                **query_params,  # Merge query parameters, they override tile params if same name
-            }
-
-            # now,with the default parameters from the service configuration, We will fill the default values
-            for param in process.get("parameters") or []:
-                param_name = param.get("name")
-                if param_name and param_name not in parameters:
-                    default_value = param.get("default")
-                    if default_value is not None:
-                        parameters[param_name] = default_value
-
-            # Validate tile bounds against service extent
-            service_extent = configuration.get("extent")
-            self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
-
-            parsed_graph = OpenEOProcessGraph(pg_data=process)
-            results_cache = make_results_cache(parsed_graph)
-            process_registry = plan_process_registry(
-                parsed_graph, self.process_registry
-            )
-            pg_callable = parsed_graph.to_callable(
-                process_registry=process_registry,
-                parameters=process.get("parameters"),
-                results_cache=results_cache,
-                # parameters=args,  # Use built-in parameter substitution instead of manual
-            )
-
+            The tile is rendered in a worker thread. If the client disconnects
+            (for example a map viewer that drops tiles when the user pans), the
+            render stops at the next checkpoint of the read path.
+            """
             try:
-                img = pg_callable(named_parameters=parameters)
-            except NoDataAvailable as e:
-                if error_headers:
-                    e.headers = error_headers  # type: ignore[attr-defined]
-                raise
-
-            # A tile graph without `save_result` gets PNG, the format of web map tiles.
-            img = encode_result(img, raster_format="PNG")
-            return Response(img.data, media_type=img.media_type, headers=tile_headers)
+                return await run_cancellable(
+                    request,
+                    lambda: self._render_xyz_tile(request, service_id, z, x, y, user),
+                )
+            except RequestCancelled:
+                logger.debug(
+                    "Tile %s/%s/%s of service %s cancelled: client disconnected",
+                    z,
+                    x,
+                    y,
+                    service_id,
+                )
+                # Nobody reads this response: the client is gone.
+                return Response(status_code=499, headers={"Cache-Control": "no-store"})

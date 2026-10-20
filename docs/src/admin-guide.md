@@ -169,6 +169,10 @@ To prevent resource exhaustion:
 - `TITILER_OPENEO_PROCESSING_MAX_PIXELS`: Maximum allowed pixels for image processing
 - `TITILER_OPENEO_PROCESSING_MAX_ITEMS`: Maximum number of items (STAC items from a API search) in a request
 
+### Tile Request Cancellation
+
+When a map viewer aborts a tile (for example, when the user pans), the server stops the work for that tile at the next item read, and frees the worker thread. The server sees the abort only when the connection to it closes. If a reverse proxy is in front of the server, it must close the upstream connection when the client aborts. For nginx (and the NGINX Ingress Controller), `proxy_ignore_client_abort` must stay `off`, which is the default. See [ADR 0011](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0011-request-cancellation.md).
+
 ## Monitoring
 
 ### API Endpoints

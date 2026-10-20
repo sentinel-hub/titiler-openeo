@@ -256,7 +256,7 @@ def test_every_retry_rebuilds_the_reader_so_an_expired_token_is_reminted(monkeyp
         return src
 
     monkeypatch.setattr(reader, "SimpleSTACReader", factory)
-    monkeypatch.setattr(reader.time, "sleep", lambda _: None)
+    monkeypatch.setattr(reader, "cancellable_sleep", lambda _: None)
 
     item = stamp_signer_key(
         {"id": "x", "properties": {"datetime": "2025-01-01T00:00:00Z"}}, TEST_KEY

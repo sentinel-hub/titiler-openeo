@@ -6,7 +6,7 @@ from typing import Dict, Optional, Union
 import numpy
 import pystac
 from pystac.extensions.projection import ProjectionExtension
-from rio_tiler.constants import MAX_THREADS, WGS84_CRS
+from rio_tiler.constants import WGS84_CRS
 from rio_tiler.io import COGReader
 from rio_tiler.tasks import create_tasks
 
@@ -91,10 +91,12 @@ def load_url(
     item_dict = stamp_signer_key(item.to_dict(), signer_key)
 
     # Create the tasks, read on the native grid of the COG
+    # threads=0: a lazy task, read when the stack is read (in the context of
+    # the request, so it sees the cancel flag).
     tasks = create_tasks(
         _reader,
         [item_dict],
-        MAX_THREADS,
+        0,
         cog_bounds,
         assets=["data"],
         bounds_crs=cog_crs,
