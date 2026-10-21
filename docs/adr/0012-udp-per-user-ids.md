@@ -79,7 +79,10 @@ do not have to do a manual step.
   key and do nothing.
 - **SQLAlchemy, SQLite:** SQLite cannot change a primary key. The store
   renames the old table, creates the new table, copies the rows and drops the
-  old table.
+  old table. These steps run in a savepoint. The `pysqlite` driver does not
+  open a transaction for DDL, so without the savepoint a failure part way
+  leaves an empty table with the new key. The next start then does not
+  migrate, and the old rows stay hidden in the renamed table.
 - **DuckDB:** DuckDB cannot drop a primary key. The store rebuilds the table
   in one transaction.
 - **Local JSON:** the store reads the old flat layout

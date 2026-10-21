@@ -192,14 +192,20 @@ def _migrate_udp_primary_key(conn: Any) -> None:
         return
 
     if conn.dialect.name == "sqlite":
-        old = f"{table.name}_old"
-        conn.execute(text(f"ALTER TABLE {table.name} RENAME TO {old}"))
-        table.create(conn)
-        columns = ", ".join(c.name for c in table.columns)
-        conn.execute(
-            text(f"INSERT INTO {table.name} ({columns}) SELECT {columns} FROM {old}")
-        )
-        conn.execute(text(f"DROP TABLE {old}"))
+        # pysqlite does not open a transaction for DDL. Without the savepoint,
+        # a failure part way leaves an empty table under the new key, which
+        # the next start does not migrate, and the rows in the old table.
+        with conn.begin_nested():
+            old = f"{table.name}_old"
+            conn.execute(text(f"ALTER TABLE {table.name} RENAME TO {old}"))
+            table.create(conn)
+            columns = ", ".join(c.name for c in table.columns)
+            conn.execute(
+                text(
+                    f"INSERT INTO {table.name} ({columns}) SELECT {columns} FROM {old}"
+                )
+            )
+            conn.execute(text(f"DROP TABLE {old}"))
         return
 
     quote = conn.dialect.identifier_preparer.quote

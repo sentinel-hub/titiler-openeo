@@ -212,3 +212,59 @@ def test_table_keyed_on_id_is_migrated(tmp_path):
     # Opening the migrated store again leaves it as it is
     reopened = SQLAlchemyUdpStore(store=url)
     assert len(reopened.list_udps(user_id="user1")) == 1
+
+
+def test_failed_migration_keeps_the_old_table(tmp_path):
+    """A rebuild that fails part way leaves the old table as it was (#469)."""
+    from sqlalchemy import create_engine, inspect, text
+
+    url = f"sqlite:///{tmp_path / 'udp.db'}"
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        # A null `user_id` cannot go into the new key, so the copy fails
+        # after the old table is renamed and the new one is created.
+        conn.execute(
+            text(
+                """
+                CREATE TABLE udp_definitions (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    user_id VARCHAR,
+                    process_graph JSON NOT NULL,
+                    summary VARCHAR,
+                    description TEXT,
+                    parameters JSON,
+                    returns JSON,
+                    categories JSON NOT NULL,
+                    deprecated BOOLEAN NOT NULL,
+                    experimental BOOLEAN NOT NULL,
+                    exceptions JSON,
+                    examples JSON,
+                    links JSON,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO udp_definitions
+                (id, user_id, process_graph, categories, deprecated, experimental,
+                 created_at, updated_at)
+                VALUES ('ndvi', NULL, '{"process_id": "one"}', '[]', 0, 0,
+                        '2024-01-01 00:00:00', '2024-01-01 00:00:00')
+                """
+            )
+        )
+
+    with pytest.raises(Exception, match="NOT NULL"):
+        SQLAlchemyUdpStore(store=url)
+
+    inspector = inspect(create_engine(url))
+    assert "udp_definitions_old" not in inspector.get_table_names()
+    pk = inspector.get_pk_constraint("udp_definitions")
+    assert pk["constrained_columns"] == ["id"]
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id FROM udp_definitions")).all()
+    assert rows == [("ndvi",)]

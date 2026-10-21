@@ -21,7 +21,12 @@ def create_engine(monkeypatch):
             module, "create_engine", side_effect=lambda *a, **k: MagicMock()
         ) as create_engine,
         patch.object(module.Base.metadata, "create_all"),
+        patch.object(module, "inspect") as inspect,
     ):
+        # The tables already have the current key, so nothing is migrated.
+        inspect.return_value.get_pk_constraint.return_value = {
+            "constrained_columns": ["user_id", "id"]
+        }
         yield create_engine
 
 
@@ -111,5 +116,5 @@ def test_postgres_schema_creation_holds_an_advisory_lock(create_engine):
     module.SQLAlchemyStore(store="postgresql://u:p@localhost/db")
 
     conn = engine.begin.return_value.__enter__.return_value
-    assert "pg_advisory_xact_lock" in str(conn.execute.call_args_list[0].args[0])
+    assert "pg_advisory_xact_lock" in str(conn.execute.call_args.args[0])
     module.Base.metadata.create_all.assert_called_once_with(conn)
