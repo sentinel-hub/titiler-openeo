@@ -1,0 +1,24 @@
+# CI scenario: a read-only root filesystem, non-root and without capabilities,
+# with a writable /tmp from extraVolumes. Proves the pod starts and serves so.
+replicaCount: 1
+
+image:
+  repository: titiler-openeo
+  tag: dev
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+extraVolumes:
+  - name: tmp
+    emptyDir:
+      sizeLimit: 1Gi
+extraVolumeMounts:
+  - name: tmp
+    mountPath: /tmp

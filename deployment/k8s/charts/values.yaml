@@ -63,7 +63,8 @@ extraHostPathMounts:
 # there, see CPL_TMPDIR):
 #   extraVolumes:
 #     - name: tmp
-#       emptyDir: {}
+#       emptyDir:
+#         sizeLimit: 1Gi
 #   extraVolumeMounts:
 #     - name: tmp
 #       mountPath: /tmp
@@ -327,7 +328,7 @@ securityContext:
   # capabilities:
   #   drop:
   #     - ALL
-  # readOnlyRootFilesystem: true
+  # readOnlyRootFilesystem: true  # needs a writable /tmp, see extraVolumes
   # allowPrivilegeEscalation: false
   # runAsNonRoot: true
   # runAsUser: 1001
