@@ -1,4 +1,4 @@
-# Set update schedule for GitHub Actions
+# Set update schedule for GitHub Actions and the Python dependencies in uv.lock
 
 version: 2
 updates:
@@ -12,5 +12,27 @@ updates:
       interval: "weekly"
     groups:
       all:
+        patterns:
+        - "*"
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    # Version updates only: security updates ignore the cooldown.
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: "weekly"
+    # Otherwise dev dependencies get the scope "deps-dev", which the PR title
+    # check rejects.
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python:
+        patterns:
+        - "*"
+      # The group above only applies to version updates, so without this each
+      # security advisory opens its own PR.
+      security:
+        applies-to: security-updates
         patterns:
         - "*"
