@@ -58,6 +58,18 @@ extraHostPathMounts:
   #   readOnly: false
   #   mountPropagation: HostToContainer # OPTIONAL
 
+# Extra volumes for the pod and mounts for the API container. For example, a
+# writable /tmp, which securityContext.readOnlyRootFilesystem needs (GDAL writes
+# there, see CPL_TMPDIR):
+#   extraVolumes:
+#     - name: tmp
+#       emptyDir: {}
+#   extraVolumeMounts:
+#     - name: tmp
+#       mountPath: /tmp
+extraVolumes: []
+extraVolumeMounts: []
+
 imagePullSecrets: []
 
 # Authentication configuration
