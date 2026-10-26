@@ -7,7 +7,7 @@ from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Item
 from rio_tiler.models import ImageData
 
-from titiler.openeo.errors import OutputLimitExceeded
+from titiler.openeo.errors import OutputLimitExceeded, ProcessParameterInvalid
 from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
 from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
@@ -363,34 +363,46 @@ def _range_only_item_dict(start: str, end: str) -> dict:
     return item
 
 
-def test_load_collection_keys_range_only_items_by_start_datetime(monkeypatch):
-    """Items with ``"datetime": null`` are keyed by their ``start_datetime``.
-
-    STAC allows a null datetime when start_datetime/end_datetime are set, and
-    composites such as Planetary Computer's MODIS collections are published that
-    way. Regression for #472: these items failed with
-    ``'NoneType' object has no attribute 'isoformat'``.
-    """
-    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
-
-    items = [
-        Item.from_dict(
-            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
-        ),
-        Item.from_dict(_stac_item_dict("2013-02-18T00:00:00Z")),
-    ]
+def _load_range_only_items(monkeypatch, *periods):
+    """Run load_collection over one range-only item per ``(start, end)`` period."""
+    items = []
+    for i, (start, end) in enumerate(periods):
+        item = _range_only_item_dict(start, end)
+        item["id"] = f"tile-{i}"
+        items.append(Item.from_dict(item))
     monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
 
-    backend = stacApiBackend(url="https://example.com")
-    loader = LoadCollection(stac_api=backend)
-    stack = loader.load_collection(
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    return loader.load_collection(
         id="test",
         spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
         width=64,
         height=64,
     )
 
-    assert stack.timestamps() == [datetime(2013, 2, 10), datetime(2013, 2, 18)]
+
+def test_load_collection_keys_range_only_items_by_start_datetime(monkeypatch):
+    """Tiles of one composite with ``"datetime": null`` form one slice at their start.
+
+    Regression for #472: these items failed with
+    ``'NoneType' object has no attribute 'isoformat'``.
+    """
+    feb = ("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+    stack = _load_range_only_items(monkeypatch, feb, feb)
+    assert stack.timestamps() == [datetime(2013, 2, 10)]
+
+
+def test_load_collection_rejects_periods_sharing_a_start(monkeypatch):
+    """Items that start together but cover different periods are not mosaicked.
+
+    E.g. a seasonal and a yearly product both starting on 1 January.
+    """
+    with pytest.raises(ProcessParameterInvalid, match="different periods"):
+        _load_range_only_items(
+            monkeypatch,
+            ("2016-01-01T00:00:00Z", "2016-03-31T23:59:59Z"),
+            ("2016-01-01T00:00:00Z", "2016-12-31T23:59:59Z"),
+        )
 
 
 # A triangle over the lower-left half of the [0, 0, 1, 1] square.
@@ -545,39 +557,44 @@ def test_load_stac_geojson_spatial_extent_single_item(monkeypatch):
     assert not mask[numpy.tril_indices(10, k=-1)].any()
 
 
-def test_load_stac_temporal_filter_keeps_range_only_items(monkeypatch):
-    """The temporal filter falls back to ``start_datetime`` when ``datetime`` is null.
+_FEB_10_17 = {
+    "datetime": None,
+    "start_datetime": "2013-02-10T00:00:00Z",
+    "end_datetime": "2013-02-17T23:59:59Z",
+}
 
-    Regression for #472: such items were silently dropped, so load_stac raised
-    NoDataAvailable for an extent that covers them.
-    """
-    import numpy
 
-    monkeypatch.setattr(
-        LoadStac,
-        "_load_stac_object",
-        lambda self, url: Item.from_dict(
-            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+@pytest.mark.parametrize(
+    "props,extent,kept",
+    [
+        (_FEB_10_17, ["2013-02-01", "2013-03-01"], True),
+        # Overlap, as in a STAC API search: kept although it starts before the extent.
+        (_FEB_10_17, ["2013-02-12", "2013-02-20"], True),
+        (_FEB_10_17, ["2013-02-18", "2013-03-01"], False),
+        # The extent end is excluded.
+        (_FEB_10_17, ["2013-01-01", "2013-02-10"], False),
+        # Offsets are compared as times, not as text.
+        (
+            {"datetime": None, "start_datetime": "2013-02-01T00:00:00+00:00"},
+            ["2013-02-01", "2013-03-01"],
+            True,
         ),
-    )
-    monkeypatch.setattr(
-        "titiler.openeo.stacapi._reader",
-        lambda item, bbox, **kwargs: ImageData(
-            numpy.ma.ones((1, 10, 10), dtype="float32"),
-            crs=kwargs["dst_crs"],
-            bounds=tuple(bbox),
+        (
+            {"datetime": "2013-03-01T00:00:00+00:00"},
+            ["2013-02-01", "2013-03-01"],
+            False,
         ),
-    )
-
-    stack = LoadStac().load_stac(
-        url="https://example.com/item.json",
-        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
-        temporal_extent=TemporalInterval(["2013-02-01", "2013-03-01"]),
-        width=10,
-        height=10,
-    )
-
-    assert stack.timestamps() == [datetime(2013, 2, 10)]
+        # No date at all: skipped.
+        ({"datetime": None}, ["2013-02-01", "2013-03-01"], False),
+    ],
+)
+def test_load_stac_temporal_filter_keeps_items_overlapping_the_extent(
+    props, extent, kept
+):
+    """load_stac keeps an item if its datetime or start/end range overlaps the extent."""
+    item = {"properties": props}
+    filtered = LoadStac()._filter_by_temporal_extent([item], TemporalInterval(extent))
+    assert filtered == ([item] if kept else [])
 
 
 def test_load_stac_passes_geojson_to_collection(monkeypatch):

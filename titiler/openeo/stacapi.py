@@ -1,6 +1,7 @@
 """Stac API backend."""
 
 import logging
+from datetime import datetime
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import urljoin
@@ -20,6 +21,7 @@ from pystac import Collection, Item
 from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
+from pystac.utils import str_to_datetime
 from pystac_client import Client
 from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
@@ -46,6 +48,11 @@ from .errors import (
     UnsupportedSTACObject,
 )
 from .processes.implementations.data_model import RasterStack, compute_cutline_mask
+from .processes.implementations.reduce import (
+    _interval_to_pair,
+    _parse_intervals,
+    _timestamp_in_interval,
+)
 from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import _estimate_output_dimensions, _item_datetime, _reader
@@ -1353,12 +1360,9 @@ class LoadCollection:
             output_bbox = bbox
 
         # Group items by date
-        items_by_date: dict[str, list[Item]] = {}
+        items_by_date: dict[datetime, list[Item]] = {}
         for item in items:
-            date = _item_datetime(item).isoformat()
-            if date not in items_by_date:
-                items_by_date[date] = []
-            items_by_date[date].append(item)
+            items_by_date.setdefault(_item_datetime(item), []).append(item)
 
         # Create lazy tasks for each date group
         # Each task will call mosaic_reader when executed
@@ -1415,6 +1419,17 @@ class LoadCollection:
         # Build tasks list for RasterStack
         tasks = []
         for date, date_items in items_by_date.items():
+            # Range-only items that start together but end differently are
+            # different products (e.g. seasonal and yearly): one mosaic of them
+            # would silently show only the first.
+            ends = {
+                i.common_metadata.end_datetime for i in date_items if not i.datetime
+            }
+            if len(ends) > 1:
+                raise ProcessParameterInvalid(
+                    f"Items starting at {date.isoformat()} cover different periods; "
+                    "use `properties` to load only one of them."
+                )
             task_fn = make_mosaic_task(
                 date_items,
                 bbox,
@@ -1434,10 +1449,8 @@ class LoadCollection:
                 (
                     task_fn,
                     {
-                        "id": date,
-                        "datetime": _item_datetime(date_items[0])
-                        if date_items
-                        else None,
+                        "id": date.isoformat(),
+                        "datetime": date,
                         "geometry": geometries if geometries else None,
                         # The source items behind this date group's mosaic. Carried
                         # so processes that need per-item STAC metadata (asset
@@ -1552,32 +1565,24 @@ class LoadStac:
         Raises:
             TemporalExtentEmpty: If the temporal extent is empty
         """
-        start_date = None
-        end_date = None
-        if temporal_extent[0] is not None:
-            start_date = str(temporal_extent[0].to_numpy())
-        if temporal_extent[1] is not None:
-            end_date = str(temporal_extent[1].to_numpy())
-
-        if not end_date and not start_date:
+        start, end = _parse_intervals([_interval_to_pair(temporal_extent)])[0]
+        if start is None and end is None:
             raise TemporalExtentEmpty()
 
+        # Overlap, as in a STAC API search (and so in load_collection): the
+        # item's datetime, or its start/end range when datetime is null, must
+        # meet [start, end).
         filtered_items = []
         for item in items:
             props = item.get("properties", {})
-            item_datetime = props.get("datetime") or props.get("start_datetime")
-            if not item_datetime:
+            item_start = props.get("datetime") or props.get("start_datetime")
+            if not item_start:
                 continue
-
-            if start_date and end_date:
-                if start_date <= item_datetime < end_date:
-                    filtered_items.append(item)
-            elif start_date:
-                if start_date <= item_datetime:
-                    filtered_items.append(item)
-            elif end_date:
-                if item_datetime < end_date:
-                    filtered_items.append(item)
+            item_end = props.get("datetime") or props.get("end_datetime") or item_start
+            if _timestamp_in_interval(
+                str_to_datetime(item_start), None, end
+            ) and _timestamp_in_interval(str_to_datetime(item_end), start, None):
+                filtered_items.append(item)
 
         return filtered_items
 
