@@ -33,8 +33,7 @@ ENV UV_LINK_MODE=copy \
 WORKDIR /tmp/app
 COPY titiler/ titiler/
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra server --extra oidc --extra postgres && \
-    uv pip install PyYAML && \
+RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres && \
     uv pip install --no-deps .
 
 # Runtime stage
