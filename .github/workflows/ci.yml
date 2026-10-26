@@ -9,6 +9,11 @@ on:
     - '*'
   pull_request:
   workflow_dispatch:
+  # Nightly, so the image is rebuilt (CI builds have no layer cache) and
+  # re-scanned with that day's Trivy database: catches Wolfi package drift and
+  # new CVEs between merges. Nothing is pushed on schedule.
+  schedule:
+    - cron: '0 4 * * *'
 
 env:
   LATEST_PY_VERSION: '3.12'
@@ -137,9 +142,19 @@ jobs:
           IMAGE_REF: ${{ steps.build.outputs.imageid }}
         run: ./docker/smoke-test.sh "$IMAGE_REF"
 
+      - name: fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.build.outputs.imageid }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL
+
       # Same inputs as the build step, so this comes from its cache.
       - name: push
-        if: steps.can-push.outputs.value == 'true'
+        if: steps.can-push.outputs.value == 'true' && github.event_name != 'schedule'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
