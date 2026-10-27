@@ -24,7 +24,7 @@ APP_ENV=(-e TITILER_OPENEO_STAC_API_URL=https://stac.invalid -e TITILER_OPENEO_S
 
 PASS=0
 FAILED=()
-trap 'docker ps -aq --filter "label=$LABEL" | xargs docker rm -f >/dev/null 2>&1 || true' EXIT
+trap 'docker ps -aq --filter "label=$LABEL" | xargs docker rm -fv >/dev/null 2>&1 || true' EXIT
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q --platform "$PLATFORM" "$IMAGE" >/dev/null
 
@@ -54,7 +54,7 @@ start() {
   id="$(docker run -d --platform "$PLATFORM" --label "$LABEL" -p 127.0.0.1::80 "${APP_ENV[@]}" "$@")"
   port="$(docker port "$id" 80/tcp | head -1 | sed 's/.*://')"
   for ((i = 0; i < TIMEOUT; i += 2)); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null; then
+    if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null; then
       echo "http://127.0.0.1:$port"
       return
     fi
@@ -127,9 +127,10 @@ c_chart_cmd_serves() {
   url="$(start -e WEB_CONCURRENCY=2 -e CPL_TMPDIR=/tmp --entrypoint uvicorn "$IMAGE" \
     titiler.openeo.main:app --host 0.0.0.0 --port 80 --forwarded-allow-ips '*' \
     --log-config /config/log_config.yaml --timeout-keep-alive 600)" || { echo "$url"; return 1; }
-  curl -fsS "$url/" | grep -q '"backend_version"'
+  # check runs this in a condition, where errexit is off: return explicitly.
+  curl -fsS --max-time 30 "$url/" | grep -q '"backend_version"' || return 1
   # /readyz pings the STAC API, unreachable here: it must answer, not pass.
-  curl -sS "$url/readyz" | grep -q '"checks"'
+  curl -sS --max-time 30 "$url/readyz" | grep -q '"checks"'
 }
 
 c_gdal_config_honoured() {
