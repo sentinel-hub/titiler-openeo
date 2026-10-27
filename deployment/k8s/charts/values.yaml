@@ -337,8 +337,7 @@ podSecurityContext:
   sysctls:
     - name: net.ipv4.ip_unprivileged_port_start
       value: "0"
-  # fsGroup matches the application user ID baked into the image (see
-  # Dockerfile's `titiler` user)
+  # fsGroup matches the image's user, uid 65532 (see USER in the Dockerfile)
   fsGroup: 65532
   # runAsNonRoot: true
   # runAsUser: 1001
