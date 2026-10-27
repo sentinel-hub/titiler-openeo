@@ -154,13 +154,24 @@ jobs:
             type=raw,value=${{ steps.semver.outputs.major }}
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: true
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # As in ci.yml: a release image that breaks its runtime contract is never pushed.
+      - name: Smoke-test the image
+        env:
+          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: ./docker/smoke-test.sh "$IMAGE_REF"
+
+      - name: Push
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: printf '%s\n' "$TAGS" | xargs -r -n1 docker push
 
   publish-helm-chart-oci:
     needs: release-please
