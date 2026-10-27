@@ -1,0 +1,59 @@
+name: Nightly image rebuild and scan
+
+# Rebuilds the image from scratch, smoke-tests it and scans it with that day's
+# Trivy database, to catch Wolfi package drift and new CVEs between merges, then
+# scans the published `latest` image the same way. Nothing is pushed. Also runs
+# on pull requests that change this file.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly-image.yml
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-and-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: titiler-openeo:nightly
+
+      - name: smoke-test the image
+        env:
+          IMAGE_REF: titiler-openeo:nightly
+        run: ./docker/smoke-test.sh "$IMAGE_REF"
+
+      - name: fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: titiler-openeo:nightly
+          scanners: vuln
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL
+
+      # What deployments pull. Not on pull requests: a CVE in the published
+      # image is no reason to fail a change to this file.
+      - name: fail on fixable CRITICAL vulnerabilities in the published latest image
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:latest
+          scanners: vuln
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL
