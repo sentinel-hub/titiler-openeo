@@ -213,6 +213,15 @@ envVars:
     - name: TITILER_OPENEO_TILE_STORE_URL
       secretName: titiler-openeo-pg-app
       secretKey: uri
+
+# Authentication is required; see the chart README.
+auth:
+  method: oidc
+  oidc:
+    enabled: true
+    clientId: "<client-id>"
+    wellKnownUrl: "https://<provider>/.well-known/openid-configuration"
+    redirectUrl: "https://<editor-url>/"
 ```
 
 Install or upgrade the release:

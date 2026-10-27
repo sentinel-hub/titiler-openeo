@@ -67,10 +67,15 @@ auth:
 
   # Basic auth configuration (for testing)
   basic:
+    # false only to supply TITILER_OPENEO_AUTH_USERS yourself, via envVars.fromSecret
     enabled: true
-    users:
-      - username: "test"
-        password: "password"
+    # Required with method "basic": rendering fails without at least one user.
+    # They reach the app through a ConfigMap, readable by anyone who can read
+    # ConfigMaps in the namespace. Pods read the users at start-up, so after
+    # changing them run `kubectl rollout restart deployment/<release>-titiler-openeo`.
+    users: []
+    #  - username: "alice"
+    #    password: "<choose-a-password>"
 
   # OIDC configuration (for production)
   oidc:

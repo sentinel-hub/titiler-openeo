@@ -24,7 +24,7 @@ Then visit http://localhost:8080
 {{- end }}
 
 Authentication Configuration:
-{{- if eq .Values.auth.method "basic" }}
+{{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled }}
 Basic Authentication is enabled:
 - Multiple users can be configured in values.yaml
 - Current number of configured users: {{ len .Values.auth.basic.users }}
