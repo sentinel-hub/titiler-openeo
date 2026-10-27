@@ -145,3 +145,23 @@ tests:
           content:
             name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
           any: true
+
+  - it: should add extraVolumes and extraVolumeMounts (e.g. /tmp for readOnlyRootFilesystem)
+    set:
+      extraVolumes:
+        - name: tmp
+          emptyDir: {}
+      extraVolumeMounts:
+        - name: tmp
+          mountPath: /tmp
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp

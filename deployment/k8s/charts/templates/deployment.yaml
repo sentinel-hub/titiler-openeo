@@ -211,6 +211,9 @@ spec:
               mountPropagation: {{ .mountPropagation }}
               {{- end }}
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: config-volume
           configMap:
@@ -230,6 +233,9 @@ spec:
           hostPath:
             path: {{ .hostPath }}
             type: Directory
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

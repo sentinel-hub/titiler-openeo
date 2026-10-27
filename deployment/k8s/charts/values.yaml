@@ -58,6 +58,19 @@ extraHostPathMounts:
   #   readOnly: false
   #   mountPropagation: HostToContainer # OPTIONAL
 
+# Extra volumes for the pod and mounts for the API container. For example, a
+# writable /tmp, which securityContext.readOnlyRootFilesystem needs (GDAL writes
+# there, see CPL_TMPDIR):
+#   extraVolumes:
+#     - name: tmp
+#       emptyDir:
+#         sizeLimit: 1Gi
+#   extraVolumeMounts:
+#     - name: tmp
+#       mountPath: /tmp
+extraVolumes: []
+extraVolumeMounts: []
+
 imagePullSecrets: []
 
 # Authentication configuration
@@ -315,7 +328,7 @@ securityContext:
   # capabilities:
   #   drop:
   #     - ALL
-  # readOnlyRootFilesystem: true
+  # readOnlyRootFilesystem: true  # needs a writable /tmp, see extraVolumes
   # allowPrivilegeEscalation: false
   # runAsNonRoot: true
   # runAsUser: 1001
@@ -324,8 +337,7 @@ podSecurityContext:
   sysctls:
     - name: net.ipv4.ip_unprivileged_port_start
       value: "0"
-  # fsGroup matches the application user ID baked into the image (see
-  # Dockerfile's `titiler` user)
+  # fsGroup matches the image's user, uid 65532 (see USER in the Dockerfile)
   fsGroup: 65532
   # runAsNonRoot: true
   # runAsUser: 1001
