@@ -885,6 +885,7 @@ def _get_assets_resolutions(
     item: pystac.Item,
     src_dst: SimpleSTACReader,
     bands: Optional[list[str]] = None,
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dict[str, tuple[float, float, rasterio.crs.CRS]]:
     """Get x and y resolutions and CRS for each band from STAC assets.
 
@@ -892,12 +893,23 @@ def _get_assets_resolutions(
         item: STAC item dictionary
         src_dst: SimpleSTACReader instance
         bands: Optional list of band names to filter assets
+        assets: What is read for each of ``bands``, one entry per band, as
+            `LoadCollection._bands_to_assets` returns it (e.g. ``B01|bands=b1``
+            read as ``{"name": "B01", "bands": ["b1"]}``). The resolution comes
+            from the asset each entry names; the result stays keyed by the
+            band name. None: each band name is the asset name.
 
     Returns:
         Dictionary mapping band names to (x_resolution, y_resolution, crs) tuples
     """
     band_resolutions = {}
-    assets_to_process = set(bands) if bands else set(item.get_assets().keys())
+    # ``band name -> asset name``: the name to look up for each requested band.
+    if not bands:
+        assets_to_process = {key: key for key in item.get_assets()}
+    elif assets is not None and len(assets) == len(bands):
+        assets_to_process = dict(zip(bands, _asset_names(assets)))
+    else:
+        assets_to_process = {band: band for band in bands}
 
     # Built lazily, only if a requested name turns out not to be a real asset
     # -- the common (no derived bands requested) case pays nothing extra.
@@ -905,21 +917,21 @@ def _get_assets_resolutions(
     sibling_candidates: Optional[List[SiblingCandidateFacts]] = None
     collection_id = item.collection_id or ""
 
-    for band_name in assets_to_process:
-        resolution_asset_name = band_name
+    for band_name, lookup_name in assets_to_process.items():
+        resolution_asset_name = lookup_name
         # Set only for a band resolved via `_inner_bands` below: its own
         # declared ground sample distance, which overrides the owning asset's
         # (a multi-band asset's own metadata describes just its finest band --
         # EOPF's `reflectance` declares 10m even though `b01` is native 20m).
         band_gsd: Optional[float] = None
 
-        if band_name not in item.assets:
+        if lookup_name not in item.assets:
             # Not a real asset key. Prefer a band published *inside* one of
             # this item's own assets (titiler/openeo/assetbands.py) over a
             # band-source-derived name below: `src_dst._inner_bands` is
             # precomputed for this exact item, so this costs nothing extra to
             # check first, and the two mechanisms cannot both match one name.
-            resolved_inner = src_dst._inner_bands.get(band_name)
+            resolved_inner = src_dst._inner_bands.get(lookup_name)
             if resolved_inner is not None:
                 resolution_asset_name = resolved_inner.asset_key
                 band_gsd = resolved_inner.metadata.get("gsd")
@@ -940,7 +952,7 @@ def _get_assets_resolutions(
                     ]
                 resolved = resolve_band(
                     collection_id,
-                    band_name,
+                    lookup_name,
                     item_asset_facts,
                     BAND_SOURCES,
                     sibling_candidates=sibling_candidates,
@@ -1215,16 +1227,20 @@ def _get_cube_resolutions(
     target_crs: rasterio.crs.CRS,
     target_bbox: List[float],
     bands: Optional[list[str]],
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
     """Get resolutions for each datetime and band combination.
 
     ``readers`` are the opened readers `_estimate_output_dimensions` built, one
-    per item; each reader's ``input`` is the item itself.
+    per item; each reader's ``input`` is the item itself. ``assets`` as in
+    `_get_assets_resolutions`.
     """
     cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
 
     for src_dst in readers:
-        asset_resolutions = _get_assets_resolutions(src_dst.input, src_dst, bands)
+        asset_resolutions = _get_assets_resolutions(
+            src_dst.input, src_dst, bands, assets
+        )
         for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
             if x_res is None or y_res is None:
                 continue
@@ -1262,6 +1278,7 @@ def _estimate_output_dimensions(
     check_max_pixels: bool = True,
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
     reader_cls: Optional[ReaderCls] = None,
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -1277,6 +1294,10 @@ def _estimate_output_dimensions(
         reader_cls: The reader class to open each item with; `SimpleSTACReader`
             by default. A backend passes the same subclass it reads with, so the
             estimate sees the same bounds, CRS and inner bands the read will.
+        assets: What is read for each of ``bands``, one entry per band
+            (`LoadCollection._bands_to_assets`). Resolutions are looked up on
+            these assets, and the pixel limit still counts ``bands``. None:
+            each band name is the asset name.
 
     Returns:
         Dictionary containing:
@@ -1315,7 +1336,7 @@ def _estimate_output_dimensions(
 
         # Get resolutions for each datetime and band
         cube_resolutions = _get_cube_resolutions(
-            readers, output_crs, output_bbox, bands
+            readers, output_crs, output_bbox, bands, assets
         )
 
     # Find the minimum resolution across all bands
@@ -1363,6 +1384,76 @@ def _asset_extra_fields(item: Any, band: str) -> Dict[str, Any]:
     if not assets or band not in assets:
         return {}
     return dict(getattr(assets[band], "extra_fields", {}) or {})
+
+
+#: The per-band lists of an asset's STAC metadata, in the order of its bands.
+_BAND_LISTS = ("raster:bands", "bands", "eo:bands")
+
+
+def _narrow_to_band(fields: Dict[str, Any], index: int) -> Dict[str, Any]:
+    """``fields`` with every per-band list cut to its 1-based band ``index``.
+
+    So a helper that reads the first band (`_band_scale_offset`, a plugin's
+    ``band_key``) reads band ``index``. A list too short for ``index`` becomes
+    empty: that band has no per-band metadata.
+    """
+    narrowed = dict(fields)
+    for key in _BAND_LISTS:
+        values = fields.get(key)
+        if isinstance(values, list):
+            narrowed[key] = values[index - 1 : index]
+    return narrowed
+
+
+def _band_index(fields: Dict[str, Any], band: str) -> Optional[int]:
+    """The 1-based index of ``band`` in the asset, as rio-tiler resolves ``bands``.
+
+    rio-tiler's `STACReader._get_options` matches the common name first, then
+    the name, in the asset's ``bands`` (``eo:bands`` for STAC 1.0).
+    """
+    stac_bands = fields.get("bands") or fields.get("eo:bands") or []
+    for index, meta in enumerate(stac_bands, 1):
+        if not isinstance(meta, Mapping):
+            continue
+        if band in (
+            meta.get("eo:common_name") or meta.get("common_name"),
+            meta.get("name"),
+        ):
+            return index
+    return None
+
+
+def _asset_band_fields(
+    item: Any, assets: Sequence[AssetType]
+) -> Optional[List[Tuple[str, Dict[str, Any]]]]:
+    """One ``(asset name, STAC metadata)`` pair per band that reading ``assets`` returns.
+
+    A plain name gives the asset's metadata as is. A rio-tiler asset dict
+    (`LoadCollection._bands_to_assets`) that selects ``indexes`` or ``bands``
+    gives one pair per selected band, with the metadata narrowed to that band
+    (`_narrow_to_band`), so a non-first band never gets the first band's
+    scale/offset. None when an asset carries an ``expression``: its output
+    bands do not map to source bands.
+    """
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            out.append((asset, _asset_extra_fields(item, asset)))
+            continue
+        name = asset["name"]
+        fields = _asset_extra_fields(item, name)
+        if asset.get("expression"):
+            return None
+        indexes = asset.get("indexes")
+        if indexes is None and asset.get("bands"):
+            indexes = [_band_index(fields, band) or 0 for band in asset["bands"]]
+        if indexes is None:
+            out.append((name, fields))
+            continue
+        if isinstance(indexes, int):
+            indexes = [indexes]
+        out.extend((name, _narrow_to_band(fields, index)) for index in indexes)
+    return out
 
 
 def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
@@ -1462,7 +1553,7 @@ def _plugin_pairs_for(src_dst: Any) -> PluginPairs:
 def _apply_scale_offset(
     img: ImageData,
     item: Any,
-    assets: Optional[Sequence[str]],
+    assets: Optional[Sequence[AssetType]],
     *,
     sources: Sequence[str] = ("stac",),
     plugin_pairs: Optional[PluginPairs] = None,
@@ -1487,18 +1578,27 @@ def _apply_scale_offset(
     scale/offset (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
     keeps its integer class values. The nodata mask is preserved.
 
+    ``assets`` are the requested assets: names, or rio-tiler asset dicts whose
+    ``indexes``/``bands`` pick bands of an asset (`_asset_band_fields`).
+
     No-ops (returns ``img`` unchanged, keeping its dtype) when ``assets`` is missing,
-    its length does not match the band count, or every band is identity (1/0).
+    an asset carries an ``expression``, the number of requested bands does not
+    match the band count, or every band is identity (1/0).
     """
     if not assets or not sources:
         return img
 
+    band_fields = _asset_band_fields(item, assets)
+    if band_fields is None:
+        logger.warning("Cannot apply scale/offset to an asset expression; skipping.")
+        return img
+
     nbands = img.array.shape[0]
-    if len(assets) != nbands:
+    if len(band_fields) != nbands:
         logger.warning(
-            "Cannot apply scale/offset: %d band(s) but %d asset name(s); skipping.",
+            "Cannot apply scale/offset: %d band(s) but %d asset band(s); skipping.",
             nbands,
-            len(assets),
+            len(band_fields),
         )
         return img
 
@@ -1507,16 +1607,18 @@ def _apply_scale_offset(
 
     loaded: Dict[str, Optional[ProductScaleOffset]] = {}
 
-    def from_source(source: str, index: int, band: str) -> Tuple[float, float]:
+    def from_source(
+        source: str, index: int, fields: Dict[str, Any]
+    ) -> Tuple[float, float]:
         if source == "stac":
-            return _band_scale_offset(_asset_extra_fields(item, band))
+            return _band_scale_offset(fields)
         if source == "cog":
             if not has_cog:
                 return (1.0, 0.0)
             return (float(img_scales[index]), float(img_offsets[index]))
         # Ask the plugin for the band's key first: that needs no fetch, so a
         # band the plugin knows nothing about (e.g. SCL) never loads its file.
-        key = SCALE_OFFSET_PLUGINS[source].band_key(_asset_extra_fields(item, band))
+        key = SCALE_OFFSET_PLUGINS[source].band_key(fields)
         if plugin_pairs is None or key is None:
             return (1.0, 0.0)
         if source not in loaded:
@@ -1525,10 +1627,10 @@ def _apply_scale_offset(
         return product.get(key, (1.0, 0.0)) if product else (1.0, 0.0)
 
     pairs: List[Tuple[float, float]] = []
-    for index, band in enumerate(assets):
+    for index, (_, fields) in enumerate(band_fields):
         pair = (1.0, 0.0)
         for source in sources:
-            pair = from_source(source, index, band)
+            pair = from_source(source, index, fields)
             if not _is_identity(pair):
                 break
         pairs.append(pair)
@@ -1605,8 +1707,8 @@ def _asset_names(assets: Sequence[AssetType]) -> List[str]:
 
     ``assets`` may mix plain names with rio-tiler asset dicts
     (``{"name": ..., "bands": [...]}``), which is what a backend's
-    `LoadCollection._bands_to_assets` produces. The post-read steps in
-    `_reader` key on names, so they see the same thing either way.
+    `LoadCollection._bands_to_assets` produces. The derived-band mask step in
+    `_reader` keys on names, so it sees the same thing either way.
     """
     return [asset["name"] if isinstance(asset, dict) else asset for asset in assets]
 
@@ -1688,7 +1790,7 @@ def _reader(
                     img = _apply_scale_offset(
                         img,
                         item,
-                        requested_names,
+                        requested,
                         sources=sources,
                         plugin_pairs=_plugin_pairs_for(src_dst),
                     )

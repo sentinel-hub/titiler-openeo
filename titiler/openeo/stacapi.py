@@ -1280,10 +1280,11 @@ class LoadCollection:
 
         The hook a backend overrides when its band notation carries reader
         options (e.g. ``asset|bands=b04`` parsed into
-        ``{"name": "asset", "bands": ["b04"]}``). Only the read uses the
-        result: ``bands`` itself still names the output bands and drives the
-        resolution estimate. The default is the identity -- a band name is an
-        asset name (or a derived/inner band `SimpleSTACReader` resolves).
+        ``{"name": "asset", "bands": ["b04"]}``). Return one entry per band.
+        The read and the resolution estimate use the result; ``bands`` itself
+        still names the output bands and is what the pixel limit counts. The
+        default is the identity -- a band name is an asset name (or a
+        derived/inner band `SimpleSTACReader` resolves).
         """
         return bands
 
@@ -1434,6 +1435,10 @@ class LoadCollection:
         if bands is None and items and items[0].assets:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
+        # What is read for each band. The estimate looks up resolutions on
+        # these assets; `bands` still labels the output and the pixel limit.
+        assets = self._bands_to_assets(bands)
+
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
             items,
@@ -1443,6 +1448,7 @@ class LoadCollection:
             height,
             target_crs=target_crs,
             reader_cls=self.reader_cls,
+            assets=assets,
         )
 
         # Extract values from the result
@@ -1461,7 +1467,6 @@ class LoadCollection:
         for item in items:
             items_by_date.setdefault(_item_datetime(item).isoformat(), []).append(item)
 
-        assets = self._bands_to_assets(bands)
         tasks = [
             self._date_task(
                 date,

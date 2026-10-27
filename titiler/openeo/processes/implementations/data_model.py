@@ -386,6 +386,9 @@ class RasterStack(Dict[datetime, ImageData]):
         # ImageRef instances for deferred cutline computation
         self._image_refs: Dict[datetime, ImageRef] = {}
 
+        # Keys whose task raised an allowed exception (see `_drop`)
+        self._skipped: Set[datetime] = set()
+
         self._compute_metadata()
 
     @property
@@ -498,6 +501,21 @@ class RasterStack(Dict[datetime, ImageData]):
         """
         self._execute_selected_tasks(set(keys))
 
+    def _drop(self, key: datetime) -> None:
+        """Take ``key`` out of the stack: its task raised an allowed exception.
+
+        The label leaves `keys()`, `len()` and `timestamps()`, so they stay
+        aligned with `values()` and `items()`, and a consumer never pairs a
+        label with the image of another date. `_key_to_task_index` keeps the
+        key: a stack built with `map_tasks` still finds the task, and skips it
+        in turn.
+        """
+        with self._cache_lock:
+            self._skipped.add(key)
+            if key in self._keys:
+                self._keys.remove(key)
+            self._image_refs.pop(key, None)
+
     def _execute_task(self, key: datetime, task_func: Any) -> ImageData:
         """Execute a single task and return the result.
 
@@ -528,7 +546,9 @@ class RasterStack(Dict[datetime, ImageData]):
             keys_to_execute = [
                 key
                 for key in selected_keys
-                if key in self._key_to_task_index and key not in self._data_cache
+                if key in self._key_to_task_index
+                and key not in self._data_cache
+                and key not in self._skipped
             ]
 
         if not keys_to_execute:
@@ -564,6 +584,7 @@ class RasterStack(Dict[datetime, ImageData]):
                             str(e),
                         )
                         # Skip failed tasks, don't cache them
+                        self._drop(key)
                         continue
             except BaseException:
                 # The result is lost (cancelled request or failed task): do not
@@ -619,6 +640,8 @@ class RasterStack(Dict[datetime, ImageData]):
             if key in self._data_cache:
                 return self._data_cache[key]
 
+        if key in self._skipped:
+            raise KeyError(f"Task execution failed for key '{key}'")
         if key not in self._key_to_task_index:
             raise KeyError(f"Key '{key}' not found in RasterStack")
 
@@ -631,11 +654,13 @@ class RasterStack(Dict[datetime, ImageData]):
                 self._data_cache[key] = data
             return data
         except self._allowed_exceptions as err:
+            self._drop(key)
             raise KeyError(f"Task execution failed for key '{key}'") from err
 
     def __iter__(self) -> Any:
         """Iterate over the keys of the RasterStack."""
-        return iter(self._keys)
+        # A copy: reading a slice can `_drop` its key during the iteration.
+        return iter(list(self._keys))
 
     def __len__(self) -> int:
         """Return the number of items in the RasterStack."""
@@ -646,8 +671,12 @@ class RasterStack(Dict[datetime, ImageData]):
         return key in self._keys
 
     def keys(self) -> Any:
-        """Return the keys of the RasterStack."""
-        return self._keys
+        """Return the keys of the RasterStack.
+
+        A copy: a key whose task raises an allowed exception leaves the stack
+        when it is read (`_drop`), so the keys can shrink after a read.
+        """
+        return list(self._keys)
 
     def values(self) -> Any:
         """Return the values of the RasterStack, executing tasks if necessary."""
@@ -704,7 +733,7 @@ class RasterStack(Dict[datetime, ImageData]):
             raise KeyError("RasterStack is empty")
 
         # Try each key in order until we find one that succeeds
-        for key in self._keys:
+        for key in list(self._keys):
             try:
                 return self[key]
             except KeyError:
@@ -725,7 +754,7 @@ class RasterStack(Dict[datetime, ImageData]):
             raise KeyError("RasterStack is empty")
 
         # Try each key in reverse order until we find one that succeeds
-        for key in reversed(self._keys):
+        for key in list(reversed(self._keys)):
             try:
                 return self[key]
             except KeyError:

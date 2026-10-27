@@ -72,19 +72,23 @@ scale/offset) must change it for every backend, in `_reader`, not in a copy.
 as `assets`. The default is the identity: a band name is an asset name, or a
 derived or inner band that `SimpleSTACReader` resolves. A backend whose band
 notation carries reader options (titiler-eopf's `asset|bands=b04`) overrides
-it. Only the read uses the result. `bands` itself still labels the output and
-drives the resolution estimate.
+it, and returns one entry per band. The read and the resolution estimate use
+the result: `_estimate_output_dimensions` takes it as `assets` and looks up
+each band's resolution on the asset its entry names. `bands` itself still
+labels the output, and the pixel limit counts `bands`, so two output bands
+read from one asset count as two.
 
 This is a method, not a field, because the backends that need it already
 subclass `LoadCollection`, and a method has no default-binding question.
 
-The post-read steps in `_reader` (mask inheritance, scale/offset) key on
-asset *names*, so a rio-tiler asset dict (`{"name": ..., "bands": [...]}`)
-works there too (`_asset_names`). Known limit: one dict that reads several
-bands gives one name for several bands, so `_apply_scale_offset` skips that
-read with its usual count-mismatch warning. A backend whose multi-band assets
-carry their own scaling (Zarr) is not affected; one that needs STAC
-scale/offset on such a read should request one band per asset entry.
+The post-read steps in `_reader` accept rio-tiler asset dicts
+(`{"name": ..., "bands": [...]}`) too. Mask inheritance keys on asset names
+(`_asset_names`). Scale/offset keys on the selected bands
+(`_asset_band_fields`): a dict that selects `bands` or `indexes` gives one
+entry per selected band, with the asset's per-band metadata cut to that band.
+So `reflectance` with `bands: ["b2"]` gets the scale/offset of `b2`, not of
+the first band. An `expression` has no band-to-band map, so
+`_apply_scale_offset` skips that read with a warning.
 
 ### 2.3 Defaults are `None`, resolved at call time
 
@@ -100,6 +104,15 @@ In `load_collection`, each date group's task converts `EmptyMosaicError` to
 default allowed exception) with a warning. One date with no pixels in the
 bbox now drops out of the stack instead of failing the request. titiler-eopf
 had done this in its copy; the behaviour is right for every backend.
+
+The stack is lazy, so its labels are known before any date is read. When a
+skipped task fails, `RasterStack._drop` takes its label out of `keys()`,
+`len()` and `timestamps()`, so they agree with `values()` and `items()`. The
+GeoTIFF export labels its bands from `items()` pairs. An empty first or
+middle date thus never lends its label to the next date's pixels. A process
+that reads `data[key]` for a key it took before the read still gets a
+`KeyError` for the empty date: the request fails, as it did before this
+change.
 
 ### 2.5 The estimate opens each item one time
 
@@ -126,7 +139,8 @@ recompute.
   were updated.
 - Behaviour change: an all-empty date group is skipped with a warning (§2.4).
   A request where every date is empty still fails, at `save_result`, with an
-  empty stack.
+  empty stack. Processes that index the stack by a key taken before the read
+  still fail on an empty date; moving them to `items()` is follow-up work.
 
 ## 4. Non-goals
 

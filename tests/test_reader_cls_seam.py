@@ -8,6 +8,8 @@ still looked up at call time (several test modules monkeypatch
 `titiler.openeo.reader.SimpleSTACReader`).
 """
 
+from datetime import datetime
+
 import numpy
 import pytest
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
@@ -216,16 +218,18 @@ def test_load_stac_single_item_reads_with_its_reader_cls(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+class PipeLoadCollection(LoadCollection):
+    """A backend whose band notation is ``asset|band`` (titiler-eopf-like)."""
+
+    def _bands_to_assets(self, bands):
+        """Parse ``asset|band`` into a rio-tiler asset dict."""
+        return [
+            {"name": b.split("|")[0], "bands": [b.split("|")[1]]} for b in bands or []
+        ]
+
+
 def test_bands_to_assets_override_reaches_mosaic_reader_only(monkeypatch):
     """The override's result is what is read; `bands` still labels the output."""
-
-    class ParsingLoadCollection(LoadCollection):
-        def _bands_to_assets(self, bands):
-            return [
-                {"name": b.split("|")[0], "bands": [b.split("|")[1]]}
-                for b in bands or []
-            ]
-
     captured = {}
 
     def mock_mosaic_reader(items, reader, bbox, **kwargs):
@@ -236,7 +240,7 @@ def test_bands_to_assets_override_reaches_mosaic_reader_only(monkeypatch):
     items = [Item.from_dict(_item_dict())]
     monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
 
-    loader = ParsingLoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    loader = PipeLoadCollection(stac_api=stacApiBackend(url="https://example.com"))
     stack = loader.load_collection(
         id="c", spatial_extent=BBOX, bands=["B01|b1"], width=5, height=5
     )
@@ -246,19 +250,26 @@ def test_bands_to_assets_override_reaches_mosaic_reader_only(monkeypatch):
     assert stack.band_names == ["B01|b1"]
 
 
-def test_empty_date_group_is_skipped_not_fatal(monkeypatch):
-    """A date whose items yield no pixels drops out of the stack with a warning."""
+@pytest.mark.parametrize("empty_day", [1, 2])
+def test_empty_date_group_is_skipped_not_fatal(monkeypatch, empty_day):
+    """A date whose items yield no pixels drops out of the stack with a
+    warning, and its label goes with it: an empty first or middle date never
+    lends its label to the next date's pixels in a GeoTIFF export."""
     from rio_tiler.errors import EmptyMosaicError
 
+    from titiler.openeo.processes.implementations.formats import _handle_raster_geotiff
+
     def mock_mosaic_reader(items, reader, bbox, **kwargs):
-        if items[0].id == "empty":
+        day = int(items[0].id)
+        if day == empty_day:
             raise EmptyMosaicError("nothing here")
-        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+        # Each date's pixels carry its day, to check the labels.
+        return ImageData(numpy.ma.ones((1, 5, 5), dtype="uint8") * day), None
 
     monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
     items = [
-        Item.from_dict(_item_dict("full", "2021-01-01T00:00:00Z")),
-        Item.from_dict(_item_dict("empty", "2021-01-02T00:00:00Z")),
+        Item.from_dict(_item_dict(str(day), f"2021-01-0{day}T00:00:00Z"))
+        for day in (1, 2, 3)
     ]
     monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
 
@@ -267,9 +278,62 @@ def test_empty_date_group_is_skipped_not_fatal(monkeypatch):
         id="c", spatial_extent=BBOX, bands=["B01"], width=5, height=5
     )
 
-    # Keys are known up front (lazy stack); only the realised values shrink.
-    assert len(stack.keys()) == 2
-    assert len(list(stack.values())) == 1
+    # Keys are known up front (lazy stack); the skipped date leaves on read.
+    assert len(stack.keys()) == 3
+    img = _handle_raster_geotiff(stack)
+    kept = [day for day in (1, 2, 3) if day != empty_day]
+
+    assert len(stack) == len(stack.keys()) == len(kept)
+    assert [k.day for k in stack.keys()] == kept
+    assert img.metadata["original_keys"] == [f"2021-01-0{day} 00:00:00" for day in kept]
+    for band, day in enumerate(kept):
+        assert img.band_descriptions[band] == f"2021-01-0{day} 00:00:00"
+        assert int(img.array[band, 0, 0]) == day
+    with pytest.raises(KeyError):
+        stack[datetime(2021, 1, empty_day)]
+    assert int(stack.first.array[0, 0, 0]) == kept[0]
+
+
+def test_hook_selection_drives_the_dimension_estimate(monkeypatch):
+    """Without explicit dimensions, a parsed band selection gets the native
+    grid of the asset it reads (100x100 here), not the 1024x1024 fallback."""
+    captured = {}
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        captured.update(kwargs)
+        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+
+    monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
+    items = [Item.from_dict(_item_dict())]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    loader = PipeLoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="c", spatial_extent=BBOX, bands=["B01|b1"], width=None, height=None
+    )
+    next(iter(stack.values()))
+
+    assert (captured["width"], captured["height"]) == (100, 100)
+
+
+def test_hook_selection_counts_for_the_pixel_limit(monkeypatch):
+    """Two output bands read from one asset count as two bands."""
+    from titiler.openeo.errors import OutputLimitExceeded
+
+    items = [Item.from_dict(_item_dict())]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+    # Above one band (10x10x1x1), below two.
+    monkeypatch.setenv("TITILER_OPENEO_PROCESSING_MAX_PIXELS", "150")
+
+    loader = PipeLoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    with pytest.raises(OutputLimitExceeded):
+        loader.load_collection(
+            id="c",
+            spatial_extent=BBOX,
+            bands=["B01|b1", "B01|b2"],
+            width=10,
+            height=10,
+        )
 
 
 def test_reader_accepts_asset_dicts_from_bands_to_assets(monkeypatch):

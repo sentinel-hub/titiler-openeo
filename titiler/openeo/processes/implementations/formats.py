@@ -92,9 +92,12 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     Raises:
         ValueError: If ImageData objects have incompatible properties
     """
-    # Get all ImageData objects from the RasterStack (in the same order as keys())
-    # For RasterStack, this will execute all tasks but only when needed for saving
-    image_data_list = list(data.values())
+    # Get all (key, ImageData) pairs from the RasterStack, in temporal order.
+    # For RasterStack, this will execute all tasks but only when needed for saving.
+    # Pairs, not keys() zipped with values(): a slice whose task is skipped has
+    # no image, and zipping would label the next date's pixels with its date.
+    slices = list(data.items())
+    image_data_list = [img for _, img in slices]
 
     # Check if this is a RasterStack with ImageData objects
     if not all(isinstance(img, ImageData) for img in image_data_list):
@@ -120,7 +123,7 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     # the output has the bands of the first date, then the bands of the next one.
     arrays = []
     band_names_list = []
-    for key, img in zip(data.keys(), image_data_list):
+    for key, img in slices:
         # Preserve the native dtype and mask: GTiff is a DATA format. Casting to
         # uint8 here collapses float index/reflectance values (e.g. NDVI in
         # [-1, 1] -> all zeros). See issue #296.
@@ -146,11 +149,11 @@ def _handle_raster_geotiff(data: Dict[datetime, ImageData]) -> ImageData:
     # Prepare metadata
     combined_metadata: Dict[str, Any] = {
         "band_names": band_names_list.copy(),
-        "original_keys": [str(key) for key in data.keys()],
+        "original_keys": [str(key) for key, _ in slices],
     }
 
     # Add any metadata from the original images
-    for i, (key, img) in enumerate(data.items()):  # noqa: B007
+    for i, (key, img) in enumerate(slices):  # noqa: B007
         if img.metadata:
             combined_metadata[f"band_{i}_metadata"] = img.metadata
 
