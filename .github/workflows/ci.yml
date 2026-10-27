@@ -134,7 +134,7 @@ jobs:
       # ghcr.io. Via env: so nothing is interpolated into run:.
       - name: smoke-test the image
         env:
-          IMAGE_REF: ${{ steps.build.outputs.imageid }}
+          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
         run: ./docker/smoke-test.sh "$IMAGE_REF"
 
       # An exception, if one is ever needed, goes in a .trivyignore at the repo
@@ -142,23 +142,18 @@ jobs:
       - name: fail on fixable CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ steps.build.outputs.imageid }}
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           scanners: vuln
           exit-code: '1'
           ignore-unfixed: true
           severity: CRITICAL
-          # Outside the checkout, which is the push step's build context.
-          cache-dir: ${{ runner.temp }}/trivy
 
-      # Same inputs as the build step, so this comes from its cache.
+      # Pushes the tested image, not a rebuild.
       - name: push
         if: steps.can-push.outputs.value == 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: printf '%s\n' "$TAGS" | xargs -r -n1 docker push
 
 # PyPI publishing lives in release-please.yml. It ran here on tag pushes, but
 # release-please creates tags with GITHUB_TOKEN, which does not start
