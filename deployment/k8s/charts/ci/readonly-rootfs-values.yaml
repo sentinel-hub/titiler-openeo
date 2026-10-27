@@ -6,6 +6,16 @@ image:
   repository: titiler-openeo
   tag: dev
 
+# Small, as in postgres-values.yaml: `ct install --skip-clean-up` keeps the
+# earlier scenarios running on the same kind node.
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
 securityContext:
   runAsNonRoot: true
   runAsUser: 65532
