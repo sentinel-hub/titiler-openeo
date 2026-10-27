@@ -137,14 +137,16 @@ jobs:
           IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
         run: ./docker/smoke-test.sh "$IMAGE_REF"
 
-      # An exception, if one is ever needed, goes in a .trivyignore at the repo
+      # Blocks the main and tag pushes; on pull requests it only reports, as a
+      # CVE published overnight is no reason to fail an unrelated change. An
+      # exception, if one is ever needed, goes in a .trivyignore at the repo
       # root, which Trivy reads by default.
       - name: fail on fixable CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           scanners: vuln
-          exit-code: '1'
+          exit-code: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           ignore-unfixed: true
           severity: CRITICAL
 
