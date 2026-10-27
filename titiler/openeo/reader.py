@@ -475,21 +475,7 @@ class SimpleSTACReader(MultiBaseReader):
                     "Asset does not have 'bands' metadata, unable to use 'bands' option"
                 )
 
-            # There is no standard for precedence between 'eo:common_name' and 'name'
-            # in STAC specification, so we will use 'eo:common_name' if it exists,
-            # otherwise fallback to 'name', and if not exist use the band index as last resource.
-            # The positional fallback key is stringified: `bands` values arrive as
-            # strings (the openEO `bands` argument, and rio-tiler's asset options),
-            # so an int key here can never be matched and the fallback was dead --
-            # requesting band "1" raised "not found in asset metadata" instead of
-            # selecting index 1.
-            common_to_variable = {
-                b.get("eo:common_name")
-                or b.get("common_name")
-                or b.get("name")
-                or str(ix): ix
-                for ix, b in enumerate(stac_bands, 1)
-            }
+            common_to_variable = _band_lookup(stac_bands)
             band_indexes: list[int] = []
             for b in bands:
                 if idx := common_to_variable.get(b):
@@ -903,13 +889,19 @@ def _get_assets_resolutions(
         Dictionary mapping band names to (x_resolution, y_resolution, crs) tuples
     """
     band_resolutions = {}
-    # ``band name -> asset name``: the name to look up for each requested band.
+    # ``band name -> (asset name, gsd of the selected bands)``: what to look
+    # up for each requested band.
+    assets_to_process: Dict[str, Tuple[str, Optional[float]]]
     if not bands:
-        assets_to_process = {key: key for key in item.get_assets()}
+        assets_to_process = {key: (key, None) for key in item.get_assets()}
     elif assets is not None and len(assets) == len(bands):
-        assets_to_process = dict(zip(bands, _asset_names(assets)))
+        assets_to_process = {}
+        for band, asset in zip(bands, assets):
+            name = asset["name"] if isinstance(asset, dict) else asset
+            gsd = _selection_gsd(asset, _asset_extra_fields(item, name))
+            assets_to_process[band] = (name, gsd)
     else:
-        assets_to_process = {band: band for band in bands}
+        assets_to_process = {band: (band, None) for band in bands}
 
     # Built lazily, only if a requested name turns out not to be a real asset
     # -- the common (no derived bands requested) case pays nothing extra.
@@ -917,13 +909,14 @@ def _get_assets_resolutions(
     sibling_candidates: Optional[List[SiblingCandidateFacts]] = None
     collection_id = item.collection_id or ""
 
-    for band_name, lookup_name in assets_to_process.items():
+    for band_name, (lookup_name, band_gsd) in assets_to_process.items():
         resolution_asset_name = lookup_name
-        # Set only for a band resolved via `_inner_bands` below: its own
-        # declared ground sample distance, which overrides the owning asset's
-        # (a multi-band asset's own metadata describes just its finest band --
-        # EOPF's `reflectance` declares 10m even though `b01` is native 20m).
-        band_gsd: Optional[float] = None
+        # ``band_gsd`` is set for a band selected inside an asset (an asset
+        # dict, `_selection_gsd`) or resolved via `_inner_bands` below: its
+        # own declared ground sample distance, which overrides the owning
+        # asset's (a multi-band asset's own metadata describes just its finest
+        # band -- EOPF's `reflectance` declares 10m even though `b01` is
+        # native 20m).
 
         if lookup_name not in item.assets:
             # Not a real asset key. Prefer a band published *inside* one of
@@ -1405,22 +1398,84 @@ def _narrow_to_band(fields: Dict[str, Any], index: int) -> Dict[str, Any]:
     return narrowed
 
 
-def _band_index(fields: Dict[str, Any], band: str) -> Optional[int]:
-    """The 1-based index of ``band`` in the asset, as rio-tiler resolves ``bands``.
+def _band_lookup(stac_bands: Sequence[Any]) -> Dict[str, int]:
+    """``band name -> 1-based index`` for an asset's ``bands`` (``eo:bands``) list.
 
-    rio-tiler's `STACReader._get_options` matches the common name first, then
-    the name, in the asset's ``bands`` (``eo:bands`` for STAC 1.0).
+    The one place that resolves a ``bands`` selection: `SimpleSTACReader._get_options`
+    uses it for the read, and `_asset_bands` for the post-read steps, so both
+    always pick the same band.
+
+    There is no standard for precedence between 'eo:common_name' and 'name'
+    in STAC specification, so we will use 'eo:common_name' if it exists,
+    otherwise fallback to 'name', and if not exist use the band index as last resource.
+    The positional fallback key is stringified: `bands` values arrive as
+    strings (the openEO `bands` argument, and rio-tiler's asset options),
+    so an int key here can never be matched and the fallback was dead --
+    requesting band "1" raised "not found in asset metadata" instead of
+    selecting index 1.
     """
-    stac_bands = fields.get("bands") or fields.get("eo:bands") or []
-    for index, meta in enumerate(stac_bands, 1):
-        if not isinstance(meta, Mapping):
-            continue
-        if band in (
-            meta.get("eo:common_name") or meta.get("common_name"),
-            meta.get("name"),
-        ):
-            return index
-    return None
+    lookup: Dict[str, int] = {}
+    for ix, b in enumerate(stac_bands, 1):
+        meta = b if isinstance(b, Mapping) else {}
+        key = (
+            meta.get("eo:common_name")
+            or meta.get("common_name")
+            or meta.get("name")
+            or str(ix)
+        )
+        lookup[key] = ix
+    return lookup
+
+
+def _stac_bands(fields: Mapping[str, Any]) -> List[Any]:
+    """The asset's ``bands`` list (``eo:bands`` for STAC 1.0), or []."""
+    return list(fields.get("bands") or fields.get("eo:bands") or [])
+
+
+def _selected_indexes(
+    asset: AssetType, fields: Mapping[str, Any]
+) -> Optional[List[Optional[int]]]:
+    """The 1-based indexes of the bands that reading ``asset`` returns, in order.
+
+    The same selection `SimpleSTACReader._get_options` makes: ``bands``
+    (resolved with `_band_lookup`) wins over ``indexes``. ``[None]`` for a
+    plain name or a dict without a selection: the whole asset, taken as one
+    band. None for an ``expression``: its output bands do not map to source
+    bands. A band name the asset does not have gives 0 (the read raises).
+    """
+    if not isinstance(asset, dict):
+        return [None]
+    if asset.get("expression"):
+        return None
+    if bands := asset.get("bands"):
+        lookup = _band_lookup(_stac_bands(fields))
+        return [lookup.get(band, 0) for band in bands]
+    if indexes := asset.get("indexes"):
+        return [indexes] if isinstance(indexes, int) else list(indexes)
+    return [None]
+
+
+def _asset_bands(
+    item: Any, assets: Sequence[AssetType]
+) -> Optional[List[Tuple[str, Optional[int]]]]:
+    """One ``(asset name, 1-based band index)`` pair per band that reading ``assets`` returns.
+
+    ``assets`` may mix plain names with rio-tiler asset dicts
+    (``{"name": ..., "bands": [...]}``), which is what a backend's
+    `LoadCollection._bands_to_assets` produces. A dict that selects several
+    bands gives one pair per band, so the result is in output-band order --
+    what the post-read steps in `_reader` key on. The index is None for a
+    whole asset (`_selected_indexes`). None when an asset carries an
+    ``expression``.
+    """
+    out: List[Tuple[str, Optional[int]]] = []
+    for asset in assets:
+        name = asset["name"] if isinstance(asset, dict) else asset
+        indexes = _selected_indexes(asset, _asset_extra_fields(item, name))
+        if indexes is None:
+            return None
+        out.extend((name, index) for index in indexes)
+    return out
 
 
 def _asset_band_fields(
@@ -1428,32 +1483,42 @@ def _asset_band_fields(
 ) -> Optional[List[Tuple[str, Dict[str, Any]]]]:
     """One ``(asset name, STAC metadata)`` pair per band that reading ``assets`` returns.
 
-    A plain name gives the asset's metadata as is. A rio-tiler asset dict
-    (`LoadCollection._bands_to_assets`) that selects ``indexes`` or ``bands``
-    gives one pair per selected band, with the metadata narrowed to that band
-    (`_narrow_to_band`), so a non-first band never gets the first band's
-    scale/offset. None when an asset carries an ``expression``: its output
-    bands do not map to source bands.
+    The bands of `_asset_bands`. A whole asset gives its metadata as is; a
+    selected band gives the metadata narrowed to that band (`_narrow_to_band`),
+    so a non-first band never gets the first band's scale/offset. None when
+    an asset carries an ``expression``.
     """
+    selection = _asset_bands(item, assets)
+    if selection is None:
+        return None
     out: List[Tuple[str, Dict[str, Any]]] = []
-    for asset in assets:
-        if not isinstance(asset, dict):
-            out.append((asset, _asset_extra_fields(item, asset)))
-            continue
-        name = asset["name"]
+    for name, index in selection:
         fields = _asset_extra_fields(item, name)
-        if asset.get("expression"):
-            return None
-        indexes = asset.get("indexes")
-        if indexes is None and asset.get("bands"):
-            indexes = [_band_index(fields, band) or 0 for band in asset["bands"]]
-        if indexes is None:
-            out.append((name, fields))
-            continue
-        if isinstance(indexes, int):
-            indexes = [indexes]
-        out.extend((name, _narrow_to_band(fields, index)) for index in indexes)
+        out.append((name, fields if index is None else _narrow_to_band(fields, index)))
     return out
+
+
+def _selection_gsd(asset: AssetType, fields: Mapping[str, Any]) -> Optional[float]:
+    """The finest per-band ``gsd`` of the bands ``asset`` selects, or None.
+
+    A multi-band asset's own ``gsd`` describes just its finest band (EOPF's
+    `reflectance` declares 10m, but its `b01` is native 20m), so a selection
+    of `b01` must use the band's ``gsd``. None for a whole asset, or when no
+    selected band declares one.
+    """
+    indexes = _selected_indexes(asset, fields)
+    if not indexes or indexes == [None]:
+        return None
+    stac_bands = _stac_bands(fields)
+    gsds = [
+        float(stac_bands[i - 1]["gsd"])
+        for i in indexes
+        if i
+        and 0 < i <= len(stac_bands)
+        and isinstance(stac_bands[i - 1], Mapping)
+        and stac_bands[i - 1].get("gsd") is not None
+    ]
+    return min(gsds) if gsds else None
 
 
 def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
@@ -1677,8 +1742,22 @@ def _inherit_derived_band_masks(
     If a derived band's sibling was not itself requested, there is nothing to
     inherit and that band's own mask (fully valid, as computed) is left alone
     -- a derived-only request has no raster band to borrow a mask from.
+
+    ``requested`` names each band of ``img`` in order (`_asset_bands`). When
+    the counts differ (a plain name for a multi-band asset), the positions are
+    not known and the masks are left alone, so no band borrows the mask of
+    another.
     """
     if not derived_bands:
+        return img
+
+    if len(requested) != img.count:
+        logger.warning(
+            "Cannot inherit derived band masks: %d band(s) but %d requested "
+            "band name(s); skipping.",
+            img.count,
+            len(requested),
+        )
         return img
 
     index_by_name = {name: i for i, name in enumerate(requested)}
@@ -1700,17 +1779,6 @@ def _inherit_derived_band_masks(
 
     img.array = numpy.ma.MaskedArray(img.array.data, mask=mask)
     return img
-
-
-def _asset_names(assets: Sequence[AssetType]) -> List[str]:
-    """The asset name of each requested asset.
-
-    ``assets`` may mix plain names with rio-tiler asset dicts
-    (``{"name": ..., "bands": [...]}``), which is what a backend's
-    `LoadCollection._bands_to_assets` produces. The derived-band mask step in
-    `_reader` keys on names, so it sees the same thing either way.
-    """
-    return [asset["name"] if isinstance(asset, dict) else asset for asset in assets]
 
 
 def _reader(
@@ -1770,14 +1838,16 @@ def _reader(
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")
-                requested_names = _asset_names(requested) if requested else None
-                if requested_names:
+                selection = _asset_bands(item, requested) if requested else None
+                if selection:
                     # getattr, not a direct attribute access: some tests
                     # substitute a minimal stand-in for SimpleSTACReader that
                     # does not carry this (SimpleSTACReader-internal) attribute
                     # -- treat that the same as "no derived bands".
                     img = _inherit_derived_band_masks(
-                        img, getattr(src_dst, "_derived_bands", {}), requested_names
+                        img,
+                        getattr(src_dst, "_derived_bands", {}),
+                        [name for name, _ in selection],
                     )
 
                 # Apply scale/offset (per band, from the deployment's ordered

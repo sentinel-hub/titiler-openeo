@@ -74,7 +74,10 @@ derived or inner band that `SimpleSTACReader` resolves. A backend whose band
 notation carries reader options (titiler-eopf's `asset|bands=b04`) overrides
 it, and returns one entry per band. The read and the resolution estimate use
 the result: `_estimate_output_dimensions` takes it as `assets` and looks up
-each band's resolution on the asset its entry names. `bands` itself still
+each band's resolution on the asset its entry names. For a selection inside
+the asset, the per-band `gsd` of the selected bands wins over the asset's own
+(`_selection_gsd`): `reflectance` with `bands: ["coastal"]` gets b01's 20m,
+the same as `coastal` requested directly. `bands` itself still
 labels the output, and the pixel limit counts `bands`, so two output bands
 read from one asset count as two.
 
@@ -82,13 +85,21 @@ This is a method, not a field, because the backends that need it already
 subclass `LoadCollection`, and a method has no default-binding question.
 
 The post-read steps in `_reader` accept rio-tiler asset dicts
-(`{"name": ..., "bands": [...]}`) too. Mask inheritance keys on asset names
-(`_asset_names`). Scale/offset keys on the selected bands
-(`_asset_band_fields`): a dict that selects `bands` or `indexes` gives one
-entry per selected band, with the asset's per-band metadata cut to that band.
-So `reflectance` with `bands: ["b2"]` gets the scale/offset of `b2`, not of
-the first band. An `expression` has no band-to-band map, so
-`_apply_scale_offset` skips that read with a warning.
+(`{"name": ..., "bands": [...]}`) too. `_asset_bands` turns the requested
+assets into one `(asset name, band index)` pair per output band. It selects
+bands the same way the read does: `bands` wins over `indexes`, and
+`_band_lookup` (shared with `SimpleSTACReader._get_options`) resolves a band
+by its common name, else its name, else its stringified position.
+
+- Mask inheritance uses these names in output-band order. A dict that reads
+  two bands takes two positions, so a derived band after it borrows the mask
+  of its own sibling. When the names do not match the band count (a plain
+  name for a multi-band asset), the step is skipped with a warning.
+- Scale/offset uses the asset's per-band metadata cut to each selected band
+  (`_asset_band_fields`). So `reflectance` with `bands: ["b2"]` gets the
+  scale/offset of `b2`, not of the first band.
+- An `expression` has no band-to-band map, so `_apply_scale_offset` skips
+  that read with a warning.
 
 ### 2.3 Defaults are `None`, resolved at call time
 

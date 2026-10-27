@@ -145,6 +145,33 @@ def test_apply_scale_offset_uses_the_selected_band_coefficients(asset):
     numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
 
 
+def test_apply_scale_offset_bands_win_over_indexes():
+    """The read resolves `bands` over `indexes` (`_get_options`); so does the
+    scale/offset lookup, or band 2's pixels would get band 1's pair."""
+    img = _img([[[100, 200]]])
+    asset = {"name": "reflectance", "indexes": [1], "bands": ["b2"]}
+    out = _apply_scale_offset(img, _TWO_BAND_ITEM, [asset])
+    numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
+
+
+def test_apply_scale_offset_positional_band_of_unnamed_bands():
+    """Unnamed bands resolve by their stringified 1-based position, as the
+    read does: `bands=["2"]` reads band 2 and gets band 2's pair."""
+    item = {
+        "assets": {
+            "data": {
+                "bands": [
+                    {"raster:scale": 0.5, "raster:offset": 1.0},
+                    {"raster:scale": 0.1, "raster:offset": -2.0},
+                ]
+            }
+        }
+    }
+    img = _img([[[100, 200]]])
+    out = _apply_scale_offset(img, item, [{"name": "data", "bands": ["2"]}])
+    numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
+
+
 def test_apply_scale_offset_one_pair_per_band_of_a_multi_band_selection():
     img = _img([[[100]], [[100]]])
     out = _apply_scale_offset(
