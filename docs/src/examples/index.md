@@ -9,12 +9,13 @@ The openEO Web Editor provides a graphical interface for interacting with the AP
 1. Start the services:
 
 ```bash
+echo "TITILER_OPENEO_AUTH_USERS='{\"test\":{\"password\":\"test\"}}'" >> .env   # local development only
 docker compose up
 ```
 
 1. Access the editor at http://localhost:8080 and set the backend URL to http://localhost:8081
 
-2. Authenticate using the instructions in the [Admin Guide](../admin-guide.md#authentication)
+2. Log in with the local development user that the `echo` line adds (username `test`, password `test`). For other authentication setups, see the [Admin Guide](../admin-guide.md#authentication)
 
 ## Jupyter Notebook Examples
 

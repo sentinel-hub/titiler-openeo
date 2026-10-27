@@ -73,6 +73,10 @@ def main_module(monkeypatch, store_path, store_type):
     """
     monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
     monkeypatch.setenv("TITILER_OPENEO_STORE_URL", f"{store_path}")
+    # Basic auth, the default method, refuses to start without users.
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_USERS", json.dumps({"test": {"password": "test"}})
+    )
 
     import titiler.openeo.main as module
     from titiler.openeo.auth import get_auth

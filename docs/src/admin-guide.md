@@ -135,13 +135,16 @@ TITILER_OPENEO_CACHE_DISABLE=false
 openEO by TiTiler supports two authentication methods:
 
 1. Basic Authentication (default)
-   - Configured through [`AuthSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L61)
+   - Configured through [`AuthSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py)
    - Set `TITILER_OPENEO_AUTH_METHOD=basic`
-   - Configure users in environment:
+   - Configure users in environment, as a JSON object keyed by username:
 
      ```bash
      TITILER_OPENEO_AUTH_USERS='{"user1": {"password": "pass1", "roles": ["user"]}}'
      ```
+
+   - Users are required: there is no built-in user. With basic authentication and no
+     `TITILER_OPENEO_AUTH_USERS`, the backend refuses to start and names the variable.
 
 2. OpenID Connect
    - See [OpenID Connect Configuration](openid-connect.md) for details

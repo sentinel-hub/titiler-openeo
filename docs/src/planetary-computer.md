@@ -3,6 +3,10 @@
 titiler-openeo runs against [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/)
 without credentials. Point it at the Planetary Computer STAC API and reads work.
 
+After copying the sample, uncomment `TITILER_OPENEO_AUTH_USERS` in `.env` and set a
+username and password before starting: basic authentication, the default, refuses to
+start without a user.
+
 ```bash
 cp .env.planetarycomputer .env
 docker compose up

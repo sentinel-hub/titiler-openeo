@@ -139,14 +139,9 @@ class AuthSettings(BaseSettings):
     # Authentication method
     method: str = "basic"
 
-    # Dictionary of users with access
-    # Only used if method is set to "basic"
-    users: Dict[str, Any] = {
-        "test": {
-            "password": "test",
-            "roles": ["user"],
-        }
-    }
+    # Dictionary of users with access, keyed by username
+    # Required if method is set to "basic": there is no built-in user
+    users: Dict[str, Any] = {}
 
     # OIDC configuration
     # Only used if method is set to "oidc"
@@ -156,6 +151,8 @@ class AuthSettings(BaseSettings):
         env_prefix="TITILER_OPENEO_AUTH_",
         env_file=".env",
         extra="ignore",
+        # Start-up errors are logged; never echo the users (and passwords) in them.
+        hide_input_in_errors=True,
     )
 
     def __init__(self, *args, **kwargs):
@@ -187,6 +184,32 @@ class AuthSettings(BaseSettings):
             raise ValueError(
                 "OIDC authentication is enabled but incompletely configured. "
                 f"Missing: {', '.join(missing)}."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_basic_users(self):
+        """Refuse to start basic auth without usable users, rather than fall back."""
+        if self.method == "basic" and not (
+            self.users
+            and all(
+                # BasicAuth splits credentials on the first ":", so a username
+                # that is empty or contains one could never log in.
+                name
+                and ":" not in name
+                and isinstance(user, dict)
+                and isinstance(user.get("password"), str)
+                and user["password"]
+                for name, user in self.users.items()
+            )
+        ):
+            raise ValueError(
+                "Basic authentication is enabled but TITILER_OPENEO_AUTH_USERS is "
+                "empty or has an invalid user: each needs a non-empty username "
+                'without ":" and a non-empty "password". Set it to a JSON object '
+                "keyed by username, "
+                'e.g. \'{"alice": {"password": "..."}}\', '
+                "or set TITILER_OPENEO_AUTH_METHOD=oidc."
             )
         return self
 
