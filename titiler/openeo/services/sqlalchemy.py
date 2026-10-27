@@ -169,6 +169,7 @@ _SCHEMA_LOCK_KEY = 0x7469_7469_6C65_7230
 # Seconds to wait at startup for PostgreSQL to accept connections: less than
 # the ~50 s after which the chart's liveness probe restarts a silent pod.
 _STARTUP_TIMEOUT = 30
+_RETRY_INTERVAL = 1
 
 
 def create_schema(engine: Any) -> None:
@@ -182,28 +183,31 @@ def create_schema(engine: Any) -> None:
 
     This is the first connection the stores make, at import. PostgreSQL may not
     accept connections yet (it is starting along with the app, or restarting),
-    so `OperationalError` is retried for up to `_STARTUP_TIMEOUT` seconds
-    rather than crashing the process. A wrong password or a missing database
-    is an `OperationalError` too, and so also fails only after that.
+    so connecting is retried for up to `_STARTUP_TIMEOUT` seconds rather than
+    crashing the process. A wrong password or a missing database also fails at
+    connect, so only after that. Errors once connected are not retried.
     """
     deadline = time.monotonic() + _STARTUP_TIMEOUT
     while True:
         try:
-            with engine.begin() as conn:
-                if engine.dialect.name == "postgresql":
-                    conn.execute(
-                        text("SELECT pg_advisory_xact_lock(:key)"),
-                        {"key": _SCHEMA_LOCK_KEY},
-                    )
-                Base.metadata.create_all(conn)
-                _migrate_udp_primary_key(conn)
-            return
+            with engine.connect():
+                break
         except OperationalError as err:
             if time.monotonic() >= deadline:
                 raise
             reason = str(err.orig).partition("\n")[0]
-            logger.warning("Database not ready, retrying in 1 s: %s", reason)
-            time.sleep(1)
+            logger.warning(
+                "Database not ready, retrying in %s s: %s", _RETRY_INTERVAL, reason
+            )
+            time.sleep(_RETRY_INTERVAL)
+
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            conn.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SCHEMA_LOCK_KEY}
+            )
+        Base.metadata.create_all(conn)
+        _migrate_udp_primary_key(conn)
 
 
 def _migrate_udp_primary_key(conn: Any) -> None:
