@@ -177,8 +177,9 @@ def create_schema(engine: Any) -> None:
 
     This is the first connection the stores make, at import. PostgreSQL may not
     accept connections yet (it is starting along with the app, or restarting),
-    so connection errors are retried for up to `_STARTUP_TIMEOUT` seconds
-    rather than crashing the process.
+    so `OperationalError` is retried for up to `_STARTUP_TIMEOUT` seconds
+    rather than crashing the process. A wrong password or a missing database
+    is an `OperationalError` too, and so also fails only after that.
     """
     if engine.dialect.name != "postgresql":
         Base.metadata.create_all(engine)
