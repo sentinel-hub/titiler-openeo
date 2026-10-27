@@ -1,5 +1,7 @@
 """titiler.openeo.services SQLAlchemy."""
 
+import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from threading import Lock
@@ -23,11 +25,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
 from ..settings import StoreSettings
 from .base import ServicesStore, UdpStore
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -156,6 +161,10 @@ def dispose_engines() -> None:
 # Arbitrary key of the PostgreSQL advisory lock that serializes schema creation.
 _SCHEMA_LOCK_KEY = 0x7469_7469_6C65_7230
 
+# Seconds to wait at startup for PostgreSQL to accept connections: less than
+# the ~50 s after which the chart's liveness probe restarts a silent pod.
+_STARTUP_TIMEOUT = 30
+
 
 def create_schema(engine: Any) -> None:
     """Create the missing tables.
@@ -165,16 +174,32 @@ def create_schema(engine: Any) -> None:
     it, and one crashes (#274). A transaction-scoped advisory lock lets only
     one process create the schema at a time; the next ones then find the
     tables and skip them.
+
+    This is the first connection the stores make, at import. PostgreSQL may not
+    accept connections yet (it is starting along with the app, or restarting),
+    so connection errors are retried for up to `_STARTUP_TIMEOUT` seconds
+    rather than crashing the process.
     """
     if engine.dialect.name != "postgresql":
         Base.metadata.create_all(engine)
         return
 
-    with engine.begin() as conn:
-        conn.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SCHEMA_LOCK_KEY}
-        )
-        Base.metadata.create_all(conn)
+    deadline = time.monotonic() + _STARTUP_TIMEOUT
+    while True:
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"),
+                    {"key": _SCHEMA_LOCK_KEY},
+                )
+                Base.metadata.create_all(conn)
+            return
+        except OperationalError as err:
+            if time.monotonic() >= deadline:
+                raise
+            reason = str(err.orig).partition("\n")[0]
+            logger.warning("Database not ready, retrying in 1 s: %s", reason)
+            time.sleep(1)
 
 
 @define(kw_only=True)
