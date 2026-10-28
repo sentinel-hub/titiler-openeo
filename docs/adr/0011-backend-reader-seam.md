@@ -119,7 +119,11 @@ had done this in its copy; the behaviour is right for every backend.
 The stack is lazy, so its labels are known before any date is read. When a
 skipped task fails, `RasterStack._drop` takes its label out of `keys()`,
 `len()` and `timestamps()`, so they agree with `values()` and `items()`. The
-GeoTIFF export labels its bands from `items()` pairs. An empty first or
+GeoTIFF export labels its bands from `items()` pairs. A key is listed one
+time only: `load_collection` groups items on the naive-UTC instant (not the
+isoformat string, which differs for one instant with two UTC offsets), and
+`RasterStack` lists a timestamp that two tasks share one time, for the last
+task, the only one it can reach. So `_drop` never leaves a copy behind. An empty first or
 middle date thus never lends its label to the next date's pixels. A process
 that reads `data[key]` for a key it took before the read still gets a
 `KeyError` for the empty date: the request fails, as it did before this

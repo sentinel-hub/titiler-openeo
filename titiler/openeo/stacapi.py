@@ -1,6 +1,7 @@
 """Stac API backend."""
 
 import logging
+from datetime import datetime
 from threading import Lock
 from typing import (
     Any,
@@ -57,7 +58,11 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .processes.implementations.data_model import RasterStack, compute_cutline_mask
+from .processes.implementations.data_model import (
+    RasterStack,
+    _normalize_to_naive_utc,
+    compute_cutline_mask,
+)
 from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
 from .reader import (
@@ -1472,15 +1477,19 @@ class LoadCollection:
         # has coordinates in the correct CRS.
         output_bbox = dimensions["output_bbox"]
 
-        # One lazy task per distinct datetime: the items sharing it are
-        # mosaicked together when the task runs.
-        items_by_date: Dict[str, List[Item]] = {}
+        # One lazy task per distinct instant: the items sharing it are
+        # mosaicked together when the task runs. Grouped on the naive-UTC
+        # instant that `RasterStack` keys on, not the isoformat string: the
+        # same instant written with two UTC offsets is one date, not two
+        # tasks with one key.
+        items_by_date: Dict[datetime, List[Item]] = {}
         for item in items:
-            items_by_date.setdefault(_item_datetime(item).isoformat(), []).append(item)
+            instant = _normalize_to_naive_utc(_item_datetime(item))
+            items_by_date.setdefault(instant, []).append(item)
 
         tasks = [
             self._date_task(
-                date,
+                _item_datetime(date_items[0]).isoformat(),
                 date_items,
                 bbox=bbox,
                 bounds_crs=bounds_crs,
@@ -1491,7 +1500,7 @@ class LoadCollection:
                 tile_buffer=tile_buffer,
                 polygons=polygons,
             )
-            for date, date_items in items_by_date.items()
+            for date_items in items_by_date.values()
         ]
 
         return RasterStack(

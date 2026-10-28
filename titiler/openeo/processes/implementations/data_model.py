@@ -454,9 +454,18 @@ class RasterStack(Dict[datetime, ImageData]):
         # Sort by timestamp to ensure temporal ordering
         timestamp_task_pairs.sort(key=lambda x: x[0])
 
-        # Second pass: build keys and mappings in sorted order
+        # Second pass: build keys and mappings in sorted order. A key is listed
+        # once: when two tasks share a timestamp, only the last one is reachable
+        # (`_key_to_task_index`), so listing the key twice would show a date
+        # two times, or keep a copy after `_drop`.
         for timestamp, task_index, asset in timestamp_task_pairs:
-            self._keys.append(timestamp)
+            if timestamp in self._key_to_task_index:
+                logging.warning(
+                    "Two tasks share the timestamp '%s'; only the last one is kept.",
+                    timestamp,
+                )
+            else:
+                self._keys.append(timestamp)
             self._key_to_task_index[timestamp] = task_index
 
             # Create ImageRef if we have the required dimensions

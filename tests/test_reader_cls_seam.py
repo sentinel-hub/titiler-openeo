@@ -294,6 +294,32 @@ def test_empty_date_group_is_skipped_not_fatal(monkeypatch, empty_day):
     assert int(stack.first.array[0, 0, 0]) == kept[0]
 
 
+def test_one_instant_with_two_utc_offsets_is_one_date(monkeypatch):
+    """Items are grouped on the instant, not the isoformat string, so both
+    items go into one mosaic under one key."""
+    calls = []
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        calls.append([item.id for item in items])
+        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+
+    monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
+    items = [
+        Item.from_dict(_item_dict("utc", "2021-01-01T00:00:00Z")),
+        Item.from_dict(_item_dict("plus_one", "2021-01-01T01:00:00+01:00")),
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="c", spatial_extent=BBOX, bands=["B01"], width=5, height=5
+    )
+
+    assert stack.keys() == [datetime(2021, 1, 1)]
+    assert len(stack.values()) == 1
+    assert calls == [["utc", "plus_one"]]
+
+
 def test_each_task_run_gets_a_new_pixel_selector(monkeypatch):
     """The selector holds the mosaic it builds: one kept in the task closure
     would keep a released slice alive and start a re-run with old pixels."""
