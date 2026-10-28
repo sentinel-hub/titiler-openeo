@@ -145,3 +145,18 @@ tests:
           content:
             name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
           any: true
+
+  - it: should not set a strategy by default
+    asserts:
+      - isNull:
+          path: spec.strategy
+
+  - it: should apply the Recreate strategy when set
+    set:
+      strategy:
+        type: Recreate
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: Recreate
