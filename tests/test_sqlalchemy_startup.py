@@ -1,60 +1,56 @@
-"""Startup of the SQLAlchemy stores while PostgreSQL is not ready yet."""
+"""Startup of the app while PostgreSQL is down (#479)."""
 
-from unittest.mock import MagicMock, patch
+import os
+import subprocess
+import sys
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from starlette.testclient import TestClient
 
-from titiler.openeo.services import sqlalchemy as module
+from titiler.openeo.services.sqlalchemy import SQLAlchemyStore
 
-REFUSED = OperationalError("SELECT 1", {}, Exception("Connection refused"))
-
-
-def _postgres_engine(*connect_results):
-    """An engine whose `connect()` raises or succeeds in turn."""
-    engine = MagicMock()
-    engine.dialect.name = "postgresql"
-    engine.connect.side_effect = connect_results
-    return engine, engine.begin.return_value.__enter__.return_value
+# Nothing listens on port 1, so connecting fails at once.
+DOWN = "postgresql://u:p@127.0.0.1:1/db"
 
 
-@patch.object(module.time, "sleep")
-@patch.object(module.Base.metadata, "create_all")
-def test_create_schema_waits_for_the_database(create_all, sleep):
-    """Connecting is retried until PostgreSQL accepts, then the schema is created once."""
-    engine, conn = _postgres_engine(REFUSED, REFUSED, MagicMock())
+def test_app_imports_with_postgres_down(tmp_path):
+    """Importing the app does not connect to the database."""
+    pytest.importorskip("psycopg2")
+    env = {
+        **os.environ,
+        "TITILER_OPENEO_STAC_API_URL": "https://stac.example.com",
+        "TITILER_OPENEO_STORE_URL": DOWN,
+        "TITILER_OPENEO_TILE_STORE_URL": DOWN,
+    }
 
-    module.create_schema(engine)
+    # In `tmp_path`, so that no `.env` of the repository applies.
+    result = subprocess.run(
+        [sys.executable, "-c", "import titiler.openeo.main"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
-    assert engine.connect.call_count == 3
-    assert sleep.call_count == 2
-    assert conn.execute.call_args.args[1] == {"key": module._SCHEMA_LOCK_KEY}
-    create_all.assert_called_once_with(conn)
-
-
-@patch.object(module.time, "sleep")
-@patch.object(module.Base.metadata, "create_all")
-def test_create_schema_gives_up(create_all, sleep):
-    """A database that stays unreachable still fails startup, after the attempts."""
-    engine, _ = _postgres_engine(*[REFUSED] * module._STARTUP_ATTEMPTS)
-    engine.begin.side_effect = REFUSED
-
-    with pytest.raises(OperationalError):
-        module.create_schema(engine)
-
-    assert engine.connect.call_count == module._STARTUP_ATTEMPTS
-    create_all.assert_not_called()
+    assert result.returncode == 0, result.stderr
 
 
-@patch.object(module.time, "sleep")
-@patch.object(module.Base.metadata, "create_all")
-def test_create_schema_does_not_retry_once_connected(create_all, sleep):
-    """An error after connecting (here on the lock) fails at once, as before."""
-    engine, conn = _postgres_engine(MagicMock())
-    conn.execute.side_effect = OperationalError("SELECT 1", {}, Exception("disk full"))
+# Overrides the `store_type` parametrization of `main_module`.
+@pytest.mark.parametrize("store_type", ["sqlalchemy"])
+def test_readyz_reports_database_down(main_module, monkeypatch):
+    """With the database down, the pod stays live but gets no traffic."""
+    pytest.importorskip("psycopg2")
+    from titiler.openeo.stacapi import stacApiBackend
 
-    with pytest.raises(OperationalError):
-        module.create_schema(engine)
+    monkeypatch.setattr(stacApiBackend, "ping", lambda self, *a, **kw: None)
+    monkeypatch.setattr(main_module, "service_store", SQLAlchemyStore(store=DOWN))
+    client = TestClient(main_module.create_app())
 
-    sleep.assert_not_called()
-    create_all.assert_not_called()
+    response = client.get("/readyz")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["store"]["status"] == "error"
+
+    assert client.get("/healthz").status_code == 200
