@@ -1,0 +1,331 @@
+suite: test the schema Job
+templates:
+  - schema-job.yaml
+tests:
+  - it: should not render for the json store
+    set:
+      database.type: "json"
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not render for the duckdb store
+    set:
+      database.type: "duckdb"
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # A pre-* phase cannot reach the bundled PostgreSQL: pre-install runs before
+  # it exists, pre-upgrade before an upgrade could start or resize it.
+  - it: should run as a post-install and post-upgrade hook
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-titiler-openeo-schema
+      # Exact, so an argocd.argoproj.io/hook annotation cannot sneak in either.
+      - equal:
+          path: metadata.annotations
+          value:
+            helm.sh/hook: post-install,post-upgrade
+            helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+      - equal:
+          path: spec.backoffLimit
+          value: 3
+      - equal:
+          path: spec.template.spec.restartPolicy
+          value: Never
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - python
+            - -m
+            - titiler.openeo.services.create_schema
+
+  - it: should use the same inline DSN as the Deployment
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      postgresql.auth.username: "openeo"
+      postgresql.auth.database: "openeo"
+      enableTileStore: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+          count: 1
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+          count: 1
+
+  # The password is set so that a plaintext DSN can render, and `env: null`
+  # clears the literal env, so the lists below are exact.
+  - it: should take both DSNs from the Secret and render no plaintext one
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      enableTileStore: true
+      env: null
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+        - name: TITILER_OPENEO_TILE_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: tile-dsn
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: TITILER_OPENEO_STORE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: titiler-openeo-db
+                  key: dsn
+            - name: TITILER_OPENEO_TILE_STORE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: titiler-openeo-db
+                  key: tile-dsn
+      - equal:
+          path: spec.template.spec.initContainers[0].env
+          value:
+            - name: PGHOST
+              value: RELEASE-NAME-titiler-openeo-postgresql
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: openeo
+            - name: PGDATABASE
+              value: openeo
+
+  # Kubernetes keeps the last entry of a name, so the Job lists the store URL
+  # entries in the Deployment's order (database.url, env, fromSecret,
+  # fromConfigMap) and uses the same database. Each default `env` key is
+  # nulled, so the list below is exact.
+  - it: should order the store URL entries as the Deployment does
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      env:
+        CPL_TMPDIR: null
+        GDAL_CACHEMAX: null
+        VSI_CACHE: null
+        VSI_CACHE_SIZE: null
+        CPL_VSIL_CURL_CACHE_SIZE: null
+        GDAL_DISABLE_READDIR_ON_OPEN: null
+        GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: null
+        GDAL_HTTP_MULTIPLEX: null
+        GDAL_HTTP_VERSION: null
+        PYTHONWARNINGS: null
+        TITILER_OPENEO_TILE_STORE_URL: "sqlite:////dev/tiles.db"
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_TILE_STORE_URL
+          secretName: tiles
+          secretKey: dsn
+      envVars.fromConfigMap:
+        - name: TITILER_OPENEO_STORE_URL
+          configMapName: dsn-config
+          configMapKey: dsn
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: TITILER_OPENEO_STORE_URL
+              value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+            - name: TITILER_OPENEO_TILE_STORE_URL
+              value: sqlite:////dev/tiles.db
+            - name: TITILER_OPENEO_TILE_STORE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tiles
+                  key: dsn
+            - name: TITILER_OPENEO_STORE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: dsn-config
+                  key: dsn
+
+  # Each reference the Job does not need could block it with
+  # CreateContainerConfigError and hang the release.
+  - it: should leave out the auth ConfigMap and the other envVars entries
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      auth.method: "basic"
+      auth.basic.enabled: true
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_PC_SUBSCRIPTION_KEY
+          secretName: planetary-computer
+          secretKey: subscription-key
+      envVars.fromConfigMap:
+        - name: REDIS_PORT
+          configMapName: redis-config
+          configMapKey: port
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_BASIC_USERS
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_PC_SUBSCRIPTION_KEY
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_PORT
+          any: true
+
+  - it: should run the API's image and be scheduled like the API, without its affinity
+    set:
+      database.type: "postgresql"
+      database.external.enabled: true
+      database.external.host: "pg.example.com"
+      database.external.password: "extpass"
+      image.tag: "1.2.3"
+      image.pullPolicy: Always
+      imagePullSecrets:
+        - name: registry
+      serviceAccountName: titiler
+      nodeSelector:
+        pool: api
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: api
+          effect: NoSchedule
+      podSecurityContext:
+        fsGroup: 1001
+      securityContext:
+        runAsNonRoot: true
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: titiler-openeo
+              topologyKey: kubernetes.io/hostname
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/sentinel-hub/titiler-openeo:1.2.3
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value:
+            - name: registry
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: titiler
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            pool: api
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: dedicated
+              operator: Equal
+              value: api
+              effect: NoSchedule
+      # `set` merges into the default maps, so check the keys set here.
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 1001
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            runAsNonRoot: true
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests
+          value:
+            cpu: 250m
+            memory: 512Mi
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: should wait for the bundled PostgreSQL in an init container
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: wait-for-postgresql
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: postgres:17-alpine
+      # No value is interpolated into the shell string.
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value:
+            - sh
+            - -c
+            - until pg_isready; do sleep 2; done
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: PGHOST
+            value: RELEASE-NAME-titiler-openeo-postgresql
+
+  - it: should not wait for a bundled PostgreSQL with an external database
+    set:
+      database.type: "postgresql"
+      database.external.enabled: true
+      database.external.host: "pg.example.com"
+      database.external.password: "extpass"
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+
+  # TITILER_OPENEO_STORE_URL in `env` is ignored, as in the Deployment.
+  - it: should pass the literal env, such as a tile store URL or libpq settings
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      env:
+        PGSSLMODE: require
+        TITILER_OPENEO_TILE_STORE_URL: "postgresql://t:p@tiles:5432/t"
+        TITILER_OPENEO_STORE_URL: "ignored"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGSSLMODE
+            value: require
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            value: postgresql://t:p@tiles:5432/t
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: ignored
