@@ -19,7 +19,7 @@ from .sqlalchemy import _get_engine, create_schema
 class _StoreUrls(BaseSettings):
     """The store URLs of `BackendSettings`, without its other required fields."""
 
-    store_url: str
+    store_url: Optional[str] = None
     tile_store_url: Optional[str] = None
 
     model_config = SettingsConfigDict(
@@ -30,7 +30,7 @@ class _StoreUrls(BaseSettings):
 
 
 def main() -> None:
-    urls = _StoreUrls()  # type: ignore[call-arg]
+    urls = _StoreUrls()
     # A JSON or DuckDB services store has no tables, but its tile store can be
     # on a SQL database.
     databases = [

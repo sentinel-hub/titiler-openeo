@@ -77,6 +77,18 @@ def test_command_fails_without_a_sql_database(tmp_path, store):
     assert "No SQL database" in result.stderr
 
 
+def test_command_without_store_url_hides_the_tile_store_password(tmp_path):
+    """A missing store URL is not a validation error that echoes the tile DSN."""
+    pytest.importorskip("psycopg2")
+    # Nothing listens on port 1, so connecting fails at once.
+    tiles = "postgresql://u:s3cret@127.0.0.1:1/db"
+
+    result = _run(tmp_path, check=False, tile_store_url=tiles)
+
+    assert result.returncode != 0
+    assert "s3cret" not in result.stdout + result.stderr
+
+
 def test_command_hides_the_password(tmp_path, monkeypatch, capsys):
     """The Job log shows which database, never its password."""
     monkeypatch.chdir(tmp_path)
