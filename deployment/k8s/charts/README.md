@@ -138,10 +138,9 @@ one, so it is safe to run on every upgrade.
   false`): every new PostgreSQL pod starts with an empty database, and nothing
   creates the tables again until the next install or upgrade runs the Job. Run
   the command in an API pod (see below) to restore them sooner.
-* **Image**: the Job needs an image with titiler-openeo newer than 0.19.0. With
-  an older `image.tag`, the Job fails with
-  `No module named titiler.openeo.services.create_schema` and the release is
-  marked failed; the old image still creates its tables at startup.
+* **Image**: an image older than the command (titiler-openeo 0.19.0 and
+  before, or an image built on one) creates its tables at startup, so with it
+  the Job logs that it has nothing to do and succeeds.
 * **Failures**: the Job retries 3 times, then fails the release. A failed Job is
   kept until the next install or upgrade replaces it:
   `kubectl logs job/<release>-titiler-openeo-schema` (add

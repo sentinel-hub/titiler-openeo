@@ -61,7 +61,19 @@ spec:
         - name: create-schema
           image: {{ include "titiler.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["python", "-m", "titiler.openeo.services.create_schema"]
+          # An image older than the command (0.19.0 and before) creates its
+          # tables at startup: then there is nothing to do. A broken image
+          # still fails here, on the import of the package.
+          command:
+            - python
+            - -c
+            - |
+              import importlib.util, runpy
+              name = "titiler.openeo.services.create_schema"
+              if importlib.util.find_spec(name) is None:
+                  print(f"No {name} in this image: it creates its tables at startup")
+              else:
+                  runpy.run_module(name, run_name="__main__")
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
