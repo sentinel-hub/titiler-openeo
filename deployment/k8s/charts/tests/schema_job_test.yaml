@@ -16,6 +16,20 @@ tests:
       - hasDocuments:
           count: 0
 
+  # The sealed-secret pattern does not require database.type: postgresql.
+  - it: should render for a store URL from envVars.fromSecret, whatever database.type is
+    set:
+      database.type: "json"
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Job
+
   # A pre-* phase cannot reach the bundled PostgreSQL: pre-install runs before
   # it exists, pre-upgrade before an upgrade could start or resize it.
   - it: should run as a post-install and post-upgrade hook
@@ -116,7 +130,7 @@ tests:
   # entries in the Deployment's order (database.url, env, fromSecret,
   # fromConfigMap) and uses the same database. Each default `env` key is
   # nulled, so the list below is exact.
-  - it: should order the store URL entries as the Deployment does
+  - it: should order the store URL entries as deployment.yaml does (database, env, fromSecret, fromConfigMap)
     set:
       database.type: "postgresql"
       postgresql.enabled: true
