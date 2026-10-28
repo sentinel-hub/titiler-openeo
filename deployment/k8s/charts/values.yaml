@@ -149,7 +149,8 @@ envVars:
   # (e.g. one managed by Sealed Secrets / External Secrets). When this entry
   # is present, the chart skips emitting the helper-built value: env var so
   # the password never ends up in rendered manifests and Helm `lookup` is
-  # not required.
+  # not required. The chart also runs the schema Job (README, "PostgreSQL
+  # schema"), whatever `database.type` is.
   # - name: TITILER_OPENEO_STORE_URL
   #   secretName: titiler-openeo-db
   #   secretKey: dsn

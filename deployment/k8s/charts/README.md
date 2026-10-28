@@ -110,8 +110,9 @@ database:
 
 ### PostgreSQL schema
 
-With `database.type: postgresql`, the API does not connect to the database or
-create tables at startup. A pod whose database is down stays Running but not
+With `database.type: postgresql`, or a `TITILER_OPENEO_STORE_URL` from
+`envVars.fromSecret`, the API does not connect to the database or create tables
+at startup. A pod whose database is down stays Running but not
 Ready (`/readyz` returns 503), so it gets no traffic and is not restarted.
 
 The tables come from a Job, `<release>-titiler-openeo-schema`
@@ -126,7 +127,9 @@ one, so it is safe to run on every upgrade.
   container also waits until PostgreSQL accepts connections. It is not a
   pre-install or pre-upgrade hook: pre-install runs before the bundled
   PostgreSQL exists, and pre-upgrade runs before an upgrade could start, resize
-  or create it.
+  or create it. If the release fails before its hooks (for example `--wait`
+  times out because `/readyz` also checks the STAC API), the Job does not run
+  until the next install or upgrade.
 * **New tables**: the API can serve before the Job has run. On a fresh install
   (a few seconds), and after an upgrade that adds a table, requests that use a
   missing table fail until the Job completes (with `--wait`, for the whole

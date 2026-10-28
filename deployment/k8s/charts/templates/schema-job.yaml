@@ -1,4 +1,4 @@
-{{- if eq .Values.database.type "postgresql" -}}
+{{- if or (eq .Values.database.type "postgresql") (eq (include "database.urlFromSecret" .) "true") -}}
 {{- /*
 Creates the missing tables after every install and upgrade, so the API does
 not run DDL at startup. Post-* and not pre-*: a pre-install hook runs before
