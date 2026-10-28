@@ -59,8 +59,14 @@ tests:
           path: spec.template.spec.containers[0].command
           value:
             - python
-            - -m
-            - titiler.openeo.services.create_schema
+            - -c
+            - |
+              import importlib.util, runpy
+              name = "titiler.openeo.services.create_schema"
+              if importlib.util.find_spec(name) is None:
+                  print(f"No {name} in this image: it creates its tables at startup")
+              else:
+                  runpy.run_module(name, run_name="__main__")
 
   - it: should use the same inline DSN as the Deployment
     set:
