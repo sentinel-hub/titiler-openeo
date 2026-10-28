@@ -94,6 +94,28 @@ do not have to do a manual step.
 The old key made the ids unique across all users. Thus no two old rows can
 have the same `(user_id, id)`, and the copy cannot fail on a duplicate.
 
+### 4.1 No rolling upgrade
+
+The advisory lock controls only the startup of new workers. It does not stop
+old workers that continue to run during a rolling update. Their ORM model
+keys `udp_definitions` on `id` alone. After the migration, when two users
+have the same id:
+
+- `delete_udp` selects the row by `id` and `user_id`, but `session.delete`
+  sends `DELETE ... WHERE id = ?`. Thus the rows of both users are deleted.
+- `upsert_udp` selects by `id` alone and gets two rows, thus it fails with
+  `MultipleResultsFound`.
+
+Thus the upgrade must stop all old workers before the new workers start. The
+Helm chart has a `strategy` value for this (`type: Recreate`). The admin
+guide gives the upgrade steps.
+
+We did not use a staged migration over two releases (first delete and update
+by `(user_id, id)` with the old key, then change the key). It makes rolling
+upgrades safe, but it delays the fix for one release, and it is safe only if
+operators do not skip the first release. DuckDB and the local JSON store are
+not affected, because only one process can use them.
+
 ## 5. When to look at option B again
 
 Add a surrogate key when a different table or resource must point to a UDP
@@ -116,3 +138,5 @@ unique constraint. The API continues to use the `id`.
   large table, this start can take more time.
 - A downgrade to an older version is not supported after two users save the
   same id. The old key cannot hold the two rows.
+- On SQL stores, the upgrade cannot be a rolling update (§4.1), thus it has
+  downtime.

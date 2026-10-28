@@ -271,4 +271,34 @@ When updating openEO by TiTiler:
 5. Update the application
 6. Verify functionality
 
+### Upgrade notes
+
+#### UDP ids per user (PostgreSQL and other SQL stores)
+
+The first version with
+[ADR 0012](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0012-udp-per-user-ids.md)
+changes the key of the `udp_definitions` table from `id` to `(user_id, id)`
+when it starts. Older versions still use `id` alone. If an older pod handles a
+request after the change, it can:
+
+- delete the UDPs of all users that have the same id, when one of them deletes
+  their UDP,
+- return `500` when a user saves a UDP with an id that a different user also
+  has.
+
+Thus do not use a rolling update for this upgrade. Stop all old pods before
+the new pods start:
+
+- **Helm:** set `strategy.type: Recreate` for this upgrade. You can go back to
+  the default rolling update after all pods run the new version.
+
+  ```bash
+  helm upgrade <release> <chart> --reuse-values --set strategy.type=Recreate
+  ```
+
+- **Other deployments:** scale to zero, then start the new version.
+
+This upgrade has downtime. DuckDB and the local JSON store are not affected,
+because only one process can use them.
+
 For implementation details, refer to the [source code](https://github.com/sentinel-hub/titiler-openeo/tree/main/titiler/openeo).
