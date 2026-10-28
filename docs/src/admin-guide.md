@@ -117,7 +117,7 @@ TITILER_OPENEO_STORE_POOL_SIZE=5
 TITILER_OPENEO_STORE_MAX_OVERFLOW=10
 TITILER_OPENEO_STORE_POOL_TIMEOUT=5       # Seconds to wait for a free connection
 TITILER_OPENEO_STORE_POOL_RECYCLE=-1      # Seconds before a connection is replaced; -1 disables, 0 is rejected
-TITILER_OPENEO_STORE_POOL_PRE_PING=true   # Test a connection before use, so a database restart fails no request
+TITILER_OPENEO_STORE_POOL_PRE_PING=true   # Test a connection before use, so no request fails on a connection a database restart closed
 ```
 
 If the login record of an authenticated request cannot reach the database (for example, no free connection within `POOL_TIMEOUT`), the request gets `503 Service Unavailable` with a `Retry-After` header, not `401`.
