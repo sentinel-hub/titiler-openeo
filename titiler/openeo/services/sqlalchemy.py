@@ -1,7 +1,5 @@
 """titiler.openeo.services SQLAlchemy."""
 
-import logging
-import time
 import uuid
 from datetime import datetime, timezone
 from threading import Lock
@@ -25,14 +23,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
 from ..settings import StoreSettings
 from .base import ServicesStore, UdpStore
-
-logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -158,47 +153,31 @@ def dispose_engines() -> None:
         _engines.clear()
 
 
-# Arbitrary key of the PostgreSQL advisory lock that serializes schema creation.
-_SCHEMA_LOCK_KEY = 0x7469_7469_6C65_7230
-
-# Connection attempts at startup, one per second: about 30 s, less than the
-# ~50 s after which the chart's liveness probe restarts a silent pod.
-_STARTUP_ATTEMPTS = 30
-
-
 def create_schema(engine: Any) -> None:
-    """Create the missing tables.
+    """Create the missing tables of every store, the tile store's included.
 
-    `create_all` checks for a table and then creates it, so two replicas that
-    start together against an empty PostgreSQL database can both try to create
-    it, and one crashes (#274). A transaction-scoped advisory lock lets only
-    one process create the schema at a time; the next ones then find the
-    tables and skip them.
+    It runs through `python -m titiler.openeo.services.create_schema`, which
+    the Helm chart runs in a Job after each install and upgrade. The stores do
+    not call it on a server database:
+    connecting at import crashed the app while the database was not ready
+    (#479), and replicas that started together raced on the DDL (#274).
 
-    This is the first connection the stores make, at import, and PostgreSQL may
-    not accept connections yet (it is starting along with the app, or
-    restarting), so connecting is retried for about 30 s, a wrong password
-    included. Errors once connected are not retried.
+    It only creates missing tables; it never alters or drops one.
     """
-    if engine.dialect.name != "postgresql":
-        Base.metadata.create_all(engine)
-        return
+    # Registers `tile_assignments` on `Base`.
+    from . import sqlalchemy_tile  # noqa: F401
 
-    for _ in range(_STARTUP_ATTEMPTS):
-        try:
-            with engine.connect():
-                break
-        except OperationalError as err:
-            reason = str(err.orig).partition("\n")[0]
-            logger.warning("Database not ready, retrying in 1 s: %s", reason)
-            time.sleep(1)
+    Base.metadata.create_all(engine)
 
-    # Raises, as before, if PostgreSQL still refuses connections.
-    with engine.begin() as conn:
-        conn.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SCHEMA_LOCK_KEY}
-        )
-        Base.metadata.create_all(conn)
+
+def _create_sqlite_schema(engine: Any) -> None:
+    """Create the tables in process, for SQLite only.
+
+    An in-memory database exists only within this process's connection, so
+    nothing outside can prepare it, and a SQLite file has no server to wait for.
+    """
+    if engine.dialect.name == "sqlite":
+        create_schema(engine)
 
 
 @define(kw_only=True)
@@ -213,7 +192,7 @@ class SQLAlchemyStore(ServicesStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        create_schema(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def ping(self) -> None:
         """Verify the SQLAlchemy store is reachable. Raises on failure."""
@@ -407,7 +386,7 @@ class SQLAlchemyUdpStore(UdpStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        create_schema(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def list_udps(
         self, user_id: str, limit: int = 100, offset: int = 0

@@ -1,4 +1,4 @@
-"""Concurrent startup and login against PostgreSQL, as with several replicas.
+"""The SQLAlchemy stores against a real PostgreSQL.
 
 Set `TITILER_OPENEO_TEST_POSTGRES_URL` to a server URL whose user can create
 databases (e.g. `postgresql://postgres:pg@localhost:5432/postgres`) to run them.
@@ -17,6 +17,7 @@ from titiler.openeo.services.sqlalchemy_tile import SQLAlchemyTileStore
 
 ADMIN_URL = os.environ.get("TITILER_OPENEO_TEST_POSTGRES_URL")
 REPLICAS = 8
+TABLES = {"services", "user_tracking", "udp_definitions", "tile_assignments"}
 
 pytestmark = pytest.mark.skipif(
     not ADMIN_URL, reason="TITILER_OPENEO_TEST_POSTGRES_URL is not set"
@@ -51,20 +52,69 @@ def _all_at_once(fn):
         return [f.result() for f in [pool.submit(run) for _ in range(REPLICAS)]]
 
 
-def test_concurrent_startup_on_empty_database(empty_database):
-    """Every store creates the schema at once without a crash (#274)."""
+def _tables(url):
+    from sqlalchemy import inspect
 
-    def start():
-        module.SQLAlchemyStore(store=empty_database)
-        module.SQLAlchemyUdpStore(store=empty_database)
-        SQLAlchemyTileStore(empty_database)
+    return set(inspect(module._get_engine(url)).get_table_names())
 
-    _all_at_once(start)
+
+def test_create_schema_on_empty_database(empty_database):
+    """The schema is created, and a second run, as on an upgrade, is a no-op."""
+    engine = module._get_engine(empty_database)
+
+    module.create_schema(engine)
+    module.create_schema(engine)
+
+    assert _tables(empty_database) == TABLES
+
+
+def test_stores_leave_an_empty_database_untouched(empty_database):
+    """The stores run no DDL on PostgreSQL, so replicas cannot race on it (#274)."""
+    module.SQLAlchemyStore(store=empty_database)
+    module.SQLAlchemyUdpStore(store=empty_database)
+    SQLAlchemyTileStore(empty_database)
+
+    assert _tables(empty_database) == set()
+
+
+def test_pre_ping_reconnects_after_server_restart(
+    empty_database, tmp_path, monkeypatch
+):
+    """A pooled connection the server dropped fails no request (pre-ping)."""
+    from sqlalchemy import create_engine, make_url, text
+
+    # Default settings: no `.env` of the repository, no pre-ping variable.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TITILER_OPENEO_STORE_POOL_PRE_PING", raising=False)
+    store = module.SQLAlchemyStore(store=empty_database)
+    module.create_schema(store._engine)
+    assert store.get_services() == []
+
+    # As a restart does, end the pooled connection's backend. With a timeout,
+    # `pg_terminate_backend` waits until the backend has exited.
+    admin = create_engine(ADMIN_URL)
+    with admin.connect() as conn:
+        terminated = (
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity "
+                    "WHERE datname = :name"
+                ),
+                {"name": make_url(empty_database).database},
+            )
+            .scalars()
+            .all()
+        )
+    admin.dispose()
+    assert terminated and all(terminated)
+
+    assert store.get_services() == []
 
 
 def test_concurrent_first_login(empty_database):
     """Concurrent first logins of one user count each login once (#275)."""
     store = module.SQLAlchemyStore(store=empty_database)
+    module.create_schema(store._engine)
     user = User(user_id="user", email="user@example.com")
 
     _all_at_once(lambda: store.track_user_login(user=user, provider="oidc"))
