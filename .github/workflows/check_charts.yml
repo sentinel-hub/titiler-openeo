@@ -93,9 +93,9 @@ jobs:
           # pod by the standard helm label (app.kubernetes.io/instance is the
           # release name, name is the chart name).
           for i in $(seq 1 30); do
-            POD=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+            POD=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,!app.kubernetes.io/component' \
               -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-            NS=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+            NS=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,!app.kubernetes.io/component' \
               -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
             if [[ -n "$POD" ]]; then
               break
@@ -173,9 +173,15 @@ jobs:
           fi
 
           # Assertion 2: the plaintext password must not appear anywhere in
-          # the rendered Deployment manifest.
+          # the rendered Deployment manifest, nor in the schema Job (a hook,
+          # deleted once it succeeds, so read from the release).
           if echo "${DEPLOY_YAML}" | grep -q "${PG_PASSWORD}"; then
             echo "::error::Plaintext postgres password leaked into rendered Deployment"
+            exit 1
+          fi
+          HOOKS_YAML=$(helm get hooks "${RELEASE}" --namespace "${NAMESPACE}")
+          if echo "${HOOKS_YAML}" | grep -q "${PG_PASSWORD}"; then
+            echo "::error::Plaintext postgres password leaked into the schema Job"
             exit 1
           fi
 
@@ -233,6 +239,19 @@ jobs:
             fi
             echo "  GET ${endpoint} -> ${code}"
           done
+
+          # Assertion 5: the post-install schema Job created every table,
+          # the tile store's included. `helm install --wait` returns only
+          # after the hook succeeded. The local socket uses trust auth.
+          TABLES=$(kubectl exec --namespace "${NAMESPACE}" "${PG_HOST}-0" -- \
+            psql -U openeo -d openeo -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('services', 'user_tracking', 'udp_definitions', 'tile_assignments')")
+          if [[ "${TABLES}" != "4" ]]; then
+            echo "::error::Expected the 4 store tables, found ${TABLES}"
+            kubectl exec --namespace "${NAMESPACE}" "${PG_HOST}-0" -- psql -U openeo -d openeo -c '\dt' || true
+            exit 1
+          fi
+          echo "  schema Job created ${TABLES} tables"
 
           echo "✅ Sealed-secret install passed all assertions."
 

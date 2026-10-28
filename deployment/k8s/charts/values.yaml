@@ -242,6 +242,7 @@ postgresql:
 # Database configuration
 database:
   # Type of database to use: "json", "duckdb", "postgresql"
+  # "postgresql" adds a Job that creates the tables (README, "PostgreSQL schema").
   type: "json"
   # Default services configuration file path
   defaultServices: ""  # Path to default services configuration file (like files/copernicus.json)
@@ -308,7 +309,7 @@ database:
     maxOverflow: 10
     timeout: 5  # seconds to wait for a free connection; a waiting request holds a worker thread
     recycle: -1  # seconds before a connection is replaced; -1 disables (0 is rejected)
-    prePing: false  # test connections before use
+    prePing: true  # test connections before use, so requests reconnect after a database restart
 
 securityContext:
   {}

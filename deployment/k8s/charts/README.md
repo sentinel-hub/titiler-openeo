@@ -108,6 +108,69 @@ database:
   type: "postgresql"
 ```
 
+### PostgreSQL schema
+
+With `database.type: postgresql`, the API does not connect to the database or
+create tables at startup. A pod whose database is down stays Running but not
+Ready (`/readyz` returns 503), so it gets no traffic and is not restarted.
+
+The tables come from a Job, `<release>-titiler-openeo-schema`
+(`titiler-openeo-schema` for a release named `titiler-openeo`). It runs
+`python -m titiler.openeo.services.create_schema` with the API's image, store
+URLs and `env` map. It creates the missing tables and never alters or drops
+one, so it is safe to run on every upgrade.
+
+* **When**: the Job is a `post-install,post-upgrade` Helm hook. With `--wait`,
+  it runs once the release's pods are Ready; readiness checks the connection,
+  not the tables, so this cannot deadlock. With the bundled PostgreSQL, an init
+  container also waits until PostgreSQL accepts connections. It is not a
+  pre-install or pre-upgrade hook: pre-install runs before the bundled
+  PostgreSQL exists, and pre-upgrade runs before an upgrade could start, resize
+  or create it.
+* **New tables**: the API can serve before the Job has run. On a fresh install
+  (a few seconds), and after an upgrade that adds a table, requests that use a
+  missing table fail until the Job completes (with `--wait`, for the whole
+  rollout).
+* **Bundled PostgreSQL without persistence** (`postgresql.persistence.enabled:
+  false`): every new PostgreSQL pod starts with an empty database, and nothing
+  creates the tables again until the next install or upgrade runs the Job. Run
+  the command in an API pod (see below) to restore them sooner.
+* **Image**: the Job needs an image with titiler-openeo newer than 0.19.0. With
+  an older `image.tag`, the Job fails with
+  `No module named titiler.openeo.services.create_schema` and the release is
+  marked failed; the old image still creates its tables at startup.
+* **Failures**: the Job retries 3 times, then fails the release. A failed Job is
+  kept until the next install or upgrade replaces it:
+  `kubectl logs job/<release>-titiler-openeo-schema` (add
+  `-c wait-for-postgresql` for the init container). A successful Job is
+  deleted.
+* **Scheduling**: the Job uses the API's `resources`, `nodeSelector`,
+  `tolerations`, `imagePullSecrets`, `serviceAccountName` and security
+  contexts, but not its `affinity`. On a cluster with no room for one more
+  API-sized pod (for example at `autoscaling.maxReplicas`), the Job stays
+  Pending until the Helm timeout, and the release fails after the rollout.
+* **Environment**: the Job gets `TITILER_OPENEO_STORE_URL` and
+  `TITILER_OPENEO_TILE_STORE_URL` from the same values as the API (`database`,
+  `env`, `envVars`), and the `env` map (for example `PGSSLMODE`), but no other
+  `envVars` entry and no volume. A DSN that needs a file from
+  `extraHostPathMounts` (such as `sslrootcert=/certs/ca.pem`) fails in the Job.
+* **JSON or DuckDB store with a PostgreSQL tile store** (a
+  `TITILER_OPENEO_TILE_STORE_URL` set through `env` or `envVars`): there is no
+  Job, so nothing creates `tile_assignments`. After install and each upgrade,
+  run the command in an API pod (it skips the JSON or DuckDB store):
+  `kubectl exec deploy/<release>-titiler-openeo -- python -m titiler.openeo.services.create_schema`.
+* **`helm template | kubectl apply`** (and kustomize `helmCharts`): the Job is
+  applied like any other resource. A Job's pod template cannot change, so
+  delete the completed Job before applying a new version, or render with
+  `--no-hooks` and run the command yourself.
+* **Argo CD** runs the Job once per sync, as a PostSync hook, after every
+  resource of the application is Healthy. If one stays Progressing (for example
+  an Ingress that never gets a load-balancer address), the Job never runs, and
+  a new database gets no tables.
+* **Outside Helm**, run `python -m titiler.openeo.services.create_schema` with
+  the same `TITILER_OPENEO_STORE_URL` (and `TITILER_OPENEO_TILE_STORE_URL`)
+  before starting a new version.
+
 ### Persistence Configuration
 
 ```yaml

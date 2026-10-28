@@ -1,0 +1,115 @@
+{{- if eq .Values.database.type "postgresql" -}}
+{{- /*
+Creates the missing tables after every install and upgrade, so the API does
+not run DDL at startup. Post-* and not pre-*: a pre-install hook runs before
+the bundled PostgreSQL exists, and a pre-upgrade hook before an upgrade could
+start, resize or create it. Readiness checks the connection, not the tables,
+so `--wait` cannot deadlock on this hook. See "PostgreSQL schema" in the
+chart README.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-schema" (include "titiler.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "titiler.labels" . | nindent 4 }}
+    app.kubernetes.io/component: schema
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # A failed Job is kept for `kubectl logs` until the next run replaces it.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "titiler.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: schema
+    spec:
+      restartPolicy: Never
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+        # Without `--wait`, or when this upgrade restarts PostgreSQL, the Job
+        # can start first. libpq variables, so no value reaches the shell.
+        - name: wait-for-postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          {{- with .Values.postgresql.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["sh", "-c", "until pg_isready; do sleep 2; done"]
+          env:
+            - name: PGHOST
+              value: {{ include "titiler.postgresql.fullname" . | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.auth.database | quote }}
+          {{- with .Values.postgresql.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- end }}
+      containers:
+        - name: create-schema
+          image: {{ include "titiler.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "titiler.openeo.services.create_schema"]
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The Deployment's store URL entries, in its order, so the same one
+          # wins when a name is set twice. Only what create_schema reads:
+          # another ConfigMap or Secret reference could block the Job with
+          # CreateContainerConfigError.
+          {{- $dsnNames := list "TITILER_OPENEO_STORE_URL" "TITILER_OPENEO_TILE_STORE_URL" }}
+          env:
+            {{- include "titiler.storeEnv" . | trim | nindent 12 }}
+            {{- include "titiler.literalEnv" . | trim | nindent 12 }}
+            {{- range .Values.envVars.fromSecret }}
+            {{- if has .name $dsnNames }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+            {{- end }}
+            {{- range .Values.envVars.fromConfigMap }}
+            {{- if has .name $dsnNames }}
+            - name: {{ .name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .configMapName }}
+                  key: {{ .configMapKey }}
+            {{- end }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- /* Scheduled like the API, except `affinity`: an API anti-affinity could leave this pod unschedulable. */}}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
