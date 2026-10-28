@@ -117,6 +117,75 @@ def test_apply_scale_offset_noop_on_band_asset_mismatch():
     assert out is img
 
 
+#: A two-band asset with distinct per-band coefficients (STAC 1.1 ``bands``).
+_TWO_BAND_ITEM = {
+    "assets": {
+        "reflectance": {
+            "bands": [
+                {"name": "b1", "raster:scale": 0.5, "raster:offset": 1.0},
+                {"name": "b2", "raster:scale": 0.1, "raster:offset": -2.0},
+            ]
+        }
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "asset",
+    [
+        {"name": "reflectance", "bands": ["b2"]},
+        {"name": "reflectance", "indexes": [2]},
+    ],
+)
+def test_apply_scale_offset_uses_the_selected_band_coefficients(asset):
+    """An asset dict that selects a non-first band gets that band's pair,
+    not the first band's (which a lookup by asset name alone would give)."""
+    img = _img([[[100, 200]]])
+    out = _apply_scale_offset(img, _TWO_BAND_ITEM, [asset])
+    numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
+
+
+def test_apply_scale_offset_bands_win_over_indexes():
+    """The read resolves `bands` over `indexes` (`_get_options`); so does the
+    scale/offset lookup, or band 2's pixels would get band 1's pair."""
+    img = _img([[[100, 200]]])
+    asset = {"name": "reflectance", "indexes": [1], "bands": ["b2"]}
+    out = _apply_scale_offset(img, _TWO_BAND_ITEM, [asset])
+    numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
+
+
+def test_apply_scale_offset_positional_band_of_unnamed_bands():
+    """Unnamed bands resolve by their stringified 1-based position, as the
+    read does: `bands=["2"]` reads band 2 and gets band 2's pair."""
+    item = {
+        "assets": {
+            "data": {
+                "bands": [
+                    {"raster:scale": 0.5, "raster:offset": 1.0},
+                    {"raster:scale": 0.1, "raster:offset": -2.0},
+                ]
+            }
+        }
+    }
+    img = _img([[[100, 200]]])
+    out = _apply_scale_offset(img, item, [{"name": "data", "bands": ["2"]}])
+    numpy.testing.assert_allclose(out.array.data[0], [[8.0, 18.0]], rtol=1e-5)
+
+
+def test_apply_scale_offset_one_pair_per_band_of_a_multi_band_selection():
+    img = _img([[[100]], [[100]]])
+    out = _apply_scale_offset(
+        img, _TWO_BAND_ITEM, [{"name": "reflectance", "bands": ["b2", "b1"]}]
+    )
+    numpy.testing.assert_allclose(out.array.data[:, 0, 0], [8.0, 51.0], rtol=1e-5)
+
+
+def test_apply_scale_offset_noop_on_asset_expression():
+    img = _img([[[100]]])
+    asset = {"name": "reflectance", "expression": "b1/b2"}
+    assert _apply_scale_offset(img, _TWO_BAND_ITEM, [asset]) is img
+
+
 def test_apply_scale_offset_noop_when_assets_missing():
     img = _img([[[2000, 1500]]])
     assert _apply_scale_offset(img, {"assets": {}}, None) is img

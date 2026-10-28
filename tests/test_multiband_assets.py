@@ -245,15 +245,33 @@ def test_cube_resolutions_use_each_bands_own_gsd(eopf_item):
     target_crs = rasterio.crs.CRS.from_epsg(32627)
     target_bbox = list(eopf_item.bbox)
 
-    resolutions = _get_cube_resolutions(
-        [eopf_item], target_crs, target_bbox, list(EXPECTED_BANDS)
-    )
+    with SimpleSTACReader(eopf_item) as src_dst:
+        resolutions = _get_cube_resolutions(
+            [src_dst], target_crs, target_bbox, list(EXPECTED_BANDS)
+        )
     (per_band,) = resolutions.values()
 
     for name, expected_gsd in EXPECTED_BANDS.items():
         (x_res, y_res, _bbox) = per_band[name][0]
         assert x_res == expected_gsd
         assert y_res == expected_gsd
+
+
+@pytest.mark.parametrize("selector", [{"bands": ["coastal"]}, {"indexes": [1]}])
+def test_asset_dict_selection_uses_the_selected_bands_own_gsd(eopf_item, selector):
+    """`{"name": "reflectance", "bands": ["coastal"]}` (what a backend's
+    `_bands_to_assets` gives) gets b01's native 20m, the same as requesting
+    `coastal` directly -- not the asset's own 10m."""
+    with SimpleSTACReader(eopf_item) as src_dst:
+        resolutions = _get_assets_resolutions(
+            eopf_item,
+            src_dst,
+            bands=["reflectance|coastal"],
+            assets=[{"name": "reflectance", **selector}],
+        )
+
+    x_res, y_res, _crs = resolutions["reflectance|coastal"]
+    assert (x_res, y_res) == (20, 20)
 
 
 def test_cube_resolutions_gsd_fallback_covers_assets_with_no_proj_transform(
@@ -265,9 +283,10 @@ def test_cube_resolutions_gsd_fallback_covers_assets_with_no_proj_transform(
     target_crs = rasterio.crs.CRS.from_epsg(32627)
     target_bbox = list(eopf_item.bbox)
 
-    resolutions = _get_cube_resolutions(
-        [eopf_item], target_crs, target_bbox, ["AOT_10m", "SCL_20m", "WVP_10m"]
-    )
+    with SimpleSTACReader(eopf_item) as src_dst:
+        resolutions = _get_cube_resolutions(
+            [src_dst], target_crs, target_bbox, ["AOT_10m", "SCL_20m", "WVP_10m"]
+        )
     (per_band,) = resolutions.values()
 
     assert per_band["AOT_10m"][0][:2] == (10.0, 10.0)
