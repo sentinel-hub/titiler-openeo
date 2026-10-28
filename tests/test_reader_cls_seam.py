@@ -294,6 +294,32 @@ def test_empty_date_group_is_skipped_not_fatal(monkeypatch, empty_day):
     assert int(stack.first.array[0, 0, 0]) == kept[0]
 
 
+def test_each_task_run_gets_a_new_pixel_selector(monkeypatch):
+    """The selector holds the mosaic it builds: one kept in the task closure
+    would keep a released slice alive and start a re-run with old pixels."""
+    selectors = []
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        selectors.append(kwargs["pixel_selection"])
+        return ImageData(numpy.ma.zeros((1, 5, 5), dtype="uint8")), None
+
+    monkeypatch.setattr(stacapi_module, "mosaic_reader", mock_mosaic_reader)
+    items = [Item.from_dict(_item_dict())]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="c", spatial_extent=BBOX, bands=["B01"], width=5, height=5
+    )
+    (key,) = stack.keys()
+    stack[key]
+    stack.release(key)
+    stack[key]
+
+    assert len(selectors) == 2
+    assert selectors[0] is not selectors[1]
+
+
 def test_hook_selection_drives_the_dimension_estimate(monkeypatch):
     """Without explicit dimensions, a parsed band selection gets the native
     grid of the asset it reads (100x100 here), not the 1024x1024 fallback."""

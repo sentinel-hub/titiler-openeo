@@ -1311,6 +1311,16 @@ class LoadCollection:
             "width": width,
             "height": height,
             "buffer": float(tile_buffer) if tile_buffer is not None else None,
+            # Forwarded by mosaic_reader to `_reader`, which consumes it.
+            "reader_cls": self.reader_cls,
+        }
+
+        def task() -> ImageData:
+            # A new selector on each run: it holds the mosaic it builds, so one
+            # kept in the closure would keep the slice alive after
+            # `RasterStack.release()` and start a re-run (`map_tasks`) with
+            # the pixels of the run before.
+            #
             # Not just a stylistic default: FirstMethod picks its per-pixel
             # winner from masks alone, per band independently, and derived
             # (band-source) bands have their mask forced to match their
@@ -1320,14 +1330,15 @@ class LoadCollection:
             # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
             # DN from one source item with LUT values from another. A
             # value-driven method (Highest/Lowest) would not preserve that.
-            "pixel_selection": PixelSelectionMethod["first"].value(),
-            # Forwarded by mosaic_reader to `_reader`, which consumes it.
-            "reader_cls": self.reader_cls,
-        }
-
-        def task() -> ImageData:
+            pixel_selection = PixelSelectionMethod["first"].value()
             try:
-                img, _ = mosaic_reader(date_items, _reader, bbox, **mosaic_kwargs)
+                img, _ = mosaic_reader(
+                    date_items,
+                    _reader,
+                    bbox,
+                    pixel_selection=pixel_selection,
+                    **mosaic_kwargs,
+                )
             except EmptyMosaicError as e:
                 # Every item of this date was outside the bbox or all no-data.
                 # `RasterStack` skips `TileOutsideBounds` (its default allowed
