@@ -69,6 +69,7 @@ helm install titiler-openeo . -f values-cdse.yaml -n your-namespace
 | `image.tag` | Container image tag (defaults to `titiler-openeo-{{ .Chart.AppVersion }}` when unset) | `titiler-openeo-0.12.0` |
 | `image.pullPolicy` | Container image pull policy | `IfNotPresent` |
 | `replicaCount` | Number of replicas | `1` |
+| `strategy` | Deployment update strategy. Empty uses the Kubernetes default (`RollingUpdate`). Set `type: Recreate` for upgrades that must stop all old pods first (see the admin guide upgrade notes) | `{}` |
 
 ### Database Configuration
 
@@ -119,7 +120,8 @@ The tables come from a Job, `<release>-titiler-openeo-schema`
 (`titiler-openeo-schema` for a release named `titiler-openeo`). It runs
 `python -m titiler.openeo.services.create_schema` with the API's image, store
 URLs and `env` map. It creates the missing tables and never alters or drops
-one, so it is safe to run on every upgrade.
+one, except the one-time `udp_definitions` key change of ADR 0012 (see the
+admin guide's upgrade notes), so it is safe to run on every upgrade.
 
 * **When**: the Job is a `post-install,post-upgrade` Helm hook. With `--wait`,
   it runs once the release's pods are Ready; readiness checks the connection,

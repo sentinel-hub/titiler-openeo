@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Integer,
+    PrimaryKeyConstraint,
     StaticPool,
     String,
     Text,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     case,
     create_engine,
     func,
+    inspect,
     select,
     text,
 )
@@ -69,8 +71,9 @@ class UdpDefinition(Base):
 
     __tablename__ = "udp_definitions"
 
+    # UDP ids are unique per user, not across users (#469).
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
     process_graph: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -92,6 +95,8 @@ class UdpDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    __table_args__ = (PrimaryKeyConstraint("user_id", "id"),)
 
 
 _engines: Dict[str, Any] = {}
@@ -162,12 +167,15 @@ def create_schema(engine: Any) -> None:
     connecting at import crashed the app while the database was not ready
     (#479), and replicas that started together raced on the DDL (#274).
 
-    It only creates missing tables; it never alters or drops one.
+    Apart from keying an older `udp_definitions` table on `(user_id, id)`
+    (#469), it only creates missing tables; it never alters or drops one.
     """
     # Registers `tile_assignments` on `Base`.
     from . import sqlalchemy_tile  # noqa: F401
 
-    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        Base.metadata.create_all(conn)
+        _migrate_udp_primary_key(conn)
 
 
 def _create_sqlite_schema(engine: Any) -> None:
@@ -178,6 +186,39 @@ def _create_sqlite_schema(engine: Any) -> None:
     """
     if engine.dialect.name == "sqlite":
         create_schema(engine)
+
+
+def _migrate_udp_primary_key(conn: Any) -> None:
+    """Key an older `udp_definitions` table on `(user_id, id)`.
+
+    Older tables are keyed on `id` alone, which lets only one user hold an id
+    (#469). SQLite cannot change a primary key, so there the table is rebuilt.
+    """
+    table = UdpDefinition.__table__
+    pk = inspect(conn).get_pk_constraint(table.name)
+    if sorted(pk["constrained_columns"]) == ["id", "user_id"]:
+        return
+
+    if conn.dialect.name == "sqlite":
+        # pysqlite does not open a transaction for DDL. Without the savepoint,
+        # a failure part way leaves an empty table under the new key, which
+        # the next start does not migrate, and the rows in the old table.
+        with conn.begin_nested():
+            old = f"{table.name}_old"
+            conn.execute(text(f"ALTER TABLE {table.name} RENAME TO {old}"))
+            table.create(conn)
+            columns = ", ".join(c.name for c in table.columns)
+            conn.execute(
+                text(
+                    f"INSERT INTO {table.name} ({columns}) SELECT {columns} FROM {old}"
+                )
+            )
+            conn.execute(text(f"DROP TABLE {old}"))
+        return
+
+    quote = conn.dialect.identifier_preparer.quote
+    conn.execute(text(f"ALTER TABLE {table.name} DROP CONSTRAINT {quote(pk['name'])}"))
+    conn.execute(text(f"ALTER TABLE {table.name} ADD PRIMARY KEY (user_id, id)"))
 
 
 @define(kw_only=True)
@@ -438,11 +479,10 @@ class SQLAlchemyUdpStore(UdpStore):
         now = datetime.utcnow()
         with Session(self._engine) as session:
             existing: Optional[UdpDefinition] = session.execute(
-                select(UdpDefinition).where(UdpDefinition.id == udp_id)
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
             ).scalar_one_or_none()
-
-            if existing is not None and existing.user_id != user_id:
-                raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
 
             if existing is not None:
                 existing.process_graph = process_graph

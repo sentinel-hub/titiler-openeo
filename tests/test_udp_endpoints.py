@@ -76,8 +76,7 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     )
 
     # Inject a string created_at to simulate JSON-loaded store
-    udp_store.store["udpstr"] = {
-        "user_id": "test_user",
+    udp_store.store["test_user"]["udpstr"] = {
         "process_graph": {
             "node": {"process_id": "constant", "arguments": {"x": 2}, "result": True}
         },
