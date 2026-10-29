@@ -117,10 +117,20 @@ TITILER_OPENEO_STORE_POOL_SIZE=5
 TITILER_OPENEO_STORE_MAX_OVERFLOW=10
 TITILER_OPENEO_STORE_POOL_TIMEOUT=5       # Seconds to wait for a free connection
 TITILER_OPENEO_STORE_POOL_RECYCLE=-1      # Seconds before a connection is replaced; -1 disables, 0 is rejected
-TITILER_OPENEO_STORE_POOL_PRE_PING=false  # Test a connection before use
+TITILER_OPENEO_STORE_POOL_PRE_PING=true   # Test a connection before use, so no request fails on a connection a database restart closed
 ```
 
 If the login record of an authenticated request cannot reach the database (for example, no free connection within `POOL_TIMEOUT`), the request gets `503 Service Unavailable` with a `Retry-After` header, not `401`.
+
+##### Database schema
+
+The services, UDP and tile stores do not create their tables on a server database such as PostgreSQL. The app starts without connecting to it, and `/readyz` returns `503` until the database answers. Create the tables before the first start and again after each upgrade, with the same store URLs as the app:
+
+```bash
+TITILER_OPENEO_STORE_URL=postgresql://user:pass@host/db python -m titiler.openeo.services.create_schema
+```
+
+The command reads `TITILER_OPENEO_STORE_URL` and `TITILER_OPENEO_TILE_STORE_URL`, creates the missing tables in each SQL database (it skips a JSON or DuckDB store), and never alters or drops a table, except the one-time `udp_definitions` key change (see [Upgrade notes](#upgrade-notes)). It exits non-zero on any error, or when neither URL is a SQL database. With `database.type: postgresql`, the Helm chart runs it in a Job after each install and upgrade. SQLite stores still create their tables at startup. titiler-openeo 0.19.0 and older create the tables at startup on every database.
 
 #### Cache Settings ([`CacheSettings`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/settings.py#L196))
 
@@ -282,7 +292,10 @@ When updating openEO by TiTiler:
 The first version with
 [ADR 0012](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0012-udp-per-user-ids.md)
 changes the key of the `udp_definitions` table from `id` to `(user_id, id)`
-when it starts. Older versions still use `id` alone. If an older pod handles a
+when `create_schema` runs (with the Helm chart, in the schema Job after the
+upgrade; a SQLite store, when it starts). Until then the table keeps the old
+key, so two users cannot yet save the same id. Older versions still use `id`
+alone. If an older pod handles a
 request after the change, it can:
 
 - delete the UDPs of all users that have the same id, when one of them deletes
@@ -300,7 +313,8 @@ the new pods start:
   helm upgrade <release> <chart> --reuse-values --set strategy.type=Recreate
   ```
 
-- **Other deployments:** scale to zero, then start the new version.
+- **Other deployments:** scale to zero, run `create_schema`, then start the
+  new version.
 
 This upgrade has downtime. DuckDB and the local JSON store are not affected,
 because only one process can use them.

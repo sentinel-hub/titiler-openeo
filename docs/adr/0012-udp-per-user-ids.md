@@ -1,6 +1,6 @@
 # ADR 0012 — User-defined process ids are unique per user
 
-- **Status:** Accepted
+- **Status:** Accepted; amended (2026-10-29), see [§7](#7-amendment-2026-10-29--the-migration-runs-in-the-schema-command)
 - **Date:** 2026-10-19
 - **Deciders:** @emmanuelmathot
 - **Related:** [#469](https://github.com/sentinel-hub/titiler-openeo/issues/469)
@@ -140,3 +140,17 @@ unique constraint. The API continues to use the `id`.
   same id. The old key cannot hold the two rows.
 - On SQL stores, the upgrade cannot be a rolling update (§4.1), thus it has
   downtime.
+
+## 7. Amendment (2026-10-29) — the migration runs in the schema command
+
+Since #479, the stores run no DDL on a server database when they start. On
+PostgreSQL, the migration of §4 runs in
+`python -m titiler.openeo.services.create_schema`, which the Helm chart runs
+in a `post-install,post-upgrade` Job, and takes no advisory lock: only that
+command runs DDL. Outside the chart, operators run the command (admin guide).
+A SQLite store still migrates when it starts.
+
+§4.1 still holds: the Job runs after the new pods start, and during a rolling
+update old pods can still serve after it, so this upgrade uses
+`strategy.type: Recreate`. Until the Job has run, the table keeps the old key,
+so two users cannot yet save the same id.

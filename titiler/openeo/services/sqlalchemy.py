@@ -158,26 +158,34 @@ def dispose_engines() -> None:
         _engines.clear()
 
 
-# Arbitrary key of the PostgreSQL advisory lock that serializes schema creation.
-_SCHEMA_LOCK_KEY = 0x7469_7469_6C65_7230
-
-
 def create_schema(engine: Any) -> None:
-    """Create the missing tables.
+    """Create the missing tables of every store, the tile store's included.
 
-    `create_all` checks for a table and then creates it, so two replicas that
-    start together against an empty PostgreSQL database can both try to create
-    it, and one crashes (#274). A transaction-scoped advisory lock lets only
-    one process create the schema at a time; the next ones then find the
-    tables and skip them. The same lock covers the migration of older tables.
+    It runs through `python -m titiler.openeo.services.create_schema`, which
+    the Helm chart runs in a Job after each install and upgrade. The stores do
+    not call it on a server database:
+    connecting at import crashed the app while the database was not ready
+    (#479), and replicas that started together raced on the DDL (#274).
+
+    Apart from keying an older `udp_definitions` table on `(user_id, id)`
+    (#469), it only creates missing tables; it never alters or drops one.
     """
+    # Registers `tile_assignments` on `Base`.
+    from . import sqlalchemy_tile  # noqa: F401
+
     with engine.begin() as conn:
-        if engine.dialect.name == "postgresql":
-            conn.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SCHEMA_LOCK_KEY}
-            )
         Base.metadata.create_all(conn)
         _migrate_udp_primary_key(conn)
+
+
+def _create_sqlite_schema(engine: Any) -> None:
+    """Create the tables in process, for SQLite only.
+
+    An in-memory database exists only within this process's connection, so
+    nothing outside can prepare it, and a SQLite file has no server to wait for.
+    """
+    if engine.dialect.name == "sqlite":
+        create_schema(engine)
 
 
 def _migrate_udp_primary_key(conn: Any) -> None:
@@ -225,7 +233,7 @@ class SQLAlchemyStore(ServicesStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        create_schema(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def ping(self) -> None:
         """Verify the SQLAlchemy store is reachable. Raises on failure."""
@@ -419,7 +427,7 @@ class SQLAlchemyUdpStore(UdpStore):
         """Post init: create engine and session factory."""
         self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        create_schema(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def list_udps(
         self, user_id: str, limit: int = 100, offset: int = 0

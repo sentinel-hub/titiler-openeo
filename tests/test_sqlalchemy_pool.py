@@ -16,17 +16,9 @@ from titiler.openeo.settings import StoreSettings
 def create_engine(monkeypatch):
     """A fake `create_engine` that returns a distinct engine on every call."""
     monkeypatch.setattr(module, "_engines", {})
-    with (
-        patch.object(
-            module, "create_engine", side_effect=lambda *a, **k: MagicMock()
-        ) as create_engine,
-        patch.object(module.Base.metadata, "create_all"),
-        patch.object(module, "inspect") as inspect,
-    ):
-        # The tables already have the current key, so nothing is migrated.
-        inspect.return_value.get_pk_constraint.return_value = {
-            "constrained_columns": ["user_id", "id"]
-        }
+    with patch.object(
+        module, "create_engine", side_effect=lambda *a, **k: MagicMock()
+    ) as create_engine:
         yield create_engine
 
 
@@ -107,14 +99,12 @@ def test_empty_pool_variable_keeps_the_default(monkeypatch):
     assert StoreSettings().pool_recycle == -1
 
 
-def test_postgres_schema_creation_holds_an_advisory_lock(create_engine):
-    """On PostgreSQL, the schema is created under an advisory lock (#274)."""
-    engine = MagicMock()
-    engine.dialect.name = "postgresql"
-    create_engine.side_effect = lambda *a, **k: engine
+def test_pool_pre_ping_is_on_by_default(tmp_path, monkeypatch, create_engine):
+    """Pre-ping is on unless disabled: a database restart fails no request."""
+    # In `tmp_path`, so that no `.env` of the repository applies.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TITILER_OPENEO_STORE_POOL_PRE_PING", raising=False)
 
     module.SQLAlchemyStore(store="postgresql://u:p@localhost/db")
 
-    conn = engine.begin.return_value.__enter__.return_value
-    assert "pg_advisory_xact_lock" in str(conn.execute.call_args.args[0])
-    module.Base.metadata.create_all.assert_called_once_with(conn)
+    assert create_engine.call_args.kwargs["pool_pre_ping"] is True

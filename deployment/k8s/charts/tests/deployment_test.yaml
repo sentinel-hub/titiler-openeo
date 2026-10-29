@@ -71,6 +71,16 @@ tests:
             name: TITILER_OPENEO_STORE_POOL_PRE_PING
             value: "true"
 
+  # The chart renders the value, so a chart default of false would override
+  # the app's: a request would then fail after every database restart.
+  - it: should turn pre-ping on by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_PRE_PING
+            value: "true"
+
   - it: should leave out pool settings that are null
     set:
       database.pool.recycle: null
