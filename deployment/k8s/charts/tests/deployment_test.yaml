@@ -2,13 +2,15 @@ suite: test deployment
 templates:
   - deployment.yaml
 tests:
-  - it: should use Chart.appVersion when image.tag is unset
+  - it: should use v-prefixed Chart.appVersion when image.tag is unset
+    chart:
+      appVersion: "9.9.9"
     set:
       image.tag: null
     asserts:
-      - matchRegex:
+      - equal:
           path: spec.template.spec.containers[0].image
-          pattern: ^ghcr\.io/sentinel-hub/titiler-openeo:titiler-openeo-[0-9]+\.[0-9]+\.[0-9]+$
+          value: ghcr.io/sentinel-hub/titiler-openeo:v9.9.9
 
   - it: should use custom tag when image.tag is set
     set:
