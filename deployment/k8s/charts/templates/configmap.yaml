@@ -17,5 +17,24 @@ data:
     {{ .Files.Get .Values.database.defaultServices | nindent 4 }}
   {{- end }}
   {{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled }}
-  basic-auth-users: {{ toJson .Values.auth.basic.users | quote }}
+  {{- /* Checked first: ranging over a non-list would print its value. */}}
+  {{- if not (kindIs "slice" .Values.auth.basic.users) }}
+  {{- fail "auth.basic.users must be a list of users, each with a username and a password." }}
+  {{- end }}
+  {{- /* The app reads a JSON object keyed by username (AuthSettings.users). */}}
+  {{- $users := dict }}
+  {{- range .Values.auth.basic.users }}
+  {{- /* `and` stops at the first false, so a non-map entry is never read. */}}
+  {{- if not (and (kindIs "map" .) (kindIs "string" .username) .username (not (contains ":" .username)) (kindIs "string" .password) .password) }}
+  {{- fail "auth.basic.users: every user needs a username and a password, both non-empty quoted strings, and a username cannot contain a colon" }}
+  {{- end }}
+  {{- if hasKey $users .username }}
+  {{- fail "auth.basic.users: usernames must be unique" }}
+  {{- end }}
+  {{- $_ := set $users .username (dict "password" .password) }}
+  {{- end }}
+  {{- if not $users }}
+  {{- fail "auth.basic.users is required when auth.method=basic and auth.basic.enabled=true. Set at least one user with a username and a password, or use auth.method=oidc." }}
+  {{- end }}
+  basic-auth-users: {{ toJson $users | quote }}
   {{- end }}

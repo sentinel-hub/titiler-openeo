@@ -82,11 +82,22 @@ spec:
             # STAC configuration
             - name: TITILER_OPENEO_STAC_API_URL
               value: {{ .Values.stac.apiUrl | quote }}
+            {{- /* Names also set through `env` or `envVars`. */}}
+            {{- $overridden := keys (.Values.env | default dict) }}
+            {{- range concat (.Values.envVars.fromSecret | default list) (.Values.envVars.fromConfigMap | default list) }}
+            {{- $overridden = append $overridden .name }}
+            {{- end }}
+            {{- if and (eq .Values.auth.method "basic") (not .Values.auth.basic.enabled) (not (has "TITILER_OPENEO_AUTH_USERS" $overridden)) }}
+            {{- fail "auth.method=basic with auth.basic.enabled=false would start the app without the configured users. Set auth.basic.enabled=true, supply TITILER_OPENEO_AUTH_USERS through envVars.fromSecret, or use auth.method=oidc." }}
+            {{- end }}
+            {{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled (has "TITILER_OPENEO_AUTH_USERS" $overridden) }}
+            {{- fail "TITILER_OPENEO_AUTH_USERS is set both from auth.basic.users and through env or envVars. To supply it yourself, set auth.basic.enabled=false." }}
+            {{- end }}
             # Authentication configuration
             - name: TITILER_OPENEO_AUTH_METHOD
               value: {{ .Values.auth.method | quote }}
             {{- if and (eq .Values.auth.method "basic") .Values.auth.basic.enabled }}
-            - name: TITILER_OPENEO_AUTH_BASIC_USERS
+            - name: TITILER_OPENEO_AUTH_USERS
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "titiler.fullname" . }}-configmap
@@ -133,10 +144,6 @@ spec:
               keeps its default; a name also set through `env` or `envVars`
               is left out, so it is not rendered twice.
             */}}
-            {{- $overridden := keys (.Values.env | default dict) }}
-            {{- range concat (.Values.envVars.fromSecret | default list) (.Values.envVars.fromConfigMap | default list) }}
-            {{- $overridden = append $overridden .name }}
-            {{- end }}
             {{- $pool := .Values.database.pool | default dict }}
             {{- range $key, $suffix := dict "size" "POOL_SIZE" "maxOverflow" "MAX_OVERFLOW" "timeout" "POOL_TIMEOUT" "recycle" "POOL_RECYCLE" "prePing" "POOL_PRE_PING" }}
             {{- $name := printf "TITILER_OPENEO_STORE_%s" $suffix }}

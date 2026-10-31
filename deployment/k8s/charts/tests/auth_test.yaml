@@ -1,0 +1,156 @@
+suite: test basic auth users
+templates:
+  - configmap.yaml
+  - deployment.yaml
+tests:
+  - it: should pass the users to the app as TITILER_OPENEO_AUTH_USERS
+    set:
+      auth.basic.users:
+        - username: alice
+          password: alice-test-pass
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_USERS
+            valueFrom:
+              configMapKeyRef:
+                name: RELEASE-NAME-titiler-openeo-configmap
+                key: basic-auth-users
+        template: deployment.yaml
+
+  - it: should render the users as a JSON object keyed by username
+    set:
+      auth.basic.users:
+        - username: alice
+          password: alice-test-pass
+        - username: bob
+          password: bob-test-pass
+    asserts:
+      - equal:
+          path: data["basic-auth-users"]
+          value: '{"alice":{"password":"alice-test-pass"},"bob":{"password":"bob-test-pass"}}'
+        template: configmap.yaml
+
+  - it: should fail rendering when basic auth has no users
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users is required when auth.method=basic and auth.basic.enabled=true. Set at least one user with a username and a password, or use auth.method=oidc."
+        template: configmap.yaml
+
+  - it: should fail rendering when a user has an empty password
+    set:
+      auth.basic.users:
+        - username: alice
+          password: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: every user needs a username and a password, both non-empty quoted strings, and a username cannot contain a colon"
+        template: configmap.yaml
+
+  - it: should fail rendering when a password is not a string
+    set:
+      auth.basic.users:
+        - username: alice
+          password: 1234
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: every user needs a username and a password, both non-empty quoted strings, and a username cannot contain a colon"
+        template: configmap.yaml
+
+  - it: should fail rendering when a username contains a colon
+    set:
+      auth.basic.users:
+        - username: "alice:admin"
+          password: alice-test-pass
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: every user needs a username and a password, both non-empty quoted strings, and a username cannot contain a colon"
+        template: configmap.yaml
+
+  - it: should fail rendering when a user is not a map
+    set:
+      auth.basic.users:
+        - alice
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: every user needs a username and a password, both non-empty quoted strings, and a username cannot contain a colon"
+        template: configmap.yaml
+
+  - it: should fail rendering when a username is repeated
+    set:
+      auth.basic.users:
+        - username: alice
+          password: alice-test-pass
+        - username: alice
+          password: other-test-pass
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: usernames must be unique"
+        template: configmap.yaml
+
+  - it: should fail rendering, without printing the value, when the users are not a list
+    set:
+      auth.basic.users: "alice:alice-test-pass"
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users must be a list of users, each with a username and a password."
+        template: configmap.yaml
+
+  - it: should fail rendering when basic auth is disabled and no users are supplied
+    set:
+      auth.basic.enabled: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.method=basic with auth.basic.enabled=false would start the app without the configured users. Set auth.basic.enabled=true, supply TITILER_OPENEO_AUTH_USERS through envVars.fromSecret, or use auth.method=oidc."
+        template: deployment.yaml
+
+  - it: should fail rendering when TITILER_OPENEO_AUTH_USERS is also supplied while basic auth is enabled
+    set:
+      auth.basic.users:
+        - username: alice
+          password: alice-test-pass
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_AUTH_USERS
+          secretName: titiler-openeo-users
+          secretKey: users
+    asserts:
+      - failedTemplate:
+          errorMessage: "TITILER_OPENEO_AUTH_USERS is set both from auth.basic.users and through env or envVars. To supply it yourself, set auth.basic.enabled=false."
+        template: deployment.yaml
+
+  - it: should take the users from a Secret when basic auth is disabled
+    set:
+      auth.basic.enabled: false
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_AUTH_USERS
+          secretName: titiler-openeo-users
+          secretKey: users
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_USERS
+            valueFrom:
+              secretKeyRef:
+                name: titiler-openeo-users
+                key: users
+          count: 1
+        template: deployment.yaml
+
+  - it: should not pass any users under OIDC
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_USERS
+          any: true
+        template: deployment.yaml
+      - notExists:
+          path: data["basic-auth-users"]
+        template: configmap.yaml
