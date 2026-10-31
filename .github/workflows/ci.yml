@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     # Runs the multi-replica race tests (tests/test_sqlalchemy_races.py).
     services:
@@ -121,13 +121,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.github_token }}
 
-      - name: build and push
+      - name: build
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: ${{ steps.can-push.outputs.value == 'true' }}
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Gates the push: an image that breaks its runtime contract never reaches
+      # ghcr.io. Via env: so nothing is interpolated into run:.
+      - name: smoke-test the image
+        env:
+          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: ./docker/smoke-test.sh "$IMAGE_REF"
+
+      # Pushes the tested image, not a rebuild.
+      - name: push
+        if: steps.can-push.outputs.value == 'true'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: printf '%s\n' "$TAGS" | xargs -r -n1 docker push
 
 # PyPI publishing lives in release-please.yml. It ran here on tag pushes, but
 # release-please creates tags with GITHUB_TOKEN, which does not start
