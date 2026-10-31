@@ -51,8 +51,9 @@ Configuration settings can be provided via environment variables. The following 
 
 - TITILER_OPENEO_STAC_API_URL: URL of the STAC API with the collections to be used
 - TITILER_OPENEO_STORE_URL: URL of the openEO service/UDP store json file
+- TITILER_OPENEO_AUTH_USERS: basic auth users, as a JSON object keyed by username (e.g. `'{"user1": {"password": "pass1"}}'`). Required with basic auth, the default method: there is no built-in user, and the API refuses to start without one. `.env.eoapi` sets a local development user; the other sample files have a placeholder to fill in. See the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication) for OpenID Connect.
 
-In this repository, 2 `.env` sample files are provided:
+In this repository, 3 `.env` sample files are provided:
 
 - [`.env.eoapi`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.eoapi) that uses the [Earth Observation API (EOAPI)](https://eoapi.dev/).
 
@@ -85,6 +86,8 @@ In this repository, 2 `.env` sample files are provided:
   ```
 
 visit ['Access to EO data via S3'](https://documentation.dataspace.copernicus.eu/APIs/S3.html) for information on how to access the Copernicus Data Space Ecosystem (CDSE) data via S3.
+
+- [`.env.planetarycomputer`](https://github.com/sentinel-hub/titiler-openeo/blob/main/.env.planetarycomputer) that uses [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/). See the [Planetary Computer guide](https://sentinel-hub.github.io/titiler-openeo/planetary-computer/).
 
 ## Contributing
 
