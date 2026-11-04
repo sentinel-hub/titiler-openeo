@@ -55,7 +55,8 @@ tests:
     set:
       database.type: "postgresql"
       postgresql.enabled: true
-      # Intentionally omit a password — the helper must not be invoked.
+      # Intentionally omit a password — the helper must not be invoked
+      # (it fails the render without one).
       postgresql.auth.password: ""
       envVars.fromSecret:
         - name: TITILER_OPENEO_STORE_URL
@@ -71,8 +72,33 @@ tests:
                 name: titiler-openeo-db
                 key: dsn
           count: 1
-      - notMatchRegexRaw:
-          pattern: "postgresql://"
+
+  # Same, with a password, so that a plaintext DSN can render next to the
+  # Secret one and the notContains below can fail.
+  - it: should not emit a helper TITILER_OPENEO_STORE_URL next to the Secret one, even with a password set
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            valueFrom:
+              secretKeyRef:
+                name: titiler-openeo-db
+                key: dsn
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
 
   - it: should also skip TITILER_OPENEO_TILE_STORE_URL helper value when secret override is present
     set:
@@ -97,8 +123,40 @@ tests:
                 name: titiler-openeo-db
                 key: dsn
           count: 1
-      - notMatchRegexRaw:
-          pattern: "postgresql://"
+
+  - it: should not emit a helper TITILER_OPENEO_TILE_STORE_URL next to the Secret one, even with a password set
+    set:
+      database.type: "postgresql"
+      postgresql.enabled: true
+      postgresql.auth.password: "supersecret"
+      enableTileStore: true
+      envVars.fromSecret:
+        - name: TITILER_OPENEO_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+        - name: TITILER_OPENEO_TILE_STORE_URL
+          secretName: titiler-openeo-db
+          secretKey: dsn
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            valueFrom:
+              secretKeyRef:
+                name: titiler-openeo-db
+                key: dsn
+          count: 1
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_TILE_STORE_URL
+            value: postgresql://openeo:supersecret@RELEASE-NAME-titiler-openeo-postgresql:5432/openeo
 
   - it: should emit TITILER_OPENEO_TILE_STORE_URL from helper when enableTileStore is true and no secret override
     set:

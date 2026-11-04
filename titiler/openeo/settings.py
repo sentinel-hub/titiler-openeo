@@ -442,7 +442,11 @@ class StoreSettings(BaseSettings):
         ),
     )
     pool_pre_ping: bool = Field(
-        False, description="Test a connection before use; drops stale ones."
+        True,
+        description=(
+            "Test a connection before use; drops stale ones, so the first "
+            "request after a database restart reconnects instead of failing."
+        ),
     )
 
     model_config = SettingsConfigDict(

@@ -22,7 +22,7 @@ from .base import (
     TileAssignmentStore,
     TileNotAssignedError,
 )
-from .sqlalchemy import Base, _get_engine, create_schema
+from .sqlalchemy import Base, _create_sqlite_schema, _get_engine
 
 
 class TileAssignment(Base):
@@ -58,8 +58,8 @@ class SQLAlchemyTileStore(TileAssignmentStore):
         # Shares the services store's engine and pool for the same URL
         self._engine = _get_engine(store)
         self._session_factory = sessionmaker(bind=self._engine)
-        # Ensure tile_assignments table exists
-        create_schema(self._engine)
+        # A server database gets tile_assignments from `create_schema`
+        _create_sqlite_schema(self._engine)
 
     def ping(self) -> None:
         """Verify the tile store is reachable. Raises on failure."""
