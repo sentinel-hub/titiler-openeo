@@ -5,7 +5,7 @@
 # ecosystem moves it. Keep it fresh: the packages below are unpinned and built
 # against Wolfi's current glibc, while this rootfs keeps the glibc it shipped
 # with. A stale digest fails docker/smoke-test.sh.
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7 AS base
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:771146c2dfc880902a185f060c3db5571473c46b267edd98c3119c83068dfb61 AS base
 
 # After FROM on purpose: an ARG before the first FROM is only in scope for FROM lines.
 ARG PYTHON_VERSION=3.14
@@ -20,7 +20,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apk add --no-cache python-${PYTHON_VERSION} libstdc++
 
 # A stage rather than COPY --from=<image>, because Dependabot only reads FROM lines.
-FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # Build stage
 FROM base AS builder
