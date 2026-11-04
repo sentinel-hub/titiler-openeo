@@ -1,84 +1,71 @@
 # syntax=docker/dockerfile:1
-ARG PYTHON_VERSION=3.11
 
-# Build stage
-FROM python:${PYTHON_VERSION}-slim AS builder
+# Wolfi's apk repository is open: no Chainguard subscription is needed. `latest`
+# is the only free tag, so the digest is the version pin and Dependabot's docker
+# ecosystem moves it. Keep it fresh: the packages below are unpinned and built
+# against Wolfi's current glibc, while this rootfs keeps the glibc it shipped
+# with. A stale digest fails docker/smoke-test.sh.
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7 AS base
 
-# Set build labels
-LABEL stage=builder
-LABEL org.opencontainers.image.source="https://github.com/developmentseed/titiler-openeo"
-LABEL org.opencontainers.image.description="TiTiler OpenEO API"
-LABEL org.opencontainers.image.licenses="MIT"
+# After FROM on purpose: an ARG before the first FROM is only in scope for FROM lines.
+ARG PYTHON_VERSION=3.14
 
-# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install build dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    libexpat1 curl && \
-    rm -rf /var/lib/apt/lists/*
+# Unpinned on purpose: Wolfi removes old versions, so `=<version>` pins break the
+# build within days. libstdc++ is needed by the rasterio, pyproj and numexpr
+# wheels, which link it without vendoring it. Python's mpdecimal pulls it in
+# today; it is listed so that a change there cannot drop it.
+RUN apk add --no-cache python-${PYTHON_VERSION} libstdc++
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# A stage rather than COPY --from=<image>, because Dependabot only reads FROM lines.
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 
-# Configure uv-managed virtual environment
+# Build stage
+FROM base AS builder
+
+LABEL stage=builder
+
+COPY --from=uv /uv /usr/local/bin/
+
+# The apk Python, not one uv downloads: apk patches it and Trivy can see it.
 ENV UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_PREFERENCE=only-system \
     PATH="/opt/venv/bin:${PATH}"
 
-# Install application
 WORKDIR /tmp/app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --no-install-project
+COPY README.md ./
 COPY titiler/ titiler/
-COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres && \
-    uv pip install --no-deps .
+RUN uv pip install --no-deps .
 
 # Runtime stage
-FROM python:${PYTHON_VERSION}-slim
+FROM base
 
-# Set runtime labels
 LABEL org.opencontainers.image.source="https://github.com/developmentseed/titiler-openeo"
 LABEL org.opencontainers.image.description="TiTiler OpenEO API"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/opt/venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:${PATH}"
 
-# Install runtime dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    libexpat1 fonts-dejavu \
-    curl && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Create non-root user
-RUN useradd -u 65532 -m -s /bin/bash titiler && \
-    mkdir -p /data /config
-COPY log_config.yaml /config/log_config.yaml
-RUN chown -R titiler:titiler /data /config
+# Owned by wolfi-base's nonroot user (uid 65532), as the chart's fsGroup expects.
+RUN mkdir -p /data /config && chown 65532:65532 /data /config
+COPY --chown=65532:65532 log_config.yaml /config/log_config.yaml
 
 WORKDIR /app
-USER titiler
+# Numeric, so Kubernetes can verify runAsNonRoot. Binding port 80 as non-root
+# needs the chart's net.ipv4.ip_unprivileged_port_start sysctl (Docker allows it
+# by default).
+USER 65532
 
-# Create data directory
 VOLUME /data
-# Create config directory and copy default config
 VOLUME /config
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl --fail http://localhost:8000/api || exit 1
-
-# Set default command
 CMD ["uvicorn", "titiler.openeo.main:app", "--host", "0.0.0.0", "--port", "80", "--log-config", "/config/log_config.yaml"]
 
-# Expose port
 EXPOSE 80

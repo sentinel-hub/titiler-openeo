@@ -1,4 +1,5 @@
-# Set update schedule for GitHub Actions and the Python dependencies in uv.lock
+# Set update schedule for GitHub Actions, the Dockerfile images and the Python
+# dependencies in uv.lock
 
 version: 2
 updates:
@@ -12,6 +13,17 @@ updates:
       interval: "weekly"
     groups:
       all:
+        patterns:
+        - "*"
+
+  # Moves the digest-pinned Wolfi base and uv images in the Dockerfile. No
+  # cooldown: base image updates carry the OS security fixes.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker:
         patterns:
         - "*"
 
