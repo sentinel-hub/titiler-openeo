@@ -69,6 +69,7 @@ helm install titiler-openeo . -f values-cdse.yaml -n your-namespace
 | `image.tag` | Container image tag (defaults to `titiler-openeo-{{ .Chart.AppVersion }}` when unset) | `titiler-openeo-0.12.0` |
 | `image.pullPolicy` | Container image pull policy | `IfNotPresent` |
 | `replicaCount` | Number of replicas | `1` |
+| `strategy` | Deployment update strategy. Empty uses the Kubernetes default (`RollingUpdate`). Set `type: Recreate` for upgrades that must stop all old pods first (see the admin guide upgrade notes) | `{}` |
 
 ### Database Configuration
 

@@ -186,11 +186,34 @@ class LocalServiceStore(ServicesStore):
             json.load(f)
 
 
+def _nest_udps(store: Dict[str, Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Return UDPs in the per-user layout `{user_id: {udp_id: data}}`.
+
+    Older store files keep UDPs flat as `{udp_id: {"user_id": ..., ...}}`,
+    which lets only one user hold an id (#469). A flat entry has a string
+    `user_id`, while a per-user entry maps UDP ids to dicts, so the two
+    layouts cannot be mistaken for each other.
+    """
+    nested: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for key, value in store.items():
+        if isinstance(value.get("user_id"), str):
+            data = dict(value)
+            nested.setdefault(data.pop("user_id"), {})[key] = data
+        else:
+            nested.setdefault(key, {}).update(value)
+    return nested
+
+
 @define
 class LocalUdpStore(UdpStore):
-    """In-memory UDP Store, for testing purposes."""
+    """In-memory UDP Store, for testing purposes.
 
-    store: Dict[str, Dict[str, Any]] = field(factory=dict)
+    UDP ids are unique per user, so `store` maps user ids to that user's UDPs.
+    """
+
+    store: Dict[str, Dict[str, Dict[str, Any]]] = field(
+        factory=dict, converter=_nest_udps
+    )
     path: Optional[str] = field(default=None, kw_only=True)
 
     def list_udps(
@@ -198,9 +221,8 @@ class LocalUdpStore(UdpStore):
     ) -> List[Dict[str, Any]]:
         """List UDP definitions for a user."""
         udps = [
-            self._to_dict(udp_id, data)
-            for udp_id, data in self.store.items()
-            if data["user_id"] == user_id
+            self._to_dict(user_id, udp_id, data)
+            for udp_id, data in self.store.get(user_id, {}).items()
         ]
         # Sort by created_at descending to mirror other stores; tolerate string timestamps
         udps.sort(
@@ -213,10 +235,10 @@ class LocalUdpStore(UdpStore):
 
     def get_udp(self, user_id: str, udp_id: str) -> Optional[Dict[str, Any]]:
         """Get a single UDP definition."""
-        data = self.store.get(udp_id)
-        if data is None or data["user_id"] != user_id:
+        data = self.store.get(user_id, {}).get(udp_id)
+        if data is None:
             return None
-        return self._to_dict(udp_id, data)
+        return self._to_dict(user_id, udp_id, data)
 
     def upsert_udp(
         self,
@@ -236,10 +258,7 @@ class LocalUdpStore(UdpStore):
     ) -> str:
         """Create or replace a UDP for a user."""
         now = datetime.utcnow()
-        existing = self.store.get(udp_id)
-        if existing is not None and existing["user_id"] != user_id:
-            raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
-
+        existing = self.store.get(user_id, {}).get(udp_id)
         if existing is not None:
             existing["process_graph"] = process_graph
             existing["parameters"] = parameters
@@ -254,8 +273,7 @@ class LocalUdpStore(UdpStore):
             existing["links"] = links
             existing["updated_at"] = now
         else:
-            self.store[udp_id] = {
-                "user_id": user_id,
+            self.store.setdefault(user_id, {})[udp_id] = {
                 "process_graph": process_graph,
                 "parameters": parameters,
                 "summary": summary,
@@ -275,18 +293,22 @@ class LocalUdpStore(UdpStore):
 
     def delete_udp(self, user_id: str, udp_id: str) -> bool:
         """Delete a UDP for a user."""
-        existing = self.store.get(udp_id)
-        if existing is None or existing["user_id"] != user_id:
+        udps = self.store.get(user_id, {})
+        if udp_id not in udps:
             raise ValueError(f"Could not find UDP {udp_id} for user {user_id}")
-        self.store.pop(udp_id)
+        udps.pop(udp_id)
+        if not udps:
+            self.store.pop(user_id)
         self._persist()
         return True
 
-    def _to_dict(self, udp_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _to_dict(
+        self, user_id: str, udp_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Serialize UDP data to dict with id."""
         return {
             "id": udp_id,
-            "user_id": data["user_id"],
+            "user_id": user_id,
             "process_graph": data["process_graph"],
             "parameters": data.get("parameters"),
             "summary": data.get("summary"),

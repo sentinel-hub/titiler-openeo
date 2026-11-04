@@ -50,6 +50,13 @@ autoscaling:
 
 replicaCount: 1
 
+# Deployment update strategy. When empty, Kubernetes uses RollingUpdate, so
+# old and new pods run at the same time during an upgrade. Set `type: Recreate`
+# for an upgrade that must stop all old pods first. See "Upgrade notes" in the
+# admin guide.
+strategy: {}
+#  type: Recreate
+
 extraHostPathMounts:
   []
   # - name: map-sources

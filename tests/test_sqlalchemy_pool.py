@@ -21,7 +21,12 @@ def create_engine(monkeypatch):
             module, "create_engine", side_effect=lambda *a, **k: MagicMock()
         ) as create_engine,
         patch.object(module.Base.metadata, "create_all"),
+        patch.object(module, "inspect") as inspect,
     ):
+        # The tables already have the current key, so nothing is migrated.
+        inspect.return_value.get_pk_constraint.return_value = {
+            "constrained_columns": ["user_id", "id"]
+        }
         yield create_engine
 
 

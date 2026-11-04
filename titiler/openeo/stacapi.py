@@ -1,8 +1,21 @@
 """Stac API backend."""
 
 import logging
+from datetime import datetime
 from threading import Lock
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from urllib.parse import urljoin
 
 import numpy
@@ -24,12 +37,12 @@ from pystac_client import Client
 from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
 from rasterio.features import bounds as geometry_bounds
-from rasterio.warp import transform_bounds
-from rio_tiler.errors import TileOutsideBounds
+from rio_tiler.errors import EmptyMosaicError, TileOutsideBounds
 from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
+from rio_tiler.types import AssetType
 from urllib3 import Retry
 
 from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
@@ -45,10 +58,19 @@ from .errors import (
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .processes.implementations.data_model import RasterStack, compute_cutline_mask
+from .processes.implementations.data_model import (
+    RasterStack,
+    _normalize_to_naive_utc,
+    compute_cutline_mask,
+)
 from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
-from .reader import _estimate_output_dimensions, _item_datetime, _reader
+from .reader import (
+    SimpleSTACReader,
+    _estimate_output_dimensions,
+    _item_datetime,
+    _reader,
+)
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
 from .signing import stamp_signer_key
 
@@ -811,6 +833,14 @@ class LoadCollection:
     #: time is what keeps a short-lived credential fresh across retries.
     signer_key: Optional[str] = field(default=None)
 
+    #: The asset reader class every read and every dimension estimate of this
+    #: loader is built with. A backend that needs another reader (e.g. one that
+    #: routes Zarr media types to its own per-asset reader) subclasses
+    #: `SimpleSTACReader` and passes the subclass here, instead of copying
+    #: `_reader` or `load_collection` (issue #379, ADR 0011). `None` -- the
+    #: default -- means `SimpleSTACReader`, resolved at call time.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
+
     def _resolve_parameter_reference(
         self,
         value: Any,
@@ -1248,6 +1278,101 @@ class LoadCollection:
 
         return cql2_filter
 
+    def _bands_to_assets(
+        self, bands: Optional[List[str]]
+    ) -> Optional[Sequence[AssetType]]:
+        """Turn the requested ``bands`` into what ``mosaic_reader`` reads as ``assets``.
+
+        The hook a backend overrides when its band notation carries reader
+        options (e.g. ``asset|bands=b04`` parsed into
+        ``{"name": "asset", "bands": ["b04"]}``). Return one entry per band.
+        The read and the resolution estimate use the result; ``bands`` itself
+        still names the output bands and is what the pixel limit counts. The
+        default is the identity -- a band name is an asset name (or a
+        derived/inner band `SimpleSTACReader` resolves).
+        """
+        return bands
+
+    def _date_task(
+        self,
+        date: str,
+        date_items: List[Item],
+        *,
+        bbox: List[float],
+        bounds_crs: Any,
+        output_crs: Any,
+        assets: Optional[Sequence[AssetType]],
+        width: int,
+        height: int,
+        tile_buffer: Optional[float],
+        polygons: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[Callable[[], ImageData], Dict[str, Any]]:
+        """One `RasterStack` task: the lazy mosaic of ``date_items`` and its metadata."""
+        mosaic_kwargs: Dict[str, Any] = {
+            "threads": 0,
+            "bounds_crs": bounds_crs,
+            "assets": assets,
+            "dst_crs": output_crs,
+            "width": width,
+            "height": height,
+            "buffer": float(tile_buffer) if tile_buffer is not None else None,
+            # Forwarded by mosaic_reader to `_reader`, which consumes it.
+            "reader_cls": self.reader_cls,
+        }
+
+        def task() -> ImageData:
+            # A new selector on each run: it holds the mosaic it builds, so one
+            # kept in the closure would keep the slice alive after
+            # `RasterStack.release()` and start a re-run (`map_tasks`) with
+            # the pixels of the run before.
+            #
+            # Not just a stylistic default: FirstMethod picks its per-pixel
+            # winner from masks alone, per band independently, and derived
+            # (band-source) bands have their mask forced to match their
+            # sibling raw band's (reader.py's mask-inheritance post-step,
+            # ADR 0002 §2.4). So within one item's contribution, DN and its
+            # calibration/noise LUT bands always share a winner here --
+            # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
+            # DN from one source item with LUT values from another. A
+            # value-driven method (Highest/Lowest) would not preserve that.
+            pixel_selection = PixelSelectionMethod["first"].value()
+            try:
+                img, _ = mosaic_reader(
+                    date_items,
+                    _reader,
+                    bbox,
+                    pixel_selection=pixel_selection,
+                    **mosaic_kwargs,
+                )
+            except EmptyMosaicError as e:
+                # Every item of this date was outside the bbox or all no-data.
+                # `RasterStack` skips `TileOutsideBounds` (its default allowed
+                # exception) with a warning, so one empty date drops out of the
+                # stack instead of failing the whole request.
+                raise TileOutsideBounds(
+                    f"No valid data found in bbox {bbox} for date {date}"
+                ) from e
+            if polygons:
+                # GeoJSON spatial extent: no data outside the polygons.
+                img = _mask_outside_polygons(img, polygons)
+            return img
+
+        # Footprints of the source items, for cutline mask computation.
+        geometries = [item.geometry for item in date_items if item.geometry is not None]
+        metadata = {
+            "id": date,
+            "datetime": _item_datetime(date_items[0]),
+            "geometry": geometries or None,
+            # The source items behind this date group's mosaic. Carried so
+            # processes that need per-item STAC metadata (asset hrefs,
+            # properties) can reach it -- notably `sar_backscatter`, whose
+            # calibration LUTs and GCP geometry are per source item. Retrieve
+            # via `RasterStack.get_source_items`, never by reaching into task
+            # metadata directly. These are `pystac.Item`s.
+            "items": date_items,
+        }
+        return task, metadata
+
     def load_collection(
         self,
         id: str,
@@ -1326,6 +1451,10 @@ class LoadCollection:
         if bands is None and items and items[0].assets:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
+        # What is read for each band. The estimate looks up resolutions on
+        # these assets; `bands` still labels the output and the pixel limit.
+        assets = self._bands_to_assets(bands)
+
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
             items,
@@ -1334,6 +1463,8 @@ class LoadCollection:
             width,
             height,
             target_crs=target_crs,
+            reader_cls=self.reader_cls,
+            assets=assets,
         )
 
         # Extract values from the result
@@ -1342,114 +1473,35 @@ class LoadCollection:
         bbox = dimensions["bbox"]
         bounds_crs = dimensions["bounds_crs"]
         output_crs = dimensions["crs"]
+        # `bbox` in `output_crs`: the RasterStack bounds, so the output GeoTIFF
+        # has coordinates in the correct CRS.
+        output_bbox = dimensions["output_bbox"]
 
-        # Reproject bbox from bounds_crs to output_crs for the RasterStack bounds
-        # This ensures the output GeoTIFF has coordinates in the correct CRS
-        if bounds_crs != output_crs:
-            output_bbox = list(
-                transform_bounds(bounds_crs, output_crs, *bbox, densify_pts=21)
-            )
-        else:
-            output_bbox = bbox
-
-        # Group items by date
-        items_by_date: dict[str, list[Item]] = {}
+        # One lazy task per distinct instant: the items sharing it are
+        # mosaicked together when the task runs. Grouped on the naive-UTC
+        # instant that `RasterStack` keys on, not the isoformat string: the
+        # same instant written with two UTC offsets is one date, not two
+        # tasks with one key.
+        items_by_date: Dict[datetime, List[Item]] = {}
         for item in items:
-            date = _item_datetime(item).isoformat()
-            if date not in items_by_date:
-                items_by_date[date] = []
-            items_by_date[date].append(item)
+            instant = _normalize_to_naive_utc(_item_datetime(item))
+            items_by_date.setdefault(instant, []).append(item)
 
-        # Create lazy tasks for each date group
-        # Each task will call mosaic_reader when executed
-        def make_mosaic_task(
-            date_items: list[Item],
-            bbox: List[float],
-            bounds_crs: Any,
-            output_crs: Any,
-            bands: Optional[list[str]],
-            width: int,
-            height: int,
-            tile_buffer: Optional[float],
-            polygons: Optional[List[Dict[str, Any]]],
-        ):
-            """Create a closure that loads data for a date group."""
-
-            def task():
-                # Build kwargs for mosaic_reader
-                mosaic_kwargs = {
-                    "threads": 0,
-                    "bounds_crs": bounds_crs,
-                    "assets": bands,
-                    "dst_crs": output_crs,
-                    "width": int(width) if width else width,
-                    "height": int(height) if height else height,
-                    "buffer": float(tile_buffer)
-                    if tile_buffer is not None
-                    else tile_buffer,
-                    # Not just a stylistic default: FirstMethod picks its per-pixel
-                    # winner from masks alone, per band independently, and derived
-                    # (band-source) bands have their mask forced to match their
-                    # sibling raw band's (reader.py's mask-inheritance post-step,
-                    # ADR 0002 §2.4). So within one item's contribution, DN and its
-                    # calibration/noise LUT bands always share a winner here --
-                    # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
-                    # DN from one source item with LUT values from another. A
-                    # value-driven method (Highest/Lowest) would not preserve that.
-                    "pixel_selection": PixelSelectionMethod["first"].value(),
-                }
-
-                img, _ = mosaic_reader(
-                    date_items,
-                    _reader,
-                    bbox,
-                    **mosaic_kwargs,
-                )
-                if polygons:
-                    # GeoJSON spatial extent: no data outside the polygons.
-                    img = _mask_outside_polygons(img, polygons)
-                return img
-
-            return task
-
-        # Build tasks list for RasterStack
-        tasks = []
-        for date, date_items in items_by_date.items():
-            task_fn = make_mosaic_task(
+        tasks = [
+            self._date_task(
+                _item_datetime(date_items[0]).isoformat(),
                 date_items,
-                bbox,
-                bounds_crs,
-                output_crs,
-                bands,
-                width,
-                height,
-                tile_buffer,
-                polygons,
+                bbox=bbox,
+                bounds_crs=bounds_crs,
+                output_crs=output_crs,
+                assets=assets,
+                width=int(width),
+                height=int(height),
+                tile_buffer=tile_buffer,
+                polygons=polygons,
             )
-            # Collect all geometries from items for cutline mask computation (union of footprints)
-            geometries = [
-                item.geometry for item in date_items if item.geometry is not None
-            ]
-            tasks.append(
-                (
-                    task_fn,
-                    {
-                        "id": date,
-                        "datetime": _item_datetime(date_items[0])
-                        if date_items
-                        else None,
-                        "geometry": geometries if geometries else None,
-                        # The source items behind this date group's mosaic. Carried
-                        # so processes that need per-item STAC metadata (asset
-                        # hrefs, properties) can reach it -- notably
-                        # `sar_backscatter`, whose calibration LUTs and GCP
-                        # geometry are per source item. Retrieve via
-                        # `RasterStack.get_source_items`, never by reaching into
-                        # task metadata directly. These are `pystac.Item`s.
-                        "items": date_items,
-                    },
-                )
-            )
+            for date_items in items_by_date.values()
+        ]
 
         return RasterStack(
             tasks=tasks,
@@ -1472,6 +1524,11 @@ class LoadStac:
     #: nothing to add to untouched, so a URL the user passed cannot pull a
     #: credential onto a host this deployment never meant to reach.
     signer_key: Optional[str] = field(default=None)
+
+    #: See `LoadCollection.reader_cls`. Forwarded to every read this class
+    #: makes, including the `LoadCollection` it delegates Collections and
+    #: Catalogs to.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
 
     def _load_stac_object(self, url: str) -> pystac.STACObject:
         """Load a STAC object from a URL.
@@ -1520,10 +1577,14 @@ class LoadStac:
         """
         collection_id = stac_obj.id
         stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
-        # The delegate inherits this instance's signer: handing off to a
-        # LoadCollection for a user-supplied catalogue must not silently drop
-        # the credential path.
-        load_collection = LoadCollection(stac_api=stac_api, signer_key=self.signer_key)
+        # The delegate inherits this instance's signer and reader class: handing
+        # off to a LoadCollection for a user-supplied catalogue must not
+        # silently drop the credential path or the backend's reader.
+        load_collection = LoadCollection(
+            stac_api=stac_api,
+            signer_key=self.signer_key,
+            reader_cls=self.reader_cls,
+        )
 
         return load_collection.load_collection(
             id=collection_id,
@@ -1654,6 +1715,7 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            reader_cls=self.reader_cls,
         )
 
         return RasterStack(
@@ -1771,7 +1833,7 @@ class LoadStac:
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, bbox_extent, bands, width, height
+            items, bbox_extent, bands, width, height, reader_cls=self.reader_cls
         )
 
         # Extract values from the result
@@ -1790,5 +1852,6 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
+            reader_cls=self.reader_cls,
         )
         return img

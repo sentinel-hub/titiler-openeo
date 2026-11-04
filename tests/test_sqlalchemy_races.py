@@ -72,3 +72,58 @@ def test_concurrent_first_login(empty_database):
     tracking = store.get_user_tracking(user_id="user", provider="oidc")
     assert tracking is not None
     assert tracking["login_count"] == REPLICAS
+
+
+def test_concurrent_startup_migrates_udp_key_once(empty_database):
+    """Replicas that start together rekey an older UDP table once (#469)."""
+    from sqlalchemy import create_engine, inspect, text
+
+    engine = create_engine(empty_database)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE udp_definitions (
+                    id VARCHAR PRIMARY KEY,
+                    user_id VARCHAR NOT NULL,
+                    process_graph JSON NOT NULL,
+                    summary VARCHAR,
+                    description TEXT,
+                    parameters JSON,
+                    returns JSON,
+                    categories JSON NOT NULL,
+                    deprecated BOOLEAN NOT NULL,
+                    experimental BOOLEAN NOT NULL,
+                    exceptions JSON,
+                    examples JSON,
+                    links JSON,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO udp_definitions
+                (id, user_id, process_graph, categories, deprecated, experimental,
+                 created_at, updated_at)
+                VALUES ('ndvi', 'user1', '{"process_id": "one"}', '[]', false,
+                        false, now(), now())
+                """
+            )
+        )
+
+    _all_at_once(lambda: module.SQLAlchemyUdpStore(store=empty_database))
+
+    pk = inspect(engine).get_pk_constraint("udp_definitions")
+    engine.dispose()
+    assert sorted(pk["constrained_columns"]) == ["id", "user_id"]
+
+    store = module.SQLAlchemyUdpStore(store=empty_database)
+    store.upsert_udp(user_id="user2", udp_id="ndvi", process_graph={"p": 2})
+    assert store.get_udp(user_id="user1", udp_id="ndvi")["process_graph"] == {
+        "process_id": "one"
+    }
+    assert store.get_udp(user_id="user2", udp_id="ndvi")["process_graph"] == {"p": 2}

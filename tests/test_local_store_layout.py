@@ -49,7 +49,7 @@ def test_ids_can_collide_across_namespaces(tmp_path: Path):
 
     data = json.loads(path.read_text())
     assert service_id in data["services"]
-    assert service_id in data["udp_definitions"]
+    assert service_id in data["udp_definitions"]["user"]
 
 
 def test_each_store_only_sees_its_namespace(tmp_path: Path):
@@ -79,3 +79,33 @@ def test_each_store_only_sees_its_namespace(tmp_path: Path):
 
     assert udp_store.get_udp(user_id="u1", udp_id="udp") is not None
     assert udp_store.get_udp(user_id="u1", udp_id="svc") is None
+
+
+def test_flat_udp_layout_is_read_per_user(tmp_path: Path):
+    """A store file with flat UDP ids is read and rewritten per user (#469)."""
+    path = tmp_path / "store.json"
+    path.write_text(
+        json.dumps(
+            {
+                "services": {},
+                "udp_definitions": {
+                    "ndvi": {
+                        "user_id": "u1",
+                        "process_graph": {"p": 1},
+                        "created_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:00:00Z",
+                    }
+                },
+            }
+        )
+    )
+
+    udp_store = get_udp_store(str(path))
+    assert udp_store.get_udp(user_id="u1", udp_id="ndvi")["user_id"] == "u1"
+
+    udp_store.upsert_udp(user_id="u2", udp_id="ndvi", process_graph={"p": 2})
+
+    data = json.loads(path.read_text())["udp_definitions"]
+    assert data["u1"]["ndvi"]["process_graph"] == {"p": 1}
+    assert data["u2"]["ndvi"]["process_graph"] == {"p": 2}
+    assert get_udp_store(str(path)).get_udp(user_id="u1", udp_id="ndvi") is not None
