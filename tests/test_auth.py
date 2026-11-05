@@ -9,7 +9,7 @@ import pytest
 from fastapi.exceptions import HTTPException
 from pydantic import ValidationError
 
-from titiler.openeo.auth import AuthToken, OIDCAuth, OIDCConfig
+from titiler.openeo.auth import AuthToken, BasicAuth, OIDCAuth, OIDCConfig, get_auth
 from titiler.openeo.settings import AuthSettings
 
 ISSUER = "https://auth.example.com"
@@ -456,7 +456,66 @@ def test_oidc_method_requires_client_id_and_wk_url():
 
 
 def test_basic_method_needs_no_oidc_config():
-    assert AuthSettings(method="basic").method == "basic"
+    users = {"alice": {"password": "s3cret"}}
+    assert AuthSettings(method="basic", users=users).method == "basic"
+
+
+def test_there_is_no_built_in_user():
+    """A missing or misnamed users setting must not fall back to a known login."""
+    assert AuthSettings.model_fields["users"].default == {}
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"users": {}},
+        {"users": {"a": {}}},
+        {"users": {"a": {"password": ""}}},
+        {"users": {"a": "pw"}},
+        {"users": {"": {"password": "x"}}},
+        {"users": {"a:b": {"password": "x"}}},
+    ],
+)
+def test_basic_method_without_users_refuses_to_start(monkeypatch, kwargs):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_USERS", raising=False)
+    with pytest.raises(ValidationError, match="TITILER_OPENEO_AUTH_USERS"):
+        AuthSettings(_env_file=None, **kwargs)
+
+
+def test_settings_errors_do_not_echo_passwords(monkeypatch):
+    """A list-shaped users value must not print its password at start-up."""
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_USERS",
+        json.dumps([{"username": "alice", "password": "s3cret-value"}]),
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        AuthSettings(_env_file=None)
+
+    assert "s3cret-value" not in str(excinfo.value)
+
+
+def test_users_are_read_from_the_environment(monkeypatch):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_USERS", json.dumps({"alice": {"password": "s3cret"}})
+    )
+    settings = AuthSettings(_env_file=None)
+    assert settings.users == {"alice": {"password": "s3cret"}}
+
+    credentials = base64.b64encode(b"alice:s3cret").decode()
+    auth = get_auth(settings, store=Mock())
+    assert isinstance(auth, BasicAuth)
+    assert auth.login(f"Basic {credentials}").access_token == credentials
+
+
+def test_oidc_method_needs_no_users(monkeypatch, oidc_config):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_USERS", raising=False)
+    settings = AuthSettings(method="oidc", oidc=oidc_config, _env_file=None)
+    assert settings.users == {}
+    assert isinstance(get_auth(settings, store=Mock()), OIDCAuth)
 
 
 def test_redirect_url_accepts_one_url_or_a_list():

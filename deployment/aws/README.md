@@ -31,10 +31,11 @@ AWS_DEFAULT_REGION=us-east-1 AWS_REGION=us-east-1 AWS_PROFILE=myprofile npm --pr
 
 Set environment variable or hard code in `infrastructure/aws/.env` file (e.g `STACK_STAGE=testing`).
 
-NOTE: At the time of writing this readme, 2 environment variables are mandatory in order to use the API:
+NOTE: At the time of writing this readme, 3 environment variables are mandatory in order to use the API:
 
 - TITILER_OPENEO_STAC_API_URL ("https://stac.eoapi.dev" or "https://stac.dataspace.copernicus.eu/v1")
 - TITILER_OPENEO_STORE_URL ("/var/task/services/eoapi.json" or "/var/task/services/copernicus.json")
+- TITILER_OPENEO_AUTH_USERS (basic auth users, e.g. `'{"<user>":{"password":"<choose-a-password>"}}'`): there is no built-in user, and the API refuses to start without one. Not needed with TITILER_OPENEO_AUTH_METHOD=oidc (see the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication)).
 
 3. Pre-Generate CFN template
 
