@@ -23,8 +23,16 @@ helm install titiler-openeo . -n your-namespace \
 ## Upgrading to 4.0.0
 
 * Basic auth has no default user any more: set at least one user in
-  `auth.basic.users` (username and password as quoted strings) or use OIDC.
+  `auth.basic.users` (username and password as quoted strings), supply the
+  users from a Secret (see
+  [Authentication Configuration](#authentication-configuration)), or use OIDC.
   `helm upgrade` fails until you do.
+* `helm upgrade --reuse-values` keeps the old default user, `test` with the
+  password `password`. The chart rejects this user, so `helm upgrade` fails
+  until you replace it.
+* Installs that already supply `TITILER_OPENEO_AUTH_USERS` through `env` or
+  `envVars` must set `auth.basic.enabled=false`. `helm upgrade` fails until you
+  do.
 * Installs that configured users now get exactly those users; the app's
   built-in login stops working.
 * OIDC installs are unaffected.
@@ -180,6 +188,22 @@ auth:
     users:
       - username: "alice"
         password: "<choose-a-password>"
+```
+
+To keep the passwords out of the ConfigMap, supply the users from a Secret.
+The Secret key holds the JSON object that the app reads, for example
+`{"alice":{"password":"<choose-a-password>"}}`:
+
+```yaml
+auth:
+  method: "basic"
+  basic:
+    enabled: false
+envVars:
+  fromSecret:
+    - name: TITILER_OPENEO_AUTH_USERS
+      secretName: titiler-openeo-users
+      secretKey: users
 ```
 
 2. OpenID Connect (for production)

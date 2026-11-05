@@ -35,7 +35,28 @@ tests:
   - it: should fail rendering when basic auth has no users
     asserts:
       - failedTemplate:
-          errorMessage: "auth.basic.users is required when auth.method=basic and auth.basic.enabled=true. Set at least one user with a username and a password, or use auth.method=oidc."
+          errorMessage: "auth.basic.users is required when auth.method=basic and auth.basic.enabled=true. Set at least one user with a username and a password, set auth.basic.enabled=false and supply TITILER_OPENEO_AUTH_USERS through envVars.fromSecret, or use auth.method=oidc."
+        template: configmap.yaml
+
+  - it: should fail rendering with the default user of older charts, kept by --reuse-values
+    set:
+      auth.basic.users:
+        - username: test
+          password: password
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.basic.users: test/password is the default of older charts, kept by helm upgrade --reuse-values. Set a different password."
+        template: configmap.yaml
+
+  - it: should accept the username test with a different password
+    set:
+      auth.basic.users:
+        - username: test
+          password: test-user-pass
+    asserts:
+      - equal:
+          path: data["basic-auth-users"]
+          value: '{"test":{"password":"test-user-pass"}}'
         template: configmap.yaml
 
   - it: should fail rendering when a user has an empty password
