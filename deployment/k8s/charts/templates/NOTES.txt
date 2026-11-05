@@ -28,6 +28,9 @@ Authentication Configuration:
 Basic Authentication is enabled:
 - Multiple users can be configured in values.yaml
 - Current number of configured users: {{ len .Values.auth.basic.users }}
+{{- else if eq .Values.auth.method "basic" }}
+Basic Authentication is enabled:
+- Users are read from TITILER_OPENEO_AUTH_USERS, set through env or envVars
 {{- else if eq .Values.auth.method "oidc" }}
 OpenID Connect (OIDC) Authentication is enabled:
 - Well-known URL: {{ .Values.auth.oidc.wellKnownUrl }}
