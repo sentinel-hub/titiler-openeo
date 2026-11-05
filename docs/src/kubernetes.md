@@ -19,9 +19,11 @@ minikube start
 # Set context
 kubectl config use-context minikube
 
-# Install using Helm
-cd deployment/k8s
-helm upgrade --install openeo-titiler .
+# Install using Helm (basic auth needs at least one user)
+cd deployment/k8s/charts
+helm upgrade --install openeo-titiler . \
+  --set-string 'auth.basic.users[0].username=alice' \
+  --set-string 'auth.basic.users[0].password=<choose-a-password>'
 
 # Enable ingress (if needed)
 minikube addons enable ingress

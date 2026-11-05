@@ -10,11 +10,35 @@ This Helm chart deploys openEO by TiTiler on a Kubernetes cluster. It provides a
 
 ## Installation
 
-Add the repository and install the chart:
+Add the repository and install the chart. The chart needs authentication: at
+least one basic-auth user, or OIDC (see
+[Authentication Configuration](#authentication-configuration)).
 
 ```bash
-helm install titiler-openeo . -n your-namespace
+helm install titiler-openeo . -n your-namespace \
+  --set-string 'auth.basic.users[0].username=alice' \
+  --set-string 'auth.basic.users[0].password=<choose-a-password>'
 ```
+
+## Upgrading to 4.0.0
+
+* Basic auth has no default user any more: set at least one user in
+  `auth.basic.users` (username and password as quoted strings), supply the
+  users from a Secret (see
+  [Authentication Configuration](#authentication-configuration)), or use OIDC.
+  `helm upgrade` fails until you do.
+* `helm upgrade --reuse-values` keeps the old default user, `test` with the
+  password `password`. The chart rejects this user, so `helm upgrade` fails
+  until you replace it.
+* Installs that already supply `TITILER_OPENEO_AUTH_USERS` through `env` or
+  `envVars` must set `auth.basic.enabled=false`. `helm upgrade` fails until you
+  do.
+* Installs that configured users now get exactly those users; the app's
+  built-in login stops working.
+* OIDC installs are unaffected.
+* Passwords are stored in the chart's ConfigMap and in the Helm release Secret.
+* Pods read the users at start-up, so after changing users run
+  `kubectl rollout restart deployment/<release>-titiler-openeo`.
 
 ## Deploying with CDSE (Copernicus Data Space Ecosystem)
 
@@ -51,6 +75,12 @@ resources:
   requests:
     cpu: 1
     memory: 2Gi
+
+auth:
+  basic:
+    users:
+      - username: "alice"
+        password: "<choose-a-password>"
 ```
 
 3. Install the chart with CDSE values:
@@ -145,14 +175,36 @@ The chart supports two authentication methods:
 
 1. Basic Authentication (for testing)
 
+Basic authentication is the default and has no default user: rendering fails
+until `auth.basic.users` has at least one user with a username and a password.
+The chart passes them to the app as `TITILER_OPENEO_AUTH_USERS` through a
+ConfigMap, so anyone who can read ConfigMaps in the namespace can read the
+passwords.
+
 ```yaml
 auth:
   method: "basic"
   basic:
     enabled: true
     users:
-      - username: "test"
-        password: "password"
+      - username: "alice"
+        password: "<choose-a-password>"
+```
+
+To keep the passwords out of the ConfigMap, supply the users from a Secret.
+The Secret key holds the JSON object that the app reads, for example
+`{"alice":{"password":"<choose-a-password>"}}`:
+
+```yaml
+auth:
+  method: "basic"
+  basic:
+    enabled: false
+envVars:
+  fromSecret:
+    - name: TITILER_OPENEO_AUTH_USERS
+      secretName: titiler-openeo-users
+      secretKey: users
 ```
 
 2. OpenID Connect (for production)
