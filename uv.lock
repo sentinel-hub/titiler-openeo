@@ -4317,7 +4317,7 @@ wheels = [
 
 [[package]]
 name = "titiler-openeo"
-version = "0.20.0"
+version = "0.20.1"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.20.1 (2026-11-05)
+
+## What's Changed
+* build(docker): move the image to Wolfi and Python 3.14 by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/476
+* chore(deps): bump the all group across 1 directory with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/484
+* chore(deps): bump the docker group with 2 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/486
+* chore(deps): bump the security group across 1 directory with 12 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/487
+* ci: scan the image with Trivy and rebuild it nightly by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/478
+* fix(helm): default image tag to v<appVersion> by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/482
+* chore(main): release titiler-openeo-chart 3.2.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/483
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.20.0...v0.20.1
+
 ## 0.20.0 (2026-10-28)
 
 ## What's Changed
