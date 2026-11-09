@@ -1,0 +1,21 @@
+suite: test install notes
+templates:
+  - NOTES.txt
+tests:
+  - it: should count the users configured in values
+    set:
+      auth.basic.users:
+        - username: alice
+          password: alice-test-pass
+    asserts:
+      - matchRegexRaw:
+          pattern: "Current number of configured users: 1"
+
+  - it: should name the variable when the users are supplied through env or envVars
+    set:
+      auth.basic.enabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: "Users are read from TITILER_OPENEO_AUTH_USERS"
+      - notMatchRegexRaw:
+          pattern: "Current number of configured users"

@@ -36,3 +36,10 @@ postgresql:
     requests:
       cpu: 100m
       memory: 256Mi
+
+# Basic auth needs at least one user. CI-only placeholder, not a real credential.
+auth:
+  basic:
+    users:
+      - username: "ci-user"
+        password: "ci-only-not-a-secret"

@@ -50,9 +50,9 @@ auth:
   method: "basic"
   basic:
     enabled: true
-    users:
-      - username: "test"
-        password: "password"
+    users:  # CI-only placeholder, not a real credential
+      - username: "ci-user"
+        password: "ci-only-not-a-secret"
   oidc:
     enabled: false
     clientId: ""

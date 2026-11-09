@@ -126,6 +126,16 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:18080/api.html
           echo "GET /.well-known/openeo"
           curl -fsS -o /dev/null http://127.0.0.1:18080/.well-known/openeo
+          # Only ci-user is configured (all ci/*.yaml). It must log in, and no other login may.
+          echo "GET /credentials/basic as ci-user (expect 200)"
+          curl -fsS -o /dev/null -u 'ci-user:ci-only-not-a-secret' http://127.0.0.1:18080/credentials/basic
+          # Relies on the app's built-in test user (before the app fix); once that user is gone, the ci-user check and the app's fail-closed start-up carry the proof.
+          echo "GET /credentials/basic as an unconfigured user (expect 401)"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -u 'test:test' http://127.0.0.1:18080/credentials/basic)
+          if [[ "$code" != "401" ]]; then
+            echo "::error::unconfigured login returned $code, expected 401: chart users are not reaching the app"
+            exit 1
+          fi
 
       # End-to-end test for the GitOps sealed-secret pattern.
       # ct install can't natively pre-create a Secret in the test namespace,
