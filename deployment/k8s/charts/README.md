@@ -150,7 +150,8 @@ The tables come from a Job, `<release>-titiler-openeo-schema`
 (`titiler-openeo-schema` for a release named `titiler-openeo`). It runs
 `python -m titiler.openeo.services.create_schema` with the API's image, store
 URLs and `env` map. It creates the missing tables and never alters or drops
-one, so it is safe to run on every upgrade.
+one, except the one-time `udp_definitions` key change of ADR 0012 (see the
+admin guide's upgrade notes), so it is safe to run on every upgrade.
 
 * **When**: the Job is a `post-install,post-upgrade` Helm hook. With `--wait`,
   it runs once the release's pods are Ready; readiness checks the connection,
