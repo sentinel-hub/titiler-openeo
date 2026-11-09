@@ -19,8 +19,10 @@ IMAGE="${1:?usage: $0 <image-ref>}"
 PLATFORM="${SMOKE_PLATFORM:-linux/amd64}"
 TIMEOUT="${SMOKE_TIMEOUT:-180}"
 LABEL="titiler-openeo-smoke=$$"
-# The app needs a STAC API and a store to start; no check below connects to them.
-APP_ENV=(-e TITILER_OPENEO_STAC_API_URL=https://stac.invalid -e TITILER_OPENEO_STORE_URL=/tmp/services.json)
+# The app needs a STAC API, a store and, with basic auth (the default), a user to
+# start; no check below connects to them or logs in.
+APP_ENV=(-e TITILER_OPENEO_STAC_API_URL=https://stac.invalid -e TITILER_OPENEO_STORE_URL=/tmp/services.json
+  -e 'TITILER_OPENEO_AUTH_USERS={"smoke": {"password": "smoke"}}')
 
 PASS=0
 FAILED=()
