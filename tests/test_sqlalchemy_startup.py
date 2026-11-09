@@ -1,5 +1,6 @@
 """Startup of the app while PostgreSQL is down (#479)."""
 
+import json
 import os
 import subprocess
 import sys
@@ -19,6 +20,8 @@ def test_app_imports_with_postgres_down(tmp_path):
     env = {
         **os.environ,
         "TITILER_OPENEO_STAC_API_URL": "https://stac.example.com",
+        # Basic auth, the default, needs a user since #481.
+        "TITILER_OPENEO_AUTH_USERS": json.dumps({"test": {"password": "test"}}),
         "TITILER_OPENEO_STORE_URL": DOWN,
         "TITILER_OPENEO_TILE_STORE_URL": DOWN,
     }
