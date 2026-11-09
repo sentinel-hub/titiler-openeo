@@ -13,6 +13,12 @@ The tile assignment feature requires two levels of configuration:
    TITILER_OPENEO_TILE_STORE_URL=postgresql://user:pass@host/db
    ```
 
+   Outside the Helm chart, or with its JSON or DuckDB store, create the `tile_assignments` table in that database before the first start and after each upgrade (see [Database schema](admin-guide.md#database-schema)):
+
+   ```bash
+   TITILER_OPENEO_STORE_URL=postgresql://user:pass@host/db python -m titiler.openeo.services.create_schema
+   ```
+
 2. Service Configuration:
 
    ```json
