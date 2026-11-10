@@ -548,6 +548,44 @@ def test_single_redirect_url_env_stays_valid(monkeypatch):
     assert config.allowed_tenants == []
 
 
+def test_provider_id_and_grant_types_parse_from_env(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE")
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES", "authorization_code+pkce refresh_token"
+    )
+    config = OIDCConfig()
+    assert config.provider_id == "CDSE"
+    assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
+
+
+@pytest.mark.parametrize("provider_id", ["", "a/b", "CDSE prod", "x" * 21])
+def test_invalid_provider_id_is_refused(provider_id):
+    with pytest.raises(ValidationError, match="provider_id"):
+        OIDCConfig(provider_id=provider_id)
+
+
+@pytest.mark.parametrize("grant_types", ["", "password", []])
+def test_invalid_grant_types_are_refused(grant_types):
+    with pytest.raises(ValidationError):
+        OIDCConfig(grant_types=grant_types)
+
+
+def test_token_for_the_configured_provider_id_is_accepted(settings, mock_key):
+    settings.oidc.provider_id = "CDSE"
+    auth = OIDCAuth(settings=settings, store=Mock())
+    auth._config_cache = dict(DISCOVERY)
+    auth._config_fetched_at = time.monotonic()
+
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        assert auth.validate(f"oidc/CDSE/{token}").user_id == _payload()["sub"]
+
+        with pytest.raises(HTTPException) as err:
+            auth.validate(f"oidc/oidc/{token}")
+    assert err.value.status_code == 403
+    assert err.value.detail == "Invalid authentication provider"
+
+
 def test_audiences_parse_space_separated():
     config = OIDCConfig(client_id="c", wk_url=WK_URL, audiences=["a", "b"])
     assert config.audiences == ["a", "b"]

@@ -72,3 +72,29 @@ def test_no_redirect_url_omits_redirect_urls():
     """Previously advertised `[""]`, which is not a valid URL."""
     (client,) = _provider(_client())["default_clients"]
     assert "redirect_urls" not in client
+
+
+def test_provider_id_defaults_to_oidc():
+    assert _provider(_client())["id"] == "oidc"
+
+
+def test_provider_id_is_configurable():
+    """#465: the id names the provider (CDSE uses "CDSE"), not the protocol."""
+    assert _provider(_client(provider_id="CDSE"))["id"] == "CDSE"
+
+
+def test_grant_types_default_lists_pkce_device_code_and_refresh():
+    (client,) = _provider(_client())["default_clients"]
+    assert client["grant_types"] == [
+        "authorization_code+pkce",
+        "urn:ietf:params:oauth:grant-type:device_code+pkce",
+        "refresh_token",
+    ]
+
+
+def test_grant_types_are_configurable():
+    """#465: do not advertise a flow that the client registration disables."""
+    (client,) = _provider(_client(grant_types="authorization_code+pkce refresh_token"))[
+        "default_clients"
+    ]
+    assert client["grant_types"] == ["authorization_code+pkce", "refresh_token"]

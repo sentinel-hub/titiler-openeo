@@ -1,5 +1,6 @@
 """Titiler-openEO API settings."""
 
+import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
@@ -10,6 +11,20 @@ from pydantic_settings import (
     NoDecode,
     SettingsConfigDict,
 )
+
+#: The grant types (flows) the openEO API allows a default client to declare.
+OIDCGrantType = Literal[
+    "implicit",
+    "authorization_code",
+    "authorization_code+pkce",
+    "urn:ietf:params:oauth:grant-type:device_code",
+    "urn:ietf:params:oauth:grant-type:device_code+pkce",
+    "refresh_token",
+]
+
+#: openEO API: the provider id is `[\d\w]{1,20}`. Anchored here, because the
+#: id is also the middle part of the `oidc/<provider_id>/<token>` bearer token.
+_PROVIDER_ID_RE = re.compile(r"^[\d\w]{1,20}$")
 
 
 class OIDCConfig(BaseSettings):
@@ -25,6 +40,23 @@ class OIDCConfig(BaseSettings):
     name_claim: str = "name"
     title: str = "OIDC"
     description: str = "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+
+    # The provider `id` in `GET /credentials/oidc`. openEO clients send it back
+    # as the prefix of the bearer token (`oidc/<provider_id>/<token>`), and the
+    # openEO Python client keys its stored refresh tokens on it. It identifies
+    # the provider, not the protocol: CDSE back-ends use "CDSE". The default
+    # keeps the value of the versions before it was configurable (#465).
+    provider_id: str = "oidc"
+
+    # The flows advertised for the default client. Advertise only the flows
+    # that the client registration at the provider really allows: the openEO
+    # Python client tries the device code flow when it is listed, and fails
+    # when the provider has it disabled for the client (#465).
+    grant_types: list[OIDCGrantType] = [
+        "authorization_code+pkce",
+        "urn:ietf:params:oauth:grant-type:device_code+pkce",
+        "refresh_token",
+    ]
 
     # Additional accepted `aud` values, space-separated, beyond `client_id`.
     # Needed for providers that issue *access* tokens audienced at an API
@@ -49,12 +81,31 @@ class OIDCConfig(BaseSettings):
     # When set, a token without `tid` is rejected. See ADR 0006 S2.3.
     allowed_tenants: list[str] = []
 
-    @field_validator("redirect_url", mode="before")
+    @field_validator("redirect_url", "grant_types", mode="before")
     @classmethod
-    def _split_redirect_url(cls, value: Any) -> Any:
-        """Accept one URL or a space-separated list, as a `str` or a list."""
+    def _split_space_separated(cls, value: Any) -> Any:
+        """Accept one value or a space-separated list, as a `str` or a list."""
         if isinstance(value, str):
             return value.split()
+        return value
+
+    @field_validator("provider_id")
+    @classmethod
+    def _check_provider_id(cls, value: str) -> str:
+        """Refuse at start-up an id that openEO clients cannot send back."""
+        if not _PROVIDER_ID_RE.match(value):
+            raise ValueError(
+                "provider_id must be 1 to 20 letters, digits or underscores "
+                f"(openEO API), got {value!r}"
+            )
+        return value
+
+    @field_validator("grant_types")
+    @classmethod
+    def _check_grant_types(cls, value: list[str]) -> list[str]:
+        """A default client without a flow is of no use to a client."""
+        if not value:
+            raise ValueError("grant_types must list at least one grant type")
         return value
 
     model_config = SettingsConfigDict(
@@ -125,6 +176,7 @@ class OIDCConfig(BaseSettings):
                 "audiences",
                 "redirect_url",
                 "allowed_tenants",
+                "grant_types",
             ):
                 return value.split() if value else None
 

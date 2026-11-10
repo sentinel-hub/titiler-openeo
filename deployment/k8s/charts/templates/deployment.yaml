@@ -130,6 +130,14 @@ spec:
             - name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
               value: {{ .Values.auth.oidc.allowedTenants | quote }}
             {{- end }}
+            {{- if .Values.auth.oidc.providerId }}
+            - name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+              value: {{ .Values.auth.oidc.providerId | quote }}
+            {{- end }}
+            {{- if .Values.auth.oidc.grantTypes }}
+            - name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+              value: {{ .Values.auth.oidc.grantTypes | quote }}
+            {{- end }}
             {{- end }}
             {{- /*
               Pool settings. A key set to null or "" is left out, so the app

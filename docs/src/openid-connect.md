@@ -9,13 +9,13 @@ The implementation is available in [`titiler/openeo/auth.py`](https://github.com
 TiTiler-OpenEO follows the OpenEO authentication specification where tokens are provided in the format:
 
 ```
-Bearer oidc/oidc/{actual_token}
+Bearer oidc/{provider_id}/{actual_token}
 ```
 
 The token structure consists of three parts:
 
 1. Authentication method (`oidc`)
-2. Provider identifier (`oidc`)
+2. Provider identifier: `TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID`, `oidc` by default
 3. The actual OIDC token
 
 Token parsing is handled by the [`AuthToken`](https://github.com/sentinel-hub/titiler-openeo/blob/main/titiler/openeo/auth.py#L284) class.
@@ -41,10 +41,28 @@ TITILER_OPENEO_AUTH_OIDC_DESCRIPTION="OpenID Connect (OIDC) Authorization Code F
 TITILER_OPENEO_AUTH_OIDC_AUDIENCES=""  # Space-separated extra accepted `aud` values
 TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM="sub"  # Claim used as User.user_id (default)
 TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS=""  # Space-separated Entra tenant ids; empty = all
+TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID="oidc"  # Provider id, 1-20 letters, digits or underscores (default)
+TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce urn:ietf:params:oauth:grant-type:device_code+pkce refresh_token"  # (default)
 ```
 
 All the values in `REDIRECT_URL` are advertised to openEO clients as the
-`redirect_urls` of the default client in `GET /credentials/oidc`.
+`redirect_urls` of the default client in `GET /credentials/oidc`. Each value
+must also be an allowed redirect URI of the client at the provider. Add
+`https://editor.openeo.org/` to let the
+[openEO Web Editor](https://github.com/Open-EO/openeo-web-editor/blob/master/docs/oidc.md)
+log in with the default client. If no redirect URL matches the Web Editor,
+it asks the user to type a client ID.
+
+`PROVIDER_ID` is the provider `id` in `GET /credentials/oidc`. It identifies
+the provider, not the protocol: use a name such as `CDSE`. openEO clients
+send it back as the middle part of the bearer token, and the openEO Python
+client keys its stored refresh tokens on it. When you change it, users must
+log in again.
+
+`GRANT_TYPES` lists the flows advertised for the default client. List only
+the flows that the client registration at the provider allows. The openEO
+Python client tries the device code flow when it is listed, and fails when
+the provider does not allow it for the client.
 
 `TITILER_OPENEO_AUTH_METHOD=oidc` is validated at startup: the backend refuses
 to start if `CLIENT_ID` or `WK_URL` is unset, rather than failing on the first
@@ -53,6 +71,27 @@ request.
 !!! warning "`USER_ID_CLAIM` is not safe to change on a running deployment"
     Services, UDPs and tile assignments are all keyed on `User.user_id`.
     Changing which claim produces it orphans everything already stored.
+
+## Copernicus Data Space Ecosystem (CDSE)
+
+Request a dedicated public client in the CDSE realm from CDSE support. Give
+the grant types, the redirect URIs and the web origins that your deployment
+needs. Then advertise exactly these values:
+
+```bash
+TITILER_OPENEO_AUTH_METHOD=oidc
+TITILER_OPENEO_AUTH_OIDC_CLIENT_ID="<your CDSE client id>"
+TITILER_OPENEO_AUTH_OIDC_WK_URL="https://identity.dataspace.copernicus.eu/auth/realms/CDSE/.well-known/openid-configuration"
+TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://<your backend>/ https://editor.openeo.org/"
+TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID="CDSE"
+TITILER_OPENEO_AUTH_OIDC_TITLE="CDSE"
+TITILER_OPENEO_AUTH_OIDC_DESCRIPTION="Copernicus Data Space Ecosystem"
+```
+
+Do not use the shared `cdse-public` client. Its redirect URI allow-list can
+change without notice, and it does not allow the device code flow. If you
+must use it, set
+`TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce refresh_token"`.
 
 ## Microsoft Entra ID
 

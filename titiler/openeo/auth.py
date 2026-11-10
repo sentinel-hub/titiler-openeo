@@ -534,8 +534,8 @@ class OIDCAuth(Auth):
                 detail="Invalid authentication method",
             )
 
-        # Check the provider
-        if parsed_token.provider != "oidc":
+        # Check the provider: the id advertised in `GET /credentials/oidc`.
+        if parsed_token.provider != self._oidc_config.provider_id:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Invalid authentication provider",
