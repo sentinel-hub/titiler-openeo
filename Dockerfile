@@ -5,7 +5,7 @@
 # ecosystem moves it. Keep it fresh: the packages below are unpinned and built
 # against Wolfi's current glibc, while this rootfs keeps the glibc it shipped
 # with. A stale digest fails docker/smoke-test.sh.
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:771146c2dfc880902a185f060c3db5571473c46b267edd98c3119c83068dfb61 AS base
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:24f549a7fcace88e69b9557941168c74645688ecc4acf7fb6d734a6b74e9019d AS base
 
 # After FROM on purpose: an ARG before the first FROM is only in scope for FROM lines.
 ARG PYTHON_VERSION=3.14
