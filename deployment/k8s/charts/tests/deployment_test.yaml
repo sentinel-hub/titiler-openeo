@@ -262,6 +262,43 @@ tests:
       - failedTemplate:
           errorPattern: "auth.oidc.providerId must be a string"
 
+  - it: should refuse a list item that YAML read as a boolean or a number
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      # `allowedTenants: [NO, 123]` in a values file
+      auth.oidc.allowedTenants: [false, 123]
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.allowedTenants must be a string or a list of strings"
+
+  - it: should trim the OIDC settings, so a | block passes no newline
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client\n"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: "CDSE\n"
+      auth.oidc.redirectUrl: ["https://a/\n", " https://b/ "]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_CLIENT_ID
+            value: "client"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+            value: "https://a/ https://b/"
+
   - it: should refuse an OIDC setting that YAML read as a number
     set:
       auth.method: oidc
