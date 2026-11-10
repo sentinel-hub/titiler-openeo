@@ -293,7 +293,7 @@ auth:
     userIdClaim: ""  # Claim used as the user id; empty = "sub"
     allowedTenants: ""  # Microsoft Entra tenant ids, space-separated; empty = all
     providerId: ""  # Provider id in GET /credentials/oidc, e.g. "CDSE"; empty = "oidc"
-    grantTypes: ""  # Flows the client registration allows, space-separated; empty = PKCE, device code and refresh
+    grantTypes: ""  # Flows the client registration allows, space-separated or a list; empty = PKCE, device code and refresh
 ```
 
 For Microsoft Entra ID with work, school and personal accounts, use the
