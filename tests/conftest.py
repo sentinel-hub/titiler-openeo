@@ -1,6 +1,7 @@
 """``pytest`` configuration."""
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal, Union
 
@@ -10,6 +11,7 @@ from starlette.testclient import TestClient
 
 from titiler.openeo.auth import Auth, User
 from titiler.openeo.services.base import ServicesStore
+from titiler.openeo.settings import OIDCConfig
 
 # Silence noisy pydantic v1 deprecation warnings from openeo_pg_parser_networkx
 try:  # pragma: no cover - best effort suppression
@@ -36,6 +38,19 @@ try:  # pragma: no cover - best effort suppression
     )
 except Exception:
     pass
+
+
+@pytest.fixture(autouse=True)
+def _no_local_oidc_settings(monkeypatch):
+    """Keep a developer's OIDC variables and ``./.env`` out of the tests.
+
+    The OIDC tests assume the defaults, e.g. the provider id ``oidc``; an
+    exported CDSE configuration would fail them.
+    """
+    for name in list(os.environ):
+        if name.startswith("TITILER_OPENEO_AUTH_OIDC_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setitem(OIDCConfig.model_config, "env_file", None)
 
 
 StoreType = Literal["local", "duckdb", "sqlalchemy"]

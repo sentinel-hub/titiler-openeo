@@ -14,6 +14,7 @@ from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pydantic import AnyUrl, BaseModel, Field, RootModel, field_validator
 
 from ..services.auth import check_authorized_users_scope, validate_access_configuration
+from ..settings import OIDCGrantType, OIDCProviderId
 
 OPENEO_VERSION = "1.2.0"
 
@@ -25,16 +26,7 @@ class OIDCDefaultClient(BaseModel):
         ...,
         description="The OpenID Connect Client ID to be used in the authentication procedure.",
     )
-    grant_types: List[
-        Literal[
-            "implicit",
-            "authorization_code",
-            "authorization_code+pkce",
-            "urn:ietf:params:oauth:grant-type:device_code",
-            "urn:ietf:params:oauth:grant-type:device_code+pkce",
-            "refresh_token",
-        ]
-    ] = Field(
+    grant_types: List[OIDCGrantType] = Field(
         ...,
         description="List of authorization grant types (flows) supported by the OpenID Connect client.",
     )
@@ -47,9 +39,8 @@ class OIDCDefaultClient(BaseModel):
 class OIDCProvider(BaseModel):
     """OpenID Connect Provider."""
 
-    id: str = Field(
+    id: OIDCProviderId = Field(
         ...,
-        pattern=r"[\d\w]{1,20}",
         description="A per-backend unique identifier for the OpenID Connect Provider to be as prefix for the Bearer token.",
     )
     issuer: AnyUrl = Field(
