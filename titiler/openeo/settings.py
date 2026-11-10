@@ -4,7 +4,13 @@ import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    NoDecode,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +28,38 @@ OIDCGrantType = Literal[
 #: `\w` is ASCII. Clients send the id back in a header, as the middle part of
 #: the `oidc/<provider_id>/<token>` bearer token, so a trailing newline must
 #: not pass either: in pydantic's pattern, unlike Python's `re`, `$` is the
-#: end of the text.
+#: end of the text. `OIDCConfig` strips surrounding whitespace first.
 OIDCProviderId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_]{1,20}$")]
+
+
+class _BlankIsUnset(PydanticBaseSettingsSource):
+    """Leave out the variables that hold only whitespace.
+
+    `env_ignore_empty` leaves out only `""`: a variable set to `" "` split to
+    `[]` and replaced a list default, so `GET /credentials/oidc` advertised no
+    `openid` scope. Only the environment and `.env` are wrapped: an explicit
+    argument is still validated as given.
+    """
+
+    def __init__(self, source: PydanticBaseSettingsSource):
+        super().__init__(source.settings_cls)
+        self._source = source
+        # The name the settings build keys this source's values on.
+        self.__name__ = type(source).__name__
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        """Not used: `__call__` reads all the fields from the wrapped source."""
+        return None, "", False
+
+    def __call__(self) -> dict[str, Any]:
+        """Return the wrapped source's values, without the blank strings."""
+        return {
+            name: value
+            for name, value in self._source().items()
+            if not (isinstance(value, str) and not value.strip())
+        }
 
 
 class OIDCConfig(BaseSettings):
@@ -112,10 +148,29 @@ class OIDCConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
         env_file=".env",
-        # An empty variable keeps the default, as in the Helm chart.
-        env_ignore_empty=True,
+        # A Helm `|` block or a Secret built from a file ends with a newline.
+        # Kept, it fails every login: `client_id` would not match the token
+        # `aud`. This also strips each item of the list settings.
+        str_strip_whitespace=True,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """A blank variable keeps the default, as in the Helm chart."""
+        return (
+            init_settings,
+            _BlankIsUnset(env_settings),
+            _BlankIsUnset(dotenv_settings),
+            file_secret_settings,
+        )
 
 
 class AuthSettings(BaseSettings):

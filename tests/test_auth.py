@@ -3,6 +3,7 @@
 import base64
 import json
 import logging
+import os
 import time
 from unittest.mock import MagicMock, Mock, patch
 
@@ -563,7 +564,7 @@ def test_provider_id_and_grant_types_parse_from_env(monkeypatch):
     "provider_id",
     # A trailing newline (a Helm `|` block, a Secret built from a file) or a
     # non-ASCII letter cannot be sent back in an HTTP header.
-    ["", "a/b", "CDSE prod", "x" * 21, "CDSE\n", "Łódź", "é", "²"],
+    ["", " ", "a/b", "CDSE prod", "x" * 21, "Łódź", "é", "²"],
 )
 def test_invalid_provider_id_is_refused(provider_id):
     with pytest.raises(ValidationError, match="provider_id"):
@@ -596,6 +597,46 @@ def test_empty_oidc_env_values_keep_the_defaults(monkeypatch):
     assert config.grant_types == defaults["grant_types"].default
     assert config.scopes == defaults["scopes"].default
     assert config.redirect_url == []
+
+
+def test_blank_oidc_env_values_keep_the_defaults(monkeypatch):
+    """`env_ignore_empty` alone let `" "` replace a list default with `[]`."""
+    for name in ("PROVIDER_ID", "GRANT_TYPES", "SCOPES", "TITLE"):
+        monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", " \n")
+    config = OIDCConfig()
+    defaults = OIDCConfig.model_fields
+    assert config.provider_id == "oidc"
+    assert config.grant_types == defaults["grant_types"].default
+    assert config.scopes == defaults["scopes"].default
+    assert config.title == defaults["title"].default
+
+
+def test_blank_oidc_dotenv_values_keep_the_defaults(tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text('TITILER_OPENEO_AUTH_OIDC_SCOPES=" "\n')
+    config = OIDCConfig(_env_file=dotenv)
+    assert config.scopes == OIDCConfig.model_fields["scopes"].default
+
+
+def test_oidc_settings_are_stripped(monkeypatch):
+    """A Helm `|` block or a file-built Secret ends with a newline; kept, a
+    `client_id` would never match a token `aud`."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", f" {WK_URL}\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://a/\n")
+    config = OIDCConfig()
+    assert config.client_id == "mine"
+    assert config.wk_url == WK_URL
+    assert config.provider_id == "CDSE"
+    assert config.redirect_url == ["http://a/"]
+    assert OIDCConfig(provider_id="CDSE\n").provider_id == "CDSE"
+
+
+def test_auth_method_from_the_developer_env_does_not_leak():
+    """The autouse fixture also removes `TITILER_OPENEO_AUTH_METHOD`."""
+    assert "TITILER_OPENEO_AUTH_METHOD" not in os.environ
+    assert AuthSettings.model_config["env_file"] is None
 
 
 def test_list_settings_parse_space_separated_dotenv(tmp_path):

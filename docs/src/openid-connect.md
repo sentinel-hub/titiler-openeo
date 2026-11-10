@@ -98,6 +98,10 @@ warning if `GRANT_TYPES` lists an authorization code flow while
 `REDIRECT_URL` is empty: the openEO API requires redirect URLs for it. The
 OIDC settings are read only for this method: with `basic`, they are ignored.
 
+The backend removes the whitespace around each value, such as the trailing
+newline of a Helm `|` block or of a Secret built from a file. A variable that
+is empty or holds only whitespace keeps the default.
+
 !!! warning "`USER_ID_CLAIM` is not safe to change on a running deployment"
     Services, UDPs and tile assignments are all keyed on `User.user_id`.
     Changing which claim produces it orphans everything already stored.
