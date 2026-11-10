@@ -544,7 +544,7 @@ class EndpointsFactory(BaseFactory):
                 return openapi.OIDCProviders(
                     providers=[
                         openapi.OIDCProvider(
-                            id="oidc",
+                            id=self.auth.settings.oidc.provider_id,
                             # Not the discovery `issuer`: Entra's `common`
                             # endpoint returns a `{tenantid}` template there.
                             issuer=self.auth.authority,
@@ -555,11 +555,7 @@ class EndpointsFactory(BaseFactory):
                             default_clients=[
                                 openapi.OIDCDefaultClient(
                                     id=self.auth.settings.oidc.client_id,
-                                    grant_types=[
-                                        "authorization_code+pkce",
-                                        "urn:ietf:params:oauth:grant-type:device_code+pkce",
-                                        "refresh_token",
-                                    ],
+                                    grant_types=self.auth.settings.oidc.grant_types,
                                     redirect_urls=(
                                         self.auth.settings.oidc.redirect_url or None
                                     ),

@@ -158,7 +158,19 @@ tests:
       auth.oidc.audiences: "api://client"
       auth.oidc.userIdClaim: "sub"
       auth.oidc.allowedTenants: "9188040d-6c67-4c5b-b112-36a304b66dad"
+      auth.oidc.providerId: "CDSE"
+      auth.oidc.grantTypes: "authorization_code+pkce refresh_token"
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
       - contains:
           path: spec.template.spec.containers[0].env
           content:
@@ -196,6 +208,16 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
           any: true
 
   - it: should not set a strategy by default

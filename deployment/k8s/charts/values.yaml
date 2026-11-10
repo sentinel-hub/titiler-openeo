@@ -102,6 +102,15 @@ auth:
     # Microsoft Entra tenant ids allowed to sign in, space-separated. Empty
     # allows all. Personal Microsoft accounts: 9188040d-6c67-4c5b-b112-36a304b66dad
     allowedTenants: ""
+    # Provider id advertised in GET /credentials/oidc and expected as the
+    # bearer token prefix (oidc/<providerId>/<token>). 1-20 letters, digits or
+    # underscores; for example "CDSE". Empty keeps the backend default, "oidc".
+    providerId: ""
+    # Flows advertised for the default client, space-separated. List only the
+    # flows that the client registration allows. Empty keeps the backend
+    # default: "authorization_code+pkce
+    # urn:ietf:params:oauth:grant-type:device_code+pkce refresh_token".
+    grantTypes: ""
 
 # STAC configuration
 stac:
