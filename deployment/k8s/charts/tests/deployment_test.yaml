@@ -28,6 +28,46 @@ tests:
       - isNull:
           path: spec.template.spec.initContainers[0].securityContext
 
+  - it: should pin the init-store image by digest and fully qualify it by default
+    set:
+      database.persistence.enabled: true
+      database.type: json
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^docker\.io/library/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
+  - it: should keep the pinned init-store image when an upgrade reuses values from an older chart
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore: null
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^docker\.io/library/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
+  - it: should let values override the init-store image
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore.image.repository: registry.example.org/busybox
+      initStore.image.tag: "1.38.0"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.org/busybox:1.38.0
+
+  - it: should keep the digest when only the init-store repository is overridden
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore.image.repository: registry.example.org/busybox
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^registry\.example\.org/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
   - it: should apply initContainerSecurityContext to the init-store container
     set:
       database.persistence.enabled: true

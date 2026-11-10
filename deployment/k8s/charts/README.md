@@ -98,6 +98,7 @@ helm install titiler-openeo . -f values-cdse.yaml -n your-namespace
 | `image.repository` | Container image repository | `ghcr.io/sentinel-hub/titiler-openeo` |
 | `image.tag` | Container image tag (defaults to `v{{ .Chart.AppVersion }}` when unset) | unset |
 | `image.pullPolicy` | Container image pull policy | `IfNotPresent` |
+| `initStore.image.repository` / `initStore.image.tag` | Image of the init-store init container (JSON store only) | `docker.io/library/busybox` / `1.38.0@sha256:…` |
 | `replicaCount` | Number of replicas | `1` |
 | `strategy` | Deployment update strategy. Empty uses the Kubernetes default (`RollingUpdate`). Set `type: Recreate` for upgrades that must stop all old pods first (see the admin guide upgrade notes) | `{}` |
 

@@ -344,6 +344,13 @@ podSecurityContext:
   # runAsNonRoot: true
   # runAsUser: 1001
 
+# Image for the init-store init container (only rendered when
+# database.persistence.enabled=true and database.type="json").
+initStore:
+  image:
+    repository:  # Uses docker.io/library/busybox by default
+    tag:  # Uses the digest-pinned 1.38.0 in templates/deployment.yaml by default
+
 # securityContext for the init-store init container (only rendered when
 # database.persistence.enabled=true and database.type="json").
 initContainerSecurityContext:
