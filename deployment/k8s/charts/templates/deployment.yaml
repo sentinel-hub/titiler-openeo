@@ -96,47 +96,37 @@ spec:
                   key: basic-auth-users
             {{- end }}
             {{- if and (eq .Values.auth.method "oidc") .Values.auth.oidc.enabled }}
-            - name: TITILER_OPENEO_AUTH_OIDC_CLIENT_ID
-              value: {{ .Values.auth.oidc.clientId | quote }}
-            - name: TITILER_OPENEO_AUTH_OIDC_WK_URL
-              value: {{ .Values.auth.oidc.wellKnownUrl | quote }}
-            - name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
-              value: {{ .Values.auth.oidc.redirectUrl | quote }}
-            {{- if .Values.auth.oidc.scopes }}
-            - name: TITILER_OPENEO_AUTH_OIDC_SCOPES
-              value: {{ .Values.auth.oidc.scopes | quote }}
+            {{- /*
+              OIDC settings. A list is joined with spaces, and each value is
+              trimmed, so a `|` block does not pass a trailing newline. A blank
+              one is left out, so the app keeps its default; a name also set
+              through `env` or `envVars` is left out, so it is not rendered
+              twice. A value or a list item YAML read as a boolean or a number
+              (`providerId: NO`, `allowedTenants: [NO]`) is refused: rendered
+              as text, it would not be the value meant.
+            */}}
+            {{- range list (list "clientId" "CLIENT_ID") (list "wellKnownUrl" "WK_URL") (list "redirectUrl" "REDIRECT_URL") (list "scopes" "SCOPES") (list "nameClaim" "NAME_CLAIM") (list "title" "TITLE") (list "description" "DESCRIPTION") (list "audiences" "AUDIENCES") (list "userIdClaim" "USER_ID_CLAIM") (list "allowedTenants" "ALLOWED_TENANTS") (list "providerId" "PROVIDER_ID") (list "grantTypes" "GRANT_TYPES") }}
+            {{- $key := index . 0 }}
+            {{- $name := printf "TITILER_OPENEO_AUTH_OIDC_%s" (index . 1) }}
+            {{- $val := get $.Values.auth.oidc $key }}
+            {{- $items := list }}
+            {{- if kindIs "slice" $val }}
+            {{- $items = $val }}
+            {{- else if not (kindIs "invalid" $val) }}
+            {{- $items = list $val }}
             {{- end }}
-            {{- if .Values.auth.oidc.nameClaim }}
-            - name: TITILER_OPENEO_AUTH_OIDC_NAME_CLAIM
-              value: {{ .Values.auth.oidc.nameClaim | quote }}
+            {{- $parts := list }}
+            {{- range $item := $items }}
+            {{- if not (kindIs "string" $item) }}
+            {{- fail (printf "auth.oidc.%s must be a string or a list of strings, got %v (%s): quote it in the values file, or use --set-string" $key $item (kindOf $item)) }}
             {{- end }}
-            {{- if .Values.auth.oidc.title }}
-            - name: TITILER_OPENEO_AUTH_OIDC_TITLE
-              value: {{ .Values.auth.oidc.title | quote }}
+            {{- $parts = append $parts (trim $item) }}
             {{- end }}
-            {{- if .Values.auth.oidc.description }}
-            - name: TITILER_OPENEO_AUTH_OIDC_DESCRIPTION
-              value: {{ .Values.auth.oidc.description | quote }}
+            {{- $val = join " " $parts | trim }}
+            {{- if and $val (not (has $name $overridden)) }}
+            - name: {{ $name }}
+              value: {{ $val | quote }}
             {{- end }}
-            {{- if .Values.auth.oidc.audiences }}
-            - name: TITILER_OPENEO_AUTH_OIDC_AUDIENCES
-              value: {{ .Values.auth.oidc.audiences | quote }}
-            {{- end }}
-            {{- if .Values.auth.oidc.userIdClaim }}
-            - name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
-              value: {{ .Values.auth.oidc.userIdClaim | quote }}
-            {{- end }}
-            {{- if .Values.auth.oidc.allowedTenants }}
-            - name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
-              value: {{ .Values.auth.oidc.allowedTenants | quote }}
-            {{- end }}
-            {{- if .Values.auth.oidc.providerId }}
-            - name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
-              value: {{ .Values.auth.oidc.providerId | quote }}
-            {{- end }}
-            {{- if .Values.auth.oidc.grantTypes }}
-            - name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
-              value: {{ .Values.auth.oidc.grantTypes | quote }}
             {{- end }}
             {{- end }}
             {{- /*

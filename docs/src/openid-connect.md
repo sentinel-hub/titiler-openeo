@@ -46,27 +46,61 @@ TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce urn:ietf:params:oa
 ```
 
 All the values in `REDIRECT_URL` are advertised to openEO clients as the
-`redirect_urls` of the default client in `GET /credentials/oidc`. Each value
-must also be an allowed redirect URI of the client at the provider. Add
+`redirect_urls` of the default client in `GET /credentials/oidc`. Add
 `https://editor.openeo.org/` to let the
 [openEO Web Editor](https://github.com/Open-EO/openeo-web-editor/blob/master/docs/oidc.md)
 log in with the default client. If no redirect URL matches the Web Editor,
 it asks the user to type a client ID.
 
+At the provider, allow the same URLs as redirect URIs of the client, but
+*without* the trailing slash: `https://editor.openeo.org`. The Web Editor
+strips the slash from the redirect URI it sends, and a provider that compares
+redirect URIs exactly, as Keycloak (and so CDSE) does, otherwise refuses the
+login with *"Invalid parameter: redirect_uri"*. Keep the slash in
+`REDIRECT_URL`.
+
 `PROVIDER_ID` is the provider `id` in `GET /credentials/oidc`. It identifies
 the provider, not the protocol: use a name such as `CDSE`. openEO clients
-send it back as the middle part of the bearer token, and the openEO Python
-client keys its stored refresh tokens on it. When you change it, users must
-log in again.
+send it back as the middle part of the bearer token. Changing it on a running
+deployment breaks:
+
+- scripts that name the old id, as in `authenticate_oidc(provider_id="oidc")`;
+- client settings saved for the old id, such as those of
+  `openeo-auth add-oidc`, which the client then ignores;
+- open connections, which keep sending the old id and get a 403 until they
+  connect again.
+
+Stored refresh tokens keep working: the openEO Python client keys them on the
+issuer and the client ID, not on the provider id.
 
 `GRANT_TYPES` lists the flows advertised for the default client. List only
-the flows that the client registration at the provider allows. The openEO
-Python client tries the device code flow when it is listed, and fails when
-the provider does not allow it for the client.
+the flows that the client registration at the provider allows, each once.
+The openEO clients use the default client as follows:
+
+- The Python client's `authenticate_oidc()` uses it only when the list has
+  `refresh_token` and a device code flow
+  (`urn:ietf:params:oauth:grant-type:device_code+pkce` or
+  `urn:ietf:params:oauth:grant-type:device_code`). Otherwise
+  `authenticate_oidc()` fails with *"No client_id found"*, even for a user who
+  has a stored refresh token. Without the device code flow, Python users call
+  `authenticate_oidc_authorization_code()` instead. It needs
+  `authorization_code+pkce` in the list, and opens a browser that redirects
+  to the client on `http://localhost`, so the provider must allow a
+  `http://localhost` redirect URI.
+- The Web Editor uses it for `authorization_code+pkce`, when a
+  `REDIRECT_URL` value matches the editor.
 
 `TITILER_OPENEO_AUTH_METHOD=oidc` is validated at startup: the backend refuses
-to start if `CLIENT_ID` or `WK_URL` is unset, rather than failing on the first
-request.
+to start if `CLIENT_ID` or `WK_URL` is unset, if `PROVIDER_ID` is not 1 to 20
+ASCII letters, digits or underscores, or if `GRANT_TYPES` lists a flow twice
+or only `refresh_token`, rather than failing on the first request. It logs a
+warning if `GRANT_TYPES` lists an authorization code flow while
+`REDIRECT_URL` is empty: the openEO API requires redirect URLs for it. The
+OIDC settings are read only for this method: with `basic`, they are ignored.
+
+The backend removes the whitespace around each value, such as the trailing
+newline of a Helm `|` block or of a Secret built from a file. A variable that
+is empty or holds only whitespace keeps the default.
 
 !!! warning "`USER_ID_CLAIM` is not safe to change on a running deployment"
     Services, UDPs and tile assignments are all keyed on `User.user_id`.
@@ -76,13 +110,23 @@ request.
 
 Request a dedicated public client in the CDSE realm from CDSE support. Give
 the grant types, the redirect URIs and the web origins that your deployment
-needs. Then advertise exactly these values:
+needs, for example:
+
+- the grant types: authorization code with PKCE, device code and refresh
+  token;
+- the redirect URI and the web origin of the Web Editor,
+  `https://editor.openeo.org`, without a trailing slash (see above);
+- a `http://localhost` redirect URI, if Python users log in with the
+  authorization code flow.
+
+Then advertise exactly the grant types that CDSE enabled for the client:
 
 ```bash
 TITILER_OPENEO_AUTH_METHOD=oidc
 TITILER_OPENEO_AUTH_OIDC_CLIENT_ID="<your CDSE client id>"
 TITILER_OPENEO_AUTH_OIDC_WK_URL="https://identity.dataspace.copernicus.eu/auth/realms/CDSE/.well-known/openid-configuration"
-TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://<your backend>/ https://editor.openeo.org/"
+TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://editor.openeo.org/"
+TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce urn:ietf:params:oauth:grant-type:device_code+pkce refresh_token"
 TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID="CDSE"
 TITILER_OPENEO_AUTH_OIDC_TITLE="CDSE"
 TITILER_OPENEO_AUTH_OIDC_DESCRIPTION="Copernicus Data Space Ecosystem"
@@ -92,6 +136,8 @@ Do not use the shared `cdse-public` client. Its redirect URI allow-list can
 change without notice, and it does not allow the device code flow. If you
 must use it, set
 `TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce refresh_token"`.
+Python users then log in with `authenticate_oidc_authorization_code()`, not
+`authenticate_oidc()` (see `GRANT_TYPES` above).
 
 ## Microsoft Entra ID
 

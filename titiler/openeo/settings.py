@@ -1,16 +1,18 @@
 """Titiler-openEO API settings."""
 
-import re
+import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
-    EnvSettingsSource,
     NoDecode,
+    PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The grant types (flows) the openEO API allows a default client to declare.
 OIDCGrantType = Literal[
@@ -22,9 +24,42 @@ OIDCGrantType = Literal[
     "refresh_token",
 ]
 
-#: openEO API: the provider id is `[\d\w]{1,20}`. Anchored here, because the
-#: id is also the middle part of the `oidc/<provider_id>/<token>` bearer token.
-_PROVIDER_ID_RE = re.compile(r"^[\d\w]{1,20}$")
+#: openEO API: a provider id matches `[\d\w]{1,20}`, an ECMA-262 pattern, so
+#: `\w` is ASCII. Clients send the id back in a header, as the middle part of
+#: the `oidc/<provider_id>/<token>` bearer token, so a trailing newline must
+#: not pass either: in pydantic's pattern, unlike Python's `re`, `$` is the
+#: end of the text. `OIDCConfig` strips surrounding whitespace first.
+OIDCProviderId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_]{1,20}$")]
+
+
+class _BlankIsUnset(PydanticBaseSettingsSource):
+    """Leave out the variables that hold only whitespace.
+
+    `env_ignore_empty` leaves out only `""`: a variable set to `" "` split to
+    `[]` and replaced a list default, so `GET /credentials/oidc` advertised no
+    `openid` scope. Only the environment and `.env` are wrapped: an explicit
+    argument is still validated as given.
+    """
+
+    def __init__(self, source: PydanticBaseSettingsSource):
+        super().__init__(source.settings_cls)
+        self._source = source
+        # The name the settings build keys this source's values on.
+        self.__name__ = type(source).__name__
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        """Not used: `__call__` reads all the fields from the wrapped source."""
+        return None, "", False
+
+    def __call__(self) -> dict[str, Any]:
+        """Return the wrapped source's values, without the blank strings."""
+        return {
+            name: value
+            for name, value in self._source().items()
+            if not (isinstance(value, str) and not value.strip())
+        }
 
 
 class OIDCConfig(BaseSettings):
@@ -33,26 +68,28 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = ""
     wk_url: str = ""
-    # Space-separated in the environment; a single URL stays valid. Advertised
-    # to openEO clients as `redirect_urls` in `GET /credentials/oidc`.
-    redirect_url: list[str] = []
-    scopes: list[str] = ["openid", "email", "profile"]
+    # The list settings are space-separated in the environment and in `.env`
+    # (`NoDecode`: not JSON). A single URL stays valid. Advertised to openEO
+    # clients as `redirect_urls` in `GET /credentials/oidc`.
+    redirect_url: Annotated[list[str], NoDecode] = []
+    scopes: Annotated[list[str], NoDecode] = ["openid", "email", "profile"]
     name_claim: str = "name"
     title: str = "OIDC"
     description: str = "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
 
     # The provider `id` in `GET /credentials/oidc`. openEO clients send it back
-    # as the prefix of the bearer token (`oidc/<provider_id>/<token>`), and the
-    # openEO Python client keys its stored refresh tokens on it. It identifies
-    # the provider, not the protocol: CDSE back-ends use "CDSE". The default
-    # keeps the value of the versions before it was configurable (#465).
-    provider_id: str = "oidc"
+    # as the prefix of the bearer token (`oidc/<provider_id>/<token>`). It
+    # identifies the provider, not the protocol: CDSE back-ends use "CDSE".
+    # The default keeps the value of the versions before it was configurable
+    # (#465).
+    provider_id: OIDCProviderId = "oidc"
 
     # The flows advertised for the default client. Advertise only the flows
-    # that the client registration at the provider really allows: the openEO
-    # Python client tries the device code flow when it is listed, and fails
-    # when the provider has it disabled for the client (#465).
-    grant_types: list[OIDCGrantType] = [
+    # that the client registration at the provider really allows. The openEO
+    # Python client's `authenticate_oidc()` uses the default client only when
+    # it lists `refresh_token` and a device code flow, and then fails if the
+    # provider has the device code flow disabled for the client (#465).
+    grant_types: Annotated[list[OIDCGrantType], NoDecode, Field(min_length=1)] = [
         "authorization_code+pkce",
         "urn:ietf:params:oauth:grant-type:device_code+pkce",
         "refresh_token",
@@ -64,7 +101,7 @@ class OIDCConfig(BaseSettings):
     # (`api://<client_id>`). Empty by default, which accepts exactly what this
     # backend accepted before the setting existed.
     # See docs/adr/0006-microsoft-entra-oidc.md S2.2 change 6.
-    audiences: list[str] = []
+    audiences: Annotated[list[str], NoDecode] = []
 
     # Which token claim becomes `User.user_id`. Services, UDPs and tile
     # assignments are all keyed on it, so changing this on a running deployment
@@ -79,9 +116,16 @@ class OIDCConfig(BaseSettings):
     # discovery URL, that is every Microsoft work and personal account. The
     # personal-account (MSA) tenant is 9188040d-6c67-4c5b-b112-36a304b66dad.
     # When set, a token without `tid` is rejected. See ADR 0006 S2.3.
-    allowed_tenants: list[str] = []
+    allowed_tenants: Annotated[list[str], NoDecode] = []
 
-    @field_validator("redirect_url", "grant_types", mode="before")
+    @field_validator(
+        "redirect_url",
+        "scopes",
+        "grant_types",
+        "audiences",
+        "allowed_tenants",
+        mode="before",
+    )
     @classmethod
     def _split_space_separated(cls, value: Any) -> Any:
         """Accept one value or a space-separated list, as a `str` or a list."""
@@ -89,100 +133,44 @@ class OIDCConfig(BaseSettings):
             return value.split()
         return value
 
-    @field_validator("provider_id")
-    @classmethod
-    def _check_provider_id(cls, value: str) -> str:
-        """Refuse at start-up an id that openEO clients cannot send back."""
-        if not _PROVIDER_ID_RE.match(value):
-            raise ValueError(
-                "provider_id must be 1 to 20 letters, digits or underscores "
-                f"(openEO API), got {value!r}"
-            )
-        return value
-
     @field_validator("grant_types")
     @classmethod
     def _check_grant_types(cls, value: list[str]) -> list[str]:
-        """A default client without a flow is of no use to a client."""
-        if not value:
-            raise ValueError("grant_types must list at least one grant type")
+        """Refuse a list that the openEO API forbids or no client can use."""
+        if len(set(value)) != len(value):
+            raise ValueError("lists a grant type twice")
+        if set(value) == {"refresh_token"}:
+            raise ValueError(
+                "lists only refresh_token, which cannot get a client its first token"
+            )
         return value
 
     model_config = SettingsConfigDict(
         env_prefix="TITILER_OPENEO_AUTH_OIDC_",
         env_file=".env",
+        # A Helm `|` block or a Secret built from a file ends with a newline.
+        # Kept, it fails every login: `client_id` would not match the token
+        # `aud`. This also strips each item of the list settings.
+        str_strip_whitespace=True,
         extra="ignore",
     )
 
     @classmethod
     def settings_customise_sources(
         cls,
-        settings_cls,
-        init_settings,
-        env_settings,
-        dotenv_settings,
-        file_secret_settings,
-    ):
-        """
-        Customize sources for settings construction.
-
-        This method allows customization of the settings sources hierarchy by inserting
-        a custom settings source after the init_settings source.
-
-        Args:
-            settings_cls (Type[BaseSettings]): The settings class being constructed.
-            init_settings (SettingsSource): Settings from direct class instantiation.
-            env_settings (SettingsSource): Settings from environment variables.
-            dotenv_settings (SettingsSource): Settings from .env file.
-            file_secret_settings (SettingsSource): Settings from secrets file.
-
-        Returns:
-            tuple: A tuple containing the settings sources in order of precedence:
-                - init_settings
-                - custom settings source
-                - dotenv_settings
-                - file_secret_settings
-        """
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """A blank variable keeps the default, as in the Helm chart."""
         return (
             init_settings,
-            cls.CustomSettingsSource(settings_cls),
-            dotenv_settings,
+            _BlankIsUnset(env_settings),
+            _BlankIsUnset(dotenv_settings),
             file_secret_settings,
         )
-
-    class CustomSettingsSource(EnvSettingsSource):
-        """Custom settings source for handling environment variables.
-
-        Extends EnvSettingsSource to provide custom parsing of environment variables.
-        """
-
-        def prepare_field_value(
-            self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
-        ) -> Any:
-            """Prepare field value from environment variable.
-
-            Args:
-                field_name: Name of the field being processed
-                field: Field information
-                value: Raw value from environment
-                value_is_complex: Whether the value is a complex type
-
-            Returns:
-                Processed value for the field
-            """
-            # allow space-separated list parsing for list-valued fields
-            if field_name in (
-                "scopes",
-                "audiences",
-                "redirect_url",
-                "allowed_tenants",
-                "grant_types",
-            ):
-                return value.split() if value else None
-
-            return super().prepare_field_value(
-                field_name, field, value, value_is_complex
-            )
 
 
 class AuthSettings(BaseSettings):
@@ -195,8 +183,7 @@ class AuthSettings(BaseSettings):
     # Required if method is set to "basic": there is no built-in user
     users: Dict[str, Any] = {}
 
-    # OIDC configuration
-    # Only used if method is set to "oidc"
+    # OIDC configuration. Read from the environment only if method is "oidc".
     oidc: Optional[OIDCConfig] = None
 
     model_config = SettingsConfigDict(
@@ -207,25 +194,19 @@ class AuthSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    def __init__(self, *args, **kwargs):
-        """Initialize settings, defaulting `oidc` from the environment.
-
-        `setdefault`, not an unconditional assignment: overwriting `kwargs`
-        made `AuthSettings(oidc=...)` silently ignored, which in turn made
-        `validate_oidc_config` below and the `if not settings.oidc` guards in
-        `auth.py` dead code (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
-        """
-        kwargs.setdefault("oidc", OIDCConfig())
-        super().__init__(*args, **kwargs)
-
     @model_validator(mode="after")
     def validate_oidc_config(self):
-        """Fail at startup, not at the first request, on incomplete OIDC config."""
+        """Fail at startup, not at the first request, on incomplete OIDC config.
+
+        The OIDC settings are read only for the "oidc" method, so leftover
+        OIDC variables cannot stop another method from starting. An `oidc`
+        argument is kept (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
+        """
         if self.method != "oidc":
             return self
 
-        if not self.oidc:
-            raise ValueError("OIDC configuration required when method is 'oidc'")
+        if self.oidc is None:
+            self.oidc = OIDCConfig()
 
         missing = [
             f"TITILER_OPENEO_AUTH_OIDC_{name.upper()}"
@@ -236,6 +217,18 @@ class AuthSettings(BaseSettings):
             raise ValueError(
                 "OIDC authentication is enabled but incompletely configured. "
                 f"Missing: {', '.join(missing)}."
+            )
+
+        if not self.oidc.redirect_url and any(
+            grant.startswith(("implicit", "authorization_code"))
+            for grant in self.oidc.grant_types
+        ):
+            # openEO API: redirect URLs MUST be given for these flows. A
+            # warning, not an error: device code logins work without them.
+            logger.warning(
+                "The OIDC default client lists an authorization code or implicit "
+                "flow, but TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL is empty: the "
+                "openEO Web Editor will ask users for a client ID."
             )
         return self
 

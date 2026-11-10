@@ -2,6 +2,8 @@
 
 import base64
 import json
+import logging
+import os
 import time
 from unittest.mock import MagicMock, Mock, patch
 
@@ -37,8 +39,8 @@ def oidc_config():
 def settings(oidc_config):
     """Real settings, not a Mock.
 
-    Possible only because `AuthSettings.__init__` no longer overwrites its own
-    `oidc` argument (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
+    Possible only because `AuthSettings` no longer overwrites its own `oidc`
+    argument (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
     """
     return AuthSettings(method="oidc", oidc=oidc_config)
 
@@ -558,16 +560,132 @@ def test_provider_id_and_grant_types_parse_from_env(monkeypatch):
     assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
 
 
-@pytest.mark.parametrize("provider_id", ["", "a/b", "CDSE prod", "x" * 21])
+@pytest.mark.parametrize(
+    "provider_id",
+    # A trailing newline (a Helm `|` block, a Secret built from a file) or a
+    # non-ASCII letter cannot be sent back in an HTTP header.
+    ["", " ", "a/b", "CDSE prod", "x" * 21, "Łódź", "é", "²"],
+)
 def test_invalid_provider_id_is_refused(provider_id):
     with pytest.raises(ValidationError, match="provider_id"):
         OIDCConfig(provider_id=provider_id)
 
 
-@pytest.mark.parametrize("grant_types", ["", "password", []])
+@pytest.mark.parametrize(
+    "grant_types",
+    [
+        "",
+        " ",
+        "password",
+        [],
+        "refresh_token refresh_token authorization_code+pkce",
+        # A refresh token is never the first token a client gets.
+        "refresh_token",
+    ],
+)
 def test_invalid_grant_types_are_refused(grant_types):
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="grant_types"):
         OIDCConfig(grant_types=grant_types)
+
+
+def test_empty_oidc_env_values_keep_the_defaults(monkeypatch):
+    for name in ("PROVIDER_ID", "GRANT_TYPES", "SCOPES", "REDIRECT_URL"):
+        monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", "")
+    config = OIDCConfig()
+    defaults = OIDCConfig.model_fields
+    assert config.provider_id == defaults["provider_id"].default == "oidc"
+    assert config.grant_types == defaults["grant_types"].default
+    assert config.scopes == defaults["scopes"].default
+    assert config.redirect_url == []
+
+
+def test_blank_oidc_env_values_keep_the_defaults(monkeypatch):
+    """`env_ignore_empty` alone let `" "` replace a list default with `[]`."""
+    for name in ("PROVIDER_ID", "GRANT_TYPES", "SCOPES", "TITLE"):
+        monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", " \n")
+    config = OIDCConfig()
+    defaults = OIDCConfig.model_fields
+    assert config.provider_id == "oidc"
+    assert config.grant_types == defaults["grant_types"].default
+    assert config.scopes == defaults["scopes"].default
+    assert config.title == defaults["title"].default
+
+
+def test_blank_oidc_dotenv_values_keep_the_defaults(tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text('TITILER_OPENEO_AUTH_OIDC_SCOPES=" "\n')
+    config = OIDCConfig(_env_file=dotenv)
+    assert config.scopes == OIDCConfig.model_fields["scopes"].default
+
+
+def test_oidc_settings_are_stripped(monkeypatch):
+    """A Helm `|` block or a file-built Secret ends with a newline; kept, a
+    `client_id` would never match a token `aud`."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", f" {WK_URL}\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://a/\n")
+    config = OIDCConfig()
+    assert config.client_id == "mine"
+    assert config.wk_url == WK_URL
+    assert config.provider_id == "CDSE"
+    assert config.redirect_url == ["http://a/"]
+    assert OIDCConfig(provider_id="CDSE\n").provider_id == "CDSE"
+
+
+def test_auth_method_from_the_developer_env_does_not_leak():
+    """The autouse fixture also removes `TITILER_OPENEO_AUTH_METHOD`."""
+    assert "TITILER_OPENEO_AUTH_METHOD" not in os.environ
+    assert AuthSettings.model_config["env_file"] is None
+
+
+def test_list_settings_parse_space_separated_dotenv(tmp_path):
+    """`.env` values are space-separated too, not JSON (docs/src/local-setup.md)."""
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        'TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce refresh_token"\n'
+        'TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://editor.openeo.org/ http://a/"\n'
+        "TITILER_OPENEO_AUTH_OIDC_SCOPES=openid\n"
+    )
+    config = OIDCConfig(_env_file=dotenv)
+    assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
+    assert config.redirect_url == ["https://editor.openeo.org/", "http://a/"]
+    assert config.scopes == ["openid"]
+
+
+def test_other_methods_ignore_the_oidc_settings(monkeypatch):
+    """Leftover OIDC variables must not stop a basic-auth deployment."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "my-idp")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES", "password")
+    settings = AuthSettings(
+        method="basic", users={"alice": {"password": "s3cret"}}, _env_file=None
+    )
+    assert settings.oidc is None
+
+
+def test_oidc_method_reads_and_checks_the_oidc_settings(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", WK_URL)
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE")
+    assert AuthSettings(method="oidc", _env_file=None).oidc.provider_id == "CDSE"
+
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "my-idp")
+    with pytest.raises(ValidationError, match="provider_id"):
+        AuthSettings(method="oidc", _env_file=None)
+
+
+def test_authorization_code_without_redirect_urls_warns(caplog):
+    """openEO API: redirect URLs MUST be given for an authorization code client."""
+    config = OIDCConfig(client_id="mine", wk_url=WK_URL)
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.settings"):
+        AuthSettings(method="oidc", oidc=config)
+    assert "TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL" in caplog.text
+
+    caplog.clear()
+    config = OIDCConfig(client_id="mine", wk_url=WK_URL, redirect_url="http://a/")
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.settings"):
+        AuthSettings(method="oidc", oidc=config)
+    assert caplog.text == ""
 
 
 def test_token_for_the_configured_provider_id_is_accepted(settings, mock_key):

@@ -220,6 +220,128 @@ tests:
             name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
           any: true
 
+  - it: should join an OIDC setting given as a YAML list
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.grantTypes:
+        - authorization_code+pkce
+        - refresh_token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
+
+  - it: should not set a blank OIDC setting
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.grantTypes: " "
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+          any: true
+
+  - it: should refuse an OIDC setting that YAML read as a boolean
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      # `providerId: NO` in a values file
+      auth.oidc.providerId: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.providerId must be a string"
+
+  - it: should refuse a list item that YAML read as a boolean or a number
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      # `allowedTenants: [NO, 123]` in a values file
+      auth.oidc.allowedTenants: [false, 123]
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.allowedTenants must be a string or a list of strings"
+
+  - it: should trim the OIDC settings, so a | block passes no newline
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client\n"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: "CDSE\n"
+      auth.oidc.redirectUrl: ["https://a/\n", " https://b/ "]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_CLIENT_ID
+            value: "client"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+            value: "https://a/ https://b/"
+
+  - it: should refuse an OIDC setting that YAML read as a number
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.providerId must be a string"
+
+  - it: should not render an OIDC setting also set through env or envVars twice
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: "CDSE"
+      auth.oidc.grantTypes: "authorization_code+pkce refresh_token"
+      env:
+        TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID: "OTHER"
+      envVars:
+        fromSecret:
+          - name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            secretName: oidc
+            secretKey: grant-types
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "OTHER"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
+
   - it: should not set a strategy by default
     asserts:
       - isNull:
