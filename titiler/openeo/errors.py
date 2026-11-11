@@ -260,6 +260,24 @@ class AuthenticationFailed(OpenEOException):
         )
 
 
+class TokenInvalid(OpenEOException):
+    """The bearer token is expired or invalid.
+
+    On this code the openEO Python client refreshes the access token and retries.
+    """
+
+    def __init__(self, message: str):
+        """Initialize error with the reason the token was rejected."""
+        super().__init__(
+            message=message,
+            code="TokenInvalid",
+            # 403 as errors.json says, not RFC 6750's 401: openeo-python-client
+            # refreshes on 401 only from 0.26.0, but on 403 since 0.13.0.
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        self.headers = {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+
+
 class AccessDenied(OpenEOException):
     """Access to the resource is forbidden."""
 

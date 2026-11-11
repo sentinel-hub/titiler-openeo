@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
-from .errors import ServiceUnavailable
+from .errors import ServiceUnavailable, TokenInvalid
 from .models.auth import BasicAuthUser, User
 from .services.base import ServicesStore
 from .settings import AuthSettings, OIDCConfig
@@ -324,10 +324,7 @@ class OIDCAuth(Auth):
             key = self._find_key(self.get_jwks(refresh=True), kid)
 
         if key is None:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail="Unable to find appropriate key",
-            )
+            raise TokenInvalid("Unable to find appropriate key")
 
         return key
 
@@ -381,15 +378,9 @@ class OIDCAuth(Auth):
             # question is only ever *why* a known key does not verify it.
             detail = self._explain_bad_signature(header, payload)
             logger.warning("OIDC signature verification failed. %s", detail)
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail=detail,
-            ) from err
+            raise TokenInvalid(detail) from err
         except ValueError as err:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail=str(err),
-            ) from err
+            raise TokenInvalid(str(err)) from err
 
     @staticmethod
     def _explain_bad_signature(header: Dict, payload: Dict) -> str:
@@ -574,18 +565,22 @@ class OIDCAuth(Auth):
                 name=name_claim,
             )
 
-        except HTTPException:
+        except (HTTPException, TokenInvalid):
             # Already a considered response with its own detail. Re-wrapping it
             # produced messages like "401: 401:" -- the outer detail being
             # `str()` of the inner exception -- which hid the real cause.
             raise
+        except httpx.HTTPError as err:
+            # The provider, not the token, failed: a refreshed token would
+            # fail the same way, so the client should retry instead.
+            raise ServiceUnavailable(
+                "Could not reach the OIDC provider", retry_after=5
+            ) from err
         except Exception as err:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
+            raise TokenInvalid(
                 # Some exceptions (notably cryptography's) stringify to "",
                 # which would otherwise produce an empty, useless detail.
-                detail=str(err) or f"{type(err).__name__} during token validation",
-                headers={"WWW-Authenticate": "Bearer"},
+                str(err) or f"{type(err).__name__} during token validation"
             ) from err
 
         # Outside the `try`: a store failure here must not become a 401.
