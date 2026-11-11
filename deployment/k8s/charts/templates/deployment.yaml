@@ -98,10 +98,8 @@ spec:
             {{- if and (eq .Values.auth.method "oidc") .Values.auth.oidc.enabled }}
             {{- /*
               OIDC settings. A list is joined with spaces, and each value is
-              trimmed, so a `|` block does not pass a trailing newline. A blank
-              one is left out, so the app keeps its default; a name also set
-              through `env` or `envVars` is left out, so it is not rendered
-              twice. A value or a list item YAML read as a boolean or a number
+              trimmed, so a `|` block does not pass a trailing newline. A value
+              or a list item YAML read as a boolean or a number
               (`providerId: NO`, `allowedTenants: [NO]`) is refused: rendered
               as text, it would not be the value meant.
             */}}
@@ -123,28 +121,21 @@ spec:
             {{- $parts = append $parts (trim $item) }}
             {{- end }}
             {{- $val = join " " $parts | trim }}
-            {{- if and $val (not (has $name $overridden)) }}
-            - name: {{ $name }}
-              value: {{ $val | quote }}
+            {{- with include "titiler.optionalEnv" (dict "name" $name "value" $val "overridden" $overridden) }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- end }}
             {{- end }}
-            {{- /*
-              Pool settings. A key set to null or "" is left out, so the app
-              keeps its default; a name also set through `env` or `envVars`
-              is left out, so it is not rendered twice.
-            */}}
             {{- $pool := .Values.database.pool | default dict }}
             {{- range $key, $suffix := dict "size" "POOL_SIZE" "maxOverflow" "MAX_OVERFLOW" "timeout" "POOL_TIMEOUT" "recycle" "POOL_RECYCLE" "prePing" "POOL_PRE_PING" }}
             {{- $name := printf "TITILER_OPENEO_STORE_%s" $suffix }}
             {{- $val := get $pool $key }}
-            {{- if and (hasKey $pool $key) (not (kindIs "invalid" $val)) (ne (toString $val) "") (not (has $name $overridden)) }}
             {{- /* YAML numbers are float64; print whole ones as integers, not 1e+06 */}}
             {{- if and (kindIs "float64" $val) (eq (floor $val) $val) }}
             {{- $val = int64 $val }}
             {{- end }}
-            - name: {{ $name }}
-              value: {{ $val | toString | quote }}
+            {{- with include "titiler.optionalEnv" (dict "name" $name "value" $val "overridden" $overridden) }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- end }}
             {{- include "titiler.literalEnv" . | trim | nindent 12 }}

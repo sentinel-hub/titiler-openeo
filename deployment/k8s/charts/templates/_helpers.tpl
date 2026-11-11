@@ -145,3 +145,18 @@ TITILER_OPENEO_STORE_URL is skipped: it comes from `titiler.storeEnv`.
 {{- end }}
 {{- end }}
 {{- end -}}
+
+{{/*
+One OIDC or pool setting of the Deployment, from a dict: `name`, `value` and
+`overridden`, the names also set through `env` or `envVars`. A blank value
+(null or "", not false or 0) is left out, so the app keeps its default; an
+overridden name is left out, so it is not rendered twice. Renders one entry
+with no leading newline, or nothing: call it in `with`, since nindent on
+nothing leaves a blank line.
+*/}}
+{{- define "titiler.optionalEnv" -}}
+{{- if and (not (kindIs "invalid" .value)) (ne (toString .value) "") (not (has .name .overridden)) -}}
+- name: {{ .name }}
+  value: {{ .value | toString | quote }}
+{{- end }}
+{{- end -}}
