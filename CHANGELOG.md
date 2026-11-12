@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.21.0 (2026-11-12)
+
+## What's Changed
+* build(docker): move the image to Wolfi and Python 3.14 by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/476
+* chore(deps): bump the all group across 1 directory with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/484
+* chore(deps): bump the docker group with 2 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/486
+* chore(deps): bump the security group across 1 directory with 12 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/487
+* ci: scan the image with Trivy and rebuild it nightly by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/478
+* fix(helm): default image tag to v<appVersion> by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/482
+* chore(main): release titiler-openeo-chart 3.2.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/483
+* fix(helm)!: pass basic-auth users in the variable the app reads by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/480
+* fix(auth)!: remove the built-in basic auth user by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/481
+* fix(docker): give the smoke test and docker compose a basic auth user by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/492
+* fix(store)!: create the PostgreSQL schema in a Helm Job, not at import by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/479
+* fix(helm): pin the init-store busybox image and make it configurable by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/488
+* chore(deps): bump chainguard/wolfi-base from `771146c` to `24f549a` in the docker group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/489
+* feat(auth): add configurable OIDC provider ID and grant types by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/494
+* fix(auth): refuse OIDC settings that openEO clients cannot use by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/495
+* chore(deps): bump the security group across 1 directory with 6 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/491
+* fix(auth): answer a rejected OIDC token with TokenInvalid by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/496
+* fix(auth): read OIDC list settings given as a JSON array by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/497
+* refactor(helm): render the OIDC and pool env settings through one helper by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/498
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.20.0...v0.21.0
+
 ## 0.20.0 (2026-10-28)
 
 ## What's Changed
