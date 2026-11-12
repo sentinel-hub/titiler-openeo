@@ -1,9 +1,18 @@
 """Titiler-openEO API settings."""
 
+import json
 import logging
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, TypeVar, Union
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BeforeValidator,
+    Field,
+    PostgresDsn,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -30,6 +39,28 @@ OIDCGrantType = Literal[
 #: not pass either: in pydantic's pattern, unlike Python's `re`, `$` is the
 #: end of the text. `OIDCConfig` strips surrounding whitespace first.
 OIDCProviderId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_]{1,20}$")]
+
+
+def _split_list(value: Any) -> Any:
+    """Read a string as a JSON array or as space-separated values."""
+    if isinstance(value, str):
+        if value.strip().startswith("["):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as err:
+                raise ValueError(
+                    f"starts with '[' but is not a valid JSON array ({err})"
+                ) from err
+        return value.split()
+    return value
+
+
+_Item = TypeVar("_Item")
+
+#: A list setting, as space-separated values (one value is a list of one) or
+#: a JSON array. `NoDecode` stops pydantic-settings from decoding variables as
+#: JSON, which refuses space-separated values; `_split_list` reads both.
+SpaceSeparated = Annotated[list[_Item], NoDecode, BeforeValidator(_split_list)]
 
 
 class _BlankIsUnset(PydanticBaseSettingsSource):
@@ -68,11 +99,9 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = ""
     wk_url: str = ""
-    # The list settings are space-separated in the environment and in `.env`
-    # (`NoDecode`: not JSON). A single URL stays valid. Advertised to openEO
-    # clients as `redirect_urls` in `GET /credentials/oidc`.
-    redirect_url: Annotated[list[str], NoDecode] = []
-    scopes: Annotated[list[str], NoDecode] = ["openid", "email", "profile"]
+    # Advertised to openEO clients as `redirect_urls` in `GET /credentials/oidc`.
+    redirect_url: SpaceSeparated[str] = []
+    scopes: SpaceSeparated[str] = ["openid", "email", "profile"]
     name_claim: str = "name"
     title: str = "OIDC"
     description: str = "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
@@ -89,7 +118,7 @@ class OIDCConfig(BaseSettings):
     # Python client's `authenticate_oidc()` uses the default client only when
     # it lists `refresh_token` and a device code flow, and then fails if the
     # provider has the device code flow disabled for the client (#465).
-    grant_types: Annotated[list[OIDCGrantType], NoDecode, Field(min_length=1)] = [
+    grant_types: Annotated[SpaceSeparated[OIDCGrantType], Field(min_length=1)] = [
         "authorization_code+pkce",
         "urn:ietf:params:oauth:grant-type:device_code+pkce",
         "refresh_token",
@@ -101,7 +130,7 @@ class OIDCConfig(BaseSettings):
     # (`api://<client_id>`). Empty by default, which accepts exactly what this
     # backend accepted before the setting existed.
     # See docs/adr/0006-microsoft-entra-oidc.md S2.2 change 6.
-    audiences: Annotated[list[str], NoDecode] = []
+    audiences: SpaceSeparated[str] = []
 
     # Which token claim becomes `User.user_id`. Services, UDPs and tile
     # assignments are all keyed on it, so changing this on a running deployment
@@ -116,22 +145,7 @@ class OIDCConfig(BaseSettings):
     # discovery URL, that is every Microsoft work and personal account. The
     # personal-account (MSA) tenant is 9188040d-6c67-4c5b-b112-36a304b66dad.
     # When set, a token without `tid` is rejected. See ADR 0006 S2.3.
-    allowed_tenants: Annotated[list[str], NoDecode] = []
-
-    @field_validator(
-        "redirect_url",
-        "scopes",
-        "grant_types",
-        "audiences",
-        "allowed_tenants",
-        mode="before",
-    )
-    @classmethod
-    def _split_space_separated(cls, value: Any) -> Any:
-        """Accept one value or a space-separated list, as a `str` or a list."""
-        if isinstance(value, str):
-            return value.split()
-        return value
+    allowed_tenants: SpaceSeparated[str] = []
 
     @field_validator("grant_types")
     @classmethod
@@ -206,7 +220,19 @@ class AuthSettings(BaseSettings):
             return self
 
         if self.oidc is None:
-            self.oidc = OIDCConfig()
+            try:
+                self.oidc = OIDCConfig()
+            except ValidationError as err:
+                # Raised as is, its errors would be reported for `AuthSettings`,
+                # by field name only: say which variable (and list item) is
+                # wrong, as the hidden input cannot show it.
+                reasons = "; ".join(
+                    f"TITILER_OPENEO_AUTH_OIDC_{str(error['loc'][0]).upper()}"
+                    + (f" item {error['loc'][1] + 1}" if len(error["loc"]) > 1 else "")
+                    + f": {error['msg']}"
+                    for error in err.errors()
+                )
+                raise ValueError(f"Invalid OIDC settings. {reasons}") from err
 
         missing = [
             f"TITILER_OPENEO_AUTH_OIDC_{name.upper()}"

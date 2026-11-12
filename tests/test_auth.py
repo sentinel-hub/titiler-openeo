@@ -643,7 +643,7 @@ def test_auth_method_from_the_developer_env_does_not_leak():
 
 
 def test_list_settings_parse_space_separated_dotenv(tmp_path):
-    """`.env` values are space-separated too, not JSON (docs/src/local-setup.md)."""
+    """`.env` values are space-separated too (docs/src/local-setup.md)."""
     dotenv = tmp_path / ".env"
     dotenv.write_text(
         'TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce refresh_token"\n'
@@ -654,6 +654,31 @@ def test_list_settings_parse_space_separated_dotenv(tmp_path):
     assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
     assert config.redirect_url == ["https://editor.openeo.org/", "http://a/"]
     assert config.scopes == ["openid"]
+
+
+@pytest.mark.parametrize("text", [" ".join, json.dumps])
+@pytest.mark.parametrize(
+    "name, items",
+    [
+        ("redirect_url", ["https://editor.openeo.org/", "http://a/"]),
+        ("scopes", ["openid", "email"]),
+        ("grant_types", ["authorization_code+pkce", "refresh_token"]),
+        ("audiences", ["api://a", "b"]),
+        ("allowed_tenants", [TENANT_A, MSA_TENANT]),
+    ],
+)
+def test_list_settings_read_space_separated_values_or_a_json_array(
+    monkeypatch, tmp_path, name, items, text
+):
+    """Space-separated is the documented form; a JSON array is not one item."""
+    variable = f"TITILER_OPENEO_AUTH_OIDC_{name.upper()}"
+    monkeypatch.setenv(variable, f" {text(items)}\n")
+    assert getattr(OIDCConfig(), name) == items
+
+    monkeypatch.delenv(variable)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(f"{variable}='{text(items)}'\n")
+    assert getattr(OIDCConfig(_env_file=dotenv), name) == items
 
 
 def test_other_methods_ignore_the_oidc_settings(monkeypatch):
@@ -673,8 +698,51 @@ def test_oidc_method_reads_and_checks_the_oidc_settings(monkeypatch):
     assert AuthSettings(method="oidc", _env_file=None).oidc.provider_id == "CDSE"
 
     monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "my-idp")
-    with pytest.raises(ValidationError, match="provider_id"):
+    with pytest.raises(
+        ValidationError,
+        match="TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID: String should match pattern",
+    ):
         AuthSettings(method="oidc", _env_file=None)
+
+
+@pytest.mark.parametrize(
+    "name, value, errors",
+    [
+        (
+            "GRANT_TYPES",
+            "refresh_token password device_code",
+            [
+                "GRANT_TYPES item 2: Input should be 'implicit'",
+                "GRANT_TYPES item 3: Input should be 'implicit'",
+            ],
+        ),
+        (
+            "SCOPES",
+            '["openid", email]',
+            ["SCOPES: Value error, starts with '[' but is not a valid JSON array"],
+        ),
+    ],
+)
+def test_a_bad_oidc_variable_is_named_at_startup(monkeypatch, name, value, errors):
+    """The error names the variable and the item, not a field of `AuthSettings`."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", WK_URL)
+    monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", value)
+    with pytest.raises(ValidationError) as excinfo:
+        AuthSettings(method="oidc", _env_file=None)
+    for error in errors:
+        assert f"TITILER_OPENEO_AUTH_OIDC_{error}" in str(excinfo.value)
+
+
+def test_settings_that_skipped_validation_fail_at_startup():
+    """`model_copy` and `model_construct` skip the validator that sets `oidc`."""
+    basic = AuthSettings(method="basic", users={"alice": {"password": "s3cret"}})
+    for settings in (
+        basic.model_copy(update={"method": "oidc"}),
+        AuthSettings.model_construct(method="oidc"),
+    ):
+        with pytest.raises(ValueError, match="OIDC configuration required"):
+            get_auth(settings, store=Mock())
 
 
 def test_authorization_code_without_redirect_urls_warns(caplog):
