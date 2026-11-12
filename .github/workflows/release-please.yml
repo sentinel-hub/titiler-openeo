@@ -171,7 +171,7 @@ jobs:
       - name: Push
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
-        run: printf '%s\n' "$TAGS" | xargs -r -n1 docker push
+        run: printf '%s\n' "$TAGS" | xargs -r ./docker/push-tags.sh
 
   publish-helm-chart-oci:
     needs: release-please
