@@ -66,12 +66,12 @@ dev = [
     "shapely>=2.0.0",
     "sqlalchemy>=2.0.0",
     "pre-commit",
-    "ipython~=8.0.0",
+    "ipython>=8.0,<8.11",
 ]
 notebook = [
     "jupyter-contrib-nbextensions>=0.7.0",
     "notebook>=6.5.4,<7.0.0",
-    "ipython~=8.0.0",
+    "ipython>=8.0,<8.11",
     "matplotlib",
     "openeo",
 ]
