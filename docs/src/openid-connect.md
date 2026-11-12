@@ -210,8 +210,8 @@ openEO clients send the **access token**, never the ID token. With only
 `openid profile email` requested, Entra issues an access token audienced at
 **Microsoft Graph**, and those cannot be validated by anyone but Graph: they
 carry a `nonce` in the JWT header and their signature will not verify against
-the tenant's published JWKS. The symptom is a 401 with *"Token signature
-verification failed"*.
+the tenant's published JWKS. The symptom is a 403 `TokenInvalid` with *"Token
+signature verification failed"*.
 
 Entra must therefore issue a token audienced at *this* backend:
 
@@ -354,6 +354,12 @@ and `_verify_claims` methods:
    `azp` must equal one of them.
 5. `exp` is **required**, and checked with 60 seconds of clock-skew allowance.
    `nbf` is checked when present.
+
+A token that fails any of these checks, or cannot be parsed, gets `403` with
+the openEO error code `TokenInvalid`, as the openEO API specifies. On that
+answer the openEO Python client (0.13.0 and later) refreshes the access token
+and retries. If the provider cannot be reached, the answer is `503`
+instead: a new token would not help.
 
 The discovery document is cached for an hour rather than for the life of the
 process, so a provider that moves its `jwks_uri` does not break a running

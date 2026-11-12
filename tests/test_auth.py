@@ -7,11 +7,14 @@ import os
 import time
 from unittest.mock import MagicMock, Mock, patch
 
+import httpx
 import pytest
 from fastapi.exceptions import HTTPException
 from pydantic import ValidationError
+from starlette.testclient import TestClient
 
 from titiler.openeo.auth import AuthToken, BasicAuth, OIDCAuth, OIDCConfig, get_auth
+from titiler.openeo.errors import TokenInvalid
 from titiler.openeo.settings import AuthSettings
 
 ISSUER = "https://auth.example.com"
@@ -353,24 +356,24 @@ def test_common_accepts_a_personal_account_token(mock_key):
 
 
 def test_common_rejects_a_tid_iss_mismatch(mock_key):
-    with pytest.raises(HTTPException, match="Invalid issuer"):
+    with pytest.raises(TokenInvalid, match="Invalid issuer"):
         _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_B)
 
 
 def test_common_rejects_a_token_without_tid(mock_key):
-    with pytest.raises(HTTPException, match="'tid'"):
+    with pytest.raises(TokenInvalid, match="'tid'"):
         _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A))
 
 
 @pytest.mark.parametrize("tid", ["not-a-guid", f"{TENANT_A}/v2.0/x", 42])
 def test_common_rejects_a_malformed_tid(mock_key, tid):
     """`tid` fills one path segment of the issuer, and nothing else."""
-    with pytest.raises(HTTPException, match="'tid'"):
+    with pytest.raises(TokenInvalid, match="'tid'"):
         _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=tid)
 
 
 def test_common_rejects_a_v1_issuer(mock_key):
-    with pytest.raises(HTTPException, match="requestedAccessTokenVersion"):
+    with pytest.raises(TokenInvalid, match="requestedAccessTokenVersion"):
         _validate(
             _entra_auth(),
             mock_key,
@@ -381,7 +384,7 @@ def test_common_rejects_a_v1_issuer(mock_key):
 
 def test_common_rejects_a_work_token_signed_by_a_personal_account_key(mock_key):
     """The key's own `issuer` is checked, not only the discovery issuer."""
-    with pytest.raises(HTTPException, match="signing key"):
+    with pytest.raises(TokenInvalid, match="signing key"):
         _validate(
             _entra_auth(key_issuer=_entra_iss(MSA_TENANT)),
             mock_key,
@@ -392,7 +395,7 @@ def test_common_rejects_a_work_token_signed_by_a_personal_account_key(mock_key):
 
 def test_allowed_tenants_rejects_another_tenant(mock_key):
     auth = _entra_auth(allowed_tenants=[TENANT_A, MSA_TENANT])
-    with pytest.raises(HTTPException, match="Tenant not allowed"):
+    with pytest.raises(TokenInvalid, match="Tenant not allowed"):
         _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
 
 
@@ -415,7 +418,7 @@ def test_single_tenant_entra_is_unchanged(mock_key):
     auth._config_cache["issuer"] = iss
 
     _validate(auth, mock_key, iss=iss, tid=TENANT_A)
-    with pytest.raises(HTTPException, match="Invalid issuer"):
+    with pytest.raises(TokenInvalid, match="Invalid issuer"):
         _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
 
 
@@ -837,3 +840,83 @@ def test_store_failure_during_login_tracking_is_a_503(auth, mock_key):
     assert excinfo.value.status_code == 503
     assert excinfo.value.headers == {"Retry-After": "5"}
     assert "10.0.0.5" not in excinfo.value.message
+
+
+def test_an_unreachable_provider_is_a_503_not_a_bad_token(auth):
+    """Refreshing the token cannot fix an outage, so it must not say TokenInvalid."""
+    from titiler.openeo.errors import ServiceUnavailable
+
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "get_jwks", side_effect=httpx.ConnectError("down")):
+        with pytest.raises(ServiceUnavailable) as excinfo:
+            auth.validate(f"oidc/oidc/{token}")
+
+    assert excinfo.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# openEO error code, through the app
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def store_type():
+    """One store is enough: these tests never reach it."""
+    return "local"
+
+
+@pytest.fixture
+def oidc_client(main_module, monkeypatch, auth) -> TestClient:
+    monkeypatch.setattr(main_module, "auth", auth)
+    return TestClient(main_module.create_app())
+
+
+def _get_me(client: TestClient, token: str):
+    return client.get("/me", headers={"Authorization": f"Bearer oidc/oidc/{token}"})
+
+
+def _assert_token_invalid(response, message: str) -> None:
+    """The openEO Python client refreshes its token only on this code.
+
+    With 403, as errors.json specifies: clients before 0.26.0 do not refresh on 401.
+    """
+    body = response.json()
+    assert body["code"] == "TokenInvalid"
+    assert body["message"] and message in body["message"]
+    assert response.status_code == 403
+    assert response.headers["WWW-Authenticate"].startswith("Bearer")
+
+
+def test_an_expired_token_answers_token_invalid(oidc_client, mock_key):
+    token = create_mock_token(_payload(exp=time.time() - 3600))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        _assert_token_invalid(_get_me(oidc_client, token), "Token expired")
+
+
+def test_a_bad_signature_answers_token_invalid(oidc_client, mock_key):
+    from cryptography.exceptions import InvalidSignature
+
+    mock_key.verify.side_effect = InvalidSignature()
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        _assert_token_invalid(
+            _get_me(oidc_client, token), "signature verification failed"
+        )
+
+
+def test_an_unknown_key_id_answers_token_invalid(oidc_client, auth):
+    auth._jwks_cache = {"keys": [_jwk("other")]}
+    auth._jwks_refreshed_at = time.monotonic()  # refetch on cooldown: no network
+    _assert_token_invalid(
+        _get_me(oidc_client, create_mock_token(_payload())),
+        "Unable to find appropriate key",
+    )
+
+
+def test_a_malformed_token_answers_token_invalid(oidc_client):
+    _assert_token_invalid(_get_me(oidc_client, "not-a-jwt"), "")
+
+
+def test_a_missing_authorization_header_is_not_token_invalid(oidc_client):
+    """Nothing to refresh: the client has to log in."""
+    assert oidc_client.get("/me").json()["code"] != "TokenInvalid"
