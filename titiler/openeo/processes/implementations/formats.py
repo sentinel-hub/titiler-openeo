@@ -21,6 +21,7 @@ from rio_tiler.models import ImageData
 
 from ...errors import FormatUnsuitable
 from .data_model import RasterStack
+from .vector_model import VectorCube
 
 DataKind = Literal["raster", "vector", "other"]
 _DATA_KINDS: Tuple[DataKind, ...] = ("raster", "vector", "other")
@@ -75,6 +76,8 @@ def data_kind(data: Any) -> DataKind:
     # RasterStack is a dict: test it before the FeatureCollection check.
     if isinstance(data, (RasterStack, ImageData, numpy.ndarray)):
         return "raster"
+    if isinstance(data, VectorCube):
+        return "vector"
     if isinstance(data, dict) and data.get("type") == "FeatureCollection":
         return "vector"
     return "other"
@@ -471,6 +474,9 @@ def encode(data: Any, format: str, options: Optional[Dict] = None) -> SaveResult
             f"Output format '{fmt.name}' can't store {kind} data. "
             f"Formats for {kind} data: {_format_names(kind)}."
         )
+    if isinstance(data, VectorCube):
+        # The vector encoders write a GeoJSON FeatureCollection (EPSG:4326).
+        data = data.to_feature_collection()
     return SaveResultData(
         data=encoder(data, fmt, dict(options or {})), media_type=fmt.media_type
     )

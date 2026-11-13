@@ -14,6 +14,7 @@ from rio_tiler.utils import resize_array
 
 from .callbacks import call_reducer, recompute_each_call
 from .data_model import ImageData, RasterStack, compute_cutline_mask
+from .vector_model import VectorCube
 
 __all__ = [
     "resample_spatial",
@@ -147,6 +148,10 @@ def _process_geometries(geometries: Union[Dict, Any]) -> Tuple[List[Any], List[D
     features = []
     properties = []
 
+    if isinstance(geometries, VectorCube):
+        # The geometries go to rio-tiler, which takes EPSG:4326 by default.
+        geometries = geometries.to_feature_collection()
+
     if isinstance(geometries, Dict):
         if "type" in geometries:
             if geometries["type"] == "FeatureCollection":
@@ -215,26 +220,125 @@ def _apply_reducer_to_image(
     return dict(zip(img.band_descriptions, band_results, strict=True))
 
 
+def _result_dims(
+    results: List[Any], target_dimension: Optional[str]
+) -> Tuple[str, ...]:
+    """Return the dimensions of a reducer result, after `geometry` and `t`.
+
+    A result is a scalar, or a dict by band name for a cube with more than one
+    band. With `target_dimension`, each scalar is a dict with the keys
+    `value`, `total_count` and `valid_count`.
+    """
+    if not results:
+        return (target_dimension,) if target_dimension is not None else ()
+    sample = results[0]
+    if target_dimension is not None:
+        multi_band = isinstance(next(iter(sample.values())), dict)
+    else:
+        multi_band = isinstance(sample, dict)
+    dims: Tuple[str, ...] = ("bands",) if multi_band else ()
+    if target_dimension is not None:
+        dims += (target_dimension,)
+    return dims
+
+
+def _level_labels(results: List[Any], depth: int) -> List[List[Any]]:
+    """Return the labels of each nesting level of the results, in first-seen order."""
+    levels = []
+    current = results
+    for _ in range(depth):
+        levels.append(list(dict.fromkeys(key for result in current for key in result)))
+        current = [value for result in current for value in result.values()]
+    return levels
+
+
+def _write_cells(
+    values: numpy.ma.MaskedArray,
+    index: Tuple[int, ...],
+    result: Any,
+    levels: List[List[Any]],
+) -> None:
+    """Write one nested reducer result into the cube values, at `index`."""
+    if not levels:
+        if result is not numpy.ma.masked:
+            # Write the raw result: the masked array would unwrap it.
+            values.data[index] = result
+            values.mask[index] = False
+        return
+    for i, label in enumerate(levels[0]):
+        if label in result:
+            _write_cells(values, index + (i,), result[label], levels[1:])
+
+
+def _vector_cube_from_results(
+    kept: List[Tuple[Any, Dict, Dict[Any, Any]]],
+    dates: List[Any],
+    target_dimension: Optional[str],
+) -> VectorCube:
+    """Build the vector cube of `aggregate_spatial` from the reducer results.
+
+    Args:
+        kept: For each geometry that covers pixels: its GeoJSON geometry, its
+            properties and its results by date.
+        dates: The labels of the temporal dimension, in stack order.
+        target_dimension: The `target_dimension` argument.
+
+    Returns:
+        A cube with the dimensions `geometry`, `t`, then `bands` for more than
+        one band, then `target_dimension` if it is set. The values have the
+        `object` dtype, so each result keeps its type (an integer count stays
+        an integer in JSON).
+
+    """
+    results = [result for _, _, by_date in kept for result in by_date.values()]
+    extra_dims = _result_dims(results, target_dimension)
+    levels = _level_labels(results, len(extra_dims))
+
+    dims = ("geometry", "t") + extra_dims
+    labels: Dict[str, List[Any]] = {
+        "t": list(dates),
+        **dict(zip(extra_dims, levels, strict=True)),
+    }
+    shape = (len(kept),) + tuple(len(labels[dim]) for dim in dims[1:])
+    values = numpy.ma.masked_all(shape, dtype=object)
+
+    t_index = {date: i for i, date in enumerate(dates)}
+    for g, (_, _, by_date) in enumerate(kept):
+        for date, result in by_date.items():
+            _write_cells(values, (g, t_index[date]), result, levels)
+
+    return VectorCube(
+        geometries=[geometry for geometry, _, _ in kept],
+        properties=[properties for _, properties, _ in kept],
+        values=values,
+        dims=dims,
+        labels=labels,
+    )
+
+
 def aggregate_spatial(
     data: RasterStack,
-    geometries: Union[Dict, Any],
+    geometries: Union[VectorCube, Dict, Any],
     reducer: Callable,
     target_dimension: Optional[str] = None,
     context: Optional[Any] = None,
-) -> Dict[str, Any]:
+) -> VectorCube:
     """Aggregates statistics for one or more geometries over the spatial dimensions.
 
     Args:
         data: A raster data cube with at least two spatial dimensions.
-        geometries: Geometries for which the aggregation will be computed.
+        geometries: Geometries for which the aggregation will be computed: a
+            vector data cube or GeoJSON.
         reducer: A reducer to be applied on all values of each geometry.
         target_dimension: Optional dimension name to store additional information.
         context: Additional data to be passed to the reducer.
 
     Returns:
-        A vector data cube as a GeoJSON FeatureCollection. Each feature keeps
-        its properties and gets a ``values`` property that maps each date to
-        its result. A geometry that covers no pixel on any date is left out.
+        A vector data cube with the dimensions `geometry` and `t`, then
+        `bands` for more than one band, then `target_dimension` if it is set.
+        Each geometry keeps its properties. A geometry that covers no pixel on
+        any date is left out.
+
     """
     features, properties = _process_geometries(geometries)
 
@@ -242,7 +346,8 @@ def aggregate_spatial(
     # skips its cache for the reducer's first node (see callbacks.py).
     reducer = recompute_each_call(reducer)
 
-    features_list: List[Dict[str, Any]] = []
+    dates: Dict[Any, None] = {}
+    kept: List[Tuple[Any, Dict, Dict[Any, Any]]] = []
     for feature, feature_properties in zip(features, properties, strict=True):
         geom = (
             feature["geometry"]
@@ -251,21 +356,16 @@ def aggregate_spatial(
         )
         values = {}
         for key, img in data.items():
+            dates[key] = None
             result = _apply_reducer_to_image(
                 img, geom, reducer, target_dimension, context
             )
             if result is not None:
                 values[key] = result
         if values:
-            features_list.append(
-                {
-                    "type": "Feature",
-                    "geometry": geom,
-                    "properties": {**feature_properties, "values": values},
-                }
-            )
+            kept.append((geom, feature_properties, values))
 
-    return {"type": "FeatureCollection", "features": features_list}
+    return _vector_cube_from_results(kept, list(dates), target_dimension)
 
 
 def resample_spatial(
