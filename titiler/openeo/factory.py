@@ -1675,9 +1675,16 @@ class EndpointsFactory(BaseFactory):
                     "content": {
                         "image/png": {},
                         "image/jpeg": {},
-                        "image/jpg": {},
+                        "image/tiff": {},
+                        "application/json": {},
+                        "application/geo+json": {},
+                        "text/csv": {},
+                        "application/vnd.apache.parquet": {},
+                        "application/geopackage+sqlite3": {},
+                        "application/vnd.flatgeobuf": {},
+                        "application/zip": {},
                     },
-                    "description": "Return an image.",
+                    "description": "Return the result in the format of `save_result`.",
                 }
             },
             tags=["Data Processing"],
@@ -1724,7 +1731,12 @@ class EndpointsFactory(BaseFactory):
             )
             result = encode_result(pg_callable(named_parameters=parameters))
 
-            return Response(result.data, media_type=result.media_type)
+            headers = (
+                {"Content-Disposition": f'attachment; filename="{result.filename}"'}
+                if result.filename
+                else None
+            )
+            return Response(result.data, media_type=result.media_type, headers=headers)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
