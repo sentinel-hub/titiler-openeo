@@ -6,8 +6,11 @@ the process specifications describe it as a `datacube` with a `geometry`
 dimension. `VectorCube` is only the name of the Python class.
 """
 
+import itertools
+import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from datetime import date
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import numpy
 from rasterio.crs import CRS
@@ -15,6 +18,10 @@ from rasterio.warp import transform_geom
 from rio_tiler.constants import WGS84_CRS
 
 GEOMETRY_DIMENSION = "geometry"
+TEMPORAL_DIMENSION = "t"
+
+# Property values that the GIS formats store as they are. Others become JSON.
+_SCALARS = (str, int, float, bool, date)
 
 
 def _normalize_features(obj: Any) -> List[Dict[str, Any]]:
@@ -26,6 +33,49 @@ def _normalize_features(obj: Any) -> List[Dict[str, Any]]:
     if obj["type"] == "Feature":
         return [obj]
     return [{"type": "Feature", "geometry": obj, "properties": {}}]
+
+
+def _unique_name(name: str, used: set) -> str:
+    """Return `name`, or `name_1`, `name_2`... if it is already used."""
+    candidate, n = name, 0
+    while candidate in used:
+        n += 1
+        candidate = f"{name}_{n}"
+    used.add(candidate)
+    return candidate
+
+
+def _cell(value: Any) -> Any:
+    """Return a table cell: a Python scalar, or None for no data."""
+    if value is None or value is numpy.ma.masked:
+        return None
+    if isinstance(value, numpy.generic):
+        return value.item()
+    return value
+
+
+def _property_cell(value: Any) -> Any:
+    """Return a property as a table cell. A list or a dict becomes JSON text."""
+    value = _cell(value)
+    if value is None or isinstance(value, _SCALARS):
+        return value
+    return json.dumps(value, default=str)
+
+
+@dataclass
+class VectorRecords:
+    """A vector data cube as a flat table, for the GIS formats.
+
+    Attributes:
+        geometries: One GeoJSON geometry for each row, in `crs`.
+        columns: The columns by name. `None` is a null value.
+        crs: The CRS of the geometries.
+
+    """
+
+    geometries: List[Optional[Dict[str, Any]]]
+    columns: Dict[str, List[Any]]
+    crs: CRS
 
 
 @dataclass
@@ -150,6 +200,83 @@ class VectorCube:
         properties.
         """
         return {"type": "FeatureCollection", "features": list(self.iter_features(crs))}
+
+    def to_records(self, reserved: Iterable[str] = ()) -> VectorRecords:
+        """Return the cube as a flat table, in the CRS of the cube.
+
+        There is one row for each geometry and each label of the `t`
+        dimension (one row for each geometry if there is no `t`). The columns
+        are: the properties of the geometries, then `t`, then one column for
+        each combination of labels of the other dimensions (for example
+        `B03`, or `B03_value` with a target dimension). A cube with the
+        `geometry` dimension only has a `value` column. The same layout is
+        used by the CSV output.
+
+        Args:
+            reserved: Column names that the caller uses (for example
+                `geometry`). A column with such a name gets a suffix.
+
+        """
+        used = set(reserved)
+        property_names = list(
+            dict.fromkeys(key for properties in self.properties for key in properties)
+        )
+        property_columns = {
+            name: _unique_name(str(name), used) for name in property_names
+        }
+
+        if self.values is None:
+            values = numpy.ma.masked_all((len(self), 1, 0), dtype=object)
+            dates: List[Any] = [None]
+            value_names: List[str] = []
+        else:
+            other = [dim for dim in self.dims[1:] if dim != TEMPORAL_DIMENSION]
+            if TEMPORAL_DIMENSION in self.dims:
+                axis = self.dims.index(TEMPORAL_DIMENSION)
+                values = numpy.ma.MaskedArray(
+                    numpy.moveaxis(self.values.data, axis, 1),
+                    mask=numpy.moveaxis(numpy.ma.getmaskarray(self.values), axis, 1),
+                )
+                dates = list(self.labels[TEMPORAL_DIMENSION])
+            else:
+                values = self.values[:, numpy.newaxis]
+                dates = [None]
+            values = values.reshape((len(self), len(dates), -1))
+            combinations = itertools.product(*(self.labels[dim] for dim in other))
+            value_names = (
+                ["_".join(str(label) for label in combo) for combo in combinations]
+                if other
+                else ["value"]
+            )
+        t_column = (
+            _unique_name(TEMPORAL_DIMENSION, used)
+            if TEMPORAL_DIMENSION in self.dims
+            else None
+        )
+        value_columns = [_unique_name(name, used) for name in value_names]
+
+        columns: Dict[str, List[Any]] = {
+            column: [] for column in property_columns.values()
+        }
+        if t_column:
+            columns[t_column] = []
+        for column in value_columns:
+            columns[column] = []
+
+        mask = numpy.ma.getmaskarray(values)
+        geometries: List[Optional[Dict[str, Any]]] = []
+        for g, geometry in enumerate(self.geometries):
+            for d, label in enumerate(dates):
+                geometries.append(geometry)
+                for name, column in property_columns.items():
+                    columns[column].append(_property_cell(self.properties[g].get(name)))
+                if t_column:
+                    columns[t_column].append(label)
+                for v, column in enumerate(value_columns):
+                    cell = None if mask[g, d, v] else values.data[g, d, v]
+                    columns[column].append(_cell(cell))
+
+        return VectorRecords(geometries=geometries, columns=columns, crs=self.crs)
 
     @property
     def __geo_interface__(self) -> Dict[str, Any]:

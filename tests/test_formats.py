@@ -181,7 +181,18 @@ def test_file_formats_document():
     FileFormats.model_validate(document)
 
     output = document["output"]
-    assert set(output) == {"GTiff", "PNG", "JPEG", "JSON", "GeoJSON", "CSV"}
+    assert set(output) == {
+        "GTiff",
+        "PNG",
+        "JPEG",
+        "JSON",
+        "GeoJSON",
+        "CSV",
+        "GeoParquet",
+        "GPKG",
+        "FlatGeobuf",
+        "ESRI Shapefile",
+    }
     assert output["GTiff"]["gis_data_types"] == ["raster"]
     assert output["GeoJSON"]["gis_data_types"] == ["vector"]
     assert output["JSON"]["gis_data_types"] == ["vector", "other"]
