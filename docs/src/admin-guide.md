@@ -60,7 +60,10 @@ TITILER_OPENEO_PC_TIMEOUT=10  # Per-request timeout when minting a token
 ```bash
 TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
+TITILER_OPENEO_PROCESSING_MAX_VECTOR_FEATURES=100000
 ```
+
+`MAX_VECTOR_FEATURES` limits the number of geometries in a vector data cube. A noisy raster can give one polygon for each pixel in `raster_to_vector`. Above the limit, the process fails with `OutputLimitExceeded`.
 
 ##### Scale and offset
 

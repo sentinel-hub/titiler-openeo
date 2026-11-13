@@ -416,6 +416,11 @@ class ProcessingSettings(BaseSettings):
     max_pixels: int = 100_000_000  # 100 million pixels default
     max_items: int = 20
 
+    # Maximum number of geometries that a process can make or load in a vector
+    # data cube. A noisy raster can give one polygon for each pixel in
+    # raster_to_vector (ADR 0014 §2.7).
+    max_vector_features: int = 100_000
+
     # Free a process-graph node's intermediate data as soon as every consumer of
     # that node has run (reference-counted results cache), instead of keeping
     # every intermediate cube resident for the whole evaluation. Bounds peak

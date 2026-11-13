@@ -346,6 +346,22 @@ class OutputLimitExceeded(OpenEOException):
         )
 
 
+class VectorFeatureLimitExceeded(OpenEOException):
+    """A vector data cube has more geometries than the maximum allowed."""
+
+    def __init__(self, process: str, max_features: int):
+        """Initialize error with the process and the limit."""
+        super().__init__(
+            message=(
+                f"{process} makes more than {max_features:,} geometries "
+                f"(max allowed: {max_features:,}). Reduce the area, or group "
+                "the values first (for example with a classification)."
+            ),
+            code="OutputLimitExceeded",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 

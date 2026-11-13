@@ -16,3 +16,4 @@ from .reduce import *  # noqa
 from .sar import *  # noqa
 from .spatial import *  # noqa
 from .tile_assignment import *  # noqa
+from .vector import *  # noqa
