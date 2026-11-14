@@ -1,8 +1,8 @@
 # ADR 0014 — Vector data cubes and vector output formats
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-13, review in [#493](https://github.com/sentinel-hub/titiler-openeo/pull/493))
 - **Date:** 2026-11-10
-- **Deciders:** @emmanuelmathot, Vincent (review)
+- **Deciders:** @emmanuelmathot, @vincentsarago
 - **Related:** [#443](https://github.com/sentinel-hub/titiler-openeo/pull/443)
   (output format registry), [#476](https://github.com/sentinel-hub/titiler-openeo/pull/476)
   (Python 3.14 image), [geopandas/pyogrio#705](https://github.com/geopandas/pyogrio/issues/705)
