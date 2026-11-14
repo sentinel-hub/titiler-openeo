@@ -9,6 +9,14 @@ from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.process_registry import Process
 
 from .implementations.core import process
+from .implementations.formats import _module_available
+from .implementations.vector import PROCESS_REQUIRES
+
+
+def process_available(name: str) -> bool:
+    """Return True if the optional modules of the process are installed."""
+    return all(_module_available(m) for m in PROCESS_REQUIRES.get(name, ()))
+
 
 json_path = Path(__file__).parent / "data"
 PROCESS_SPECIFICATIONS = {}
@@ -33,6 +41,9 @@ PROCESS_IMPLEMENTATIONS = [
 process_registry = ProcessRegistry(wrap_funcs=[process])
 
 for func in PROCESS_IMPLEMENTATIONS:
+    # A process whose optional modules are not installed is not listed.
+    if not process_available(func.__name__):
+        continue
     process_registry[func.__name__] = Process(
         spec=PROCESS_SPECIFICATIONS[func.__name__], implementation=func
     )

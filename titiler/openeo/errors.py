@@ -380,6 +380,30 @@ class VectorizeEdgeLimitExceeded(OpenEOException):
         )
 
 
+class UnitMismatch(OpenEOException):
+    """A distance in metres is given for a CRS whose unit is not the metre."""
+
+    def __init__(self, message: str):
+        """Initialize error with the message."""
+        super().__init__(
+            message=message,
+            code="UnitMismatch",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class DimensionNotAvailable(OpenEOException):
+    """A process names a dimension that the data cube does not have."""
+
+    def __init__(self, dimension: str):
+        """Initialize error with the name of the dimension."""
+        super().__init__(
+            message=f"A dimension with the name '{dimension}' does not exist.",
+            code="DimensionNotAvailable",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 
