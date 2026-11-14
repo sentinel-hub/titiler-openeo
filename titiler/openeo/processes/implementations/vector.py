@@ -1,18 +1,21 @@
 """titiler.openeo.processes Vector (ADR 0014)."""
 
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy
 from rasterio.crs import CRS
 from rasterio.errors import CRSError
-from rasterio.features import shapes
+from rasterio.features import rasterize, shapes
 from rasterio.transform import from_bounds
 from rasterio.warp import transform, transform_geom
 from rio_tiler.constants import WGS84_CRS
+from rio_tiler.models import ImageData
 
 from ...errors import (
     DimensionNotAvailable,
     FeatureUnsupported,
+    OutputLimitExceeded,
     ProcessParameterInvalid,
     UnitMismatch,
     VectorFeatureLimitExceeded,
@@ -21,7 +24,7 @@ from ...errors import (
 from ...settings import ProcessingSettings
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL
-from .vector_model import GEOMETRY_DIMENSION, VectorCube
+from .vector_model import GEOMETRY_DIMENSION, TEMPORAL_DIMENSION, VectorCube
 
 __all__ = [
     "filter_vector",
@@ -29,6 +32,7 @@ __all__ = [
     "raster_to_vector",
     "vector_buffer",
     "vector_reproject",
+    "vector_to_raster",
     "vectorize",
 ]
 
@@ -447,3 +451,184 @@ def filter_vector(
     )
     keep = getattr(shapely, relation)(candidates, base) & ~shapely.is_empty(candidates)
     return data.select(numpy.flatnonzero(keep))
+
+
+# The band name of `vector_to_raster` for a cube without a bands dimension.
+VALUE_BAND = "value"
+
+
+def _target_grid(target: RasterStack) -> Tuple[int, int, Tuple[float, ...], CRS]:
+    """Return the width, height, bounds and CRS of a raster data cube.
+
+    The grid comes from the cube metadata, so the pixels are not read. Only
+    when the metadata is not set, the first image is read.
+    """
+    if target.width and target.height and target.bounds and target.dst_crs:
+        return target.width, target.height, tuple(target.bounds), target.dst_crs
+    if not len(target):
+        raise ProcessParameterInvalid(
+            "vector_to_raster: the target raster data cube has no data."
+        )
+    first = target.first
+    return first.width, first.height, tuple(first.bounds), first.crs
+
+
+def _numeric_values(cube: VectorCube) -> numpy.ndarray:
+    """Return the values of the cube with a numeric dtype. Masked cells are 0."""
+    assert cube.values is not None
+    data = cube.values.data
+    if data.dtype == bool:
+        return data.astype("uint8")
+    if data.dtype.kind in "iuf":
+        return data
+    mask = numpy.ma.getmaskarray(cube.values)
+    cells = data[~mask].tolist()
+    sample = numpy.asarray(cells) if cells else numpy.zeros(0, dtype="float64")
+    if sample.dtype.kind not in "biuf":
+        raise ProcessParameterInvalid(
+            "vector_to_raster: the values of the vector data cube must be "
+            f"numbers, got {sample.dtype.kind!r} values (for example "
+            f"{cells[0]!r})."
+        )
+    out = numpy.zeros(
+        data.shape, dtype="uint8" if sample.dtype == bool else sample.dtype
+    )
+    out[~mask] = sample
+    return out
+
+
+def _date_key(label: Any) -> datetime:
+    """Return a label of the `t` dimension as a datetime."""
+    if isinstance(label, datetime):
+        return label
+    if isinstance(label, date):
+        return datetime(label.year, label.month, label.day)
+    if isinstance(label, str):
+        try:
+            return datetime.fromisoformat(label.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    raise ProcessParameterInvalid(
+        f"vector_to_raster: the label {label!r} of the dimension "
+        f"'{TEMPORAL_DIMENSION}' is not a date."
+    )
+
+
+def _is_empty(geometry: Optional[Dict[str, Any]]) -> bool:
+    """Return True for a null geometry or a geometry without coordinates."""
+    return not geometry or not (
+        geometry.get("coordinates") or geometry.get("geometries")
+    )
+
+
+def vector_to_raster(data: VectorCube, target: RasterStack) -> RasterStack:
+    """Convert a vector data cube into a raster data cube on the grid of `target`.
+
+    Each pixel gets the values of the last geometry that covers it, in the
+    order of the cube. A pixel is covered by a polygon if its center is in
+    the polygon. Points and lines cover the pixels on their path. A pixel
+    that no geometry covers has no data, and so does a pixel whose geometry
+    has no data.
+
+    Args:
+        data: A vector data cube with values. Its dimensions are `geometry`,
+            optionally `t`, and at most one other dimension, which becomes
+            the bands (for example `bands`, or `properties` from
+            `load_geojson`).
+        target: A raster data cube. The result has its CRS, extent and
+            resolution. Its pixels are not read.
+
+    Returns:
+        A raster data cube with one band for each label of the other
+        dimension (one band `value` if there is none) and one date for each
+        label of `t`. Without `t`, the result has no temporal dimension.
+
+    Raises:
+        ProcessParameterInvalid: If the cube has no values, values that are
+            not numbers, or more than one dimension other than `t`.
+        OutputLimitExceeded: If the result has more pixels than
+            `max_pixels`.
+
+    """
+    if data.values is None:
+        raise ProcessParameterInvalid(
+            "vector_to_raster: the vector data cube has no values to "
+            "rasterize. Use load_geojson with `properties`, or "
+            "aggregate_spatial, to make a vector data cube with values."
+        )
+    other = [dim for dim in data.dims[1:] if dim != TEMPORAL_DIMENSION]
+    if len(other) > 1:
+        raise ProcessParameterInvalid(
+            f"vector_to_raster: the vector data cube has the dimensions "
+            f"{list(data.dims)}. Only one dimension other than "
+            f"'{GEOMETRY_DIMENSION}' and '{TEMPORAL_DIMENSION}' can become "
+            f"the bands: reduce or filter the dimensions {other[1:]} first."
+        )
+
+    # The values as (geometry, date, band).
+    values = _numeric_values(data)
+    mask = numpy.ma.getmaskarray(data.values)
+    if TEMPORAL_DIMENSION in data.dims:
+        axis = data.dims.index(TEMPORAL_DIMENSION)
+        values = numpy.moveaxis(values, axis, 1)
+        mask = numpy.moveaxis(mask, axis, 1)
+        keys = [_date_key(label) for label in data.labels[TEMPORAL_DIMENSION]]
+    else:
+        values, mask = values[:, numpy.newaxis], mask[:, numpy.newaxis]
+        keys = [REDUCED_TEMPORAL_SENTINEL]
+    band_names = (
+        [str(label) for label in data.labels[other[0]]] if other else [VALUE_BAND]
+    )
+    if not keys or not band_names:
+        raise ProcessParameterInvalid(
+            f"vector_to_raster: the vector data cube has a dimension without "
+            f"labels ({list(data.dims)}), so the raster would be empty."
+        )
+    values = values.reshape(len(data), len(keys), len(band_names))
+    mask = mask.reshape(values.shape)
+    if not len(data):
+        # No geometry: every pixel has no data.
+        values = numpy.zeros((1,) + values.shape[1:], dtype=values.dtype)
+        mask = numpy.ones(values.shape, dtype=bool)
+
+    width, height, bounds, crs = _target_grid(target)
+    max_pixels = ProcessingSettings().max_pixels
+    if width * height * len(keys) * len(band_names) > max_pixels:
+        raise OutputLimitExceeded(
+            width,
+            height,
+            max_pixels,
+            items_count=len(keys),
+            bands_count=len(band_names),
+        )
+
+    # One rasterization for all dates and bands: each pixel gets the index
+    # (+1) of the last geometry that covers it, 0 if none.
+    grid_transform = from_bounds(*bounds, width, height)
+    burns = [
+        (geometry, i + 1)
+        for i, geometry in enumerate(data._geometries_in(crs))
+        if not _is_empty(geometry)
+    ]
+    index = rasterize(
+        burns,
+        out_shape=(height, width),
+        transform=grid_transform,
+        fill=0,
+        dtype="int32",
+    )
+    covered = index > 0
+    index = numpy.maximum(index - 1, 0)
+
+    images = {}
+    for d, key in enumerate(keys):
+        # (height, width, band) -> (band, height, width)
+        array = numpy.moveaxis(values[index, d], -1, 0)
+        no_data = numpy.moveaxis(mask[index, d], -1, 0) | ~covered
+        images[key] = ImageData(
+            numpy.ma.MaskedArray(array, mask=no_data),
+            crs=crs,
+            bounds=bounds,
+            band_descriptions=band_names,
+        )
+    return RasterStack.from_images(images)
