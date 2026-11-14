@@ -1,8 +1,9 @@
-"""Output formats.
+"""Output and input formats.
 
 One registry for the formats that `save_result` writes. The `/file_formats`
 endpoint and the HTTP responses read it too, so the advertised formats, the
-accepted names and the media types can't drift apart.
+accepted names and the media types can't drift apart. `INPUT_FORMATS` is the
+same for `load_url`.
 
 This module is not star-imported into `implementations`: every public function
 there must be an openEO process.
@@ -25,6 +26,7 @@ import numpy
 from rio_tiler.models import ImageData
 
 from ...errors import FormatUnsuitable, ProcessParameterInvalid
+from . import vector_io
 from .data_model import RasterStack
 from .vector_model import VectorCube, VectorRecords
 
@@ -712,6 +714,7 @@ OUTPUT_FORMATS: Tuple[OutputFormat, ...] = (
         description="A vector cube as a GeoParquet 1.1 file, with WKB geometries in the coordinate reference system of the cube. There is one row for each geometry and date, with a column `t` for the date and one column for each band (or `value`).",
         media_type="application/vnd.apache.parquet",
         encoders={"vector": _encode_geoparquet},
+        aliases=("parquet",),
         extension="parquet",
         requires=_VECTOR_EXTRA,
         takes_cube=True,
@@ -856,10 +859,131 @@ def encode_result(result: Any, raster_format: str = "GTiff") -> SaveResultData:
     return encode(result, "JSON")
 
 
+Reader = Callable[[str, str, Dict], VectorCube]
+
+
+@dataclass(frozen=True)
+class InputFormat:
+    """An input file format of `load_url`."""
+
+    name: str
+    title: str
+    description: str
+    gis_data_types: Tuple[DataKind, ...]
+    # Reads a vector file: (url, signed url, options) -> VectorCube. None for
+    # a raster format: `load_url` reads it with rio-tiler.
+    reader: Optional[Reader] = None
+    aliases: Tuple[str, ...] = ()
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    # The modules that the reader needs (an optional extra).
+    requires: Tuple[str, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        """Return True if the modules of this format are installed."""
+        return all(_module_available(name) for name in self.requires)
+
+    def to_file_format(self) -> Dict[str, Any]:
+        """Return the openEO `FileFormat` document of this format."""
+        return {
+            "title": self.title,
+            "description": self.description,
+            "gis_data_types": list(self.gis_data_types),
+            "parameters": dict(self.parameters),
+        }
+
+
+INPUT_FORMATS: Tuple[InputFormat, ...] = (
+    InputFormat(
+        name="GTiff",
+        title="GeoTIFF",
+        description="A raster file that GDAL can read, for example a Cloud Optimized GeoTIFF. The result is a raster data cube on the grid of the file.",
+        gis_data_types=("raster",),
+        aliases=("COG", "GeoTIFF"),
+    ),
+    InputFormat(
+        name="GeoJSON",
+        title="GeoJSON",
+        description="A GeoJSON file (RFC 7946, EPSG:4326). The result is a vector data cube; the properties of the features are kept.",
+        gis_data_types=("vector",),
+        reader=vector_io.read_geojson,
+    ),
+    InputFormat(
+        name="GeoParquet",
+        title="GeoParquet",
+        description="A GeoParquet 1.0 or 1.1 file with WKB geometries. The result is a vector data cube in the CRS of the file; the other columns become properties.",
+        gis_data_types=("vector",),
+        reader=vector_io.read_geoparquet,
+        aliases=("parquet",),
+        requires=_VECTOR_EXTRA,
+    ),
+    InputFormat(
+        name="GPKG",
+        title="GeoPackage",
+        description="An OGC GeoPackage. The result is a vector data cube in the CRS of the layer; the attributes become properties.",
+        gis_data_types=("vector",),
+        reader=vector_io.read_gpkg,
+        aliases=("geopackage",),
+        requires=_VECTOR_EXTRA,
+        parameters={
+            "layer_name": {
+                "type": "string",
+                "description": "The name of the layer to read. Default: the first layer.",
+            }
+        },
+    ),
+    InputFormat(
+        name="FlatGeobuf",
+        title="FlatGeobuf",
+        description="A FlatGeobuf file. The result is a vector data cube in the CRS of the file; the attributes become properties.",
+        gis_data_types=("vector",),
+        reader=vector_io.read_flatgeobuf,
+        aliases=("fgb",),
+        requires=_VECTOR_EXTRA,
+    ),
+    InputFormat(
+        name="ESRI Shapefile",
+        title="ESRI Shapefile",
+        description="An ESRI Shapefile: the URL of the `.shp` file, with the `.shx`, `.dbf` and `.prj` files next to it, or the URL of a zip archive (ends with `.zip`). The result is a vector data cube in the CRS of the file; the attributes become properties.",
+        gis_data_types=("vector",),
+        reader=vector_io.read_shapefile,
+        aliases=("shapefile", "shp"),
+        requires=_VECTOR_EXTRA,
+        parameters={
+            "encoding": {
+                "type": "string",
+                "description": "The character encoding of the attributes. Default: from the `.cpg` file, else ISO-8859-1.",
+            }
+        },
+    ),
+)
+
+_INPUT_FORMATS_BY_NAME: Dict[str, InputFormat] = {
+    key.lower(): fmt for fmt in INPUT_FORMATS for key in (fmt.name, *fmt.aliases)
+}
+
+
+def get_input_format(name: str) -> Optional[InputFormat]:
+    """Return the input format for a name or an alias, or None if it is unknown.
+
+    Names are case-insensitive. A vector format whose extra is not installed
+    gives `FormatUnsuitable` with an install hint.
+    """
+    fmt = _INPUT_FORMATS_BY_NAME.get(name.lower())
+    if fmt is not None and not fmt.available:
+        raise FormatUnsuitable(
+            f"Input format '{fmt.name}' is not installed on this back-end "
+            f"(Python package extra `titiler-openeo[vector]`)."
+        )
+    return fmt
+
+
 def file_formats_document() -> Dict[str, Any]:
     """Return the body of the openEO `/file_formats` endpoint."""
     return {
-        "input": {},
+        "input": {
+            fmt.name: fmt.to_file_format() for fmt in INPUT_FORMATS if fmt.available
+        },
         "output": {
             fmt.name: fmt.to_file_format()
             for fmt in OUTPUT_FORMATS
