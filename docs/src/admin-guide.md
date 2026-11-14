@@ -71,6 +71,8 @@ TITILER_OPENEO_PROCESSING_MAX_VECTOR_DOWNLOAD_BYTES=268435456
 
 `MAX_VECTORIZE_EDGES` limits the work of `raster_to_vector` and `vectorize`. GDAL makes all the polygons before the feature limit applies, and the cost follows the number of pixel edges between zones of different values, for all dates (about 700 ns and 120 bytes for each edge). A smooth classification of 64 million pixels has fewer than one million edges, but random noise of 4 million pixels has more than five million. The process checks the count before GDAL starts, and fails with `OutputLimitExceeded` above the limit.
 
+`MAX_PIXELS` also limits the result of `vector_to_raster`: the width and height of the target, multiplied by the dates and the bands of the vector data cube.
+
 ##### Scale and offset
 
 By default, `load_collection` and `load_stac` apply the scale/offset of each band, so that bands are physical values (for example, Sentinel-2 reflectance from 0 to 1) and not raw DN. There are three sources:
