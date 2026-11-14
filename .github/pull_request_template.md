@@ -1,3 +1,7 @@
+<!-- title must follow conventional commit format -->
+<!-- allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert -->
+<!-- allowed scopes: api, auth, processes, store, docker, helm, docs, deps, ci, io, stac -->
+
 ## Description
 
 <!-- Please provide a clear and concise description of your changes -->
