@@ -37,7 +37,7 @@ ENV UV_LINK_MODE=copy \
 
 WORKDIR /tmp/app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --no-install-project
+RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --extra vector --no-install-project
 COPY README.md ./
 COPY titiler/ titiler/
 RUN uv pip install --no-deps .
