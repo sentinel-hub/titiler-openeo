@@ -8,11 +8,12 @@ import numpy
 from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
-from ...errors import OpenEOException
+from ...errors import FeatureUnsupported, OpenEOException, ProcessParameterInvalid
 from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
 from .core import process
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
+from .vector_model import VectorCube
 
 __all__ = [
     "array_element",
@@ -615,8 +616,8 @@ def _merge_images_bands(
 
 @process
 def merge_cubes(
-    cube1: RasterStack,
-    cube2: RasterStack,
+    cube1: Union[RasterStack, VectorCube],
+    cube2: Union[RasterStack, VectorCube],
     overlap_resolver: Optional[Callable] = None,
     context: Optional[Any] = None,
 ) -> RasterStack:
@@ -647,7 +648,23 @@ def merge_cubes(
     Raises:
         OverlapResolverMissing: When overlapping data exists but no resolver
             was provided.
+        ProcessParameterInvalid: When one cube is a raster data cube and the
+            other a vector data cube.
+        FeatureUnsupported: When both cubes are vector data cubes.
     """
+    vector1, vector2 = isinstance(cube1, VectorCube), isinstance(cube2, VectorCube)
+    if vector1 != vector2:
+        raise ProcessParameterInvalid(
+            "merge_cubes: it is not possible to merge a vector and a raster "
+            "data cube (openEO specification). Use vector_to_raster to convert "
+            "the vector data cube first."
+        )
+    if vector1:
+        raise FeatureUnsupported(
+            "Process 'merge_cubes' does not support vector data cubes yet."
+        )
+    assert isinstance(cube1, RasterStack) and isinstance(cube2, RasterStack)
+
     # Get reference spatial dimensions from cube1 metadata (avoids loading pixel data)
     target_height = cube1.height
     target_width = cube1.width
