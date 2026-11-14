@@ -8,13 +8,38 @@ from rasterio.transform import from_bounds
 from rasterio.warp import transform_geom
 from rio_tiler.constants import WGS84_CRS
 
-from ...errors import ProcessParameterInvalid, VectorFeatureLimitExceeded
+from ...errors import (
+    ProcessParameterInvalid,
+    VectorFeatureLimitExceeded,
+    VectorizeEdgeLimitExceeded,
+)
 from ...settings import ProcessingSettings
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL
 from .vector_model import VectorCube
 
 __all__ = ["raster_to_vector", "vectorize"]
+
+
+def _zone_edges(values: numpy.ndarray, valid: numpy.ndarray) -> int:
+    """Count the pixel edges between zones: the work of GDAL polygonize.
+
+    An edge counts if it separates two valid pixels with different values, or
+    a valid pixel and a masked one or the image border.
+    """
+    count = 0
+    for axis in (0, 1):
+        a = [slice(None), slice(None)]
+        b = [slice(None), slice(None)]
+        a[axis], b[axis] = slice(1, None), slice(None, -1)
+        va, vb = valid[tuple(a)], valid[tuple(b)]
+        differ = (values[tuple(a)] != values[tuple(b)]) & va & vb
+        count += int(numpy.count_nonzero(differ | (va != vb)))
+    # The border of the image: the valid pixels in the first and last rows
+    # and columns.
+    for edge in (valid[0], valid[-1], valid[:, 0], valid[:, -1]):
+        count += int(numpy.count_nonzero(edge))
+    return count
 
 
 def raster_to_vector(data: RasterStack) -> VectorCube:
@@ -36,9 +61,13 @@ def raster_to_vector(data: RasterStack) -> VectorCube:
         ProcessParameterInvalid: If the cube has more than one band.
         VectorFeatureLimitExceeded: If there are more polygons than
             `max_vector_features`.
+        VectorizeEdgeLimitExceeded: If the zones have more pixel edges than
+            `max_vectorize_edges`, for all dates.
 
     """
-    max_features = ProcessingSettings().max_vector_features
+    settings = ProcessingSettings()
+    max_features = settings.max_vector_features
+    edges = 0
     dates = [key for key in data.keys() if key != REDUCED_TEMPORAL_SENTINEL]
     with_dates = len(dates) > 1
 
@@ -61,6 +90,13 @@ def raster_to_vector(data: RasterStack) -> VectorCube:
         if source.dtype == bool:
             source = source.astype("uint8")
         dtype = dtype or source.dtype
+        # GDAL makes all the polygons before the first one: check the work
+        # before it starts.
+        edges += _zone_edges(source, valid)
+        if edges > settings.max_vectorize_edges:
+            raise VectorizeEdgeLimitExceeded(
+                "raster_to_vector", edges, settings.max_vectorize_edges
+            )
         transform = from_bounds(*img.bounds, img.width, img.height)
 
         for geometry, value in shapes(
