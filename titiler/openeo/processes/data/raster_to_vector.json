@@ -1,0 +1,49 @@
+{
+  "id": "raster_to_vector",
+  "summary": "Convert a raster data cube into polygons",
+  "description": "Converts a raster data cube with one band into a vector data cube of polygons. For each date, the 4-connected pixels that have the same value become one polygon. No-data pixels make no polygon.\n\nThe value of each polygon is the value of its pixels. If the data cube has more than one date, each polygon has its date in the property `t`. The polygons are in the coordinate reference system of the raster data cube. The GeoJSON output is in EPSG:4326.\n\nThe data cube must have one band: use ``filter_bands()`` or reduce the bands dimension first. The number of polygons, and the number of pixel edges between zones, are limited by the back-end (error `OutputLimitExceeded`).\n\nThis process is not an openEO core process. It has the same name and behavior as `raster_to_vector` in the VITO back-end and in the openEO Python client (`DataCube.raster_to_vector()`).",
+  "categories": [
+    "cubes",
+    "vector"
+  ],
+  "experimental": true,
+  "parameters": [
+    {
+      "name": "data",
+      "description": "A raster data cube with one band.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube",
+        "dimensions": [
+          {
+            "type": "spatial",
+            "axis": [
+              "x",
+              "y"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "returns": {
+    "description": "A vector data cube with one polygon for each zone of equal value.",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube",
+      "dimensions": [
+        {
+          "type": "geometry",
+          "geometry_type": [
+            "Polygon"
+          ]
+        }
+      ]
+    }
+  },
+  "exceptions": {
+    "OutputLimitExceeded": {
+      "message": "The process makes more polygons, or polygons with more edges, than the back-end allows."
+    }
+  }
+}

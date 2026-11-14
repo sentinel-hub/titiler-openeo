@@ -60,7 +60,13 @@ TITILER_OPENEO_PC_TIMEOUT=10  # Per-request timeout when minting a token
 ```bash
 TITILER_OPENEO_PROCESSING_MAX_PIXELS=100000000
 TITILER_OPENEO_PROCESSING_MAX_ITEMS=20
+TITILER_OPENEO_PROCESSING_MAX_VECTOR_FEATURES=100000
+TITILER_OPENEO_PROCESSING_MAX_VECTORIZE_EDGES=5000000
 ```
+
+`MAX_VECTOR_FEATURES` limits the number of geometries in a vector data cube. A noisy raster can give one polygon for each pixel in `raster_to_vector`. Above the limit, the process fails with `OutputLimitExceeded`.
+
+`MAX_VECTORIZE_EDGES` limits the work of `raster_to_vector` and `vectorize`. GDAL makes all the polygons before the feature limit applies, and the cost follows the number of pixel edges between zones of different values, for all dates (about 700 ns and 120 bytes for each edge). A smooth classification of 64 million pixels has fewer than one million edges, but random noise of 4 million pixels has more than five million. The process checks the count before GDAL starts, and fails with `OutputLimitExceeded` above the limit.
 
 ##### Scale and offset
 
