@@ -223,6 +223,8 @@ def test_geoparquet_projected_crs(zones_cube):
     """GeoParquet keeps the CRS of the cube."""
     _, geo = _read_parquet(encode(zones_cube, "GeoParquet").data)
     assert geo["columns"]["geometry"]["crs"]["id"]["code"] == 32631
+    # `Parquet` (the name at other openEO back-ends) is an alias.
+    assert encode(zones_cube, "parquet").media_type == "application/vnd.apache.parquet"
 
 
 @pytest.mark.parametrize("compression", ["snappy", "zstd", "gzip", "uncompressed"])

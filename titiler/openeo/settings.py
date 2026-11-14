@@ -428,6 +428,11 @@ class ProcessingSettings(BaseSettings):
     # edge (5 million: about 4 s and 600 MB).
     max_vectorize_edges: int = 5_000_000
 
+    # Maximum size in bytes of a vector file that load_url downloads in full
+    # (GeoJSON, GeoParquet). GPKG, FlatGeobuf and Shapefile are read with
+    # range requests and are limited by max_vector_features only.
+    max_vector_download_bytes: int = 256 * 1024 * 1024
+
     # Free a process-graph node's intermediate data as soon as every consumer of
     # that node has run (reference-counted results cache), instead of keeping
     # every intermediate cube resident for the whole evaluation. Bounds peak
