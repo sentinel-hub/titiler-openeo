@@ -132,7 +132,7 @@ def load_url(
 
 
 def save_result(
-    data: Union[numpy.ndarray, numpy.ma.MaskedArray, RasterStack, dict],
+    data: Union[numpy.ndarray, numpy.ma.MaskedArray, RasterStack, VectorCube, dict],
     format: str,
     options: Optional[Dict] = None,
 ) -> SaveResultData:
@@ -140,7 +140,8 @@ def save_result(
 
     Args:
         data: The result to save: a raster (RasterStack, numpy array), a vector
-            cube (GeoJSON FeatureCollection) or other data.
+            data cube (VectorCube, or a GeoJSON FeatureCollection) or other
+            data. A VectorCube keeps its CRS in the GIS formats.
         format: Output format name or alias, case-insensitive. See
             `formats.OUTPUT_FORMATS`.
         options: Additional rendering options
