@@ -136,6 +136,18 @@ class VectorCube:
                 f"{self.dims}"
             )
 
+    def select(self, indices: Iterable[int]) -> "VectorCube":
+        """Return a cube with the geometries at `indices` only, in that order."""
+        index = numpy.asarray(list(indices), dtype=numpy.intp)
+        return VectorCube(
+            geometries=[self.geometries[i] for i in index],
+            crs=self.crs,
+            properties=[dict(self.properties[i]) for i in index],
+            values=None if self.values is None else self.values[index],
+            dims=self.dims,
+            labels=self.labels,
+        )
+
     def __len__(self) -> int:
         """Return the number of geometries."""
         return len(self.geometries)

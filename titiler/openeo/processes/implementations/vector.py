@@ -1,15 +1,20 @@
 """titiler.openeo.processes Vector (ADR 0014)."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy
+from rasterio.crs import CRS
+from rasterio.errors import CRSError
 from rasterio.features import shapes
 from rasterio.transform import from_bounds
-from rasterio.warp import transform_geom
+from rasterio.warp import transform, transform_geom
 from rio_tiler.constants import WGS84_CRS
 
 from ...errors import (
+    DimensionNotAvailable,
+    FeatureUnsupported,
     ProcessParameterInvalid,
+    UnitMismatch,
     VectorFeatureLimitExceeded,
     VectorizeEdgeLimitExceeded,
 )
@@ -18,7 +23,14 @@ from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL
 from .vector_model import GEOMETRY_DIMENSION, VectorCube
 
-__all__ = ["load_geojson", "raster_to_vector", "vectorize"]
+__all__ = [
+    "filter_vector",
+    "load_geojson",
+    "raster_to_vector",
+    "vector_buffer",
+    "vector_reproject",
+    "vectorize",
+]
 
 # The dimension that `load_geojson` makes from the listed properties.
 PROPERTIES_DIMENSION = "properties"
@@ -237,3 +249,201 @@ def load_geojson(data: Dict, properties: Optional[List[str]] = None) -> VectorCu
         dims=(GEOMETRY_DIMENSION, PROPERTIES_DIMENSION),
         labels={PROPERTIES_DIMENSION: labels},
     )
+
+
+# The processes that need modules of the `vector` extra. Without them, the
+# process registry does not list the process.
+PROCESS_REQUIRES: Dict[str, Tuple[str, ...]] = {
+    "vector_buffer": ("shapely",),
+    "filter_vector": ("shapely",),
+}
+
+# The spatial relations of `filter_vector`. Each one is a shapely function.
+FILTER_RELATIONS = (
+    "intersects",
+    "disjoint",
+    "equals",
+    "touches",
+    "crosses",
+    "overlaps",
+    "contains",
+    "within",
+)
+
+
+def _shapely(process: str):
+    """Import shapely, which is in the `vector` extra."""
+    try:
+        import shapely
+    except ImportError:  # pragma: no cover - the registry hides the process
+        raise FeatureUnsupported(
+            f"{process} needs the Python package extra `titiler-openeo[vector]`, "
+            "which is not installed on this back-end."
+        ) from None
+    return shapely
+
+
+def _parse_projection(projection: Union[int, str]) -> CRS:
+    """Return the CRS of an EPSG code or a WKT2 string."""
+    try:
+        if isinstance(projection, int) and not isinstance(projection, bool):
+            return CRS.from_epsg(projection)
+        if isinstance(projection, str):
+            return CRS.from_user_input(projection)
+    except CRSError as error:
+        raise ProcessParameterInvalid(
+            f"vector_reproject: the projection {projection!r} is not valid: {error}"
+        ) from None
+    raise ProcessParameterInvalid(
+        "vector_reproject: the projection must be an EPSG code or a WKT2 string."
+    )
+
+
+def vector_reproject(
+    data: VectorCube,
+    projection: Union[int, str],
+    dimension: Optional[str] = None,
+) -> VectorCube:
+    """Reproject the geometries of a vector data cube.
+
+    Args:
+        data: A vector data cube.
+        projection: The CRS to reproject to: an EPSG code or a WKT2 string.
+        dimension: The geometry dimension. A vector data cube has one, named
+            `geometry`.
+
+    Returns:
+        The vector data cube with the geometries in the new CRS. The values
+        and the properties do not change.
+
+    Raises:
+        DimensionNotAvailable: If `dimension` is not the geometry dimension.
+        ProcessParameterInvalid: If the projection is not valid.
+
+    """
+    if dimension is not None and dimension != GEOMETRY_DIMENSION:
+        raise DimensionNotAvailable(dimension)
+    crs = _parse_projection(projection)
+    return VectorCube(
+        geometries=list(data._geometries_in(crs)),
+        crs=crs,
+        properties=[dict(p) for p in data.properties],
+        values=data.values,
+        dims=data.dims,
+        labels=data.labels,
+    )
+
+
+def _utm_epsg(cube: VectorCube, shapely: Any) -> Optional[int]:
+    """Return the EPSG code of the WGS 84 UTM zone at the center of the cube."""
+    from shapely.geometry import shape
+
+    geometries = [shape(g) for g in cube.geometries if g]
+    if not geometries:
+        return None
+    minx, miny, maxx, maxy = shapely.total_bounds(geometries)
+    xs, ys = [(minx + maxx) / 2], [(miny + maxy) / 2]
+    if cube.crs != WGS84_CRS:
+        xs, ys = transform(cube.crs, WGS84_CRS, xs, ys)
+    zone = int((xs[0] + 180) // 6) % 60 + 1
+    return (32600 if ys[0] >= 0 else 32700) + zone
+
+
+def _check_metres(cube: VectorCube, shapely: Any) -> None:
+    """Raise UnitMismatch if the unit of the CRS of the cube is not the metre."""
+    crs = cube.crs
+    if not crs.is_geographic and crs.linear_units_factor == ("metre", 1.0):
+        return
+    unit = "degrees" if crs.is_geographic else crs.linear_units
+    hint = "Reproject the cube first with vector_reproject"
+    epsg = _utm_epsg(cube, shapely) if crs.is_geographic else None
+    if epsg:
+        hint += f", for example to EPSG:{epsg} (the UTM zone of the data)"
+    raise UnitMismatch(
+        f"vector_buffer: the distance is in metres, but the unit of the "
+        f"coordinate reference system of the geometries ({crs.to_string()}) "
+        f"is {unit}. {hint}."
+    )
+
+
+def vector_buffer(geometries: VectorCube, distance: float) -> VectorCube:
+    """Buffer the geometries of a vector data cube by a distance in metres.
+
+    Args:
+        geometries: A vector data cube, in a CRS whose unit is the metre.
+        distance: The distance in metres, not 0. A positive distance expands
+            the geometries; a negative distance shrinks them, and can make
+            them empty.
+
+    Returns:
+        The vector data cube with polygons. The values and the properties
+        do not change. An empty geometry stays empty.
+
+    Raises:
+        ProcessParameterInvalid: If the distance is 0.
+        UnitMismatch: If the unit of the CRS is not the metre.
+
+    """
+    shapely = _shapely("vector_buffer")
+    from shapely.geometry import mapping, shape
+
+    if distance == 0:
+        raise ProcessParameterInvalid("vector_buffer: the distance must not be 0.")
+    _check_metres(geometries, shapely)
+    buffered = [
+        None if g is None else mapping(shapely.buffer(shape(g), distance))
+        for g in geometries.geometries
+    ]
+    return VectorCube(
+        geometries=buffered,
+        crs=geometries.crs,
+        properties=[dict(p) for p in geometries.properties],
+        values=geometries.values,
+        dims=geometries.dims,
+        labels=geometries.labels,
+    )
+
+
+def filter_vector(
+    data: VectorCube, geometries: VectorCube, relation: str = "intersects"
+) -> VectorCube:
+    """Keep the geometries of a vector data cube that relate to other geometries.
+
+    A geometry of `data` (candidate) is kept if
+    `<relation>(candidate, union of geometries)` is true. For example,
+    `within` keeps the candidates that are inside the base geometries. The
+    relations are those of the OGC Simple Features standard.
+
+    Args:
+        data: A vector data cube with the candidate geometries.
+        geometries: A vector data cube with the base geometries. Their union is
+            used. They are reprojected to the CRS of `data`.
+        relation: One of intersects, disjoint, equals, touches, crosses,
+            overlaps, contains, within.
+
+    Returns:
+        The vector data cube with the candidates that are kept, in their
+        order. Empty and null candidate geometries are removed.
+
+    Raises:
+        ProcessParameterInvalid: If the relation is not known.
+
+    """
+    shapely = _shapely("filter_vector")
+    from shapely.geometry import shape
+
+    if relation not in FILTER_RELATIONS:
+        raise ProcessParameterInvalid(
+            f"filter_vector: the relation '{relation}' is not supported. "
+            f"Supported relations: {', '.join(FILTER_RELATIONS)}."
+        )
+    base = shapely.union_all(
+        [shape(g) for g in geometries._geometries_in(data.crs) if g]
+    )
+    shapely.prepare(base)
+    candidates = numpy.array(
+        [shapely.Polygon() if g is None else shape(g) for g in data.geometries],
+        dtype=object,
+    )
+    keep = getattr(shapely, relation)(candidates, base) & ~shapely.is_empty(candidates)
+    return data.select(numpy.flatnonzero(keep))
