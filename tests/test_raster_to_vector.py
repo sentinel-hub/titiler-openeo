@@ -10,13 +10,22 @@ from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 from shapely.geometry import shape
 
-from titiler.openeo.errors import ProcessParameterInvalid, VectorFeatureLimitExceeded
+from titiler.openeo.errors import (
+    ProcessParameterInvalid,
+    VectorFeatureLimitExceeded,
+    VectorizeEdgeLimitExceeded,
+)
+from titiler.openeo.processes.implementations import vector
 from titiler.openeo.processes.implementations.core import process
 from titiler.openeo.processes.implementations.data_model import RasterStack
 from titiler.openeo.processes.implementations.formats import encode
 from titiler.openeo.processes.implementations.reduce import REDUCED_TEMPORAL_SENTINEL
 from titiler.openeo.processes.implementations.spatial import aggregate_spatial
-from titiler.openeo.processes.implementations.vector import raster_to_vector, vectorize
+from titiler.openeo.processes.implementations.vector import (
+    _zone_edges,
+    raster_to_vector,
+    vectorize,
+)
 from titiler.openeo.processes.implementations.vector_model import VectorCube
 
 D1, D2 = datetime(2023, 1, 5), datetime(2023, 2, 1)
@@ -133,6 +142,47 @@ def test_feature_limit(monkeypatch):
         raster_to_vector(RasterStack.from_images({D1: _img(checker)}))
     assert error.value.code == "OutputLimitExceeded"
     assert error.value.status_code == 400
+
+
+def test_zone_edges():
+    """The count is the edges between zones, to masked pixels and to the border."""
+    valid = np.ones((4, 4), bool)
+    # One boundary of 4 edges between the zones, and 16 border edges.
+    assert _zone_edges(ZONES, valid) == 20
+    # A masked pixel inside: 3 more edges around it (one was a zone edge).
+    valid[1, 2] = False
+    assert _zone_edges(ZONES, valid) == 23
+    # A checkerboard: every inner edge separates two zones.
+    checker = (np.indices((4, 4)).sum(axis=0) % 2).astype("uint8")
+    assert _zone_edges(checker, np.ones((4, 4), bool)) == 24 + 16
+    # A fully masked raster makes no edges.
+    assert _zone_edges(ZONES, np.zeros((4, 4), bool)) == 0
+
+
+def test_edge_limit_stops_before_gdal(monkeypatch):
+    """Too many zone edges gives OutputLimitExceeded, before GDAL starts."""
+    monkeypatch.setenv("TITILER_OPENEO_PROCESSING_MAX_VECTORIZE_EDGES", "19")
+
+    def no_gdal(*args, **kwargs):
+        raise AssertionError("shapes must not run")
+
+    monkeypatch.setattr(vector, "shapes", no_gdal)
+    with pytest.raises(VectorizeEdgeLimitExceeded, match="20 pixel edges") as error:
+        raster_to_vector(RasterStack.from_images({D1: _img(ZONES)}))
+    assert error.value.code == "OutputLimitExceeded"
+    assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("limit,fails", [(39, True), (40, False)])
+def test_edge_limit_counts_all_dates(monkeypatch, limit, fails):
+    """The limit is for all the dates of the cube (20 edges for each date)."""
+    monkeypatch.setenv("TITILER_OPENEO_PROCESSING_MAX_VECTORIZE_EDGES", str(limit))
+    stack = RasterStack.from_images({D1: _img(ZONES), D2: _img(ZONES)})
+    if fails:
+        with pytest.raises(VectorizeEdgeLimitExceeded):
+            raster_to_vector(stack)
+    else:
+        assert len(raster_to_vector(stack)) == 4
 
 
 @pytest.mark.parametrize("dtype", ["float64", "float32", "int16", "bool"])

@@ -362,6 +362,24 @@ class VectorFeatureLimitExceeded(OpenEOException):
         )
 
 
+class VectorizeEdgeLimitExceeded(OpenEOException):
+    """A raster has too many zone boundaries to convert into polygons."""
+
+    def __init__(self, process: str, edges: int, max_edges: int):
+        """Initialize error with the process, the edge count and the limit."""
+        super().__init__(
+            message=(
+                f"{process}: the raster has {edges:,} pixel edges between "
+                f"zones of different values (max allowed: {max_edges:,}). The "
+                "polygons would be too many or too complex. Group the values "
+                "first (for example with a classification), use a coarser "
+                "resolution, or reduce the area."
+            ),
+            code="OutputLimitExceeded",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 

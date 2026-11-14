@@ -421,6 +421,13 @@ class ProcessingSettings(BaseSettings):
     # raster_to_vector (ADR 0014 §2.7).
     max_vector_features: int = 100_000
 
+    # Maximum number of pixel edges between zones that raster_to_vector
+    # accepts, for all dates. GDAL makes all the polygons before it gives the
+    # first one, so max_vector_features does not limit the work. The cost
+    # follows these edges, not the pixels: about 700 ns and 120 bytes for each
+    # edge (5 million: about 4 s and 600 MB).
+    max_vectorize_edges: int = 5_000_000
+
     # Free a process-graph node's intermediate data as soon as every consumer of
     # that node has run (reference-counted results cache), instead of keeping
     # every intermediate cube resident for the whole evaluation. Bounds peak
