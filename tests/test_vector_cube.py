@@ -225,5 +225,5 @@ class TestVectorCubeThroughDecorator:
         def takes_raster(data: RasterStack) -> RasterStack:
             return data
 
-        with pytest.raises(ProcessParameterInvalid, match="'vector datacube'"):
+        with pytest.raises(ProcessParameterInvalid, match="needs a raster data cube"):
             process(takes_raster)(data=VectorCube.from_geojson(SQUARE))
