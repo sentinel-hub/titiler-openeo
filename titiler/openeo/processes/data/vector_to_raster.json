@@ -1,0 +1,63 @@
+{
+  "id": "vector_to_raster",
+  "summary": "Convert a vector data cube into a raster data cube",
+  "description": "Converts the values of a vector data cube into a raster data cube with the coordinate reference system, extent and resolution of a target raster data cube. The pixels of the target are not read.\n\nEach pixel gets the values of the last geometry that covers it, in the order of the vector data cube. A pixel is covered by a polygon if its center is in the polygon. Points and lines cover the pixels on their path. A pixel that no geometry covers is no-data, and so is a pixel whose geometry has no-data.\n\nThe values must be numbers. The properties of the geometries are not used: to rasterize properties, give them to ``load_geojson()`` in its `properties` parameter. The dimensions of the vector data cube become:\n\n* `geometry`: the spatial dimensions `x` and `y` of the target.\n* `t` (optional): the temporal dimension, with the same labels. Without `t`, the result has no temporal dimension.\n* One other dimension (optional), for example `bands`, or `properties` from ``load_geojson()``: the bands dimension, with the same labels. Without it, the result has one band, `value`.\n\nA vector data cube with more than one other dimension must be reduced or filtered first. The size of the result is limited by the back-end (error `OutputLimitExceeded`).\n\nThis process is not an openEO core process. It has the same name and parameters as `vector_to_raster` in the VITO back-end and in the openEO Python client (`VectorCube.vector_to_raster()`).",
+  "categories": [
+    "cubes",
+    "vector"
+  ],
+  "experimental": true,
+  "parameters": [
+    {
+      "name": "data",
+      "description": "A vector data cube with numeric values.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube",
+        "dimensions": [
+          {
+            "type": "geometry"
+          }
+        ]
+      }
+    },
+    {
+      "name": "target",
+      "description": "A raster data cube. The result has its coordinate reference system, extent and resolution.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube",
+        "dimensions": [
+          {
+            "type": "spatial",
+            "axis": [
+              "x",
+              "y"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "returns": {
+    "description": "A raster data cube on the grid of the target, with the values of the vector data cube.",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube",
+      "dimensions": [
+        {
+          "type": "spatial",
+          "axis": [
+            "x",
+            "y"
+          ]
+        }
+      ]
+    }
+  },
+  "exceptions": {
+    "OutputLimitExceeded": {
+      "message": "The result has more pixels than the back-end allows."
+    }
+  }
+}
