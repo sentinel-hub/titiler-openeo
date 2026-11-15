@@ -454,6 +454,18 @@ class IncompatibleGeometryTypes(OpenEOException):
         )
 
 
+class GeometriesOverlap(OpenEOException):
+    """apply_polygon: a pixel is in more than one polygon."""
+
+    def __init__(self, message: str):
+        """Initialize error with the overlapping polygons."""
+        super().__init__(
+            message=message,
+            code="GeometriesOverlap",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 
