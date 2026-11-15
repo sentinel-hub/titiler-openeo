@@ -311,3 +311,10 @@ def test_process_graph_buffer_and_filter():
     document = json.loads(run().data)
     assert [f["properties"]["name"] for f in document["features"]] == ["near"]
     assert document["features"][0]["geometry"]["type"] == "Polygon"
+
+
+def test_vector_reproject_keeps_empty_geometry():
+    """An empty geometry is not reprojected (GDAL refuses it)."""
+    empty = {"type": "Polygon", "coordinates": []}
+    cube = VectorCube(geometries=[empty, None], crs=UTM)
+    assert vector_reproject(cube, 4326).geometries == [empty, None]

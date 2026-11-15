@@ -531,17 +531,10 @@ VECTOR_CUBE_NOT_YET_SUPPORTED = frozenset(
         "add_dimension",
         "aggregate_temporal",
         "aggregate_temporal_period",
-        "apply",
         "apply_dimension",
         "drop_dimension",
         "dimension_labels",
-        "filter_bands",
-        "filter_bbox",
-        "filter_labels",
-        "filter_temporal",
-        "reduce_dimension",
         "rename_dimension",
-        "rename_labels",
     }
 )
 
