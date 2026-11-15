@@ -686,3 +686,63 @@ class TestMergeCubesTemporalBroadcast:
 
         assert len(result) == 1
         assert result.first.band_descriptions == ["a", "b"]
+
+
+def test_graph_resolver_gets_x_and_y_as_parameters():
+    """A callback resolver reads x and y with from_parameter (not only `add`).
+
+    Before, x and y were keyword arguments of the callback process, so
+    max(array_create([x, y])) failed with a TypeError.
+    """
+    from datetime import datetime
+
+    import numpy as np
+    from openeo_pg_parser_networkx import OpenEOProcessGraph
+    from rasterio.crs import CRS
+    from rio_tiler.models import ImageData
+
+    from titiler.openeo.processes import process_registry
+    from titiler.openeo.processes.implementations.data_model import RasterStack
+
+    date = datetime(2023, 1, 5)
+
+    def stack(value):
+        image = ImageData(
+            np.ma.ones((1, 2, 2)) * value,
+            crs=CRS.from_epsg(4326),
+            bounds=(0, 0, 2, 2),
+            band_descriptions=["B04"],
+        )
+        return RasterStack.from_images({date: image})
+
+    resolver = {
+        "process_graph": {
+            "both": {
+                "process_id": "array_create",
+                "arguments": {
+                    "data": [{"from_parameter": "x"}, {"from_parameter": "y"}]
+                },
+            },
+            "max": {
+                "process_id": "max",
+                "arguments": {"data": {"from_node": "both"}},
+                "result": True,
+            },
+        }
+    }
+    graph = {
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_parameter": "a"},
+                "cube2": {"from_parameter": "b"},
+                "overlap_resolver": resolver,
+            },
+            "result": True,
+        }
+    }
+    run = OpenEOProcessGraph(pg_data={"process_graph": graph}).to_callable(
+        process_registry=process_registry
+    )
+    result = run(named_parameters={"a": stack(1.0), "b": stack(5.0)})
+    assert result[date].array.tolist() == [[[5.0, 5.0], [5.0, 5.0]]]

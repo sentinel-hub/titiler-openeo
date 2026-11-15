@@ -72,6 +72,27 @@ def _accepts_named_parameters(callback: Callable) -> bool:
     )
 
 
+def call_overlap_resolver(
+    resolver: Callable, x: Any, y: Any, context: Optional[Any] = None
+) -> Any:
+    """Call an overlap resolver of ``merge_cubes`` with ``x``, ``y`` and ``context``.
+
+    A callback graph resolves ``{"from_parameter": "x"}`` from
+    ``named_parameters`` (as ``apply`` does), not from keyword arguments: a
+    keyword ``x`` goes to the callback process itself, so only a process with
+    parameters named ``x`` and ``y`` (``add``) worked, and ``max(data=[x, y])``
+    failed. A plain Python resolver gets keyword arguments.
+    """
+    if not _accepts_named_parameters(resolver):
+        return resolver(x=x, y=y, context=context)
+    return resolver(
+        x,
+        y,
+        positional_parameters={"x": 0, "y": 1},
+        named_parameters={"x": x, "y": y, "context": context},
+    )
+
+
 def call_reducer(
     reducer: Callable,
     data: Any,

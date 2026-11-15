@@ -8,12 +8,20 @@ import numpy
 from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
-from ...errors import FeatureUnsupported, OpenEOException, ProcessParameterInvalid
-from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
+from ...errors import (  # noqa: F401 (OverlapResolverMissing: imported from here)
+    OpenEOException,
+    OverlapResolverMissing,
+    ProcessParameterInvalid,
+)
+from .callbacks import (
+    DIMENSION_LABELS_PARAMETER,
+    call_overlap_resolver,
+    recompute_each_call,
+)
 from .core import process
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
-from .vector_generic import vector_dimension, with_labels
+from .vector_generic import merge_vector_cubes, vector_dimension, with_labels
 from .vector_model import TEMPORAL_DIMENSION, VectorCube
 
 __all__ = [
@@ -524,17 +532,6 @@ def rename_labels(
     )
 
 
-class OverlapResolverMissing(OpenEOException):
-    """Raised when overlapping data cubes have no overlap resolver specified."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            message="Overlapping data cubes, but no overlap resolver has been specified.",
-            code="OverlapResolverMissing",
-            status_code=400,
-        )
-
-
 def _merge_images_bands(
     img1: ImageData,
     img2: ImageData,
@@ -566,7 +563,7 @@ def _merge_images_bands(
     def _resolve(x: numpy.ndarray, y: numpy.ndarray) -> numpy.ndarray:
         if overlap_resolver is None:
             raise OverlapResolverMissing()
-        return numpy.asanyarray(overlap_resolver(x=x, y=y, context=context))
+        return numpy.asanyarray(call_overlap_resolver(overlap_resolver, x, y, context))
 
     def _image(array: numpy.ndarray, band_names: List[str]) -> ImageData:
         return ImageData(
@@ -632,7 +629,7 @@ def merge_cubes(
     cube2: Union[RasterStack, VectorCube],
     overlap_resolver: Optional[Callable] = None,
     context: Optional[Any] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Merge two compatible data cubes.
 
     The data cubes must share compatible spatial dimensions. Temporal and band
@@ -662,7 +659,8 @@ def merge_cubes(
             was provided.
         ProcessParameterInvalid: When one cube is a raster data cube and the
             other a vector data cube.
-        FeatureUnsupported: When both cubes are vector data cubes.
+        IncompatibleGeometryTypes: When two vector data cubes have
+            different base geometry types.
     """
     vector1, vector2 = isinstance(cube1, VectorCube), isinstance(cube2, VectorCube)
     if vector1 != vector2:
@@ -671,10 +669,8 @@ def merge_cubes(
             "data cube (openEO specification). Use vector_to_raster to convert "
             "the vector data cube first."
         )
-    if vector1:
-        raise FeatureUnsupported(
-            "Process 'merge_cubes' does not support vector data cubes yet."
-        )
+    if isinstance(cube1, VectorCube) and isinstance(cube2, VectorCube):
+        return merge_vector_cubes(cube1, cube2, overlap_resolver, context)
     assert isinstance(cube1, RasterStack) and isinstance(cube2, RasterStack)
 
     # Get reference spatial dimensions from cube1 metadata (avoids loading pixel data)
