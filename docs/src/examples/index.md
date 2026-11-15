@@ -41,6 +41,27 @@ Explore how to:
 - Analyze temporal patterns in vegetation
 - Visualize results using matplotlib
 
+### [Field Monitoring with Vector Data Cubes](../notebooks/vector_field_monitoring.ipynb)
+
+Learn how to (see [Vector Data Cubes](../vector-cube.md)):
+
+- Load field boundaries from a FlatGeobuf file with `load_url`
+- Move the field edges inward with `vector_reproject` and `vector_buffer`
+- Compute a cloud-free NDVI time series per field with `aggregate_spatial`
+- Process the vector data cube: `filter_temporal`, `reduce_dimension`, `merge_cubes`
+- Select fields with `filter_bbox` and `filter_vector`
+- Download the results as GeoParquet, GeoPackage, FlatGeobuf, Shapefile and CSV
+
+### [From Rasters to Polygons and Back](../notebooks/vector_raster_bridges.ipynb)
+
+Learn how to:
+
+- Make polygons from the Copernicus crop type map with `raster_to_vector`
+- Compute zonal statistics on these polygons
+- Put the polygons on the Sentinel-2 grid with `vector_to_raster`
+- Crop and mask a raster to fields with `filter_spatial`
+- Process each field separately with `apply_polygon`
+
 ### Resolution Control Examples
 
 The examples demonstrate different approaches to managing resolution:

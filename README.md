@@ -26,6 +26,7 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 - Middleware for CORS, compression, and caching
 - Enhanced [RasterStack data model](https://sentinel-hub.github.io/titiler-openeo/raster-stack/) with temporal dimension support
 - [LazyRasterStack implementation](https://sentinel-hub.github.io/titiler-openeo/raster-stack/#lazyrasterstack-with-temporal-intelligence) with concurrent execution and intelligent caching
+- [Vector data cubes](https://sentinel-hub.github.io/titiler-openeo/vector-cube/): zonal statistics, polygons from rasters and back, and GIS formats (GeoParquet, GeoPackage, FlatGeobuf, Shapefile)
 
 ## Installation
 

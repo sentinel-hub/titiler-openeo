@@ -73,7 +73,11 @@ notebook = [
     "notebook>=6.5.4,<7.0.0",
     "ipython>=8.0,<8.11",
     "matplotlib",
-    "openeo",
+    # Device login against CDSE and vector cubes (`load_url`, `VectorCube`).
+    "openeo>=0.54.0",
+    # The vector notebooks read GeoParquet and GPKG results.
+    "geopandas",
+    "pyarrow",
 ]
 
 [project.optional-dependencies]
