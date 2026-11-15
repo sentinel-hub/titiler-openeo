@@ -24,6 +24,13 @@ TEMPORAL_DIMENSION = "t"
 _SCALARS = (str, int, float, bool, date)
 
 
+def is_empty_geometry(geometry: Optional[Dict[str, Any]]) -> bool:
+    """Return True for a null geometry or a geometry without coordinates."""
+    return not geometry or not (
+        geometry.get("coordinates") or geometry.get("geometries")
+    )
+
+
 def _normalize_features(obj: Any) -> List[Dict[str, Any]]:
     """Return the features of a GeoJSON FeatureCollection, Feature or Geometry."""
     if not isinstance(obj, dict) or "type" not in obj:
@@ -148,6 +155,30 @@ class VectorCube:
             labels=self.labels,
         )
 
+    def numeric_values(self) -> Optional[numpy.ma.MaskedArray]:
+        """Return the values with a numeric dtype, or None if a value is not a number.
+
+        The values of `aggregate_spatial` have the `object` dtype, so that an
+        integer stays an integer in JSON. Here they get the dtype of their
+        cells: integers stay integers, booleans stay booleans. Masked cells
+        are 0 under the mask. None for a cube without values.
+        """
+        if self.values is None:
+            return None
+        mask = numpy.ma.getmaskarray(self.values)
+        data = self.values.data
+        if data.dtype.kind in "biuf":
+            return numpy.ma.MaskedArray(data, mask=mask)
+        if data.dtype != object:
+            return None
+        cells = data[~mask].tolist()
+        sample = numpy.asarray(cells) if cells else numpy.zeros(0, dtype="float64")
+        if sample.dtype.kind not in "biuf":
+            return None
+        out = numpy.zeros(data.shape, dtype=sample.dtype)
+        out[~mask] = sample
+        return numpy.ma.MaskedArray(out, mask=mask)
+
     def __len__(self) -> int:
         """Return the number of geometries."""
         return len(self.geometries)
@@ -169,11 +200,16 @@ class VectorCube:
         )
 
     def _geometries_in(self, crs: CRS) -> List[Optional[Dict[str, Any]]]:
-        """Return the geometries in `crs`. They are not copied if the CRS is the same."""
+        """Return the geometries in `crs`. They are not copied if the CRS is the same.
+
+        Null and empty geometries stay as they are.
+        """
         if self.crs == crs:
             return self.geometries
         return [
-            transform_geom(self.crs, crs, geometry) if geometry else geometry
+            geometry
+            if is_empty_geometry(geometry)
+            else transform_geom(self.crs, crs, geometry)
             for geometry in self.geometries
         ]
 
