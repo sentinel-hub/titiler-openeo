@@ -38,6 +38,7 @@ nav:
   - Architecture:
     - Concepts: "concepts.md"
     - RasterStack Data Model: "raster-stack.md"
+    - Vector Data Cubes: "vector-cube.md"
     - Memory Management: "memory-management.md"
     - Special Features:
       - Parameter Management: "parameter-management.md"
@@ -63,6 +64,8 @@ nav:
       - NDVI Time Series Analysis: "notebooks/ndvi_time_series.ipynb"
       - Sentinel-1 SAR Backscatter RGB Composite: "notebooks/sar_backscatter_rgb.ipynb"
       - Sentinel-1 Band Sources Live Validation: "notebooks/sar_band_sources_validation.ipynb"
+      - Field Monitoring with Vector Data Cubes: "notebooks/vector_field_monitoring.ipynb"
+      - From Rasters to Polygons and Back: "notebooks/vector_raster_bridges.ipynb"
   - Development:
     - Contributing: "contributing.md"
   - Migration:
