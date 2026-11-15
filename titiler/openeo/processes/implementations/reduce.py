@@ -52,6 +52,8 @@ from rio_tiler.utils import resize_array
 
 from .callbacks import call_reducer, recompute_each_call
 from .data_model import ImageRef, RasterStack, _normalize_to_naive_utc
+from .vector_generic import reduce_vector
+from .vector_model import VectorCube
 
 logger = logging.getLogger(__name__)
 
@@ -1121,16 +1123,19 @@ def aggregate_temporal_period(
 
 
 def reduce_dimension(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     reducer: Callable,
     dimension: str,
     context: Optional[Any] = None,
     named_parameters: Optional[Dict[str, Any]] = None,
-) -> Union[RasterStack, ImageData]:
+) -> Union[RasterStack, ImageData, VectorCube]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
     Args:
-        data: A RasterStack data cube
+        data: A RasterStack data cube, or a vector data cube. For a vector
+            data cube, the reducer gets the values of all the geometries,
+            with the reduced dimension on axis 0. The `geometry` dimension
+            cannot be reduced.
         reducer: A reducer function to apply on the specified dimension
         dimension: The name of the dimension over which to reduce
         context: Additional data to be passed to the reducer
@@ -1145,6 +1150,9 @@ def reduce_dimension(
         DimensionNotAvailable: If the specified dimension does not exist
         ValueError: If the input data is invalid or the reducer returns invalid data
     """
+    if isinstance(data, VectorCube):
+        return reduce_vector(data, dimension, reducer, context, named_parameters)
+
     # Normalize dimension name
     dim_lower = dimension.lower()
 

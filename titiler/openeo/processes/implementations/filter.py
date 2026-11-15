@@ -11,7 +11,7 @@ from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
 
-from ...errors import OpenEOException
+from ...errors import DimensionMissing, OpenEOException
 from .data_model import ImageData, RasterStack
 from .reduce import (
     DimensionNotAvailable,
@@ -19,6 +19,13 @@ from .reduce import (
     _parse_intervals,
     _timestamp_in_interval,
 )
+from .vector_generic import (
+    BANDS_DIMENSION,
+    filter_vector_bbox,
+    select_labels,
+    vector_dimension,
+)
+from .vector_model import TEMPORAL_DIMENSION, VectorCube
 
 __all__ = ["filter_bands", "filter_bbox", "filter_labels", "filter_temporal"]
 
@@ -42,10 +49,10 @@ def _extent_to_pair(extent: Any) -> List[Optional[str]]:
 
 
 def filter_temporal(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     extent: Union[TemporalInterval, List[Optional[str]]],
     dimension: Optional[str] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Limits the data cube to the specified interval of dates and/or times.
 
     The filter checks whether each of the temporal dimension labels is greater
@@ -85,6 +92,21 @@ def filter_temporal(
 
     if dimension is not None and dimension.lower() not in ["t", "temporal", "time"]:
         raise DimensionNotAvailable(dimension)
+
+    if isinstance(data, VectorCube):
+        name = vector_dimension(
+            data, dimension or TEMPORAL_DIMENSION, "filter_temporal"
+        )
+        (start, end) = _parse_intervals([pair])[0]
+        return select_labels(
+            data,
+            name,
+            [
+                i
+                for i, label in enumerate(data.labels[name])
+                if _timestamp_in_interval(label, start, end)
+            ],
+        )
 
     if not data:
         return data
@@ -135,10 +157,10 @@ def _select_bands(img: ImageData, indexes: List[int], names: List[str]) -> Image
 
 
 def filter_bands(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     bands: Optional[List[str]] = None,
     wavelengths: Optional[List[List[float]]] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Filter the bands of the data cube by name.
 
     The order of ``bands`` defines the order of the bands in the result. The
@@ -166,10 +188,19 @@ def filter_bands(
         )
     if not bands:
         raise BandFilterParameterMissing()
-    if not data:
+    if isinstance(data, VectorCube):
+        if BANDS_DIMENSION not in data.dims:
+            # openEO: `DimensionMissing` for a cube without a bands dimension.
+            raise DimensionMissing(
+                f"A band dimension is missing: the vector data cube has the "
+                f"dimensions {list(data.dims)}."
+            )
+        name = BANDS_DIMENSION
+        current = [str(label) for label in data.labels[name]]
+    elif not data:
         return data
-
-    current = _cube_band_names(data)
+    else:
+        current = _cube_band_names(data)
     missing = [b for b in bands if b not in current]
     if missing:
         raise OpenEOException(
@@ -179,6 +210,8 @@ def filter_bands(
             status_code=400,
         )
     indexes = [current.index(b) for b in bands]
+    if isinstance(data, VectorCube):
+        return select_labels(data, name, indexes)
     names = list(bands)
     return data.map_images(
         lambda img: _select_bands(img, indexes, names), band_names=names
@@ -227,19 +260,29 @@ def _crop(img: ImageData, window: windows.Window, bounds: Any) -> ImageData:
     )
 
 
-def filter_bbox(data: RasterStack, extent: BoundingBox) -> RasterStack:
+def filter_bbox(
+    data: Union[RasterStack, VectorCube], extent: BoundingBox
+) -> Union[RasterStack, VectorCube]:
     """Limit the data cube to the specified bounding box.
 
-    A pixel is kept when its center is inside the bounding box. The bounding
-    box is reprojected to the CRS of the data cube.
+    Raster data cube: a pixel is kept when its center is inside the bounding
+    box. The bounding box is reprojected to the CRS of the data cube.
+
+    Vector data cube: a geometry is kept when it is fully within the bounding
+    box. The geometries are reprojected to the CRS of the bounding box.
 
     Args:
-        data: A raster data cube.
+        data: A raster or vector data cube.
         extent: A bounding box. Its CRS defaults to EPSG:4326.
 
     Returns:
         A data cube restricted to the bounding box.
     """
+    if isinstance(data, VectorCube):
+        crs = CRS.from_user_input(extent.crs) if extent.crs else CRS.from_epsg(4326)
+        return filter_vector_bbox(
+            data, extent.west, extent.south, extent.east, extent.north, crs
+        )
     if not data:
         return data
 
@@ -273,12 +316,46 @@ def _temporal_label(key: datetime) -> datetime:
     return key.replace(tzinfo=timezone.utc)
 
 
+def _label_condition(
+    condition: Callable, labels: List[Any], context: Optional[Any]
+) -> numpy.ndarray:
+    """Evaluate the condition ONCE on the array of all labels: one bool per label."""
+    values = numpy.empty(len(labels), dtype=object)
+    values[:] = labels
+    named_parameters: Dict[str, Any] = {"value": values, "context": context}
+    result = condition(
+        values,
+        positional_parameters={"value": 0},
+        named_parameters=named_parameters,
+    )
+    return numpy.broadcast_to(numpy.asarray(result, dtype=bool), values.shape)
+
+
+def _filter_vector_labels(
+    data: VectorCube, condition: Callable, dimension: str, context: Optional[Any]
+) -> VectorCube:
+    """filter_labels on a dimension of a vector data cube other than geometry.
+
+    As in the openEO specification, no match gives a dimension without labels,
+    not an error (as `filter_temporal` and `filter_bbox` on a vector cube).
+    """
+    name = vector_dimension(data, dimension, "filter_labels")
+    labels = data.labels[name]
+    if name == TEMPORAL_DIMENSION:
+        labels = [
+            _temporal_label(label) if isinstance(label, datetime) else label
+            for label in labels
+        ]
+    keep = _label_condition(condition, labels, context)
+    return select_labels(data, name, [i for i, ok in enumerate(keep) if ok])
+
+
 def filter_labels(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     condition: Callable,
     dimension: str,
     context: Optional[Any] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Filter the labels of a dimension with a condition.
 
     The condition is evaluated ONCE, on the array of all labels (see the
@@ -299,6 +376,8 @@ def filter_labels(
     Raises:
         DimensionNotAvailable: If the dimension does not exist.
     """
+    if isinstance(data, VectorCube):
+        return _filter_vector_labels(data, condition, dimension, context)
     dim = dimension.lower()
     if dim not in TEMPORAL_DIMENSIONS + SPECTRAL_DIMENSIONS:
         raise DimensionNotAvailable(dimension)
@@ -312,15 +391,7 @@ def filter_labels(
         [_temporal_label(k) for k in keys] if dim in TEMPORAL_DIMENSIONS else band_names
     )
 
-    values = numpy.empty(len(labels), dtype=object)
-    values[:] = labels
-    named_parameters: Dict[str, Any] = {"value": values, "context": context}
-    result = condition(
-        values,
-        positional_parameters={"value": 0},
-        named_parameters=named_parameters,
-    )
-    keep = numpy.broadcast_to(numpy.asarray(result, dtype=bool), values.shape)
+    keep = _label_condition(condition, labels, context)
 
     if dim in TEMPORAL_DIMENSIONS:
         selected = [k for k, ok in zip(keys, keep) if ok]

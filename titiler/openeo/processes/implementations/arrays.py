@@ -13,7 +13,8 @@ from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
 from .core import process
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
-from .vector_model import VectorCube
+from .vector_generic import vector_dimension, with_labels
+from .vector_model import TEMPORAL_DIMENSION, VectorCube
 
 __all__ = [
     "array_element",
@@ -465,11 +466,11 @@ def _rename_temporal_labels(
 
 @process
 def rename_labels(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     dimension: str,
     target: List[Union[str, float]],
     source: Optional[List[Union[str, float]]] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Rename the labels of a dimension in the data cube.
 
     Supports the spectral (``"bands"``/``"spectral"``) and temporal
@@ -493,11 +494,22 @@ def rename_labels(
         LabelsNotEnumerated: If a source label does not exist.
         LabelExists: If a renamed label collides with another label.
     """
+    source = list(source or [])
+    target = list(target)
+
+    if isinstance(data, VectorCube):
+        name = vector_dimension(data, dimension, "rename_labels")
+        current = list(data.labels[name])
+        old: List[Any] = list(source)
+        new: List[Any] = list(target)
+        if name == TEMPORAL_DIMENSION:
+            old = [_coerce_temporal_label(s) for s in old]
+            new = [_coerce_temporal_label(t) for t in new]
+        return with_labels(data, name, _compute_renamed_labels(current, old, new))
+
     if not data:
         raise ValueError("Expected a non-empty data cube")
 
-    source = list(source or [])
-    target = list(target)
     dim = dimension.lower()
 
     if dim in ("bands", "spectral"):
