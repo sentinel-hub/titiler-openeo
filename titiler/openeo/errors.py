@@ -416,6 +416,30 @@ class DimensionMissing(OpenEOException):
         )
 
 
+class OverlapResolverMissing(OpenEOException):
+    """Raised when overlapping data cubes have no overlap resolver specified."""
+
+    def __init__(self) -> None:
+        """Initialize error."""
+        super().__init__(
+            message="Overlapping data cubes, but no overlap resolver has been specified.",
+            code="OverlapResolverMissing",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class IncompatibleGeometryTypes(OpenEOException):
+    """merge_cubes: two vector data cubes with different base geometry types."""
+
+    def __init__(self, message: str):
+        """Initialize error with the geometry types."""
+        super().__init__(
+            message=message,
+            code="IncompatibleGeometryTypes",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 
