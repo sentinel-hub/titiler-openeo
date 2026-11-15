@@ -289,7 +289,9 @@ class VectorCube:
             else:
                 values = self.values[:, numpy.newaxis]
                 dates = [None]
-            values = values.reshape((len(self), len(dates), -1))
+            # The size is explicit: `-1` fails when a dimension has no labels.
+            width = int(numpy.prod([len(self.labels[dim]) for dim in other]))
+            values = values.reshape((len(self), len(dates), width))
             combinations = itertools.product(*(self.labels[dim] for dim in other))
             value_names = (
                 ["_".join(str(label) for label in combo) for combo in combinations]

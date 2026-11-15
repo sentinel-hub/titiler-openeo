@@ -10,6 +10,7 @@ from rasterio.crs import CRS
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import (
+    DimensionMissing,
     DimensionNotAvailable,
     OpenEOException,
     ProcessParameterInvalid,
@@ -206,9 +207,10 @@ def test_filter_bands():
 
 
 def test_filter_bands_errors():
-    """A band that does not exist, and a cube without bands."""
-    with pytest.raises(OpenEOException, match=r"\['B02'\] do not exist"):
+    """A band that does not exist, and a cube without bands (openEO DimensionMissing)."""
+    with pytest.raises(OpenEOException, match=r"\['B02'\] do not exist") as error:
         _run("filter_bands", bands=["B02"])
+    assert error.value.code == "BandNotAvailable"
     cube = load_geojson(
         {
             "type": "Feature",
@@ -217,8 +219,10 @@ def test_filter_bands_errors():
         },
         properties=["B04"],
     )
-    with pytest.raises(DimensionNotAvailable, match="'bands'"):
+    with pytest.raises(DimensionMissing, match="band dimension is missing") as error:
         PROCESSES["filter_bands"].implementation(data=cube, bands=["B04"])
+    assert error.value.code == "DimensionMissing"
+    assert error.value.status_code == 400
 
 
 @pytest.mark.parametrize(
@@ -259,14 +263,21 @@ def test_filter_labels_load_geojson_properties():
     assert result.values.tolist() == [[3.0]]
 
 
-def test_filter_labels_errors():
-    """No label matches; the geometry dimension."""
+def test_filter_labels_no_match_gives_an_empty_dimension():
+    """openEO: no error, the dimension has no labels (as filter_temporal)."""
     never = _callback("eq", x={"from_parameter": "value"}, y="none")
-    with pytest.raises(
-        OpenEOException, match="No label of the dimension 'bands'"
-    ) as error:
-        _run("filter_labels", dimension="bands", condition=never)
-    assert error.value.code == "NoDataAvailable"
+    result = _run("filter_labels", dimension="bands", condition=never)
+    assert result.labels == {"t": [D1, D2], "bands": []}
+    assert result.values.shape == (2, 2, 0)
+    assert len(result) == 2
+
+    late = _run("filter_temporal", extent=["2030-01-01", None])
+    assert late.labels["t"] == [] and late.values.shape == (2, 0, 2)
+
+
+def test_filter_labels_geometry_dimension():
+    """The geometry dimension is filtered with filter_vector or filter_bbox."""
+    never = _callback("eq", x={"from_parameter": "value"}, y="none")
     with pytest.raises(ProcessParameterInvalid, match="filter_vector or filter_bbox"):
         _run("filter_labels", dimension="geometry", condition=never)
 
@@ -429,3 +440,15 @@ def test_aggregate_spatial_graph_to_csv():
     properties = document["features"][0]["properties"]
     assert properties["name"] == "zone"
     assert properties["values"] == {"red": 3.0, "nir": 30.0}
+
+
+@pytest.mark.parametrize(
+    "format_name", ["GeoJSON", "CSV", "GPKG", "GeoParquet", "FlatGeobuf"]
+)
+def test_empty_dimension_is_saved(format_name):
+    """A cube with an empty dimension (after a filter) can be saved."""
+    if format_name not in ("GeoJSON", "CSV"):
+        pytest.importorskip("pyogrio")
+    cube = _run("filter_temporal", extent=["2030-01-01", None])
+    result = PROCESSES["save_result"].implementation(data=cube, format=format_name)
+    assert result.data

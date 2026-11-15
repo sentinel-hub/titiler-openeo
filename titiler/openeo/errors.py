@@ -418,6 +418,18 @@ class DimensionNotAvailable(OpenEOException):
         )
 
 
+class DimensionMissing(OpenEOException):
+    """A process needs a dimension of a type that the data cube does not have."""
+
+    def __init__(self, message: str):
+        """Initialize error with the message of the process."""
+        super().__init__(
+            message=message,
+            code="DimensionMissing",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 class MixedCRSError(OpenEOException):
     """The input data contains mixed coordinate reference systems."""
 

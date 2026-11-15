@@ -11,7 +11,7 @@ from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
 
-from ...errors import OpenEOException
+from ...errors import DimensionMissing, OpenEOException
 from .data_model import ImageData, RasterStack
 from .reduce import (
     DimensionNotAvailable,
@@ -189,7 +189,13 @@ def filter_bands(
     if not bands:
         raise BandFilterParameterMissing()
     if isinstance(data, VectorCube):
-        name = vector_dimension(data, BANDS_DIMENSION, "filter_bands")
+        if BANDS_DIMENSION not in data.dims:
+            # openEO: `DimensionMissing` for a cube without a bands dimension.
+            raise DimensionMissing(
+                f"A band dimension is missing: the vector data cube has the "
+                f"dimensions {list(data.dims)}."
+            )
+        name = BANDS_DIMENSION
         current = [str(label) for label in data.labels[name]]
     elif not data:
         return data
@@ -328,7 +334,11 @@ def _label_condition(
 def _filter_vector_labels(
     data: VectorCube, condition: Callable, dimension: str, context: Optional[Any]
 ) -> VectorCube:
-    """filter_labels on a dimension of a vector data cube other than geometry."""
+    """filter_labels on a dimension of a vector data cube other than geometry.
+
+    As in the openEO specification, no match gives a dimension without labels,
+    not an error (as `filter_temporal` and `filter_bbox` on a vector cube).
+    """
     name = vector_dimension(data, dimension, "filter_labels")
     labels = data.labels[name]
     if name == TEMPORAL_DIMENSION:
@@ -337,14 +347,7 @@ def _filter_vector_labels(
             for label in labels
         ]
     keep = _label_condition(condition, labels, context)
-    indexes = [i for i, ok in enumerate(keep) if ok]
-    if not indexes:
-        raise OpenEOException(
-            message=f"No label of the dimension '{name}' matches the condition.",
-            code="NoDataAvailable",
-            status_code=400,
-        )
-    return select_labels(data, name, indexes)
+    return select_labels(data, name, [i for i, ok in enumerate(keep) if ok])
 
 
 def filter_labels(
