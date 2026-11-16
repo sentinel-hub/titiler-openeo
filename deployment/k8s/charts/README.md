@@ -200,8 +200,7 @@ admin guide's upgrade notes), so it is safe to run on every upgrade.
 * **Bundled PostgreSQL without persistence** (`postgresql.persistence.enabled:
   false`): every new PostgreSQL pod starts with an empty database, and nothing
   creates the tables again until the next install or upgrade runs the Job. Run
-  the command in an API pod (see
-  [Selecting the API pods](#selecting-the-api-pods)) to restore them sooner.
+  the command in an API pod (see below) to restore them sooner.
 * **Image**: an image older than the command (titiler-openeo 0.19.0 and
   before, or an image built on one) creates its tables at startup, so with it
   the Job logs that it has nothing to do and succeeds.
