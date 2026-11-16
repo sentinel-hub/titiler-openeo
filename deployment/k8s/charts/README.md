@@ -40,6 +40,36 @@ helm install titiler-openeo . -n your-namespace \
 * Pods read the users at start-up, so after changing users run
   `kubectl rollout restart deployment/<release>-titiler-openeo`.
 
+## Selecting the API pods
+
+The API pods carry `app.kubernetes.io/component: api`, as the bundled
+PostgreSQL pod carries `postgresql` and the schema Job pod `schema`. To target
+only the API pods, for example in a PodDisruptionBudget, a NetworkPolicy or
+`kubectl logs -l`, select on it together with the name and instance labels
+(`app.kubernetes.io/name` is `nameOverride` when set):
+
+```bash
+kubectl get pods -l app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/instance=<release>,app.kubernetes.io/component=api
+```
+
+The Deployment and Service selectors keep the labels of chart 4.0.0,
+`app.kubernetes.io/name` and `app.kubernetes.io/instance`, for upgrade
+compatibility until a future major version. The Service still sends traffic
+only to the API pods, the only ones with a port named `http`. But these
+selectors also match the PostgreSQL and schema Job pods, so a command that
+picks one pod through them, such as `kubectl exec deploy/<release>-titiler-openeo`
+or `kubectl port-forward svc/<release>-titiler-openeo`, can pick the PostgreSQL
+pod. Name an API pod instead:
+
+```bash
+POD=$(kubectl get pods -l app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/instance=<release>,app.kubernetes.io/component=api -o name | head -n 1)
+kubectl exec "$POD" -- python -m titiler.openeo.services.create_schema
+```
+
+A selector that found the API pods by the absence of the label
+(`!app.kubernetes.io/component`) no longer matches them: select
+`app.kubernetes.io/component=api` instead.
+
 ## Deploying with CDSE (Copernicus Data Space Ecosystem)
 
 To deploy an instance working with CDSE:
@@ -170,7 +200,8 @@ admin guide's upgrade notes), so it is safe to run on every upgrade.
 * **Bundled PostgreSQL without persistence** (`postgresql.persistence.enabled:
   false`): every new PostgreSQL pod starts with an empty database, and nothing
   creates the tables again until the next install or upgrade runs the Job. Run
-  the command in an API pod (see below) to restore them sooner.
+  the command in an API pod (see
+  [Selecting the API pods](#selecting-the-api-pods)) to restore them sooner.
 * **Image**: an image older than the command (titiler-openeo 0.19.0 and
   before, or an image built on one) creates its tables at startup, so with it
   the Job logs that it has nothing to do and succeeds.
@@ -192,8 +223,8 @@ admin guide's upgrade notes), so it is safe to run on every upgrade.
 * **JSON or DuckDB store with a PostgreSQL tile store** (a
   `TITILER_OPENEO_TILE_STORE_URL` set through `env` or `envVars`): there is no
   Job, so nothing creates `tile_assignments`. After install and each upgrade,
-  run the command in an API pod (it skips the JSON or DuckDB store):
-  `kubectl exec deploy/<release>-titiler-openeo -- python -m titiler.openeo.services.create_schema`.
+  run the command in an API pod (it skips the JSON or DuckDB store), as in
+  [Selecting the API pods](#selecting-the-api-pods).
 * **`helm template | kubectl apply`** (and kustomize `helmCharts`): the Job is
   applied like any other resource. A Job's pod template cannot change, so
   delete the completed Job before applying a new version, or render with

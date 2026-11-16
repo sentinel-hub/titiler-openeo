@@ -17,6 +17,8 @@ spec:
     metadata:
       labels:
         {{- include "titiler.selectorLabels" . | nindent 8 }}
+        {{- /* Not in the selectors: see "Selecting the API pods" in the README. */}}
+        app.kubernetes.io/component: api
     spec:
       {{- with .Values.podSecurityContext }}
       securityContext:
