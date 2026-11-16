@@ -32,6 +32,10 @@ TENANT_B = "22222222-2222-2222-2222-222222222222"
 #: The tenant id Entra gives every personal Microsoft account.
 MSA_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"
 
+#: A basic-auth user whose standard base64 credentials contain "/".
+SLASH_USER, SLASH_PASSWORD = "alice", "s3?cret"
+SLASH_CREDENTIALS = base64.b64encode(f"{SLASH_USER}:{SLASH_PASSWORD}".encode()).decode()
+
 
 @pytest.fixture
 def oidc_config():
@@ -808,6 +812,20 @@ def test_auth_token_from_token():
     assert token.token == "my_access_token"
 
 
+@pytest.mark.parametrize(
+    "bearer, method, provider, value",
+    [
+        (f"Bearer basic//{SLASH_CREDENTIALS}", "basic", "", SLASH_CREDENTIALS),
+        ("Bearer oidc/realm/opaque/token", "oidc", "realm", "opaque/token"),
+    ],
+)
+def test_auth_token_from_token_keeps_slashes_in_the_token(
+    bearer, method, provider, value
+):
+    token = AuthToken.from_token(bearer)
+    assert (token.method, token.provider, token.token) == (method, provider, value)
+
+
 # ---------------------------------------------------------------------------
 # Error reporting
 # ---------------------------------------------------------------------------
@@ -929,7 +947,7 @@ def test_an_unreachable_provider_is_a_503_not_a_bad_token(auth):
 
 @pytest.fixture
 def store_type():
-    """One store is enough: these tests never reach it."""
+    """One store is enough: nothing tested here is store-specific."""
     return "local"
 
 
@@ -988,3 +1006,35 @@ def test_a_malformed_token_answers_token_invalid(oidc_client):
 def test_a_missing_authorization_header_is_not_token_invalid(oidc_client):
     """Nothing to refresh: the client has to log in."""
     assert oidc_client.get("/me").json()["code"] != "TokenInvalid"
+
+
+# ---------------------------------------------------------------------------
+# Basic auth, through the app
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def basic_client(main_module, monkeypatch) -> TestClient:
+    settings = AuthSettings(
+        method="basic", users={SLASH_USER: {"password": SLASH_PASSWORD}}
+    )
+    monkeypatch.setattr(
+        main_module, "auth", get_auth(settings, store=main_module.service_store)
+    )
+    return TestClient(main_module.create_app())
+
+
+def test_basic_credentials_with_a_slash_in_base64_work_after_login(basic_client):
+    """The access token from `/credentials/basic` must be accepted afterwards."""
+    login = basic_client.get(
+        "/credentials/basic", headers={"Authorization": f"Basic {SLASH_CREDENTIALS}"}
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+    assert "/" in access_token
+
+    me = basic_client.get(
+        "/me", headers={"Authorization": f"Bearer basic//{access_token}"}
+    )
+    assert me.status_code == 200, me.json()
+    assert me.json()["user_id"] == SLASH_USER
