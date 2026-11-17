@@ -109,38 +109,32 @@ jobs:
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
-  publish-docker:
+  # As in ci.yml: each platform is pushed by digest, untagged, then pulled back
+  # and smoke-tested, and only publish-docker tags an index of the digests
+  # that passed. A release image that breaks its runtime contract is never
+  # tagged.
+  image-meta:
     needs: release-please
     runs-on: ubuntu-latest
     if: ${{ needs.release-please.outputs.paths_released && contains(fromJSON(needs.release-please.outputs.paths_released), '.') }}
     permissions:
       contents: read
-      packages: write
-    
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Parse semver from tag
         id: semver
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
           VERSION="${TAG#v}"
-          MAJOR="${VERSION%%.*}"
-          MINOR="${VERSION%.*}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
-          echo "minor=${MINOR}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=${VERSION}"
+            echo "major=${VERSION%%.*}"
+            echo "minor=${VERSION%.*}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata
         id: meta
@@ -154,24 +148,103 @@ jobs:
             type=raw,value=${{ steps.semver.outputs.major }}
             type=raw,value=latest
 
+  build-image:
+    needs: image-meta
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest with no tag, and without BuildKit attestations, so the
+      # index holds only manifests tested below.
       - name: Build
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          load: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ needs.image-meta.outputs.labels }}
+          provenance: false
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
 
-      # As in ci.yml: a release image that breaks its runtime contract is never pushed.
+      # Pulls the pushed digest back from ghcr.io and tests it; that ref is
+      # what publish-docker tags.
       - name: Smoke-test the image
         env:
-          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-        run: ./docker/smoke-test.sh "$IMAGE_REF"
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          SMOKE_PLATFORM: linux/${{ matrix.arch }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ./docker/smoke-test.sh "$IMAGE_REF"
+          mkdir -p "$RUNNER_TEMP/tested" && echo "$IMAGE_REF" > "$RUNNER_TEMP/tested/$ARCH"
 
-      - name: Push
+      - name: Hand the tested ref to publish-docker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tested-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tested/${{ matrix.arch }}
+          if-no-files-found: error
+          # Long enough for a late "Re-run failed jobs"; cleanup deletes an
+          # untagged digest only once it is more than 7 days old.
+          retention-days: 7
+          # A re-run hands on the digest it tested itself.
+          overwrite: true
+
+  # Tags the tested digests, not a rebuild. Runs only if every platform passed.
+  publish-docker:
+    needs: [image-meta, build-image]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: tested-image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/tested
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the multi-arch index
+        working-directory: ${{ runner.temp }}/tested
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: printf '%s\n' "$TAGS" | xargs -r -n1 docker push
+          TAGS: ${{ needs.image-meta.outputs.tags }}
+        run: |
+          # One tested ref per build-image arch, or no tag at all: an artifact
+          # can be missing (expired before a re-run) and the download still passes.
+          [[ -s amd64 && -s arm64 ]] || { echo "::error::tested refs missing: $(ls)"; exit 1; }
+          args=()
+          while IFS= read -r tag; do args+=(--tag "$tag"); done <<<"$TAGS"
+          docker buildx imagetools create "${args[@]}" "$(<amd64)" "$(<arm64)"
 
   publish-helm-chart-oci:
     needs: release-please
