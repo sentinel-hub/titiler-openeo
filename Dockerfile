@@ -16,8 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
 # Unpinned on purpose: Wolfi removes old versions, so `=<version>` pins break the
 # build within days. libstdc++ is needed by the rasterio, pyproj and numexpr
 # wheels, which link it without vendoring it. Python's mpdecimal pulls it in
-# today; it is listed so that a change there cannot drop it.
-RUN apk add --no-cache python-${PYTHON_VERSION} libstdc++
+# today; it is listed so that a change there cannot drop it. libpq-18 is the
+# libpq psycopg2 is built against below; keep its major in step with
+# postgresql-18-dev.
+RUN apk add --no-cache python-${PYTHON_VERSION} libstdc++ libpq-18
 
 # A stage rather than COPY --from=<image>, because Dependabot only reads FROM lines.
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
@@ -26,6 +28,10 @@ FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b98
 FROM base AS builder
 
 LABEL stage=builder
+
+# To build psycopg2 from source: a compiler, Python headers, pg_config and the
+# libpq headers.
+RUN apk add --no-cache gcc python-${PYTHON_VERSION}-dev postgresql-18-dev
 
 COPY --from=uv /uv /usr/local/bin/
 
@@ -37,7 +43,11 @@ ENV UV_LINK_MODE=copy \
 
 WORKDIR /tmp/app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --no-install-project
+# psycopg2-binary from its sdist (hash in uv.lock), linked to the apk libpq
+# instead of the libpq and OpenSSL its wheel bundles, as psycopg advises for
+# production. The extra stays psycopg2-binary for pip users.
+RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --no-install-project \
+    --no-binary-package psycopg2-binary
 COPY README.md ./
 COPY titiler/ titiler/
 RUN uv pip install --no-deps .
