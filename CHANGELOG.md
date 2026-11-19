@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.0 (2026-11-19)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 4.0.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/490
+* feat(docs): add ADR 0014 for vector data cubes and output formats by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/493
+* fix(ci): add 'io' and 'stac' to allowed scopes in PR title validation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/507
+* build(docker): build psycopg2 from source against Wolfi's libpq by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/523
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.21.0...v0.22.0
+
 ## 0.21.0 (2026-11-12)
 
 ## What's Changed
