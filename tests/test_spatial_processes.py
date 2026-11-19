@@ -10,6 +10,7 @@ from titiler.openeo.processes.implementations.spatial import (
     aggregate_spatial,
     resample_spatial,
 )
+from titiler.openeo.processes.implementations.vector_model import VectorCube
 
 
 @pytest.fixture
@@ -162,12 +163,14 @@ def test_aggregate_spatial(sample_raster_stack):
         return None
 
     # Test basic aggregation
-    result = aggregate_spatial(
+    cube = aggregate_spatial(
         data=sample_raster_stack, geometries=geometry, reducer=mean_reducer
     )
 
-    # Result should be a GeoJSON FeatureCollection
-    assert isinstance(result, dict)
+    # Result is a vector data cube, written as a GeoJSON FeatureCollection
+    assert isinstance(cube, VectorCube)
+    assert cube.dims == ("geometry", "t", "bands")
+    result = cube.to_feature_collection()
     assert result["type"] == "FeatureCollection"
     assert "features" in result
     assert len(result["features"]) > 0
@@ -200,7 +203,7 @@ def test_aggregate_spatial(sample_raster_stack):
         geometries=geometry,
         reducer=mean_reducer_with_metadata,
         target_dimension="stats",
-    )
+    ).to_feature_collection()
 
     # Check the structure with target_dimension
     feature = result_with_metadata["features"][0]
@@ -245,7 +248,7 @@ def test_aggregate_spatial(sample_raster_stack):
 
     result_features = aggregate_spatial(
         data=sample_raster_stack, geometries=feature_collection, reducer=mean_reducer
-    )
+    ).to_feature_collection()
 
     # Should have results for both features
     assert len(result_features["features"]) == 2
@@ -282,7 +285,7 @@ def test_aggregate_spatial_single_band_is_scalar():
     )
     result = aggregate_spatial(
         data={"2021-01-01": img}, geometries=WORLD, reducer=_mean
-    )
+    ).to_feature_collection()
     assert result["features"][0]["properties"]["values"] == {"2021-01-01": 2.0}
 
 
@@ -301,7 +304,8 @@ def test_aggregate_spatial_all_bands_to_csv():
     result = aggregate_spatial(
         data={"2023-01-05": img}, geometries=WORLD, reducer=_mean
     )
-    values = result["features"][0]["properties"]["values"]["2023-01-05"]
+    features = result.to_feature_collection()["features"]
+    values = features[0]["properties"]["values"]["2023-01-05"]
     assert values["B03"] == 1.0
     assert values["B04"] is np.ma.masked
 
