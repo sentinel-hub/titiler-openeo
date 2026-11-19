@@ -157,10 +157,7 @@ jobs:
         id: image
         env:
           REF: ${{ needs.image-meta.outputs.can-push == 'true' && format('ghcr.io/{0}@{1}', github.repository, steps.build.outputs.digest) || 'titiler-openeo:local' }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          mkdir -p "$RUNNER_TEMP/tested" && echo "$REF" > "$RUNNER_TEMP/tested/$ARCH"
+        run: echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       # Gates the tags: an image that breaks its runtime contract is never
       # tagged. Via env: so nothing is interpolated into run:.
@@ -184,6 +181,12 @@ jobs:
           severity: CRITICAL
 
       # Reached only when the checks above passed.
+      - name: record the tested ref
+        env:
+          REF: ${{ steps.image.outputs.ref }}
+          ARCH: ${{ matrix.arch }}
+        run: mkdir -p "$RUNNER_TEMP/tested" && echo "$REF" > "$RUNNER_TEMP/tested/$ARCH"
+
       - name: hand the tested ref to publish-docker
         if: needs.image-meta.outputs.can-push == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
