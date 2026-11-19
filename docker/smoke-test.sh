@@ -218,6 +218,10 @@ import psycopg2
 import sqlalchemy
 
 assert psycopg2.extensions.libpq_version() >= 90000
+# The apk libpq the Dockerfile builds psycopg2 against, not a copy a wheel bundles.
+with open("/proc/self/maps") as f:
+    libpq = {line.split()[-1] for line in f if "libpq" in line}
+assert libpq and all(p.startswith("/usr/lib/libpq.so") for p in libpq), libpq
 engine = sqlalchemy.create_engine("postgresql://u:p@localhost/db")
 assert engine.dialect.driver == "psycopg2", engine.dialect.driver
 PY
