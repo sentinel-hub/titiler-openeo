@@ -90,12 +90,12 @@ jobs:
         run: |
           set -euo pipefail
           # ct install --skip-clean-up leaves the release in place. Find the
-          # pod by the standard helm label (app.kubernetes.io/instance is the
-          # release name, name is the chart name).
+          # API pod by its labels (name is the chart name, component=api
+          # leaves out the bundled PostgreSQL and schema Job pods).
           for i in $(seq 1 30); do
-            POD=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,!app.kubernetes.io/component' \
+            POD=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/component=api' \
               -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-            NS=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,!app.kubernetes.io/component' \
+            NS=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/component=api' \
               -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
             if [[ -n "$POD" ]]; then
               break

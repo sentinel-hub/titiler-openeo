@@ -19,3 +19,9 @@ tests:
           pattern: "Users are read from TITILER_OPENEO_AUTH_USERS"
       - notMatchRegexRaw:
           pattern: "Current number of configured users"
+
+  # Name and instance alone also match the bundled PostgreSQL and schema Job pods.
+  - it: should port-forward to an API pod
+    asserts:
+      - matchRegexRaw:
+          pattern: '-l "app\.kubernetes\.io/name=titiler-openeo,app\.kubernetes\.io/instance=RELEASE-NAME,app\.kubernetes\.io/component=api"'
