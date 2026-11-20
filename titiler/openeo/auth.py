@@ -621,7 +621,8 @@ class AuthToken(BaseModel):
         if "Bearer " in token:
             token = token.removeprefix("Bearer ")
 
-        return cls(**dict(zip(["method", "provider", "token"], token.split("/"))))  # type: ignore
+        # maxsplit: the token itself can contain "/" (standard base64 does).
+        return cls(**dict(zip(["method", "provider", "token"], token.split("/", 2))))  # type: ignore
 
 
 @define(kw_only=True)
