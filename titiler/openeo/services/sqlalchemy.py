@@ -2,7 +2,8 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from threading import Lock
+from typing import Any, Dict, List, Optional, Union
 
 from attrs import define, field
 from sqlalchemy import (
@@ -10,17 +11,24 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Integer,
+    PrimaryKeyConstraint,
     StaticPool,
     String,
     Text,
     UniqueConstraint,
+    case,
     create_engine,
+    func,
+    inspect,
     select,
     text,
 )
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from ..models.auth import User
+from ..settings import StoreSettings
 from .base import ServicesStore, UdpStore
 
 
@@ -63,8 +71,9 @@ class UdpDefinition(Base):
 
     __tablename__ = "udp_definitions"
 
+    # UDP ids are unique per user, not across users (#469).
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
     process_graph: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -87,32 +96,144 @@ class UdpDefinition(Base):
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    __table_args__ = (PrimaryKeyConstraint("user_id", "id"),)
+
+
+_engines: Dict[str, Any] = {}
+_engines_lock = Lock()
+
+
+def _is_sqlite_memory(url: URL) -> bool:
+    """Whether a URL names an in-memory SQLite database.
+
+    `sqlite://`, `sqlite:///:memory:` and their `sqlite+driver` forms all do.
+    """
+    return url.get_backend_name() == "sqlite" and url.database in (
+        None,
+        "",
+        ":memory:",
+    )
+
+
+def _get_engine(store: Union[str, URL]) -> Any:
+    """Return the engine for a store URL.
+
+    Server databases get one engine per URL and process, shared by every store
+    (services, UDP, tile), so they do not each hold a connection pool against
+    the same database. SQLite gets a fresh engine each time: an in-memory
+    database exists only within its connection, so sharing would leak data
+    between stores.
+    """
+    url = make_url(store)
+    if _is_sqlite_memory(url):
+        # the same connection object must be shared among threads,
+        # since the database exists only within the scope of that connection.
+        return create_engine(
+            url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    if url.get_backend_name() == "sqlite":
+        return create_engine(url)
+
+    # `str(url)` masks the password, so two URLs that differ only by password
+    # would share an engine.
+    key = url.render_as_string(hide_password=False)
+    with _engines_lock:
+        engine = _engines.get(key)
+        if engine is None:
+            engine = _engines[key] = create_engine(url, **StoreSettings().model_dump())
+        return engine
+
+
+def dispose_engines() -> None:
+    """Dispose of and forget every shared engine.
+
+    The next store built for a URL then gets a new engine with the current
+    `StoreSettings`. Meant for tests.
+    """
+    with _engines_lock:
+        for engine in _engines.values():
+            engine.dispose()
+        _engines.clear()
+
+
+def create_schema(engine: Any) -> None:
+    """Create the missing tables of every store, the tile store's included.
+
+    It runs through `python -m titiler.openeo.services.create_schema`, which
+    the Helm chart runs in a Job after each install and upgrade. The stores do
+    not call it on a server database:
+    connecting at import crashed the app while the database was not ready
+    (#479), and replicas that started together raced on the DDL (#274).
+
+    Apart from keying an older `udp_definitions` table on `(user_id, id)`
+    (#469), it only creates missing tables; it never alters or drops one.
+    """
+    # Registers `tile_assignments` on `Base`.
+    from . import sqlalchemy_tile  # noqa: F401
+
+    with engine.begin() as conn:
+        Base.metadata.create_all(conn)
+        _migrate_udp_primary_key(conn)
+
+
+def _create_sqlite_schema(engine: Any) -> None:
+    """Create the tables in process, for SQLite only.
+
+    An in-memory database exists only within this process's connection, so
+    nothing outside can prepare it, and a SQLite file has no server to wait for.
+    """
+    if engine.dialect.name == "sqlite":
+        create_schema(engine)
+
+
+def _migrate_udp_primary_key(conn: Any) -> None:
+    """Key an older `udp_definitions` table on `(user_id, id)`.
+
+    Older tables are keyed on `id` alone, which lets only one user hold an id
+    (#469). SQLite cannot change a primary key, so there the table is rebuilt.
+    """
+    table = UdpDefinition.__table__
+    pk = inspect(conn).get_pk_constraint(table.name)
+    if sorted(pk["constrained_columns"]) == ["id", "user_id"]:
+        return
+
+    if conn.dialect.name == "sqlite":
+        # pysqlite does not open a transaction for DDL. Without the savepoint,
+        # a failure part way leaves an empty table under the new key, which
+        # the next start does not migrate, and the rows in the old table.
+        with conn.begin_nested():
+            old = f"{table.name}_old"
+            conn.execute(text(f"ALTER TABLE {table.name} RENAME TO {old}"))
+            table.create(conn)
+            columns = ", ".join(c.name for c in table.columns)
+            conn.execute(
+                text(
+                    f"INSERT INTO {table.name} ({columns}) SELECT {columns} FROM {old}"
+                )
+            )
+            conn.execute(text(f"DROP TABLE {old}"))
+        return
+
+    quote = conn.dialect.identifier_preparer.quote
+    conn.execute(text(f"ALTER TABLE {table.name} DROP CONSTRAINT {quote(pk['name'])}"))
+    conn.execute(text(f"ALTER TABLE {table.name} ADD PRIMARY KEY (user_id, id)"))
+
 
 @define(kw_only=True)
 class SQLAlchemyStore(ServicesStore):
     """SQLAlchemy Service Store."""
 
-    store: str = field()
+    store: Union[str, URL] = field()
     _engine: Any = field(default=None, init=False)
     _session_factory: Any = field(default=None, init=False)
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
-        # Check if the store is a sqlite in memory database
-        kwargs = {}
-        if self.store == "sqlite:///:memory:":
-            # the same connection object must be shared among threads,
-            # since the database exists only within the scope of that connection.
-            kwargs = {
-                "connect_args": {"check_same_thread": False},
-                "poolclass": StaticPool,
-            }
-        self._engine = create_engine(self.store, **kwargs)
+        self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-
-        # Create tables if they don't exist
-
-        Base.metadata.create_all(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def ping(self) -> None:
         """Verify the SQLAlchemy store is reachable. Raises on failure."""
@@ -132,6 +253,7 @@ class SQLAlchemyStore(ServicesStore):
             return {
                 "id": result.service_id,
                 **result.service,
+                "user_id": result.user_id,
             }
 
     def get_services(self, **kwargs) -> List[Dict]:
@@ -143,6 +265,7 @@ class SQLAlchemyStore(ServicesStore):
                 {
                     "id": result.service_id,
                     **result.service,
+                    "user_id": result.user_id,
                 }
                 for result in results
             ]
@@ -160,6 +283,7 @@ class SQLAlchemyStore(ServicesStore):
                 {
                     "id": result.service_id,
                     **result.service,
+                    "user_id": result.user_id,
                 }
                 for result in results
             ]
@@ -216,36 +340,54 @@ class SQLAlchemyStore(ServicesStore):
         return item_id
 
     def track_user_login(self, user: User, provider: str) -> None:
-        """Track user login activity."""
+        """Track user login activity.
+
+        A single upsert, not a select then an insert: two replicas that serve
+        the first requests of a new user at the same time would otherwise both
+        insert the row, and one fails on `uix_user_provider` (#275).
+        """
         now = datetime.now(timezone.utc)
+        dialect = {"postgresql": postgresql, "sqlite": sqlite}[
+            self._engine.dialect.name
+        ]
+
+        stmt = dialect.insert(UserTracking).values(
+            user_id=user.user_id,
+            provider=provider,
+            first_login=now,
+            last_login=now,
+            login_count=1,
+            email=user.email,
+            name=user.name,
+        )
+        table = UserTracking.__table__.c
+        new = stmt.excluded
+        # Concurrent logins can commit out of order: an older event must not
+        # move `last_login` back or overwrite newer profile data.
+        is_latest = new.last_login >= table.last_login
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[table.user_id, table.provider],
+            set_={
+                "first_login": case(
+                    (new.first_login < table.first_login, new.first_login),
+                    else_=table.first_login,
+                ),
+                "last_login": case((is_latest, new.last_login), else_=table.last_login),
+                "login_count": table.login_count + 1,
+                # Keep the stored values when the IdP does not send them.
+                "email": case(
+                    (is_latest, func.coalesce(new.email, table.email)),
+                    else_=table.email,
+                ),
+                "name": case(
+                    (is_latest, func.coalesce(new.name, table.name)),
+                    else_=table.name,
+                ),
+            },
+        )
 
         with Session(self._engine) as session:
-            tracking: Optional[UserTracking] = session.execute(
-                select(UserTracking).where(
-                    UserTracking.user_id == user.user_id,
-                    UserTracking.provider == provider,
-                )
-            ).scalar_one_or_none()
-
-            if tracking is not None:
-                tracking.last_login = now
-                tracking.login_count += 1
-                if user.email:
-                    tracking.email = user.email
-                if user.name:
-                    tracking.name = user.name
-            else:
-                tracking = UserTracking(
-                    user_id=user.user_id,
-                    provider=provider,
-                    first_login=now,
-                    last_login=now,
-                    login_count=1,
-                    email=user.email,
-                    name=user.name,
-                )
-                session.add(tracking)
-
+            session.execute(stmt)
             session.commit()
 
     def get_user_tracking(
@@ -277,21 +419,15 @@ class SQLAlchemyStore(ServicesStore):
 class SQLAlchemyUdpStore(UdpStore):
     """SQLAlchemy UDP Store."""
 
-    store: str = field()
+    store: Union[str, URL] = field()
     _engine: Any = field(default=None, init=False)
     _session_factory: Any = field(default=None, init=False)
 
     def __attrs_post_init__(self):
         """Post init: create engine and session factory."""
-        kwargs = {}
-        if self.store == "sqlite:///:memory:":
-            kwargs = {
-                "connect_args": {"check_same_thread": False},
-                "poolclass": StaticPool,
-            }
-        self._engine = create_engine(self.store, **kwargs)
+        self._engine = _get_engine(self.store)
         self._session_factory = sessionmaker(bind=self._engine)
-        Base.metadata.create_all(self._engine)
+        _create_sqlite_schema(self._engine)
 
     def list_udps(
         self, user_id: str, limit: int = 100, offset: int = 0
@@ -343,11 +479,10 @@ class SQLAlchemyUdpStore(UdpStore):
         now = datetime.utcnow()
         with Session(self._engine) as session:
             existing: Optional[UdpDefinition] = session.execute(
-                select(UdpDefinition).where(UdpDefinition.id == udp_id)
+                select(UdpDefinition).where(
+                    UdpDefinition.id == udp_id, UdpDefinition.user_id == user_id
+                )
             ).scalar_one_or_none()
-
-            if existing is not None and existing.user_id != user_id:
-                raise ValueError(f"UDP {udp_id} does not belong to user {user_id}")
 
             if existing is not None:
                 existing.process_graph = process_graph

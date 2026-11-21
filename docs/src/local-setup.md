@@ -34,6 +34,8 @@ TITILER_OPENEO_STORE_URL="services/eoapi.json"
 
 2. CDSE Configuration
 
+`.env.cdse` sets no user: after copying it, uncomment `TITILER_OPENEO_AUTH_USERS` in `.env` and set a username and password before running `export`.
+
 ```bash
 cp .env.cdse .env
 export $(cat .env | xargs)
@@ -46,7 +48,7 @@ TITILER_OPENEO_STAC_API_URL="https://stac.dataspace.copernicus.eu/v1"
 TITILER_OPENEO_STORE_URL="services/copernicus.json"
 ```
 
-For CDSE, additional environment variables are required for efficient data access:
+For CDSE, additional environment variables are required for efficient data access. You can create your access key on `https://eodata-s3keysmanager.dataspace.copernicus.eu/panel/s3-credentials` then expose it as a variable:
 
 ```bash
 AWS_S3_ENDPOINT=eodata.dataspace.copernicus.eu
@@ -87,6 +89,8 @@ docker run -p 8081:80 mundialis/openeo-web-editor:latest
 
 3. Configure the editor:
    - Set backend URL to `http://localhost:8080`
-   - Login with the default basic auth credentials:
+   - With `.env.eoapi`, login with the local development user it sets in
+     `TITILER_OPENEO_AUTH_USERS` (with `.env.cdse`, use the user you set; there
+     is no built-in user, see the [Admin Guide](admin-guide.md#authentication)):
      - Username: `test`
      - Password: `test`

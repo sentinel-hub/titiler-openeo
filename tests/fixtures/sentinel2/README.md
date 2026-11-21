@@ -19,6 +19,25 @@ values (`mean_view_zenith == 8.396813497980254`, matching this item's own
 `view:incidence_angle` STAC property to full float precision; ADR 0004
 §1.3 explains why).
 
+## `mtd_msil2a_pb0513.xml`, `mtd_msil2a_pb0300.xml`
+
+Real ESA `MTD_MSIL2A.xml` product metadata, from Microsoft Planetary Computer
+(`product-metadata` asset), fetched live 2026-10-08, used by
+`tests/test_scale_offset_sentinel2.py` (the `sentinel2-boa` scale/offset
+plugin, ADR 0009):
+
+| File | Item | Baseline | `BOA_ADD_OFFSET` |
+| --- | --- | --- | --- |
+| `mtd_msil2a_pb0513.xml` | `S2A_MSIL2A_20260928T104741_R051_T31UFU_20260928T172818` | 05.13 | -1000 for each of the 13 bands |
+| `mtd_msil2a_pb0300.xml` | `S2B_MSIL2A_20210629T104619_R051_T31UFU_20210630T133826` | 03.00 | none (offset 0) |
+
+Trimmed to `General_Info/Product_Info` (URI, type, baseline) and the parts of
+`General_Info/Product_Image_Characteristics` that the parser reads:
+`Special_Values` (NODATA and SATURATED, added 2026-10-15 for #463),
+`QUANTIFICATION_VALUES_LIST`, `BOA_ADD_OFFSET_VALUES_LIST` and
+`Spectral_Information_List` (attributes only). The values are real, not
+synthetic. 51 KB -> 2.5 KB.
+
 ## `collections/{cdse,earth_search,planetary_computer}.json`
 
 Trimmed real STAC collections — one per catalogue, `item_assets` only —
@@ -38,6 +57,16 @@ Sentinel-2, same as it does for Sentinel-1 (`tests/fixtures/sar/README.md`).
 
 All three currently use the collection id `sentinel-2-l2a` — verified live,
 not assumed.
+
+## `collections/planetary_computer_full.json`
+
+The real Planetary Computer `sentinel-2-l2a` collection, fetched live
+2026-10-12, used by `tests/test_band_summaries.py` (issue #440, ADR 0010).
+All `item_assets` are kept with their `eo:bands`, titles and `gsd`, and the
+`summaries` that relate to bands (`eo:bands`, `gsd`) plus platform fields.
+Dropped: `links`, `assets`, `keywords`, `providers` and the `msft:*` fields.
+It has the 13 upstream `eo:bands`, the 3-band `visual` asset, the band-less
+`AOT`/`SCL`/`WVP` assets and the `granule-metadata` asset of the angle bands.
 
 ## `items/{cdse,earth_search,planetary_computer}.json`
 

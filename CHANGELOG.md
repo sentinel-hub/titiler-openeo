@@ -1,5 +1,132 @@
 # Changelog
 
+## 0.21.0 (2026-11-12)
+
+## What's Changed
+* build(docker): move the image to Wolfi and Python 3.14 by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/476
+* chore(deps): bump the all group across 1 directory with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/484
+* chore(deps): bump the docker group with 2 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/486
+* chore(deps): bump the security group across 1 directory with 12 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/487
+* ci: scan the image with Trivy and rebuild it nightly by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/478
+* fix(helm): default image tag to v<appVersion> by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/482
+* chore(main): release titiler-openeo-chart 3.2.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/483
+* fix(helm)!: pass basic-auth users in the variable the app reads by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/480
+* fix(auth)!: remove the built-in basic auth user by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/481
+* fix(docker): give the smoke test and docker compose a basic auth user by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/492
+* fix(store)!: create the PostgreSQL schema in a Helm Job, not at import by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/479
+* fix(helm): pin the init-store busybox image and make it configurable by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/488
+* chore(deps): bump chainguard/wolfi-base from `771146c` to `24f549a` in the docker group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/489
+* feat(auth): add configurable OIDC provider ID and grant types by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/494
+* fix(auth): refuse OIDC settings that openEO clients cannot use by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/495
+* chore(deps): bump the security group across 1 directory with 6 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/491
+* fix(auth): answer a rejected OIDC token with TokenInvalid by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/496
+* fix(auth): read OIDC list settings given as a JSON array by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/497
+* refactor(helm): render the OIDC and pool env settings through one helper by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/498
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.20.0...v0.21.0
+
+## 0.20.0 (2026-10-28)
+
+## What's Changed
+* feat(processes): add is_nodata and array_contains processes by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/429
+* chore(main): release titiler-openeo-chart 3.1.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/424
+* fix(api): return the service creation time in `created` by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/431
+* feat(store): add concurrent startup and user tracking tests for SQLAlchemy by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/432
+* fix(api): use gsd as a resolution only in a projected CRS by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/435
+* fix(api): merge_cubes temporal broadcast, array_element over time, date labels by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/442
+* fix(api): vector cube output as JSON/GeoJSON, with an output format registry by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/443
+* fix(processes): enhance aggregate_spatial to handle multi-band vector cubes and output CSV format by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/446
+* fix(api): enhance load_collection to support GeoJSON spatial extents and mask outside polygons by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/447
+* fix(processes): fix reducer callbacks issues + context passing via refactor by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/450
+* fix(api): mirror cube:dimensions bands in collection summaries by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/451
+* feat(processes): add new processes for logical operations, slope calculation, and data manipulation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/456
+* fix(api): enhance parameter validation to accept null for nullable required parameters by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/457
+* chore(deps): bump helm/kind-action from 1.15.0 to 1.15.1 in the all group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/454
+* fix(api): add CORS header tests and improve error handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/461
+* fix(processes): ensure stack band names are preserved and correctly assigned to images by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/460
+* feat(api): add GET /collections/{collection_id}/queryables (#466) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/467
+* feat(api): implement cooperative cancellation for request work by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/471
+* chore(deps): bump the all group with 4 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/468
+* fix(processes): handle STAC items with a null datetime by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/473
+* fix(api): implement NODATA handling from Special_Values in Sentinel-2 plugins by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/464
+* fix(deps): bump vulnerable dependencies and keep uv.lock in step with releases by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/475
+* feat(api): one reader seam for backends (#379) by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/462
+* feat(store): add ADR 0012 for user-defined process IDs uniqueness per user by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/470
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.19.0...v0.20.0
+
+## 0.19.0 (2026-10-08)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 3.0.2 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/418
+* feat: enhance Microsoft Entra ID OIDC support for multi-tenant scenarios by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/423
+* fix(api): mint one SAS token per container at a time by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/426
+* fix: fix CI race condition in curl output handling by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/428
+* feat(api): refactor scale and offset handling for collections by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/427
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.3...v0.19.0
+
+## 0.18.3 (2026-10-06)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 3.0.1 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/399
+* fix(store): refactor tests and expose user_id in stores by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/411
+* fix(store): add SQLAlchemy connection pool configuration and tests by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/412
+* docs: add link to S3 keys manager by @martinRenou in https://github.com/sentinel-hub/titiler-openeo/pull/420
+* chore(deps): bump the all group across 1 directory with 5 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/407
+
+## New Contributors
+* @martinRenou made their first contribution in https://github.com/sentinel-hub/titiler-openeo/pull/420
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.2...v0.18.3
+
+## 0.18.2 (2026-09-11)
+
+## What's Changed
+* chore(deps): bump developmentseed/container-registry-cleanup from 0.2.2 to 0.2.3 in the all group by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/400
+* fix(helm): security context. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/402
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.1...v0.18.2
+
+## 0.18.1 (2026-09-04)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 3.0.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/279
+* ci: drop GitHub Pages chart publishing, keep OCI only by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/395
+* fix: resolve a multi-band asset's own STAC name, not just its common name by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/398
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.18.0...v0.18.1
+
+## 0.18.0 (2026-08-25)
+
+## What's Changed
+* fix(api): keep GET /services/{service_id} Bearer-only per spec by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/373
+* fix(ci): skip docker push for fork PRs instead of failing by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/376
+* feat: resolve user-defined process references at execution time by @arjxn-py in https://github.com/sentinel-hub/titiler-openeo/pull/370
+* feat(api): mediated asset access for Microsoft Planetary Computer by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/371
+* feat(auth): harden OIDC so Microsoft Entra ID works by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/372
+* chore(deps): bump the all group across 1 directory with 3 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/369
+* ci: replace dead PyPI publish job with break-glass manual publish by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/380
+* fix: make the positional bands fallback reachable by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/378
+* fix(deps): relax starlette-cramjam upper bound to <1.0 by @arjxn-py in https://github.com/sentinel-hub/titiler-openeo/pull/388
+* chore(deps): bump the all group with 2 updates by @dependabot[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/386
+* refactor!: sign asset hrefs at ingest instead of threading a signer by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/382
+* feat(api): resolve bands published inside one STAC asset by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/384
+* ci: bump container-registry-cleanup to v0.2.2, restore images it wrongly deleted by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/390
+* ci: run restore images for all release images. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/391
+* ci: add tags their containers to be rebuilt. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/392
+* ci: formatting fixes for rebuild script. by @pantierra in https://github.com/sentinel-hub/titiler-openeo/pull/393
+
+## New Contributors
+* @arjxn-py made their first contribution in https://github.com/sentinel-hub/titiler-openeo/pull/370
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.17.0...v0.18.0
+
 ## 0.17.0 (2026-08-10)
 
 ## What's Changed

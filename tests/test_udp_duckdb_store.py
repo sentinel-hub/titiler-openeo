@@ -88,14 +88,6 @@ def test_user_isolation_on_upsert_and_delete(udp_store: DuckDBUdpStore):
         process_graph={"process_id": "noop"},
     )
 
-    # Another user cannot overwrite the same id
-    with pytest.raises(ValueError):
-        udp_store.upsert_udp(
-            user_id="user2",
-            udp_id=udp_id,
-            process_graph={"process_id": "noop"},
-        )
-
     # Another user cannot delete it
     with pytest.raises(ValueError):
         udp_store.delete_udp(user_id="user2", udp_id=udp_id)
@@ -103,6 +95,36 @@ def test_user_isolation_on_upsert_and_delete(udp_store: DuckDBUdpStore):
     # Original user can delete
     assert udp_store.delete_udp(user_id="user1", udp_id=udp_id) is True
     assert udp_store.get_udp(user_id="user1", udp_id=udp_id) is None
+
+
+def test_same_udp_id_for_different_users(udp_store):
+    """Two users can each hold a UDP with the same id (#469)."""
+    udp_id = "ndvi"
+    udp_store.upsert_udp(
+        user_id="user1", udp_id=udp_id, process_graph={"process_id": "one"}
+    )
+    udp_store.upsert_udp(
+        user_id="user2", udp_id=udp_id, process_graph={"process_id": "two"}
+    )
+
+    udp1 = udp_store.get_udp(user_id="user1", udp_id=udp_id)
+    udp2 = udp_store.get_udp(user_id="user2", udp_id=udp_id)
+    assert udp1["process_graph"] == {"process_id": "one"}
+    assert udp2["process_graph"] == {"process_id": "two"}
+    assert [u["id"] for u in udp_store.list_udps(user_id="user2")] == [udp_id]
+
+    # Replacing one user's UDP leaves the other user's UDP unchanged
+    udp_store.upsert_udp(
+        user_id="user2", udp_id=udp_id, process_graph={"process_id": "three"}
+    )
+    udp1 = udp_store.get_udp(user_id="user1", udp_id=udp_id)
+    assert udp1["process_graph"] == {"process_id": "one"}
+
+    # Deleting one user's UDP leaves the other user's UDP in place
+    assert udp_store.delete_udp(user_id="user1", udp_id=udp_id) is True
+    assert udp_store.get_udp(user_id="user1", udp_id=udp_id) is None
+    udp2 = udp_store.get_udp(user_id="user2", udp_id=udp_id)
+    assert udp2["process_graph"] == {"process_id": "three"}
 
 
 def test_list_with_pagination(udp_store: DuckDBUdpStore):
@@ -133,3 +155,52 @@ def test_list_with_pagination(udp_store: DuckDBUdpStore):
     all_user1 = udp_store.list_udps(user_id="user1", limit=10, offset=0)
     assert all(item["user_id"] == "user1" for item in all_user1)
     assert not any(item["id"] == "udp-other" for item in all_user1)
+
+
+def test_table_keyed_on_id_is_migrated(tmp_path: Path):
+    """A table keyed on `id` alone is rekeyed on `(user_id, id)` (#469)."""
+    import duckdb
+
+    db_path = str(tmp_path / "udp.db")
+    with duckdb.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE udp_definitions (
+                id VARCHAR PRIMARY KEY,
+                user_id VARCHAR NOT NULL,
+                process_graph JSON NOT NULL,
+                summary VARCHAR,
+                description VARCHAR,
+                parameters JSON,
+                returns JSON,
+                categories JSON,
+                deprecated BOOLEAN DEFAULT FALSE,
+                experimental BOOLEAN DEFAULT FALSE,
+                exceptions JSON,
+                examples JSON,
+                links JSON,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO udp_definitions (id, user_id, process_graph, created_at, updated_at)
+            VALUES ('ndvi', 'user1', '{"process_id": "one"}', now(), now())
+            """
+        )
+
+    udp_store = DuckDBUdpStore(store=db_path)
+    udp_store.upsert_udp(
+        user_id="user2", udp_id="ndvi", process_graph={"process_id": "two"}
+    )
+
+    udp1 = udp_store.get_udp(user_id="user1", udp_id="ndvi")
+    assert udp1["process_graph"] == {"process_id": "one"}
+    udp2 = udp_store.get_udp(user_id="user2", udp_id="ndvi")
+    assert udp2["process_graph"] == {"process_id": "two"}
+
+    # Opening the migrated store again leaves it as it is
+    reopened = DuckDBUdpStore(store=db_path)
+    assert len(reopened.list_udps(user_id="user1")) == 1

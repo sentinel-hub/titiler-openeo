@@ -213,6 +213,15 @@ envVars:
     - name: TITILER_OPENEO_TILE_STORE_URL
       secretName: titiler-openeo-pg-app
       secretKey: uri
+
+# Authentication is required; see the chart README.
+auth:
+  method: oidc
+  oidc:
+    enabled: true
+    clientId: "<client-id>"
+    wellKnownUrl: "https://<provider>/.well-known/openid-configuration"
+    redirectUrl: "https://<editor-url>/"
 ```
 
 Install or upgrade the release:
@@ -330,11 +339,13 @@ this order to avoid downtime on the data plane:
 
 ## Troubleshooting
 
-- **`titiler-openeo` pod `CrashLoopBackOff` with auth errors after the
-  switch:** confirm the `uri` key in the Secret resolves to the
-  `<cluster>-rw` Service, not `<cluster>-r` (the read-only endpoint). CNPG
-  populates `host` correctly for the `app` user; if you crafted the DSN
-  manually, double-check.
+- **`titiler-openeo` pod Running but not Ready after the switch, and
+  `helm upgrade` fails:** `/readyz` returns 503 with the auth or connection
+  error in `checks.store.error`, and the upgrade fails on `--wait` or in the
+  schema Job (`kubectl -n titiler-openeo logs job/titiler-openeo-schema`).
+  Confirm the `uri` key in the Secret resolves to the `<cluster>-rw` Service,
+  not `<cluster>-r` (the read-only endpoint). CNPG populates `host` correctly
+  for the `app` user; if you crafted the DSN manually, double-check.
 - **`helm template` shows no `TITILER_OPENEO_STORE_URL` at all:**
   verify `database.type: postgresql` is set. With other backends the chart
   intentionally omits the env var.

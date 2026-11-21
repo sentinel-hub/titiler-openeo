@@ -280,3 +280,39 @@ def test_process_with_optional_bounding_box():
     # Test with None
     result = example_process()
     assert result["bbox"] is None
+
+
+def test_is_optional_type_pep604():
+    """``X | None`` is detected the same as ``Optional[X]`` (issue #396)."""
+    is_optional, underlying = _is_optional_type(BoundingBox | None)
+    assert is_optional
+    assert underlying is BoundingBox
+
+    is_optional, underlying = _is_optional_type(BoundingBox | TemporalInterval | None)
+    assert is_optional
+    assert underlying == Union[BoundingBox, TemporalInterval]
+
+    is_optional, underlying = _is_optional_type(str | int)
+    assert not is_optional
+
+
+def test_pep604_optional_parameters_are_coerced():
+    """A ``X | None`` annotation gets the same coercion as ``Optional[X]`` (issue #396)."""
+
+    @process
+    def load(
+        spatial_extent: BoundingBox | None = None,
+        temporal_extent: TemporalInterval | None = None,
+    ):
+        return spatial_extent, temporal_extent
+
+    spatial_extent, temporal_extent = load(
+        spatial_extent=ParameterReference(from_parameter="extent"),
+        temporal_extent=ParameterReference(from_parameter="interval"),
+        named_parameters={
+            "extent": {"west": 0, "south": 0, "east": 1, "north": 1},
+            "interval": ["2021-01-01", "2021-02-01"],
+        },
+    )
+    assert isinstance(spatial_extent, BoundingBox)
+    assert isinstance(temporal_extent, TemporalInterval)

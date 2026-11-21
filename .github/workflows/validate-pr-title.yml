@@ -40,6 +40,9 @@ jobs:
             docs
             deps
             ci
+            io
+            stac
+            adr
           # Disable validation of merge commits
           validateSingleCommit: false
           # Allow additional subjects like "Merge branch..."

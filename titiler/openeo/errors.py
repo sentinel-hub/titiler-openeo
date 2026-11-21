@@ -64,21 +64,36 @@ class ExceptionHandler:
         """
         self.logger = logger
 
+    def _log(self, status_code: int, message: str, exc: Exception) -> None:
+        """Log a server error (5xx) at ERROR with its traceback.
+
+        A client error (4xx), such as a wrong password, is expected traffic:
+        one WARNING line, as for a rejected OIDC token in `auth`. The line
+        carries the status, since without a traceback nothing else does.
+        """
+        message = f"{message} (status {status_code})"
+        if status_code >= 500:
+            self.logger.error(message, exc_info=exc)
+        else:
+            self.logger.warning(message)
+
     def openeo_exception_handler(
         self, request: Request, exc: OpenEOException
     ) -> JSONResponse:
         """Handle OpenEO exceptions."""
-        self.logger.error(f"OpenEO Exception: {exc.message}", exc_info=exc)
+        self._log(exc.status_code, f"OpenEO Exception {exc.code}: {exc.message}", exc)
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
+            headers=getattr(exc, "headers", None),
         )
 
     def validation_exception_handler(
         self, request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Handle FastAPI validation errors."""
-        self.logger.error(f"Validation Error: {str(exc)}", exc_info=exc)
+        # str(exc) spans several lines, which line-based log shippers split.
+        self._log(400, "Validation Error: " + " ".join(str(exc).split()), exc)
         return JSONResponse(
             status_code=400,
             content={
@@ -91,13 +106,14 @@ class ExceptionHandler:
         self, request: Request, exc: HTTPException
     ) -> JSONResponse:
         """Handle HTTP exceptions."""
-        self.logger.error(f"HTTP Exception: {exc.detail}", exc_info=exc)
+        self._log(exc.status_code, f"HTTP Exception: {exc.detail}", exc)
         return JSONResponse(
             status_code=exc.status_code,
             content={
                 "code": "Internal" if exc.status_code >= 500 else "InvalidRequest",
                 "message": exc.detail,
             },
+            headers=getattr(exc, "headers", None),
         )
 
     def general_exception_handler(
@@ -113,6 +129,10 @@ class ExceptionHandler:
         https://github.com/Open-EO/openeo-api/blob/master/errors.json).
         """
         self.logger.error(f"General Exception: {str(exc)}", exc_info=exc)
+        # Starlette can also call this handler outside the app middleware
+        # (when `UnhandledExceptionMiddleware` re-raises), so the cache-control
+        # middleware may not see its responses: set the header here.
+        headers = {"Cache-Control": "no-store"}
         if isinstance(exc, (ValueError, TypeError)):
             return JSONResponse(
                 status_code=400,
@@ -120,6 +140,7 @@ class ExceptionHandler:
                     "code": "InvalidRequest",
                     "message": str(exc),
                 },
+                headers=headers,
             )
         return JSONResponse(
             status_code=500,
@@ -127,6 +148,7 @@ class ExceptionHandler:
                 "code": "Internal",
                 "message": f"Server error: {exc}",
             },
+            headers=headers,
         )
 
 
@@ -150,6 +172,18 @@ class ProcessParameterRequired(OpenEOException):
         super().__init__(
             message=f"Required process parameter '{parameter}' is missing",
             code="ProcessParameterRequired",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class FormatUnsuitable(OpenEOException):
+    """The output format can't store the data, or the back-end doesn't support it."""
+
+    def __init__(self, message: str):
+        """Initialize error with the unsuitable output format."""
+        super().__init__(
+            message=message,
+            code="FormatUnsuitable",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -254,6 +288,24 @@ class AuthenticationFailed(OpenEOException):
         )
 
 
+class TokenInvalid(OpenEOException):
+    """The bearer token is expired or invalid.
+
+    On this code the openEO Python client refreshes the access token and retries.
+    """
+
+    def __init__(self, message: str):
+        """Initialize error with the reason the token was rejected."""
+        super().__init__(
+            message=message,
+            code="TokenInvalid",
+            # 403 as errors.json says, not RFC 6750's 401: openeo-python-client
+            # refreshes on 401 only from 0.26.0, but on 403 since 0.13.0.
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        self.headers = {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+
+
 class AccessDenied(OpenEOException):
     """Access to the resource is forbidden."""
 
@@ -281,13 +333,19 @@ class ResourceNotFound(OpenEOException):
 class ServiceUnavailable(OpenEOException):
     """The service is temporarily unavailable."""
 
-    def __init__(self, detail: str = "The service is temporarily unavailable"):
+    def __init__(
+        self,
+        detail: str = "The service is temporarily unavailable",
+        retry_after: Optional[int] = None,
+    ):
         """Initialize error with service unavailable."""
         super().__init__(
             message=detail,
             code="ServiceUnavailable",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+        if retry_after is not None:
+            self.headers = {"Retry-After": str(retry_after)}
 
 
 class OutputLimitExceeded(OpenEOException):

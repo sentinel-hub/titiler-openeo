@@ -1,5 +1,7 @@
 """Test titiler.openeo services."""
 
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 
 from fastapi import Header
@@ -134,6 +136,18 @@ def test_get_service(app_with_auth):
     assert service["id"] == service_id
     assert service["title"] == service_input["title"]
     assert service["type"] == service_input["type"]
+
+    # `created` is an RFC 3339 datetime set at creation (#254)
+    created = datetime.fromisoformat(service["created"].replace("Z", "+00:00"))
+    assert created.tzinfo is not None
+    assert abs(datetime.now(timezone.utc) - created) < timedelta(minutes=1)
+
+    # The listing returns the same value
+    listed = app_with_auth.get("/services").json()["services"]
+    assert (
+        next(s for s in listed if s["id"] == service_id)["created"]
+        == (service["created"])
+    )
 
     # Make sure we overwrite the Extent Parameters
     load_node = service["process"]["process_graph"]["loadco1"]
@@ -315,7 +329,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
     scope_configs = {
         "private": {
             "scope": "private",
-            "expected_status": {"owner": 200, "authenticated": 401, "anonymous": 401},
+            "expected_status": {"owner": 200, "authenticated": 403, "anonymous": 401},
         },
         "restricted": {
             "scope": "restricted",
@@ -377,7 +391,7 @@ def test_service_xyz_access_scopes(app_with_auth, app_no_auth, store_path):
         ] = test_auth.validate_optional
 
         # Create service with specific scope and authorized users
-        service_input = base_service.copy()
+        service_input = deepcopy(base_service)
         service_input["configuration"] = service_input.get("configuration", {})
         service_input["configuration"]["scope"] = config["scope"]
         if "authorized_users" in config:
@@ -707,3 +721,30 @@ def test_xyz_service_query_parameters(app_with_auth):
     # Check that we get a proper error message about invalid JSON
     error_msg = str(invalid_response.content)
     assert "Invalid JSON in query parameter" in error_msg
+
+
+def test_store_returns_user_id(store_path):
+    """Every store must expose the service owner (#409).
+
+    The ``app_*`` fixtures cannot cover this: ``titiler.openeo.main`` builds its
+    store at import time, so only the first parametrized store is ever used.
+    """
+    from titiler.openeo.services import get_store
+
+    store = get_store(f"{store_path}")
+    service_id = store.add_service("owner", {"type": "XYZ", "enabled": True})
+
+    assert store.get_service(service_id)["user_id"] == "owner"
+    assert store.get_user_services("owner")[0]["user_id"] == "owner"
+    assert store.get_services()[0]["user_id"] == "owner"
+
+
+def test_store_is_chosen_by_scheme_before_file_suffix(tmp_path):
+    """`sqlite:///x.db` is SQLite, not DuckDB (review of #411)."""
+    from titiler.openeo.services import get_store, get_udp_store
+    from titiler.openeo.services.sqlalchemy import SQLAlchemyStore, SQLAlchemyUdpStore
+
+    url = f"sqlite:///{tmp_path / 'services.db'}"
+
+    assert isinstance(get_store(url), SQLAlchemyStore)
+    assert isinstance(get_udp_store(url), SQLAlchemyUdpStore)

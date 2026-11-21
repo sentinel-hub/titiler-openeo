@@ -34,6 +34,7 @@ Add coverage options (e.g. `--cov=titiler.openeo`) when validating locally befor
 To use the openEO editor, use Docker Compose to start all services:
 
 ```bash
+echo "TITILER_OPENEO_AUTH_USERS='{\"test\":{\"password\":\"test\"}}'" >> .env   # local development only
 docker compose up
 ```
 
@@ -43,7 +44,7 @@ This will start:
 - openEO Web Editor at http://localhost:8080
 - Keycloak at http://localhost:8082
 
-Access the editor at http://localhost:8080 and set the backend URL to http://localhost:8081. For authentication setup and testing, see the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication).
+Access the editor at http://localhost:8080 and set the backend URL to http://localhost:8081. Log in with the local development user that the `echo` line adds (username `test`, password `test`). For other authentication setups, see the [Admin Guide](https://sentinel-hub.github.io/titiler-openeo/admin-guide/#authentication).
 
 ### Authentication testing with Keycloak
 

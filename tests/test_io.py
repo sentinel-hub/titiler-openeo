@@ -7,35 +7,30 @@ import pytest
 from rio_tiler.models import ImageData
 
 from titiler.openeo.processes.implementations.data_model import RasterStack
-from titiler.openeo.processes.implementations.io import (
-    SaveResultData,
-    _handle_json_format,
-    _handle_raster_geotiff,
-    _handle_text_format,
-    save_result,
-)
+from titiler.openeo.processes.implementations.formats import _handle_raster_geotiff
+from titiler.openeo.processes.implementations.io import SaveResultData, save_result
 
 
 def test_handle_text_format():
-    """Test _handle_text_format function."""
+    """Test the txt format."""
     # Test with simple string
-    result = _handle_text_format("test")
+    result = save_result("test", "txt")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "text/plain"
     assert result.data == b"test"
 
     # Test with dictionary
     data = {"key": "value", "num": 123}
-    result = _handle_text_format(data)
+    result = save_result(data, "txt")
     assert result.media_type == "text/plain"
     assert b"key" in result.data
     assert b"value" in result.data
 
 
 def test_handle_json_format():
-    """Test _handle_json_format function."""
+    """Test the JSON format."""
     data = {"name": "test", "values": [1, 2, 3]}
-    result = _handle_json_format(data, "json")
+    result = save_result(data, "json")
     assert isinstance(result, SaveResultData)
     assert result.media_type == "application/json"
     assert b'"name": "test"' in result.data
@@ -66,6 +61,34 @@ def test_handle_raster_geotiff():
     assert (result.array[0] == array1[0]).all()
     assert (result.array[1] == array2[0]).all()
     assert len(result.band_descriptions) == 2
+
+
+def test_handle_raster_geotiff_multiband():
+    """Every band of every slice is kept, named by date and band."""
+    data = {
+        datetime(2023, 1, 1): ImageData(
+            numpy.ma.array(numpy.full((2, 2, 2), 1, dtype="float32")),
+            band_descriptions=["red", "nir"],
+        ),
+        datetime(2023, 1, 2): ImageData(
+            numpy.ma.array(numpy.full((2, 2, 2), 2, dtype="float32")),
+            band_descriptions=["red", "nir"],
+        ),
+    }
+
+    result = _handle_raster_geotiff(data)
+    assert result.array.shape == (4, 2, 2)
+    assert result.array[:, 0, 0].tolist() == [1, 1, 2, 2]
+    assert result.band_descriptions == [
+        "2023-01-01 00:00:00_red",
+        "2023-01-01 00:00:00_nir",
+        "2023-01-02 00:00:00_red",
+        "2023-01-02 00:00:00_nir",
+    ]
+    assert result.metadata["original_keys"] == [
+        "2023-01-01 00:00:00",
+        "2023-01-02 00:00:00",
+    ]
 
 
 def test_handle_raster_geotiff_validation():
@@ -280,3 +303,21 @@ def test_save_result_feature_collection():
     assert csv_result.media_type == "text/csv"
     assert b"date,feature_index,value" in csv_result.data
     assert b"2021-01-01,0,1.0" in csv_result.data
+
+
+@pytest.mark.parametrize("format", ["JSON", "GeoJSON", "CSV"])
+def test_save_result_aggregate_spatial_output(format):
+    """The datetime keys of aggregate_spatial values don't break any vector format (#439)."""
+    data = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"values": {datetime(2023, 1, 5): numpy.float32(1.5)}},
+            }
+        ],
+    }
+
+    result = save_result(data, format)
+    assert b"2023-01-05T00:00:00" in result.data
+    assert b"1.5" in result.data

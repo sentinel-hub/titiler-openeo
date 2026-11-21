@@ -37,12 +37,12 @@ jobs:
         with:
           version: v3.15.2
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.x'
 
       - name: Set up chart-testing
-        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+        uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
         with:
           yamale_version: '6.0.0'
 
@@ -63,7 +63,7 @@ jobs:
         run: ct lint --chart-dirs deployment/k8s --target-branch ${{ github.event.repository.default_branch }} --check-version-increment=false
 
       - name: Build container
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         if: steps.list-changed.outputs.changed == 'true'
         with:
           # See https://github.com/developmentseed/titiler/discussions/387
@@ -74,7 +74,7 @@ jobs:
           tags: "titiler-openeo:dev"
 
       - name: Create kind cluster
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         if: steps.list-changed.outputs.changed == 'true'
 
       - name: Load container image in kind cluster
@@ -90,12 +90,12 @@ jobs:
         run: |
           set -euo pipefail
           # ct install --skip-clean-up leaves the release in place. Find the
-          # pod by the standard helm label (app.kubernetes.io/instance is the
-          # release name, name is the chart name).
+          # API pod by its labels (name is the chart name, component=api
+          # leaves out the bundled PostgreSQL and schema Job pods).
           for i in $(seq 1 30); do
-            POD=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+            POD=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/component=api' \
               -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-            NS=$(kubectl get pods -A -l app.kubernetes.io/name=titiler-openeo \
+            NS=$(kubectl get pods -A -l 'app.kubernetes.io/name=titiler-openeo,app.kubernetes.io/component=api' \
               -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
             if [[ -n "$POD" ]]; then
               break
@@ -126,6 +126,16 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:18080/api.html
           echo "GET /.well-known/openeo"
           curl -fsS -o /dev/null http://127.0.0.1:18080/.well-known/openeo
+          # Only ci-user is configured (all ci/*.yaml). It must log in, and no other login may.
+          echo "GET /credentials/basic as ci-user (expect 200)"
+          curl -fsS -o /dev/null -u 'ci-user:ci-only-not-a-secret' http://127.0.0.1:18080/credentials/basic
+          # Relies on the app's built-in test user (before the app fix); once that user is gone, the ci-user check and the app's fail-closed start-up carry the proof.
+          echo "GET /credentials/basic as an unconfigured user (expect 401)"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -u 'test:test' http://127.0.0.1:18080/credentials/basic)
+          if [[ "$code" != "401" ]]; then
+            echo "::error::unconfigured login returned $code, expected 401: chart users are not reaching the app"
+            exit 1
+          fi
 
       # End-to-end test for the GitOps sealed-secret pattern.
       # ct install can't natively pre-create a Secret in the test namespace,
@@ -173,9 +183,15 @@ jobs:
           fi
 
           # Assertion 2: the plaintext password must not appear anywhere in
-          # the rendered Deployment manifest.
+          # the rendered Deployment manifest, nor in the schema Job (a hook,
+          # deleted once it succeeds, so read from the release).
           if echo "${DEPLOY_YAML}" | grep -q "${PG_PASSWORD}"; then
             echo "::error::Plaintext postgres password leaked into rendered Deployment"
+            exit 1
+          fi
+          HOOKS_YAML=$(helm get hooks "${RELEASE}" --namespace "${NAMESPACE}")
+          if echo "${HOOKS_YAML}" | grep -q "${PG_PASSWORD}"; then
+            echo "::error::Plaintext postgres password leaked into the schema Job"
             exit 1
           fi
 
@@ -193,18 +209,32 @@ jobs:
           SVC_URL="http://${RELEASE}-titiler-openeo.${NAMESPACE}.svc.cluster.local"
 
           run_curl() {
-            # `-i` (stdin) + `--restart=Never` + `--rm` runs curl in a
-            # one-shot pod, streams its stdout to us, and cleans up. No TTY
-            # required. We intentionally do NOT pass `-f` — that swallows
-            # the body on >=400 and makes diagnosis painful. Instead we
-            # print "<http_code>|<body>" and parse it.
-            kubectl run "curl-$(date +%s%N)" \
+            # Runs curl in a one-shot pod, waits for it to end, then reads
+            # its logs. Not `kubectl run -i --rm`: its attach races the
+            # short-lived pod, so the output is either lost
+            # (`<no-response>`) or printed twice (`200200`). kind v0.33 /
+            # kubectl v1.37 (kind-action v1.15.0) hit this on ~40% of runs.
+            # We intentionally do NOT pass `-f` — that swallows the body on
+            # >=400 and makes diagnosis painful. Instead we print the body
+            # followed by "---HTTP_CODE---<code>" and parse it.
+            local pod phase
+            pod="curl-$(date +%s%N)"
+            kubectl run "${pod}" \
               --namespace "${NAMESPACE}" \
               --image=curlimages/curl:8.10.1 \
-              --restart=Never --rm -i --quiet \
+              --restart=Never --quiet \
               --command -- curl -sS \
               -w '\n---HTTP_CODE---%{http_code}\n' \
-              "${SVC_URL}$1"
+              "${SVC_URL}$1" >/dev/null
+            for _ in $(seq 1 60); do
+              phase=$(kubectl get pod "${pod}" --namespace "${NAMESPACE}" \
+                -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              [[ "${phase}" == "Succeeded" || "${phase}" == "Failed" ]] && break
+              sleep 1
+            done
+            kubectl logs "${pod}" --namespace "${NAMESPACE}" 2>&1 || true
+            kubectl delete pod "${pod}" --namespace "${NAMESPACE}" \
+              --wait=false >/dev/null 2>&1 || true
           }
 
           for endpoint in /healthz /readyz /api /api.html /.well-known/openeo; do
@@ -219,6 +249,19 @@ jobs:
             fi
             echo "  GET ${endpoint} -> ${code}"
           done
+
+          # Assertion 5: the post-install schema Job created every table,
+          # the tile store's included. `helm install --wait` returns only
+          # after the hook succeeded. The local socket uses trust auth.
+          TABLES=$(kubectl exec --namespace "${NAMESPACE}" "${PG_HOST}-0" -- \
+            psql -U openeo -d openeo -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('services', 'user_tracking', 'udp_definitions', 'tile_assignments')")
+          if [[ "${TABLES}" != "4" ]]; then
+            echo "::error::Expected the 4 store tables, found ${TABLES}"
+            kubectl exec --namespace "${NAMESPACE}" "${PG_HOST}-0" -- psql -U openeo -d openeo -c '\dt' || true
+            exit 1
+          fi
+          echo "  schema Job created ${TABLES} tables"
 
           echo "✅ Sealed-secret install passed all assertions."
 

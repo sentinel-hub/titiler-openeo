@@ -1,0 +1,44 @@
+name: Fix Broken Release Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode'
+        type: boolean
+        default: true
+      tag:
+        description: 'Force-rebuild and replace these version tags (comma-separated, e.g. v0.1.0,v0.16.5), skipping the broken-tag scan'
+        type: string
+        default: ''
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore or rebuild broken release images
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO_OWNER: sentinel-hub
+          REPOSITORY_NAME: titiler-openeo
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE_TAG: ${{ inputs.tag }}
+        run: python3 .github/scripts/fix_broken_release_images.py

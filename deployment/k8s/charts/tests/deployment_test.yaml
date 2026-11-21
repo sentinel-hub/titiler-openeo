@@ -2,13 +2,15 @@ suite: test deployment
 templates:
   - deployment.yaml
 tests:
-  - it: should use Chart.appVersion when image.tag is unset
+  - it: should use v-prefixed Chart.appVersion when image.tag is unset
+    chart:
+      appVersion: "9.9.9"
     set:
       image.tag: null
     asserts:
-      - matchRegex:
+      - equal:
           path: spec.template.spec.containers[0].image
-          pattern: ^ghcr\.io/sentinel-hub/titiler-openeo:titiler-openeo-[0-9]+\.[0-9]+\.[0-9]+$
+          value: ghcr.io/sentinel-hub/titiler-openeo:v9.9.9
 
   - it: should use custom tag when image.tag is set
     set:
@@ -17,3 +19,356 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: ghcr.io/sentinel-hub/titiler-openeo:1.2.3
+
+  - it: should not set init-store securityContext by default
+    set:
+      database.persistence.enabled: true
+      database.type: json
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers[0].securityContext
+
+  - it: should pin the init-store image by digest and fully qualify it by default
+    set:
+      database.persistence.enabled: true
+      database.type: json
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^docker\.io/library/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
+  - it: should keep the pinned init-store image when an upgrade reuses values from an older chart
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore: null
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^docker\.io/library/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
+  - it: should let values override the init-store image
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore.image.repository: registry.example.org/busybox
+      initStore.image.tag: "1.38.0"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.org/busybox:1.38.0
+
+  - it: should keep the digest when only the init-store repository is overridden
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initStore.image.repository: registry.example.org/busybox
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].image
+          pattern: ^registry\.example\.org/busybox:[^@]+@sha256:[0-9a-f]{64}$
+
+  - it: should apply initContainerSecurityContext to the init-store container
+    set:
+      database.persistence.enabled: true
+      database.type: json
+      initContainerSecurityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: init-store
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext
+          value:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+  - it: should expose the database pool settings as environment variables
+    set:
+      database.pool.size: 3
+      database.pool.maxOverflow: 4
+      database.pool.prePing: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_SIZE
+            value: "3"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_MAX_OVERFLOW
+            value: "4"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_PRE_PING
+            value: "true"
+
+  # The chart renders the value, so a chart default of false would override
+  # the app's: a request would then fail after every database restart.
+  - it: should turn pre-ping on by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_PRE_PING
+            value: "true"
+
+  - it: should leave out pool settings that are null
+    set:
+      database.pool.recycle: null
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_RECYCLE
+          any: true
+
+  - it: should render a pool setting set to false or 0, which is not blank
+    set:
+      database.pool.prePing: false
+      database.pool.maxOverflow: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_PRE_PING
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_MAX_OVERFLOW
+            value: "0"
+
+  - it: should not render a pool setting twice when env also sets it
+    set:
+      env.TITILER_OPENEO_STORE_POOL_SIZE: "20"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_SIZE
+            value: "20"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_STORE_POOL_SIZE
+            value: "5"
+
+  - it: should map the optional OIDC settings to the environment
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+      auth.oidc.redirectUrl: "https://editor.openeo.org/ http://localhost:8080/"
+      auth.oidc.audiences: "api://client"
+      auth.oidc.userIdClaim: "sub"
+      auth.oidc.allowedTenants: "9188040d-6c67-4c5b-b112-36a304b66dad"
+      auth.oidc.providerId: "CDSE"
+      auth.oidc.grantTypes: "authorization_code+pkce refresh_token"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+            value: "https://editor.openeo.org/ http://localhost:8080/"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_AUDIENCES
+            value: "api://client"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+            value: "sub"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
+            value: "9188040d-6c67-4c5b-b112-36a304b66dad"
+
+  - it: should not set the optional OIDC settings when they are empty
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_USER_ID_CLAIM
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+          any: true
+
+  - it: should join an OIDC setting given as a YAML list
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.grantTypes:
+        - authorization_code+pkce
+        - refresh_token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
+
+  - it: should not set a blank OIDC setting
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.grantTypes: " "
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+          any: true
+
+  - it: should refuse an OIDC setting that YAML read as a boolean
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      # `providerId: NO` in a values file
+      auth.oidc.providerId: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.providerId must be a string"
+
+  - it: should refuse a list item that YAML read as a boolean or a number
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      # `allowedTenants: [NO, 123]` in a values file
+      auth.oidc.allowedTenants: [false, 123]
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.allowedTenants must be a string or a list of strings"
+
+  - it: should trim the OIDC settings, so a | block passes no newline
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client\n"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: "CDSE\n"
+      auth.oidc.redirectUrl: ["https://a/\n", " https://b/ "]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_CLIENT_ID
+            value: "client"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL
+            value: "https://a/ https://b/"
+
+  - it: should refuse an OIDC setting that YAML read as a number
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "auth.oidc.providerId must be a string"
+
+  - it: should not render an OIDC setting also set through env or envVars twice
+    set:
+      auth.method: oidc
+      auth.oidc.enabled: true
+      auth.oidc.clientId: "client"
+      auth.oidc.wellKnownUrl: "https://auth.example.com/.well-known/openid-configuration"
+      auth.oidc.providerId: "CDSE"
+      auth.oidc.grantTypes: "authorization_code+pkce refresh_token"
+      env:
+        TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID: "OTHER"
+      envVars:
+        fromSecret:
+          - name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            secretName: oidc
+            secretKey: grant-types
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "CDSE"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID
+            value: "OTHER"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES
+            value: "authorization_code+pkce refresh_token"
+
+  - it: should not set a strategy by default
+    asserts:
+      - isNull:
+          path: spec.strategy
+
+  - it: should apply the Recreate strategy when set
+    set:
+      strategy:
+        type: Recreate
+    asserts:
+      - equal:
+          path: spec.strategy
+          value:
+            type: Recreate

@@ -1,10 +1,24 @@
 """titiler-openeo custom reader."""
 
 import logging
-import time
 import warnings
+from contextlib import ExitStack
+from datetime import datetime
+from functools import partial
 from threading import Lock
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 import attr
 import numpy
@@ -13,6 +27,7 @@ import rasterio
 from morecantile import TileMatrixSet
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
 from pystac.extensions.projection import ProjectionExtension
+from rasterio.enums import MaskFlags
 from rasterio.errors import RasterioIOError
 from rasterio.features import bounds as featureBounds
 from rasterio.features import rasterize
@@ -29,6 +44,7 @@ from rio_tiler.types import AssetInfo, AssetType, AssetWithOptions, BBox
 from rio_tiler.utils import cast_to_sequence, has_alpha_band, inherit_rasterio_env
 from typing_extensions import TypedDict
 
+from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
 from .bandsources import (
     BAND_SOURCES,
     ResolvedBand,
@@ -36,9 +52,12 @@ from .bandsources import (
     derive_bands,
     resolve_band,
 )
+from .cancellation import cancellable_sleep, raise_if_cancelled
 from .errors import OutputLimitExceeded
+from .scaleoffset import PLUGINS as SCALE_OFFSET_PLUGINS
+from .scaleoffset import ProductScaleOffset, ScaleOffsetPlugin, find_metadata_asset
 from .settings import ProcessingSettings
-from .signing import HrefSigner
+from .signing import HrefSigner, signer_for_item
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +71,11 @@ class Dims(TypedDict):
     height: int
     bounds_crs: rasterio.crs.CRS
     crs: rasterio.crs.CRS
+    #: The bounding box in ``bounds_crs``, as requested or as the union of the
+    #: items' bounds.
     bbox: List[float]
+    #: ``bbox`` reprojected to ``crs`` -- the grid the output is read on.
+    output_bbox: List[float]
 
 
 @attr.s
@@ -69,6 +92,13 @@ class OpenEOReader(Reader):
     growing to carry reader requirements resolved from the process graph.
 
     Current overrides:
+
+    **Nodata fallback.** ``fallback_nodata`` is a callable that returns a
+    nodata value (or None). It is called after the dataset is open, and only
+    when the header has no nodata, alpha band or mask and no ``nodata`` option
+    is set. Its value then goes into ``options``, so the read and the warp mask
+    it. ``SimpleSTACReader`` sets it from a scale/offset plugin's product
+    metadata (#463, docs/adr/0009-scale-offset-sources.md S2.5).
 
     **Georeferencing of GCP datasets.** rio-tiler detects GCPs but collapses
     them to a single affine via ``transform.from_gcps()`` and passes it as
@@ -98,6 +128,11 @@ class OpenEOReader(Reader):
     proposed there by rio-tiler's maintainer. When it ships upstream, drop the
     GCP override and keep the class as the customisation point.
     """
+
+    #: See "Nodata fallback" above. Called at most one time, after the open.
+    fallback_nodata: Optional[Callable[[], Optional[float]]] = attr.ib(
+        default=None, kw_only=True
+    )
 
     def __attrs_post_init__(self):
         """Open the dataset, warping from real GCPs when the dataset has them."""
@@ -133,6 +168,18 @@ class OpenEOReader(Reader):
         # thing it changes, rather than duplicating a tail that varies by
         # rio-tiler version.
         super().__attrs_post_init__()
+
+        if (
+            self.fallback_nodata is not None
+            and self.options.get("nodata") is None
+            and self.dataset.nodata is None
+            and all(
+                flags == [MaskFlags.all_valid] for flags in self.dataset.mask_flag_enums
+            )
+        ):
+            nodata = self.fallback_nodata()
+            if nodata is not None:
+                self.options = {**self.options, "nodata": nodata}
 
 
 #: Extensions that are never the measurement raster itself (annotation XML,
@@ -231,11 +278,39 @@ def _resolve_asset_href(
     return signer(href) if signer is not None else href
 
 
+def _to_pystac_item(item: Union[pystac.Item, Dict[str, Any]]) -> pystac.Item:
+    """Return ``item`` as a ``pystac.Item``.
+
+    `load_stac` and `load_url` hand `_reader` plain STAC dicts, while
+    `load_collection` hands it `pystac.Item`s (issue #383).
+    """
+    if isinstance(item, dict):
+        return pystac.Item.from_dict(item)
+    return item
+
+
+def _item_datetime(item: pystac.Item) -> datetime:
+    """Return the item's ``datetime``, or its ``start_datetime`` if that is null.
+
+    STAC allows ``"datetime": null`` when ``start_datetime`` and
+    ``end_datetime`` are set, and pystac then requires both (issue #472).
+    """
+    return item.datetime or item.common_metadata.start_datetime
+
+
 @attr.s
 class SimpleSTACReader(MultiBaseReader):
-    """Simplified STAC Reader."""
+    """Simplified STAC Reader.
 
-    input: pystac.Item = attr.ib()
+    This is the class a backend subclasses when it needs another per-asset
+    reader (e.g. one that routes Zarr media types to its own reader): override
+    `_get_reader`/`_get_options`, then pass the subclass as ``reader_cls`` to
+    `LoadCollection`/`LoadStac`. Every read and every dimension estimate is
+    built with it; nothing in this module needs to be copied
+    (issue #379, docs/adr/0011-backend-reader-seam.md).
+    """
+
+    input: pystac.Item = attr.ib(converter=_to_pystac_item)
 
     tms: TileMatrixSet = attr.ib(default=WEB_MERCATOR_TMS)
     minzoom: int = attr.ib(default=None)
@@ -258,19 +333,32 @@ class SimpleSTACReader(MultiBaseReader):
     #: above, which is shared by every asset this reader constructs).
     band_source_fetcher: Any = attr.ib(default=None)
 
-    #: Optional href signer, bound to the authenticated user by the process
-    #: that built this reader. Applied by `_resolve_asset_href` to every href
-    #: this reader opens -- real assets, band-source annotation assets and
-    #: their sibling measurement hrefs alike, which is why one seam covers all
-    #: three (docs/adr/0005-asset-href-signing.md S2.6). `None` means "this
-    #: deployment needs no credential on its hrefs", and is the default.
-    signer: Optional[HrefSigner] = attr.ib(default=None)
+    #: Optional href signer, resolved in `__attrs_post_init__` from the key the
+    #: item was stamped with at ingest -- never passed in. Applied by
+    #: `_resolve_asset_href` to every href this reader opens: real assets,
+    #: band-source annotation assets and their sibling measurement hrefs alike,
+    #: which is why one seam covers all three
+    #: (docs/adr/0005-asset-href-signing.md S2.6).
+    #:
+    #: Resolving here rather than receiving it is what makes the credential
+    #: fresh: `_reader` rebuilds this reader on every retry, so an expired token
+    #: is re-minted rather than reused (ADR 0005 S3.1). `None` -- an unstamped
+    #: item -- means "this deployment needs no credential on its hrefs".
+    signer: Optional[HrefSigner] = attr.ib(init=False, default=None)
 
     #: Derived band names this item's own assets resolve to, precomputed once
     #: (pure, no I/O -- regex matching over `self.input.assets`) so
     #: `_get_asset_info` and the mask-inheritance post-step in `_reader()`
     #: don't repeat it. See docs/adr/0002-band-sources.md S2.3.
     _derived_bands: Dict[str, ResolvedBand] = attr.ib(init=False, factory=dict)
+
+    #: Bands published *inside* one of this item's own assets (e.g. EOPF's
+    #: Sentinel-2 `reflectance` asset, holding all twelve bands), precomputed
+    #: once from the item's own `bands` metadata -- no registry, no I/O. See
+    #: titiler/openeo/assetbands.py. Checked in `_get_asset_info` after
+    #: `_derived_bands`: a band-source rule already matched a specific asset,
+    #: so it must not be shadowed by a same-named inner band.
+    _inner_bands: Dict[str, ResolvedAssetBand] = attr.ib(init=False, factory=dict)
 
     #: Shared, per-instance memo for band-source readers' inverse maps
     #: (`BandReader.inverse_map_cache`). Every derived-band reader built for
@@ -290,6 +378,11 @@ class SimpleSTACReader(MultiBaseReader):
 
     def __attrs_post_init__(self) -> None:
         """Set reader spatial infos and list of valid assets."""
+        # Before anything that resolves an href: `_item_has_untrustworthy_proj`
+        # below opens an asset for real, and must see the same credential the
+        # pixels will be read with (ADR 0005 S1.1).
+        self.signer = signer_for_item(self.input)
+
         self.assets = self.input.get_assets().keys()
         if not self.assets:
             raise MissingAssets(
@@ -318,6 +411,8 @@ class SimpleSTACReader(MultiBaseReader):
             )
             if resolved is not None:
                 self._derived_bands[name] = resolved
+
+        self._inner_bands = resolve_asset_bands(asset_band_facts(self.input.assets))
 
         proj = _extract_proj_info(self.input, assets=self.assets)
         if proj and _item_has_untrustworthy_proj(self.input, self.assets, self.signer):
@@ -380,21 +475,7 @@ class SimpleSTACReader(MultiBaseReader):
                     "Asset does not have 'bands' metadata, unable to use 'bands' option"
                 )
 
-            # There is no standard for precedence between 'eo:common_name' and 'name'
-            # in STAC specification, so we will use 'eo:common_name' if it exists,
-            # otherwise fallback to 'name', and if not exist use the band index as last resource.
-            # The positional fallback key is stringified: `bands` values arrive as
-            # strings (the openEO `bands` argument, and rio-tiler's asset options),
-            # so an int key here can never be matched and the fallback was dead --
-            # requesting band "1" raised "not found in asset metadata" instead of
-            # selecting index 1.
-            common_to_variable = {
-                b.get("eo:common_name")
-                or b.get("common_name")
-                or b.get("name")
-                or str(ix): ix
-                for ix, b in enumerate(stac_bands, 1)
-            }
+            common_to_variable = _band_lookup(stac_bands)
             band_indexes: list[int] = []
             for b in bands:
                 if idx := common_to_variable.get(b):
@@ -461,10 +542,28 @@ class SimpleSTACReader(MultiBaseReader):
             return self._get_derived_asset_info(asset_name)
 
         if asset_name not in self.assets:
-            raise InvalidAssetName(
-                f"'{asset_name}' is not valid, should be one of "
-                f"{sorted(set(self.assets) | set(self._derived_bands))}"
-            )
+            # Not a real asset key -- maybe a band published *inside* one
+            # (titiler/openeo/assetbands.py), e.g. EOPF's `reflectance` holding
+            # `b01`..`b12`. Rewritten to the owning asset plus a `bands` option,
+            # which `_get_options` below already knows how to turn into
+            # `indexes` -- the same mechanism a caller-supplied `bands` list
+            # uses today, just reached from a bare name instead.
+            resolved = self._inner_bands.get(asset_name)
+            if resolved is None:
+                raise InvalidAssetName(
+                    f"'{asset_name}' is not valid, should be one of "
+                    f"{sorted(set(self.assets) | set(self._derived_bands) | set(self._inner_bands))}"
+                )
+            if resolved.whole_asset:
+                # The common name of a single-band asset: read all of it.
+                asset = {**asset, "name": resolved.asset_key}
+            else:
+                asset = {
+                    **asset,
+                    "name": resolved.asset_key,
+                    "bands": [resolved.band_name],
+                }
+            asset_name = resolved.asset_key
 
         asset_info = self.input.assets[asset_name]
         extras = asset_info.extra_fields
@@ -517,7 +616,10 @@ class SimpleSTACReader(MultiBaseReader):
             # - raster:nodata (deprecated but still common in older catalogs)
             nodata_values = []
             for b in bands:
-                nodata = b.get("nodata") or b.get("raster:nodata")
+                # `is None`, not `or`: 0 is a valid nodata value (Sentinel-2).
+                nodata = b.get("nodata")
+                if nodata is None:
+                    nodata = b.get("raster:nodata")
                 if nodata is not None:
                     nodata_values.append(nodata)
 
@@ -533,7 +635,54 @@ class SimpleSTACReader(MultiBaseReader):
             if asset_nodata is not None:
                 info["method_options"]["nodata"] = asset_nodata
 
+        # Last, a scale/offset plugin's product metadata (#463): Planetary
+        # Computer's Sentinel-2 L2A gives the NODATA DN only in
+        # `MTD_MSIL2A.xml`. Not a method option: the reader uses it only when
+        # the raster header gives no nodata either, and fetches the file only
+        # then (`OpenEOReader.fallback_nodata`).
+        if (
+            "nodata" not in info["method_options"]
+            and issubclass(self.reader, OpenEOReader)
+            and self._nodata_plugins(extras)
+        ):
+            info["reader_options"]["fallback_nodata"] = partial(
+                self._plugin_nodata, extras
+            )
+
         return info
+
+    def _nodata_plugins(
+        self, extras: Mapping[str, Any]
+    ) -> List[Tuple[ScaleOffsetPlugin, Callable[[str, str, Any], Optional[float]]]]:
+        """The deployment's plugins for this collection that give nodata for an asset.
+
+        Only the plugins listed for this collection (`_scale_offset_sources`),
+        and only for an asset the plugin knows (its ``band_key`` is not None):
+        e.g. SCL is left as it is. Needs no fetch.
+        """
+        plugins = []
+        for name in _scale_offset_sources(self.input):
+            plugin = SCALE_OFFSET_PLUGINS.get(name)
+            if plugin is None or plugin.nodata is None:
+                continue
+            if plugin.band_key(extras) is None:
+                continue
+            plugins.append((plugin, plugin.nodata))
+        return plugins
+
+    def _plugin_nodata(self, extras: Mapping[str, Any]) -> Optional[float]:
+        """The nodata DN that the first of `_nodata_plugins` gives, or None."""
+        for plugin, loader in self._nodata_plugins(extras):
+            nodata = _load_from_plugin(
+                plugin,
+                self.input,
+                loader,
+                self.signer,
+                self.band_source_fetcher,
+            )
+            if nodata is not None:
+                return nodata
+        return None
 
     # The regular STAC Reader doesn't have a `read` method
     def read(
@@ -617,6 +766,18 @@ class SimpleSTACReader(MultiBaseReader):
         return img
 
 
+#: The asset reader class a read or a dimension estimate is built with. Every
+#: function taking one accepts ``None`` and resolves it to `SimpleSTACReader`
+#: *at call time*: tests monkeypatch ``reader.SimpleSTACReader``, which a
+#: def-time default would freeze (ADR 0011 S2.3).
+ReaderCls = Type[SimpleSTACReader]
+
+
+def _default_reader_cls(reader_cls: Optional[ReaderCls]) -> ReaderCls:
+    """``reader_cls`` or the module's `SimpleSTACReader`, looked up now."""
+    return reader_cls if reader_cls is not None else SimpleSTACReader
+
+
 def _get_asset_crs(
     item: pystac.Item,
     asset: pystac.Asset,
@@ -646,11 +807,28 @@ def _get_asset_crs(
     return None
 
 
+def _gsd_resolution(
+    gsd: Any, crs: Optional[rasterio.crs.CRS]
+) -> Tuple[Optional[float], Optional[float]]:
+    """Turn a STAC `gsd` into an (x, y) resolution in `crs` units.
+
+    `gsd` is a ground distance in metres (STAC common metadata), but callers
+    treat the result as already in the CRS's own units -- `_reproject_resolution`
+    passes it straight through. That only holds for a projected CRS, so a
+    geographic (or unknown) CRS gets no resolution rather than a metre value
+    read as degrees.
+    """
+    if not gsd or crs is None or not crs.is_projected:
+        return None, None
+    return abs(float(gsd)), abs(float(gsd))
+
+
 def _get_asset_resolution(
     item: pystac.Item,
     asset: pystac.Asset,
     asset_proj_ext: Optional[ProjectionExtension],
     src_dst: SimpleSTACReader,
+    asset_crs: Optional[rasterio.crs.CRS] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """Get x and y resolutions from asset metadata.
 
@@ -659,6 +837,8 @@ def _get_asset_resolution(
         asset: STAC asset
         asset_proj_ext: Asset's projection extension
         src_dst: SimpleSTACReader instance
+        asset_crs: The asset's resolved CRS; the `gsd` fallback is used only
+            when it is projected
 
     Returns:
         Tuple of (x_resolution, y_resolution), either may be None
@@ -678,13 +858,20 @@ def _get_asset_resolution(
     if src_dst.transform:
         return abs(src_dst.transform.a), abs(src_dst.transform.e)
 
-    return None, None
+    # Last resort: the asset's own declared ground sample distance (STAC common
+    # metadata `gsd`), in the asset CRS's ground units. Catches an asset that
+    # carries neither `proj:transform`/`proj:shape` nor a usable item-level
+    # transform -- e.g. EOPF's `AOT_10m`/`SCL_20m`/`WVP_10m`, which declare only
+    # `gsd`. Without this, such an asset contributes no resolution at all and
+    # `_estimate_output_dimensions` silently ignores it.
+    return _gsd_resolution(asset.extra_fields.get("gsd"), asset_crs)
 
 
 def _get_assets_resolutions(
     item: pystac.Item,
     src_dst: SimpleSTACReader,
     bands: Optional[list[str]] = None,
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dict[str, tuple[float, float, rasterio.crs.CRS]]:
     """Get x and y resolutions and CRS for each band from STAC assets.
 
@@ -692,12 +879,29 @@ def _get_assets_resolutions(
         item: STAC item dictionary
         src_dst: SimpleSTACReader instance
         bands: Optional list of band names to filter assets
+        assets: What is read for each of ``bands``, one entry per band, as
+            `LoadCollection._bands_to_assets` returns it (e.g. ``B01|bands=b1``
+            read as ``{"name": "B01", "bands": ["b1"]}``). The resolution comes
+            from the asset each entry names; the result stays keyed by the
+            band name. None: each band name is the asset name.
 
     Returns:
         Dictionary mapping band names to (x_resolution, y_resolution, crs) tuples
     """
     band_resolutions = {}
-    assets_to_process = set(bands) if bands else set(item.get_assets().keys())
+    # ``band name -> (asset name, gsd of the selected bands)``: what to look
+    # up for each requested band.
+    assets_to_process: Dict[str, Tuple[str, Optional[float]]]
+    if not bands:
+        assets_to_process = {key: (key, None) for key in item.get_assets()}
+    elif assets is not None and len(assets) == len(bands):
+        assets_to_process = {}
+        for band, asset in zip(bands, assets):
+            name = asset["name"] if isinstance(asset, dict) else asset
+            gsd = _selection_gsd(asset, _asset_extra_fields(item, name))
+            assets_to_process[band] = (name, gsd)
+    else:
+        assets_to_process = {band: (band, None) for band in bands}
 
     # Built lazily, only if a requested name turns out not to be a real asset
     # -- the common (no derived bands requested) case pays nothing extra.
@@ -705,35 +909,52 @@ def _get_assets_resolutions(
     sibling_candidates: Optional[List[SiblingCandidateFacts]] = None
     collection_id = item.collection_id or ""
 
-    for band_name in assets_to_process:
-        resolution_asset_name = band_name
+    for band_name, (lookup_name, band_gsd) in assets_to_process.items():
+        resolution_asset_name = lookup_name
+        # ``band_gsd`` is set for a band selected inside an asset (an asset
+        # dict, `_selection_gsd`) or resolved via `_inner_bands` below: its
+        # own declared ground sample distance, which overrides the owning
+        # asset's (a multi-band asset's own metadata describes just its finest
+        # band -- EOPF's `reflectance` declares 10m even though `b01` is
+        # native 20m).
 
-        if band_name not in item.assets:
-            # Not a real asset -- maybe a band-source-derived name (ADR
-            # 0002 S2.4). A derived band shares its sibling raster asset's
-            # grid, so fall back to that asset's resolution rather than
-            # silently contributing none (which would leave a derived-only
-            # request's output dimensions defaulting to 1024x1024).
-            if item_asset_facts is None:
-                item_asset_facts = [
-                    (key, a.media_type, a.roles or []) for key, a in item.assets.items()
-                ]
-                sibling_candidates = [
-                    (key, a.media_type, a.roles or [], a.extra_fields.get("gsd"))
-                    for key, a in item.assets.items()
-                ]
-            resolved = resolve_band(
-                collection_id,
-                band_name,
-                item_asset_facts,
-                BAND_SOURCES,
-                sibling_candidates=sibling_candidates,
-            )
-            if resolved is None or not resolved.sibling_key:
-                continue
-            resolution_asset_name = resolved.sibling_key
-            if resolution_asset_name not in item.assets:
-                continue
+        if lookup_name not in item.assets:
+            # Not a real asset key. Prefer a band published *inside* one of
+            # this item's own assets (titiler/openeo/assetbands.py) over a
+            # band-source-derived name below: `src_dst._inner_bands` is
+            # precomputed for this exact item, so this costs nothing extra to
+            # check first, and the two mechanisms cannot both match one name.
+            resolved_inner = src_dst._inner_bands.get(lookup_name)
+            if resolved_inner is not None:
+                resolution_asset_name = resolved_inner.asset_key
+                band_gsd = resolved_inner.metadata.get("gsd")
+            else:
+                # Maybe a band-source-derived name instead (ADR 0002 S2.4). A
+                # derived band shares its sibling raster asset's grid, so fall
+                # back to that asset's resolution rather than silently
+                # contributing none (which would leave a derived-only
+                # request's output dimensions defaulting to 1024x1024).
+                if item_asset_facts is None:
+                    item_asset_facts = [
+                        (key, a.media_type, a.roles or [])
+                        for key, a in item.assets.items()
+                    ]
+                    sibling_candidates = [
+                        (key, a.media_type, a.roles or [], a.extra_fields.get("gsd"))
+                        for key, a in item.assets.items()
+                    ]
+                resolved = resolve_band(
+                    collection_id,
+                    lookup_name,
+                    item_asset_facts,
+                    BAND_SOURCES,
+                    sibling_candidates=sibling_candidates,
+                )
+                if resolved is None or not resolved.sibling_key:
+                    continue
+                resolution_asset_name = resolved.sibling_key
+                if resolution_asset_name not in item.assets:
+                    continue
 
         asset = item.assets[resolution_asset_name]
         asset_proj_ext = None
@@ -743,11 +964,23 @@ def _get_assets_resolutions(
         # Get asset CRS or fall back to item CRS
         asset_crs = _get_asset_crs(item, asset, asset_proj_ext) or src_dst.crs
 
-        # Get asset resolution
-        x_res, y_res = _get_asset_resolution(item, asset, asset_proj_ext, src_dst)
+        # Get resolution: the band's own gsd when usable, else the asset's.
+        x_res, y_res = _gsd_resolution(band_gsd, asset_crs)
+        if x_res is None or y_res is None:
+            x_res, y_res = _get_asset_resolution(
+                item, asset, asset_proj_ext, src_dst, asset_crs
+            )
 
         # Skip if we couldn't determine resolution
         if x_res is None or y_res is None:
+            logger.debug(
+                "No resolution for band %r (asset %r, crs %s) in item %r; "
+                "it is ignored when estimating output dimensions",
+                band_name,
+                resolution_asset_name,
+                asset_crs,
+                item.id,
+            )
             continue
 
         # Keyed by the originally requested name, even when the resolution
@@ -842,8 +1075,8 @@ def _check_pixel_limit(
     For mosaics, items with the same datetime are counted only once since they
     will be combined into a single mosaic.
     """
-    from .settings import ProcessingSettings
-
+    # A fresh instance, not the module-level one: the limit is read from the
+    # environment at call time (tests set it with `monkeypatch.setenv`).
     processing_settings = ProcessingSettings()
 
     width_int = int(width or 0)
@@ -903,18 +1136,16 @@ def _get_native_crs_from_item(
 
 
 def _get_target_crs_bbox(
-    items: List[pystac.Item],
+    readers: Sequence[SimpleSTACReader],
     spatial_extent: Optional[BoundingBox],
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
-    signer: Optional[HrefSigner] = None,
 ) -> Tuple[rasterio.crs.CRS, rasterio.crs.CRS, List[float]]:
     """Get bounds CRS, target CRS, and bbox from items and spatial extent.
 
     Args:
-        items: List of STAC items
+        readers: One opened reader per STAC item (see `_estimate_output_dimensions`)
         spatial_extent: Optional bounding box for the output
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
-        signer: Optional href signer for the readers this builds
 
     Returns:
         Tuple of (bounds_crs, target_crs, bbox) where:
@@ -944,25 +1175,23 @@ def _get_target_crs_bbox(
     native_crs: Optional[rasterio.crs.CRS] = None
 
     # Process each item to update bbox and find native CRS
-    for item in items:
-        with SimpleSTACReader(item, signer=signer) as src_dst:
-            item_bbox = src_dst.bounds
-            if item_bbox:
-                if not spatial_extent:
-                    if not target_bbox:
-                        target_bbox = list(item_bbox)
-                    else:
-                        # Compute union of two bounding boxes
-                        target_bbox = [
-                            min(target_bbox[0], item_bbox[0]),  # west
-                            min(target_bbox[1], item_bbox[1]),  # south
-                            max(target_bbox[2], item_bbox[2]),  # east
-                            max(target_bbox[3], item_bbox[3]),  # north
-                        ]
+    for src_dst in readers:
+        item_bbox = src_dst.bounds
+        if item_bbox and not spatial_extent:
+            if not target_bbox:
+                target_bbox = list(item_bbox)
+            else:
+                # Compute union of two bounding boxes
+                target_bbox = [
+                    min(target_bbox[0], item_bbox[0]),  # west
+                    min(target_bbox[1], item_bbox[1]),  # south
+                    max(target_bbox[2], item_bbox[2]),  # east
+                    max(target_bbox[3], item_bbox[3]),  # north
+                ]
 
-            # Capture native CRS from first item
-            if native_crs is None:
-                native_crs = _get_native_crs_from_item(item, src_dst.crs)
+        # Capture native CRS from first item
+        if native_crs is None:
+            native_crs = _get_native_crs_from_item(src_dst.input, src_dst.crs)
 
     if not target_bbox:
         raise ValueError("No valid bounding box found in items")
@@ -987,48 +1216,48 @@ def _get_target_crs_bbox(
 
 
 def _get_cube_resolutions(
-    items: List[Dict],
+    readers: Sequence[SimpleSTACReader],
     target_crs: rasterio.crs.CRS,
     target_bbox: List[float],
     bands: Optional[list[str]],
-    signer: Optional[HrefSigner] = None,
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]]:
-    """Get resolutions for each datetime and band combination."""
+    """Get resolutions for each datetime and band combination.
+
+    ``readers`` are the opened readers `_estimate_output_dimensions` built, one
+    per item; each reader's ``input`` is the item itself. ``assets`` as in
+    `_get_assets_resolutions`.
+    """
     cube_resolutions: Dict[str, Dict[str, List[Tuple[float, float, List[float]]]]] = {}
 
-    for item in items:
-        with SimpleSTACReader(item, signer=signer) as src_dst:
-            asset_resolutions = _get_assets_resolutions(item, src_dst, bands)
-            for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
-                if x_res is None or y_res is None:
-                    continue
+    for src_dst in readers:
+        asset_resolutions = _get_assets_resolutions(
+            src_dst.input, src_dst, bands, assets
+        )
+        for band_name, (x_res, y_res, asset_crs) in asset_resolutions.items():
+            if x_res is None or y_res is None:
+                continue
 
-                x_val: float = float(x_res)
-                y_val: float = float(y_res)
+            x_val: float = float(x_res)
+            y_val: float = float(y_res)
 
-                if asset_crs != target_crs:
-                    reprojected = _reproject_resolution(
-                        asset_crs,
-                        target_crs,
-                        target_bbox,
-                        x_val,
-                        y_val,
-                    )
-                    if reprojected[0] is None or reprojected[1] is None:
-                        continue
-                    x_val = float(reprojected[0])
-                    y_val = float(reprojected[1])
-
-                item_datetime = src_dst.input.datetime.isoformat()
-                if item_datetime not in cube_resolutions:
-                    cube_resolutions[item_datetime] = {}
-
-                if band_name not in cube_resolutions[item_datetime]:
-                    cube_resolutions[item_datetime][band_name] = []
-
-                cube_resolutions[item_datetime][band_name].append(
-                    (x_val, y_val, target_bbox)
+            if asset_crs != target_crs:
+                reprojected = _reproject_resolution(
+                    asset_crs,
+                    target_crs,
+                    target_bbox,
+                    x_val,
+                    y_val,
                 )
+                if reprojected[0] is None or reprojected[1] is None:
+                    continue
+                x_val = float(reprojected[0])
+                y_val = float(reprojected[1])
+
+            item_datetime = _item_datetime(src_dst.input).isoformat()
+            cube_resolutions.setdefault(item_datetime, {}).setdefault(
+                band_name, []
+            ).append((x_val, y_val, target_bbox))
 
     return cube_resolutions
 
@@ -1041,7 +1270,8 @@ def _estimate_output_dimensions(
     height: Optional[int] = None,
     check_max_pixels: bool = True,
     target_crs: Optional[Union[int, str, rasterio.crs.CRS]] = None,
-    signer: Optional[HrefSigner] = None,
+    reader_cls: Optional[ReaderCls] = None,
+    assets: Optional[Sequence[AssetType]] = None,
 ) -> Dims:
     """
     Estimate output dimensions based on items and spatial extent.
@@ -1054,9 +1284,13 @@ def _estimate_output_dimensions(
         height: Optional user-specified height
         check_max_pixels: Whether to check pixel count limit
         target_crs: Optional target CRS for the output. If None, uses native CRS from first item.
-        signer: Optional href signer for the readers this builds. Needed here
-            too, not only on the read path: estimating dimensions opens assets
-            to read their projection metadata.
+        reader_cls: The reader class to open each item with; `SimpleSTACReader`
+            by default. A backend passes the same subclass it reads with, so the
+            estimate sees the same bounds, CRS and inner bands the read will.
+        assets: What is read for each of ``bands``, one entry per band
+            (`LoadCollection._bands_to_assets`). Resolutions are looked up on
+            these assets, and the pixel limit still counts ``bands``. None:
+            each band name is the asset name.
 
     Returns:
         Dictionary containing:
@@ -1065,24 +1299,38 @@ def _estimate_output_dimensions(
             - bounds_crs: CRS of the input bounding box
             - crs: Target CRS to use for output
             - bbox: Bounding box as a list [west, south, east, north]
+
+    Note:
+        This path opens assets to read their projection metadata, so it needs the
+        same credential the read path does. It gets it the same way: from the key
+        the item was stamped with at ingest (ADR 0005 S2.2).
     """
-    # Get bounds CRS, target CRS, and bbox
-    bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
-        items, spatial_extent, target_crs, signer=signer
-    )
+    # One reader per item, built once and shared by both helpers below. Building
+    # a `SimpleSTACReader` is not free: `__attrs_post_init__` resolves derived
+    # and inner bands and, for SAR items, opens an asset header
+    # (`_item_has_untrustworthy_proj`). The readers hold no file handles, so
+    # keeping them all open for the duration of the estimate costs only memory.
+    reader_cls = _default_reader_cls(reader_cls)
+    with ExitStack() as stack:
+        readers = [stack.enter_context(reader_cls(item)) for item in items]
 
-    # Reproject bbox to output CRS for resolution/dimension calculations
-    if bounds_crs != output_crs:
-        output_bbox = list(
-            transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+        # Get bounds CRS, target CRS, and bbox
+        bounds_crs, output_crs, target_bbox = _get_target_crs_bbox(
+            readers, spatial_extent, target_crs
         )
-    else:
-        output_bbox = target_bbox
 
-    # Get resolutions for each datetime and band
-    cube_resolutions = _get_cube_resolutions(
-        items, output_crs, output_bbox, bands, signer=signer
-    )
+        # Reproject bbox to output CRS for resolution/dimension calculations
+        if bounds_crs != output_crs:
+            output_bbox = list(
+                transform_bounds(bounds_crs, output_crs, *target_bbox, densify_pts=21)
+            )
+        else:
+            output_bbox = target_bbox
+
+        # Get resolutions for each datetime and band
+        cube_resolutions = _get_cube_resolutions(
+            readers, output_crs, output_bbox, bands, assets
+        )
 
     # Find the minimum resolution across all bands
     x_resolution: Optional[float] = None
@@ -1117,6 +1365,7 @@ def _estimate_output_dimensions(
         bounds_crs=bounds_crs,
         crs=output_crs,
         bbox=target_bbox,
+        output_bbox=output_bbox,
     )
 
 
@@ -1128,6 +1377,148 @@ def _asset_extra_fields(item: Any, band: str) -> Dict[str, Any]:
     if not assets or band not in assets:
         return {}
     return dict(getattr(assets[band], "extra_fields", {}) or {})
+
+
+#: The per-band lists of an asset's STAC metadata, in the order of its bands.
+_BAND_LISTS = ("raster:bands", "bands", "eo:bands")
+
+
+def _narrow_to_band(fields: Dict[str, Any], index: int) -> Dict[str, Any]:
+    """``fields`` with every per-band list cut to its 1-based band ``index``.
+
+    So a helper that reads the first band (`_band_scale_offset`, a plugin's
+    ``band_key``) reads band ``index``. A list too short for ``index`` becomes
+    empty: that band has no per-band metadata.
+    """
+    narrowed = dict(fields)
+    for key in _BAND_LISTS:
+        values = fields.get(key)
+        if isinstance(values, list):
+            narrowed[key] = values[index - 1 : index]
+    return narrowed
+
+
+def _band_lookup(stac_bands: Sequence[Any]) -> Dict[str, int]:
+    """``band name -> 1-based index`` for an asset's ``bands`` (``eo:bands``) list.
+
+    The one place that resolves a ``bands`` selection: `SimpleSTACReader._get_options`
+    uses it for the read, and `_asset_bands` for the post-read steps, so both
+    always pick the same band.
+
+    There is no standard for precedence between 'eo:common_name' and 'name'
+    in STAC specification, so we will use 'eo:common_name' if it exists,
+    otherwise fallback to 'name', and if not exist use the band index as last resource.
+    The positional fallback key is stringified: `bands` values arrive as
+    strings (the openEO `bands` argument, and rio-tiler's asset options),
+    so an int key here can never be matched and the fallback was dead --
+    requesting band "1" raised "not found in asset metadata" instead of
+    selecting index 1.
+    """
+    lookup: Dict[str, int] = {}
+    for ix, b in enumerate(stac_bands, 1):
+        meta = b if isinstance(b, Mapping) else {}
+        key = (
+            meta.get("eo:common_name")
+            or meta.get("common_name")
+            or meta.get("name")
+            or str(ix)
+        )
+        lookup[key] = ix
+    return lookup
+
+
+def _stac_bands(fields: Mapping[str, Any]) -> List[Any]:
+    """The asset's ``bands`` list (``eo:bands`` for STAC 1.0), or []."""
+    return list(fields.get("bands") or fields.get("eo:bands") or [])
+
+
+def _selected_indexes(
+    asset: AssetType, fields: Mapping[str, Any]
+) -> Optional[List[Optional[int]]]:
+    """The 1-based indexes of the bands that reading ``asset`` returns, in order.
+
+    The same selection `SimpleSTACReader._get_options` makes: ``bands``
+    (resolved with `_band_lookup`) wins over ``indexes``. ``[None]`` for a
+    plain name or a dict without a selection: the whole asset, taken as one
+    band. None for an ``expression``: its output bands do not map to source
+    bands. A band name the asset does not have gives 0 (the read raises).
+    """
+    if not isinstance(asset, dict):
+        return [None]
+    if asset.get("expression"):
+        return None
+    if bands := asset.get("bands"):
+        lookup = _band_lookup(_stac_bands(fields))
+        return [lookup.get(band, 0) for band in bands]
+    if indexes := asset.get("indexes"):
+        return [indexes] if isinstance(indexes, int) else list(indexes)
+    return [None]
+
+
+def _asset_bands(
+    item: Any, assets: Sequence[AssetType]
+) -> Optional[List[Tuple[str, Optional[int]]]]:
+    """One ``(asset name, 1-based band index)`` pair per band that reading ``assets`` returns.
+
+    ``assets`` may mix plain names with rio-tiler asset dicts
+    (``{"name": ..., "bands": [...]}``), which is what a backend's
+    `LoadCollection._bands_to_assets` produces. A dict that selects several
+    bands gives one pair per band, so the result is in output-band order --
+    what the post-read steps in `_reader` key on. The index is None for a
+    whole asset (`_selected_indexes`). None when an asset carries an
+    ``expression``.
+    """
+    out: List[Tuple[str, Optional[int]]] = []
+    for asset in assets:
+        name = asset["name"] if isinstance(asset, dict) else asset
+        indexes = _selected_indexes(asset, _asset_extra_fields(item, name))
+        if indexes is None:
+            return None
+        out.extend((name, index) for index in indexes)
+    return out
+
+
+def _asset_band_fields(
+    item: Any, assets: Sequence[AssetType]
+) -> Optional[List[Tuple[str, Dict[str, Any]]]]:
+    """One ``(asset name, STAC metadata)`` pair per band that reading ``assets`` returns.
+
+    The bands of `_asset_bands`. A whole asset gives its metadata as is; a
+    selected band gives the metadata narrowed to that band (`_narrow_to_band`),
+    so a non-first band never gets the first band's scale/offset. None when
+    an asset carries an ``expression``.
+    """
+    selection = _asset_bands(item, assets)
+    if selection is None:
+        return None
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for name, index in selection:
+        fields = _asset_extra_fields(item, name)
+        out.append((name, fields if index is None else _narrow_to_band(fields, index)))
+    return out
+
+
+def _selection_gsd(asset: AssetType, fields: Mapping[str, Any]) -> Optional[float]:
+    """The finest per-band ``gsd`` of the bands ``asset`` selects, or None.
+
+    A multi-band asset's own ``gsd`` describes just its finest band (EOPF's
+    `reflectance` declares 10m, but its `b01` is native 20m), so a selection
+    of `b01` must use the band's ``gsd``. None for a whole asset, or when no
+    selected band declares one.
+    """
+    indexes = _selected_indexes(asset, fields)
+    if not indexes or indexes == [None]:
+        return None
+    stac_bands = _stac_bands(fields)
+    gsds = [
+        float(stac_bands[i - 1]["gsd"])
+        for i in indexes
+        if i
+        and 0 < i <= len(stac_bands)
+        and isinstance(stac_bands[i - 1], Mapping)
+        and stac_bands[i - 1].get("gsd") is not None
+    ]
+    return min(gsds) if gsds else None
 
 
 def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
@@ -1153,32 +1544,163 @@ def _band_scale_offset(asset: Dict[str, Any]) -> Tuple[float, float]:
     )
 
 
+def _scale_offset_sources(item: Any) -> List[str]:
+    """Return the ordered scale/offset sources for ``item``'s collection.
+
+    The master switch `apply_scale_offset` (off -> none), then the
+    collection's list in `scale_offset_collections`, then the global
+    `scale_offset_sources`. The collection id comes from the item itself, so
+    an item without one (e.g. from `load_stac`) uses the global list.
+    """
+    settings = processing_settings
+    if not settings.apply_scale_offset:
+        return []
+
+    if isinstance(item, dict):
+        collection = item.get("collection")
+    else:
+        collection = getattr(item, "collection_id", None)
+
+    if collection and collection in settings.scale_offset_collections:
+        return list(settings.scale_offset_collections[collection])
+    return list(settings.scale_offset_sources)
+
+
+def _is_identity(pair: Tuple[float, float]) -> bool:
+    return pair[0] == 1.0 and pair[1] == 0.0
+
+
+#: ``plugin name -> per-band pairs``, or None when the plugin does not apply.
+PluginPairs = Callable[[str], Optional[ProductScaleOffset]]
+
+
+def _load_from_plugin(
+    plugin: ScaleOffsetPlugin,
+    item: pystac.Item,
+    loader: Callable[[str, str, Any], Any],
+    signer: Optional[HrefSigner],
+    fetcher: Any,
+) -> Any:
+    """Call ``loader`` (one of ``plugin``'s) on the item's metadata asset.
+
+    Finds the plugin's metadata asset on the item, signs its href with the
+    reader's signer, and fetches it with the reader's band-source fetcher --
+    the same path the derived-band readers use for their XML. The unsigned
+    href is the plugin's cache key. None when the plugin does not apply.
+    """
+    asset = find_metadata_asset(plugin, item)
+    if asset is None:
+        return None
+    return loader(
+        _resolve_asset_href(asset), _resolve_asset_href(asset, signer), fetcher
+    )
+
+
+def _plugin_pairs_for(src_dst: Any) -> PluginPairs:
+    """Load a plugin's pairs for the item ``src_dst`` reads (`_load_from_plugin`)."""
+    item = getattr(src_dst, "input", None)
+
+    def load(name: str) -> Optional[ProductScaleOffset]:
+        if not isinstance(item, pystac.Item):
+            return None
+        plugin = SCALE_OFFSET_PLUGINS[name]
+        return _load_from_plugin(
+            plugin,
+            item,
+            plugin.load,
+            getattr(src_dst, "signer", None),
+            getattr(src_dst, "band_source_fetcher", None),
+        )
+
+    return load
+
+
 def _apply_scale_offset(
-    img: ImageData, item: Any, assets: Optional[Sequence[str]]
+    img: ImageData,
+    item: Any,
+    assets: Optional[Sequence[AssetType]],
+    *,
+    sources: Sequence[str] = ("stac",),
+    plugin_pairs: Optional[PluginPairs] = None,
 ) -> ImageData:
-    """Apply per-band STAC ``raster:scale``/``raster:offset`` to ``img``.
+    """Apply per-band scale/offset to ``img``.
+
+    For each band, ``sources`` are tried in order and the first one with a
+    scale/offset that is not 1/0 wins, so a band is never scaled two times:
+
+    - ``"stac"``: the asset's ``raster:scale``/``raster:offset``;
+    - ``"cog"``: the COG header scale/offset that rio-tiler reports on
+      ``img.scales``/``img.offsets`` when it reads with ``unscale=False``;
+    - a plugin name (`titiler.openeo.scaleoffset.PLUGINS`): the pairs that
+      ``plugin_pairs(name)`` returns. It is called at most once per plugin,
+      and only when the walk reaches the plugin for a band the plugin knows
+      (its ``band_key`` is not None); ``None`` means the plugin does not apply
+      to this item and is skipped. Errors raise.
+
+    A band that no source covers stays as it is (identity).
 
     Returns physical values (e.g. reflectance) as ``float32``. Bands without
-    scale/offset metadata (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
+    scale/offset (default 1/0) are left unchanged, so e.g. Sentinel-2 SCL
     keeps its integer class values. The nodata mask is preserved.
 
+    ``assets`` are the requested assets: names, or rio-tiler asset dicts whose
+    ``indexes``/``bands`` pick bands of an asset (`_asset_band_fields`).
+
     No-ops (returns ``img`` unchanged, keeping its dtype) when ``assets`` is missing,
-    its length does not match the band count, or every band is identity (1/0).
+    an asset carries an ``expression``, the number of requested bands does not
+    match the band count, or every band is identity (1/0).
     """
-    if not assets:
+    if not assets or not sources:
+        return img
+
+    band_fields = _asset_band_fields(item, assets)
+    if band_fields is None:
+        logger.warning("Cannot apply scale/offset to an asset expression; skipping.")
         return img
 
     nbands = img.array.shape[0]
-    if len(assets) != nbands:
+    if len(band_fields) != nbands:
         logger.warning(
-            "Cannot apply scale/offset: %d band(s) but %d asset name(s); skipping.",
+            "Cannot apply scale/offset: %d band(s) but %d asset band(s); skipping.",
             nbands,
-            len(assets),
+            len(band_fields),
         )
         return img
 
-    pairs = [_band_scale_offset(_asset_extra_fields(item, b)) for b in assets]
-    if all(scale == 1.0 and offset == 0.0 for scale, offset in pairs):
+    img_scales, img_offsets = img.scales or [], img.offsets or []
+    has_cog = len(img_scales) == nbands and len(img_offsets) == nbands
+
+    loaded: Dict[str, Optional[ProductScaleOffset]] = {}
+
+    def from_source(
+        source: str, index: int, fields: Dict[str, Any]
+    ) -> Tuple[float, float]:
+        if source == "stac":
+            return _band_scale_offset(fields)
+        if source == "cog":
+            if not has_cog:
+                return (1.0, 0.0)
+            return (float(img_scales[index]), float(img_offsets[index]))
+        # Ask the plugin for the band's key first: that needs no fetch, so a
+        # band the plugin knows nothing about (e.g. SCL) never loads its file.
+        key = SCALE_OFFSET_PLUGINS[source].band_key(fields)
+        if plugin_pairs is None or key is None:
+            return (1.0, 0.0)
+        if source not in loaded:
+            loaded[source] = plugin_pairs(source)
+        product = loaded[source]
+        return product.get(key, (1.0, 0.0)) if product else (1.0, 0.0)
+
+    pairs: List[Tuple[float, float]] = []
+    for index, (_, fields) in enumerate(band_fields):
+        pair = (1.0, 0.0)
+        for source in sources:
+            pair = from_source(source, index, fields)
+            if not _is_identity(pair):
+                break
+        pairs.append(pair)
+
+    if all(_is_identity(pair) for pair in pairs):
         return img
 
     scales = numpy.array([s for s, _ in pairs])
@@ -1220,8 +1742,22 @@ def _inherit_derived_band_masks(
     If a derived band's sibling was not itself requested, there is nothing to
     inherit and that band's own mask (fully valid, as computed) is left alone
     -- a derived-only request has no raster band to borrow a mask from.
+
+    ``requested`` names each band of ``img`` in order (`_asset_bands`). When
+    the counts differ (a plain name for a multi-band asset), the positions are
+    not known and the masks are left alone, so no band borrows the mask of
+    another.
     """
     if not derived_bands:
+        return img
+
+    if len(requested) != img.count:
+        logger.warning(
+            "Cannot inherit derived band masks: %d band(s) but %d requested "
+            "band name(s); skipping.",
+            img.count,
+            len(requested),
+        )
         return img
 
     index_by_name = {name: i for i, name in enumerate(requested)}
@@ -1245,27 +1781,37 @@ def _inherit_derived_band_masks(
     return img
 
 
-def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
+def _reader(
+    item: Union[pystac.Item, Dict[str, Any]],
+    bbox: BBox,
+    *,
+    reader_cls: Optional[ReaderCls] = None,
+    **kwargs: Any,
+) -> ImageData:
     """
     Read a STAC item and return an ImageData object.
 
     Args:
-        item: STAC item dictionary (converted to pystac.Item by SimpleSTACReader)
+        item: STAC item, as a ``pystac.Item`` or a plain dict
         bbox: Bounding box to read
-        **kwargs: Additional keyword arguments to pass to the reader. ``signer``
-            is consumed here rather than forwarded to ``part()``; it reaches
-            this function through ``mosaic_reader``/``create_tasks``, which
-            forward their own ``**kwargs`` to the reader callable.
+        reader_cls: The reader class to open ``item`` with; `SimpleSTACReader`
+            by default. This is the one supported way for a backend to change
+            the asset reader -- it reaches here as an ordinary ``mosaic_reader``
+            / ``create_tasks`` keyword, which is why it is keyword-only and
+            consumed before ``**kwargs`` is forwarded to ``part()``
+            (issue #379, docs/adr/0011-backend-reader-seam.md).
+        **kwargs: Additional keyword arguments to pass to the reader
 
     Returns:
         ImageData object with cutline_mask set from item geometry if available
-    """
-    # Popped before the retry loop: the signer belongs to the reader's
-    # construction, not to the read call, and every retry below rebuilds the
-    # reader -- which is what re-signs hrefs whose token expired mid-read
-    # (docs/adr/0005-asset-href-signing.md S3.1).
-    signer: Optional[HrefSigner] = kwargs.pop("signer", None)
 
+    Note:
+        Any credential these hrefs need comes from ``item`` itself, stamped at
+        ingest and resolved inside ``SimpleSTACReader``. Because the retry loop
+        below rebuilds the reader, a token that expired mid-read is re-minted
+        rather than reused (docs/adr/0005-asset-href-signing.md S3.1).
+    """
+    reader_cls = _default_reader_cls(reader_cls)
     max_retries = 10
     retry_delay = 1.0  # seconds
     retries = 0
@@ -1285,25 +1831,39 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
     logger.debug(f"Loading STAC item: {item_id} (datetime: {item_datetime})")
 
     while True:
+        # Before each read and each retry: stop if the client went away.
+        raise_if_cancelled()
         try:
-            with SimpleSTACReader(item, signer=signer) as src_dst:
+            with reader_cls(item) as src_dst:
                 img = src_dst.part(bbox, **kwargs)
 
                 requested = kwargs.get("assets")
-                if requested:
+                selection = _asset_bands(item, requested) if requested else None
+                if selection:
                     # getattr, not a direct attribute access: some tests
                     # substitute a minimal stand-in for SimpleSTACReader that
                     # does not carry this (SimpleSTACReader-internal) attribute
                     # -- treat that the same as "no derived bands".
                     img = _inherit_derived_band_masks(
-                        img, getattr(src_dst, "_derived_bands", {}), requested
+                        img,
+                        getattr(src_dst, "_derived_bands", {}),
+                        [name for name, _ in selection],
                     )
 
-                # Apply STAC raster:scale/raster:offset (per band) so bands are
-                # returned as physical values (e.g. reflectance) instead of raw DN.
-                # Runs inside the lazy task — only when a slice is actually read.
-                if processing_settings.apply_scale_offset:
-                    img = _apply_scale_offset(img, item, kwargs.get("assets"))
+                # Apply scale/offset (per band, from the deployment's ordered
+                # sources: STAC, a plugin's product metadata, the COG header)
+                # so bands are returned as physical values (e.g. reflectance)
+                # instead of raw DN. Runs inside the lazy task — only when a
+                # slice is actually read.
+                sources = _scale_offset_sources(item)
+                if sources:
+                    img = _apply_scale_offset(
+                        img,
+                        item,
+                        requested,
+                        sources=sources,
+                        plugin_pairs=_plugin_pairs_for(src_dst),
+                    )
 
                 # IMPORTANT: We intentionally do NOT set cutline_mask on individual tiles.
                 #
@@ -1345,7 +1905,7 @@ def _reader(item: Dict[str, Any], bbox: BBox, **kwargs: Any) -> ImageData:
                 f"RasterioIOError loading {item_id}: {str(e)}. "
                 f"Retrying in {retry_delay}s... (Attempt {retries}/{max_retries})"
             )
-            time.sleep(retry_delay)
+            cancellable_sleep(retry_delay)
             # Increase delay for next retry (exponential backoff)
             retry_delay *= 2
 

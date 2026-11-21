@@ -9,6 +9,7 @@ from .registry import (
     ResolvedBand,
     SiblingCandidateFacts,
     derive_bands,
+    describe_bands,
     pick_nominal_sibling_by_resolution,
     resolve_band,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "ResolvedBand",
     "SiblingCandidateFacts",
     "derive_bands",
+    "describe_bands",
     "resolve_band",
     "pick_nominal_sibling_by_resolution",
     "BAND_SOURCES",

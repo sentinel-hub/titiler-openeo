@@ -102,6 +102,7 @@ __all__ = [
     "sqrt",
     "stdev",
     "subtract",
+    "sum",
     "tan",
     "tanh",
     "trunc",
@@ -482,6 +483,35 @@ def min(data, ignore_nodata: bool = True):
         return _min(data, ignore_nodata=ignore_nodata, axis=0)
     else:
         raise TypeError("Unsupported data type for min function.")
+
+
+def sum(data, ignore_nodata: bool = True):
+    """Return the sum of the array.
+
+    Reduces over axis 0 (the leading "array" dimension), as max() does. A
+    pixel with only no-data values gives no-data. If ``ignore_nodata`` is
+    false, a pixel with any no-data value gives no-data. A Python list follows
+    the openEO examples: an empty list, or a list with only ``null`` values,
+    gives ``None``.
+    """
+    if isinstance(data, (list, tuple)):
+        values = [v for v in data if v is not None]
+        if not values or (not ignore_nodata and len(values) != len(data)):
+            return None
+        return builtins.sum(values)
+    if isinstance(data, RasterStack):
+        data = numpy.ma.stack([v.array for v in data.values()], axis=0)
+    elif not isinstance(data, numpy.ndarray):
+        raise TypeError("Unsupported data type for sum function.")
+
+    if not isinstance(data, numpy.ma.MaskedArray):
+        return numpy.sum(data, axis=0)
+    total = numpy.ma.sum(data, axis=0)
+    if not ignore_nodata:
+        total = numpy.ma.masked_where(
+            numpy.ma.getmaskarray(data).any(axis=0), total, copy=False
+        )
+    return total
 
 
 def highestpixel(data):

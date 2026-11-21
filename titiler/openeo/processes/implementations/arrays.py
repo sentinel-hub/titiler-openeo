@@ -9,13 +9,16 @@ from numpy.typing import ArrayLike
 from rio_tiler.models import ImageData
 
 from ...errors import OpenEOException
+from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
 from .core import process
 from .data_model import RasterStack
-from .reduce import _normalize_to_naive_utc
+from .reduce import REDUCED_TEMPORAL_SENTINEL, _normalize_to_naive_utc
 
 __all__ = [
     "array_element",
+    "array_contains",
     "array_apply",
+    "array_interpolate_linear",
     "to_image",
     "array_create",
     "create_data_cube",
@@ -53,24 +56,21 @@ def array_element(
             "Label parameter is only supported for RasterStack/dict data types"
         )
 
-    # Validate label exists in dict (do this after type check)
-    if label is not None and isinstance(data, dict) and label not in data.keys():
-        raise KeyError(f"Label {label} not found in data: {data.keys()}")
-
-    # Handle RasterStack
+    # Handle RasterStack: in a reducer over the temporal dimension, ``data`` is
+    # the stack itself and its elements are the time steps (keys in temporal
+    # order). Select ONE time step, not one band of every time step (#437).
     if isinstance(data, dict):
-        if index is not None:
-            array_dict = {
-                k: numpy.take(v.array, index, axis=0) for k, v in data.items()
-            }
+        keys = list(data.keys())
         if label is not None:
-            array_dict = {k: v.array for k, v in data.items() if k == label}
-        # return a multi-dimensional array
-        # For RasterStack, this will execute all tasks when stacking is needed
-        # This is expected behavior for array operations.
-        # Use numpy.ma.stack (not numpy.stack) so per-slice nodata masks are
-        # preserved; plain numpy.stack silently drops them.
-        return numpy.ma.stack(list(array_dict.values()), axis=0)
+            key = _find_stack_label(keys, label)
+        else:
+            assert index is not None  # guarded above
+            if index >= len(keys):
+                raise IndexError(
+                    f"Index {index} is out of bounds for axis 0 with size {len(keys)}"
+                )
+            key = keys[index]
+        return data[key].array
 
     # Handle regular arrays (index must be provided at this point)
     if index is None:
@@ -102,6 +102,108 @@ def array_element(
         )
 
     return numpy.take(array_data, index, axis=0)
+
+
+def _find_stack_label(keys: List[Any], label: Any) -> Any:
+    """Return the RasterStack key that matches ``label``.
+
+    Stack keys are datetimes, while a label from a process graph is usually an
+    ISO 8601 string, so parse the label before the comparison.
+    """
+    try:
+        wanted = _coerce_temporal_label(label)
+    except LabelsNotEnumerated:
+        wanted = None
+    for key in keys:
+        if isinstance(key, datetime) and _normalize_to_naive_utc(key) == wanted:
+            return key
+    raise KeyError(f"Label {label} not found in data: {keys}")
+
+
+def _is_bool(v: Any) -> bool:
+    """Return True for Python and numpy booleans."""
+    return isinstance(v, (bool, numpy.bool_))
+
+
+def _is_number(v: Any) -> bool:
+    """Return True for Python and numpy numbers, booleans excluded."""
+    return isinstance(v, (int, float, numpy.number)) and not _is_bool(v)
+
+
+def _strict_eq(a: Any, b: Any) -> bool:
+    """Compare two scalars with the strict typing of the openEO ``eq`` process.
+
+    A string never equals a number and a boolean never equals a number, but an
+    integer equals a float of the same value. A no-data operand never matches.
+    """
+    if a is None or b is None or a is numpy.ma.masked:
+        return False
+    if _is_bool(a) or _is_bool(b):
+        return _is_bool(a) and _is_bool(b) and bool(a) == bool(b)
+    if _is_number(a) and _is_number(b):
+        return bool(a == b)
+    if isinstance(a, str) and isinstance(b, str):
+        return a == b
+    return False
+
+
+def _dtype_accepts(dtype: numpy.dtype, value: Any) -> bool:
+    """Return True if ``value`` can strictly equal elements of ``dtype``."""
+    if _is_bool(value):
+        return dtype.kind == "b"
+    if _is_number(value):
+        return dtype.kind in "iuf"
+    if isinstance(value, str):
+        return dtype.kind in "US"
+    return False
+
+
+def array_contains(data: Any, value: Any) -> Any:
+    """Check whether the array contains a given value.
+
+    For a list, the elements are compared one by one with the strict typing of
+    ``eq``. For a numpy array (e.g. the data of a ``reduce_dimension`` callback),
+    the check reduces the leading axis: a ``(bands, H, W)`` array gives a
+    ``(H, W)`` boolean array and a 1-D array gives a boolean. Masked (no-data)
+    elements never match.
+
+    Args:
+        data: List or array to find the value in
+        value: Value to find. A no-data value (or null) always gives false
+
+    Returns:
+        True if the array contains the value, False otherwise
+
+    Examples:
+        >>> array_contains([1, 2, 3], 2)
+        True
+        >>> array_contains(["A", "B", "C"], "b")
+        False
+        >>> array_contains([1, 2, 3], "2")
+        False
+        >>> array_contains([1, 2, None], None)
+        False
+    """
+    if value is None or value is numpy.ma.masked:
+        return False
+
+    if isinstance(data, (list, tuple)) and any(
+        isinstance(v, numpy.ndarray) for v in data
+    ):
+        data = numpy.ma.stack(data)
+
+    if isinstance(data, numpy.ndarray):
+        reduced_shape = data.shape[1:] if data.ndim > 1 else ()
+        if data.size == 0 or not _dtype_accepts(data.dtype, value):
+            matches = numpy.zeros(reduced_shape, dtype=bool)
+        else:
+            matches = numpy.ma.filled(data == value, False).any(axis=0)
+        return matches if data.ndim > 1 else bool(matches)
+
+    if isinstance(data, (list, tuple)):
+        return any(_strict_eq(v, value) for v in data)
+
+    raise TypeError(f"Unsupported data type for array_contains: {type(data)}")
 
 
 def to_image(data: Union[numpy.ndarray, numpy.ma.MaskedArray]) -> RasterStack:
@@ -448,21 +550,31 @@ def _merge_images_bands(
     bands1 = list(img1.band_descriptions)
     bands2 = list(img2.band_descriptions)
 
-    # If neither image has band names, all data overlaps
-    if not bands1 and not bands2:
+    def _resolve(x: numpy.ndarray, y: numpy.ndarray) -> numpy.ndarray:
         if overlap_resolver is None:
             raise OverlapResolverMissing()
-        resolved = overlap_resolver(x=img1.array, y=img2.array, context=context)
-        if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
-            resolved = numpy.asarray(resolved)
+        return numpy.asanyarray(overlap_resolver(x=x, y=y, context=context))
+
+    def _image(array: numpy.ndarray, band_names: List[str]) -> ImageData:
         return ImageData(
-            resolved,
+            array,
             assets=(img1.assets or []) + (img2.assets or []),
             crs=img1.crs,
             bounds=img1.bounds,
-            band_descriptions=bands1,
+            band_descriptions=band_names,
             metadata=img1.metadata or {},
         )
+
+    # Without band names on either side, all data overlaps. A single-band image
+    # without band names comes from a cube that has no bands dimension (e.g.
+    # reduced with array_element); per spec example 4 it is merged with each band
+    # of the other cube. In both cases the resolver gets the whole images.
+    if (
+        (not bands1 and not bands2)
+        or (not bands1 and img1.count == 1)
+        or (not bands2 and img2.count == 1)
+    ):
+        return _image(_resolve(img1.array, img2.array), bands1 or bands2)
 
     # Find overlapping and unique bands
     set1 = set(bands1)
@@ -481,13 +593,9 @@ def _merge_images_bands(
         band_data_1 = img1.array[idx : idx + 1]  # shape (1, h, w)
 
         if band_name in overlapping:
-            # Find matching band in cube2
-            assert overlap_resolver is not None  # guarded above
             idx2 = bands2.index(band_name)
             band_data_2 = img2.array[idx2 : idx2 + 1]  # shape (1, h, w)
-            resolved = overlap_resolver(x=band_data_1, y=band_data_2, context=context)
-            if not isinstance(resolved, (numpy.ndarray, numpy.ma.MaskedArray)):
-                resolved = numpy.asarray(resolved)
+            resolved = _resolve(band_data_1, band_data_2)
             # Ensure 3D shape
             if resolved.ndim == 2:
                 resolved = resolved[numpy.newaxis, :, :]
@@ -502,16 +610,7 @@ def _merge_images_bands(
         result_arrays.append(img2.array[idx2 : idx2 + 1])
         result_band_names.append(band_name)
 
-    merged_array = numpy.ma.concatenate(result_arrays, axis=0)
-
-    return ImageData(
-        merged_array,
-        assets=(img1.assets or []) + (img2.assets or []),
-        crs=img1.crs,
-        bounds=img1.bounds,
-        band_descriptions=result_band_names,
-        metadata=img1.metadata or {},
-    )
+    return _image(numpy.ma.concatenate(result_arrays, axis=0), result_band_names)
 
 
 @process
@@ -529,6 +628,9 @@ def merge_cubes(
     - Timestamps unique to either cube are included as-is
     - Overlapping timestamps with disjoint bands are concatenated
     - Overlapping timestamps with overlapping bands require an overlap_resolver
+    - A cube without a temporal dimension is merged with each time step of the
+      other cube, and a single-band cube without band labels with each band
+      (spec example 4)
     - Spatial dimensions of cube2 are resampled to match cube1 if needed
 
     Args:
@@ -552,6 +654,25 @@ def merge_cubes(
     if target_height is None or target_width is None:
         raise ValueError("cube1 has no spatial dimensions")
 
+    # The resolver is invoked once PER timestamp and overlapping band; without
+    # this every call after the first returns the first call's result (#449, see
+    # callbacks.py).
+    resolver = (
+        recompute_each_call(overlap_resolver) if overlap_resolver is not None else None
+    )
+
+    def _match_size(img: ImageData) -> ImageData:
+        if img.height != target_height or img.width != target_width:
+            logging.warning(
+                "Resizing cube2 image from %dx%d to %dx%d to match cube1",
+                img.width,
+                img.height,
+                target_width,
+                target_height,
+            )
+            img = img.resize(target_height, target_width)
+        return img
+
     # The two cubes may carry datetime keys with inconsistent tz-awareness:
     # raw load_collection keeps STAC tz-aware datetimes, while processes such as
     # aggregate_temporal/filter_temporal normalize to naive UTC. Comparing the two
@@ -564,49 +685,32 @@ def merge_cubes(
 
     norm_to_key1 = {_norm(k): k for k in cube1.keys()}
     norm_to_key2 = {_norm(k): k for k in cube2.keys()}
-    keys1 = set(norm_to_key1)
-    keys2 = set(norm_to_key2)
-    all_keys = sorted(keys1 | keys2)
+
+    # A temporally-reduced cube has no temporal dimension. When only one of the
+    # two cubes is reduced, `t` is not an overlapping dimension: the reduced cube
+    # is merged with each time step of the other cube (spec example 4, #436).
+    reduced = {REDUCED_TEMPORAL_SENTINEL}
+    if set(norm_to_key2) == reduced and set(norm_to_key1) != reduced:
+        norm_to_key2 = dict.fromkeys(
+            norm_to_key1, norm_to_key2[REDUCED_TEMPORAL_SENTINEL]
+        )
+    elif set(norm_to_key1) == reduced and set(norm_to_key2) != reduced:
+        norm_to_key1 = dict.fromkeys(
+            norm_to_key2, norm_to_key1[REDUCED_TEMPORAL_SENTINEL]
+        )
 
     merged_images: Dict[datetime, ImageData] = {}
-
-    for key in all_keys:
-        in_cube1 = key in keys1
-        in_cube2 = key in keys2
-
-        if in_cube1 and not in_cube2:
-            # Timestamp only in cube1
+    for key in sorted(norm_to_key1.keys() | norm_to_key2.keys()):
+        if key not in norm_to_key2:
             merged_images[key] = cube1[norm_to_key1[key]]
-
-        elif in_cube2 and not in_cube1:
-            # Timestamp only in cube2 - resize to match cube1 spatial dims
-            img2 = cube2[norm_to_key2[key]]
-            if img2.height != target_height or img2.width != target_width:
-                logging.warning(
-                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
-                    img2.width,
-                    img2.height,
-                    target_width,
-                    target_height,
-                )
-                img2 = img2.resize(target_height, target_width)
-            merged_images[key] = img2
-
+        elif key not in norm_to_key1:
+            merged_images[key] = _match_size(cube2[norm_to_key2[key]])
         else:
-            # Timestamp in both cubes - merge bands
-            img1 = cube1[norm_to_key1[key]]
-            img2 = cube2[norm_to_key2[key]]
-            if img2.height != target_height or img2.width != target_width:
-                logging.warning(
-                    "Resizing cube2 image from %dx%d to %dx%d to match cube1",
-                    img2.width,
-                    img2.height,
-                    target_width,
-                    target_height,
-                )
-                img2 = img2.resize(target_height, target_width)
             merged_images[key] = _merge_images_bands(
-                img1, img2, overlap_resolver, context
+                cube1[norm_to_key1[key]],
+                _match_size(cube2[norm_to_key2[key]]),
+                resolver,
+                context,
             )
 
     return RasterStack.from_images(merged_images)
@@ -696,3 +800,126 @@ def array_apply(
     )
 
     return numpy.asanyarray(result)
+
+
+def _label_positions(labels: Optional[List[Any]], n: int) -> Optional[numpy.ndarray]:
+    """Return the labels as numeric x positions, or None to use the indices.
+
+    Numeric labels are used as they are and temporal labels as seconds. Other
+    labels (for example band names) have no inherent distance, so the indices
+    are used.
+    """
+    if labels is None or len(labels) != n:
+        return None
+    if all(isinstance(v, datetime) for v in labels):
+        epoch = datetime(1970, 1, 1)
+        return numpy.array(
+            [(_normalize_to_naive_utc(v) - epoch).total_seconds() for v in labels],
+            dtype="float64",
+        )
+    if all(_is_number(v) for v in labels):
+        return numpy.array(labels, dtype="float64")
+    return None
+
+
+def _interpolate_leading_axis(
+    arr: numpy.ma.MaskedArray, x: Optional[numpy.ndarray]
+) -> numpy.ma.MaskedArray:
+    """Fill NaN and no-data values along axis 0 by linear interpolation.
+
+    ``x`` holds the position of each element along axis 0; None uses the
+    indices. Infinite values are valid values, as in the openEO spec.
+    """
+    if not numpy.issubdtype(arr.dtype, numpy.floating):
+        arr = arr.astype("float32")
+
+    invalid = numpy.ma.getmaskarray(arr) | numpy.isnan(arr.filled(numpy.nan))
+    n = arr.shape[0]
+    index = numpy.arange(n).reshape((n,) + (1,) * (arr.ndim - 1))
+
+    # For each element, the index of the previous and of the next valid value.
+    prev_idx = numpy.maximum.accumulate(numpy.where(invalid, -1, index), axis=0)
+    next_idx = numpy.flip(
+        numpy.minimum.accumulate(
+            numpy.flip(numpy.where(invalid, n, index), axis=0), axis=0
+        ),
+        axis=0,
+    )
+    gap = invalid & (prev_idx >= 0) & (next_idx < n)
+    if not gap.any():
+        return arr
+
+    positions = numpy.arange(n, dtype="float64") if x is None else x
+    prev_safe = numpy.clip(prev_idx, 0, n - 1)
+    next_safe = numpy.clip(next_idx, 0, n - 1)
+    values = arr.filled(numpy.nan)
+    y0 = numpy.take_along_axis(values, prev_safe, axis=0)
+    y1 = numpy.take_along_axis(values, next_safe, axis=0)
+    x_here = positions.reshape(index.shape)
+    with numpy.errstate(invalid="ignore", divide="ignore"):
+        weight = (x_here - positions[prev_safe]) / (
+            positions[next_safe] - positions[prev_safe]
+        )
+        # This form keeps an infinite end value: (-inf, 0.1) gives -inf.
+        interpolated = y0 * (1 - weight) + y1 * weight
+
+    result = numpy.where(gap, interpolated, values).astype(arr.dtype)
+    return numpy.ma.MaskedArray(
+        result, mask=numpy.ma.getmaskarray(arr) & ~gap, fill_value=arr.fill_value
+    )
+
+
+def _interpolate_list(values: List[Any], labels: Optional[List[Any]]) -> List[Any]:
+    """Interpolate a Python list, where None is no-data."""
+    if not values:
+        return []
+    arr = numpy.ma.MaskedArray(
+        [numpy.nan if v is None else v for v in values],
+        mask=[v is None for v in values],
+        dtype="float64",
+    )
+    filled = _interpolate_leading_axis(arr, _label_positions(labels, len(values)))
+    mask = numpy.ma.getmaskarray(filled)
+    return [None if m else float(v) for v, m in zip(filled.data, mask)]
+
+
+def array_interpolate_linear(
+    data: ArrayLike, named_parameters: Optional[Dict[str, Any]] = None
+) -> ArrayLike:
+    """Fill NaN and no-data values by linear interpolation along the array.
+
+    The interpolation is along the leading axis (the time axis in an
+    ``apply_dimension(dimension="t")`` callback), for each pixel. The x axis of
+    the interpolants is the label of each element when the labels are numbers
+    or dates, so irregular dates get correct weights; otherwise it is the
+    index. Leading and trailing NaN and no-data values are not changed.
+    Infinite values are valid values.
+
+    Args:
+        data: An array of numbers: a list, a dict (labeled array), an ndarray
+            or a masked array
+        named_parameters: Set by the executor. ``apply_dimension`` puts the
+            labels of the dimension in it.
+
+    Returns:
+        An array of the same shape with the gaps filled. A list gives a list
+        and a dict gives a dict.
+
+    Examples:
+        >>> array_interpolate_linear([None, 1, None, 6, None, -8])
+        [None, 1.0, 3.5, 6.0, -1.0, -8.0]
+        >>> array_interpolate_linear({1: 1.0, 3: None, 4: 4.0})
+        {1: 1.0, 3: 3.0, 4: 4.0}
+    """
+    labels = (named_parameters or {}).get(DIMENSION_LABELS_PARAMETER)
+
+    if isinstance(data, dict):
+        keys = list(data.keys())
+        return dict(zip(keys, _interpolate_list(list(data.values()), keys)))
+    if isinstance(data, (list, tuple)):
+        return _interpolate_list(list(data), None)
+
+    arr = numpy.ma.asanyarray(data)
+    if arr.ndim == 0 or arr.shape[0] < 2:
+        return data
+    return _interpolate_leading_axis(arr, _label_positions(labels, arr.shape[0]))

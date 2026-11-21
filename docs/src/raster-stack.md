@@ -276,6 +276,19 @@ The `RasterStack` implementation provides significant performance improvements:
 - **Configurable Workers**: Adjustable `max_workers` parameter for optimal resource utilization
 - **Timestamp Grouping**: Efficient parallel processing of observations at the same time point
 
+### Request Cancellation
+
+When the client of an XYZ tile disconnects, the read stops at the next
+checkpoint ([ADR 0011](https://github.com/sentinel-hub/titiler-openeo/blob/main/docs/adr/0011-request-cancellation.md)).
+The checkpoints are each item read (`_reader`), each stack slice
+(`RasterStack._execute_task`) and the end of the STAC search.
+
+The cancel flag is in a `ContextVar`. A `ThreadPoolExecutor` does not copy the
+context to its threads. Thus, if you add a thread pool to the read path, submit
+the tasks with `titiler.openeo.cancellation.submit_in_context()`. If you create
+tasks with `rio_tiler.tasks.create_tasks`, use `threads=0` (lazy tasks) and let
+the `RasterStack` pool run them.
+
 ### Memory Optimization
 
 - **Lazy Evaluation**: Only loads data when explicitly accessed or processed

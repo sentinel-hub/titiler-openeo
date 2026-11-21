@@ -4,6 +4,7 @@ import abc
 import base64
 import json
 import logging
+import re
 import time
 from base64 import b64decode
 from enum import Enum
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing_extensions import Self
 
+from .errors import ServiceUnavailable, TokenInvalid
 from .models.auth import BasicAuthUser, User
 from .services.base import ServicesStore
 from .settings import AuthSettings, OIDCConfig
@@ -65,10 +67,21 @@ _DISCOVERY_TTL = 3600.0
 #: kids would become a flood of requests to the provider (ADR 0006 S3.1).
 _JWKS_REFRESH_COOLDOWN = 300.0
 
-#: Issuer placeholder returned by Entra's multi-tenant `common` endpoint.
-#: Useless for comparison and invalid to advertise, so it is rejected with a
-#: message naming the fix rather than silently accepted (ADR 0006 S2.3).
+#: Issuer placeholder returned by Entra's multi-tenant `common` endpoint, and
+#: by the `issuer` field of the keys in its JWKS. The token's own `tid` claim is
+#: put in its place, and the result is compared with `iss` exactly
+#: (ADR 0006 S2.3).
 _TEMPLATED_ISSUER_MARKER = "{tenantid}"
+
+#: The shape of an Entra tenant id. Checked before `tid` goes into an issuer
+#: template, so that a claim value can only ever fill the one path segment.
+_TENANT_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+#: Suffix removed from `wk_url` to get the authority advertised to clients.
+_WELL_KNOWN_SUFFIX = "/.well-known/openid-configuration"
 
 
 class AuthMethod(Enum):
@@ -102,6 +115,23 @@ class Auth(metaclass=abc.ABCMeta):
         if not authorization:
             return None
         return self.validate(authorization)
+
+    def _track_login(self, user: User, provider: str) -> None:
+        """Record a login; a store failure is an outage, not a bad credential.
+
+        Reported as a 503 so clients retry instead of discarding a valid
+        token, and without the driver message, which can name the database
+        host.
+        """
+        try:
+            self.store.track_user_login(user=user, provider=provider)
+        except Exception as err:
+            logger.warning(
+                "Could not record login for user_id=%r", user.user_id, exc_info=True
+            )
+            raise ServiceUnavailable(
+                "Could not reach the user store", retry_after=5
+            ) from err
 
 
 def get_auth(settings: AuthSettings, store: ServicesStore) -> "Auth":
@@ -173,25 +203,26 @@ class OIDCAuth(Auth):
                 response.raise_for_status()
                 config: Dict = response.json()
 
-            self._check_discovery(config)
             self._config_cache = config
             self._config_fetched_at = time.monotonic()
             return config
 
-    @staticmethod
-    def _check_discovery(config: Dict) -> None:
-        """Reject a discovery document this backend cannot validate against."""
-        issuer = config.get("issuer") or ""
-        if _TEMPLATED_ISSUER_MARKER in issuer:
-            raise ValueError(
-                f"The OIDC discovery document advertises a templated issuer "
-                f"({issuer!r}), which cannot be validated against a token's `iss` "
-                "and cannot be advertised to openEO clients. This is what "
-                "Microsoft Entra's multi-tenant `common` endpoint returns; "
-                "configure a single-tenant discovery URL instead, e.g. "
-                "https://login.microsoftonline.com/<tenant_id>/v2.0/"
-                ".well-known/openid-configuration"
-            )
+    @property
+    def authority(self) -> str:
+        """The provider location to advertise to openEO clients.
+
+        Derived from `wk_url`, not from the discovery `issuer`: clients append
+        `/.well-known/openid-configuration` to it, and Entra's multi-tenant
+        `common` endpoint returns the template
+        `https://login.microsoftonline.com/{tenantid}/v2.0` as its issuer,
+        which no client can resolve. For a single-tenant or Keycloak provider
+        the two are the same URL. A `wk_url` without the standard suffix falls
+        back to the discovery issuer.
+        """
+        wk_url = str(self._oidc_config.wk_url)
+        if wk_url.endswith(_WELL_KNOWN_SUFFIX):
+            return wk_url.removesuffix(_WELL_KNOWN_SUFFIX)
+        return self.config["issuer"]
 
     def ping(self, timeout: float = 2.0) -> None:
         """Verify the OIDC well-known endpoint is reachable. Raises on failure."""
@@ -236,29 +267,47 @@ class OIDCAuth(Auth):
             return jwks
 
     @staticmethod
-    def _find_key(jwks: Dict, kid: str):
-        """Build the public key for `kid` from `jwks`, or ``None`` if absent."""
+    def _find_jwk(jwks: Dict, kid: str) -> Optional[Dict]:
+        """Return the JWK entry for `kid` in `jwks`, or ``None`` if absent."""
         for jwk in jwks.get("keys", []):
-            if jwk.get("kid") != kid:
-                continue
-
-            if jwk.get("kty") != "RSA":
-                raise ValueError(f"Unsupported key type: {jwk.get('kty')}")
-
-            # Convert JWK to public key
-            numbers = RSAPublicNumbers(
-                e=int.from_bytes(
-                    base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)),
-                    byteorder="big",
-                ),
-                n=int.from_bytes(
-                    base64.urlsafe_b64decode(jwk["n"] + "=" * (-len(jwk["n"]) % 4)),
-                    byteorder="big",
-                ),
-            )
-            return numbers.public_key()
-
+            if jwk.get("kid") == kid:
+                return jwk
         return None
+
+    def _jwk_issuer(self, kid: str) -> Optional[str]:
+        """The `issuer` the cached JWKS binds to `kid`, if it binds one.
+
+        Entra's `common` JWKS mixes keys any tenant may use (issuer
+        `.../{tenantid}/v2.0`) with keys that sign only personal-account
+        tokens (issuer fixed to the MSA tenant). Keycloak keys carry no
+        `issuer`, so the check is skipped for them. Reads the cache only:
+        `_get_key` has filled it before this is called.
+        """
+        jwk = self._find_jwk(self._jwks_cache or {}, kid)
+        return jwk.get("issuer") if jwk else None
+
+    @classmethod
+    def _find_key(cls, jwks: Dict, kid: str):
+        """Build the public key for `kid` from `jwks`, or ``None`` if absent."""
+        jwk = cls._find_jwk(jwks, kid)
+        if jwk is None:
+            return None
+
+        if jwk.get("kty") != "RSA":
+            raise ValueError(f"Unsupported key type: {jwk.get('kty')}")
+
+        # Convert JWK to public key
+        numbers = RSAPublicNumbers(
+            e=int.from_bytes(
+                base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)),
+                byteorder="big",
+            ),
+            n=int.from_bytes(
+                base64.urlsafe_b64decode(jwk["n"] + "=" * (-len(jwk["n"]) % 4)),
+                byteorder="big",
+            ),
+        )
+        return numbers.public_key()
 
     def _get_key(self, kid: str):
         """Get the public key for `kid`, refetching the JWKS if it is unknown.
@@ -275,15 +324,18 @@ class OIDCAuth(Auth):
             key = self._find_key(self.get_jwks(refresh=True), kid)
 
         if key is None:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail="Unable to find appropriate key",
-            )
+            raise TokenInvalid("Unable to find appropriate key")
 
         return key
 
-    def _verify_token(self, token: str, key) -> Dict:
-        """Verify JWT token signature and claims, and return the payload."""
+    def _verify_token(self, token: str, key, key_issuer: Optional[str] = None) -> Dict:
+        """Verify JWT token signature and claims, and return the payload.
+
+        Args:
+            token: The bare JWT.
+            key: The public key for the token's `kid`.
+            key_issuer: The `issuer` the JWKS binds to that key, if any.
+        """
         try:
             # Split the JWT
             header_b64, payload_b64, signature_b64 = token.split(".")
@@ -315,7 +367,7 @@ class OIDCAuth(Auth):
                 hashes.SHA256(),
             )
 
-            self._verify_claims(payload)
+            self._verify_claims(payload, key_issuer=key_issuer)
             return payload
 
         except InvalidSignature as err:
@@ -326,15 +378,9 @@ class OIDCAuth(Auth):
             # question is only ever *why* a known key does not verify it.
             detail = self._explain_bad_signature(header, payload)
             logger.warning("OIDC signature verification failed. %s", detail)
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail=detail,
-            ) from err
+            raise TokenInvalid(detail) from err
         except ValueError as err:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
-                detail=str(err),
-            ) from err
+            raise TokenInvalid(str(err)) from err
 
     @staticmethod
     def _explain_bad_signature(header: Dict, payload: Dict) -> str:
@@ -377,13 +423,59 @@ class OIDCAuth(Auth):
             f"truncated or re-encoded in transit. Token facts: {facts}"
         )
 
-    def _verify_claims(self, payload: Dict) -> None:
-        """Check `iss`, `aud`/`azp`, `exp` and `nbf`. Raises `ValueError`."""
-        # Issuer. Previously unchecked entirely, which meant a token from any
-        # issuer whose signing key happened to be in the cached JWKS passed.
+    @staticmethod
+    def _resolve_issuer(template: str, tid: Any) -> str:
+        """Put the token's `tid` into an Entra issuer template.
+
+        A non-templated issuer is returned unchanged, so single-tenant Entra
+        and Keycloak compare exactly as before.
+        """
+        if _TEMPLATED_ISSUER_MARKER not in template:
+            return template
+        if not isinstance(tid, str) or not _TENANT_ID_RE.match(tid):
+            raise ValueError("Token has no valid 'tid' claim")
+        return template.replace(_TEMPLATED_ISSUER_MARKER, tid)
+
+    def _verify_issuer(self, payload: Dict, key_issuer: Optional[str]) -> None:
+        """Check `iss` against the discovery issuer, the key, and the tenants.
+
+        With Entra's `common` endpoint the discovery issuer is the template
+        `https://login.microsoftonline.com/{tenantid}/v2.0`. The expected `iss`
+        is that template with the token's own `tid` in it, so a token whose
+        `iss` and `tid` disagree is rejected, as is a v1.0 token (issuer
+        `https://sts.windows.net/<tid>/`). Which tenants may sign in is then
+        `allowed_tenants`' decision (ADR 0006 S2.3).
+        """
+        iss = payload.get("iss")
+        tid = payload.get("tid")
+
+        # Previously unchecked entirely, which meant a token from any issuer
+        # whose signing key happened to be in the cached JWKS passed.
         expected_issuer = self.config.get("issuer")
-        if expected_issuer and payload.get("iss") != expected_issuer:
+        if expected_issuer and iss != self._resolve_issuer(expected_issuer, tid):
+            if isinstance(iss, str) and iss.startswith("https://sts.windows.net/"):
+                raise ValueError(
+                    "Invalid issuer: this is a Microsoft Entra v1.0 token. Set "
+                    '"requestedAccessTokenVersion": 2 in the app registration '
+                    "manifest"
+                )
             raise ValueError("Invalid issuer")
+
+        # A key the JWKS binds to one issuer must not verify another's tokens:
+        # Entra's `common` set holds keys reserved for personal accounts.
+        if key_issuer and iss != self._resolve_issuer(key_issuer, tid):
+            raise ValueError("Invalid issuer for the signing key")
+
+        allowed_tenants = {t.lower() for t in self._oidc_config.allowed_tenants}
+        allowed_tenants.discard("")
+        if allowed_tenants and (
+            not isinstance(tid, str) or tid.lower() not in allowed_tenants
+        ):
+            raise ValueError("Tenant not allowed")
+
+    def _verify_claims(self, payload: Dict, key_issuer: Optional[str] = None) -> None:
+        """Check `iss`/`tid`, `aud`/`azp`, `exp` and `nbf`. Raises `ValueError`."""
+        self._verify_issuer(payload, key_issuer)
 
         # Audience. `client_id` covers ID tokens; `audiences` covers access
         # tokens audienced at an API instead of at the client (ADR 0006 S2.2).
@@ -433,8 +525,8 @@ class OIDCAuth(Auth):
                 detail="Invalid authentication method",
             )
 
-        # Check the provider
-        if parsed_token.provider != "oidc":
+        # Check the provider: the id advertised in `GET /credentials/oidc`.
+        if parsed_token.provider != self._oidc_config.provider_id:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Invalid authentication provider",
@@ -449,7 +541,9 @@ class OIDCAuth(Auth):
             key = self._get_key(header["kid"])
 
             # Verify token and get payload
-            payload = self._verify_token(parsed_token.token, key)
+            payload = self._verify_token(
+                parsed_token.token, key, key_issuer=self._jwk_issuer(header["kid"])
+            )
 
             # Create user from payload
             name_claim = None
@@ -471,24 +565,28 @@ class OIDCAuth(Auth):
                 name=name_claim,
             )
 
-            # Track user login
-            self.store.track_user_login(user=user, provider="oidc")
-
-            return user
-
-        except HTTPException:
+        except (HTTPException, TokenInvalid):
             # Already a considered response with its own detail. Re-wrapping it
             # produced messages like "401: 401:" -- the outer detail being
             # `str()` of the inner exception -- which hid the real cause.
             raise
+        except httpx.HTTPError as err:
+            # The provider, not the token, failed: a refreshed token would
+            # fail the same way, so the client should retry instead.
+            raise ServiceUnavailable(
+                "Could not reach the OIDC provider", retry_after=5
+            ) from err
         except Exception as err:
-            raise HTTPException(
-                status_code=HTTP_401_UNAUTHORIZED,
+            raise TokenInvalid(
                 # Some exceptions (notably cryptography's) stringify to "",
                 # which would otherwise produce an empty, useless detail.
-                detail=str(err) or f"{type(err).__name__} during token validation",
-                headers={"WWW-Authenticate": "Bearer"},
+                str(err) or f"{type(err).__name__} during token validation"
             ) from err
+
+        # Outside the `try`: a store failure here must not become a 401.
+        self._track_login(user=user, provider="oidc")
+
+        return user
 
 
 class CredentialsBasic(BaseModel):
@@ -523,7 +621,8 @@ class AuthToken(BaseModel):
         if "Bearer " in token:
             token = token.removeprefix("Bearer ")
 
-        return cls(**dict(zip(["method", "provider", "token"], token.split("/"))))  # type: ignore
+        # maxsplit: the token itself can contain "/" (standard base64 does).
+        return cls(**dict(zip(["method", "provider", "token"], token.split("/", 2))))  # type: ignore
 
 
 @define(kw_only=True)
@@ -600,7 +699,6 @@ class BasicAuth(Auth):
         base_user = self._get_user_from_base64(parsed_token.token)
         user = User(user_id=base_user.user_id)
 
-        # Track user login
-        self.store.track_user_login(user=user, provider="basic")
+        self._track_login(user=user, provider="basic")
 
         return user

@@ -37,6 +37,9 @@ services:
       - TITILER_OPENEO_API_DEBUG=TRUE
       - TITILER_OPENEO_STAC_API_URL=https://stac.eoapi.dev
       - TITILER_OPENEO_STORE_URL=/tmp/services/eoapi.json
+      # Basic auth needs a user (#481). Local development only: the `test` user of
+      # .env.eoapi, unless TITILER_OPENEO_AUTH_USERS is set in .env or the shell.
+      - TITILER_OPENEO_AUTH_USERS=${TITILER_OPENEO_AUTH_USERS:-{"test":{"password":"test"}}}
       # Keycloak Config
       # - TITILER_OPENEO_AUTH_METHOD=oidc
       # - TITILER_OPENEO_AUTH_OIDC_CLIENT_ID=titiler-openeo

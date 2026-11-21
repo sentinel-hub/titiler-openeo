@@ -36,6 +36,7 @@ from titiler.openeo.bandsources.registry import ResolvedBand
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.reader import (
     SimpleSTACReader,
+    _asset_bands,
     _estimate_output_dimensions,
     _get_assets_resolutions,
     _inherit_derived_band_masks,
@@ -370,6 +371,46 @@ def test_inherit_derived_band_masks_leaves_derived_only_request_untouched():
     out = _inherit_derived_band_masks(img, derived, ["vv_noise_lut"])
 
     assert not out.array.mask.any()
+
+
+def _noise_lut() -> Dict[str, ResolvedBand]:
+    return {
+        "vv_noise_lut": ResolvedBand(
+            asset_key="schema-noise-vv",
+            sibling_key="vv",
+            quantity="noise",
+            reader=NoiseBandReader,
+        )
+    }
+
+
+def test_inherit_derived_band_masks_after_a_multi_band_selection():
+    """An asset dict that reads two bands takes two output positions, so
+    `vv_noise_lut` borrows `vv`'s mask, not the second `visual` band's."""
+    assets = [{"name": "visual", "indexes": [1, 2]}, "vv", "vv_noise_lut"]
+    selection = _asset_bands({"assets": {}}, assets)
+    names = [name for name, _ in selection]
+    assert names == ["visual", "visual", "vv", "vv_noise_lut"]
+
+    checkerboard = np.array([[True, False], [False, True]])
+    mask = np.stack(
+        [np.zeros((2, 2), bool), np.ones((2, 2), bool), checkerboard]
+        + [np.zeros((2, 2), bool)]
+    )
+    img = _image(mask, names)
+
+    out = _inherit_derived_band_masks(img, _noise_lut(), names)
+
+    np.testing.assert_array_equal(out.array.mask[3], checkerboard)
+    np.testing.assert_array_equal(out.array.mask[2], checkerboard)
+
+
+def test_inherit_derived_band_masks_skips_when_positions_are_unknown():
+    """A plain name for a multi-band asset gives fewer names than bands: the
+    positions are not known, so no mask is borrowed."""
+    img = _image(np.zeros((3, 2, 2), dtype=bool), ["visual", "vv", "vv_noise_lut"])
+    out = _inherit_derived_band_masks(img, _noise_lut(), ["vv", "vv_noise_lut"])
+    assert out is img
 
 
 def test_inherit_derived_band_masks_noop_without_derived_bands():

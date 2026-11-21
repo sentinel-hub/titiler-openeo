@@ -1,6 +1,6 @@
 # ADR 0003 — Service access control (`access` / `configuration.scope`)
 
-- **Status:** Amended (2026-08-11) — see [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug)
+- **Status:** Amended (2026-08-11, 2026-09-29) — see [§7](#7-amendment-2026-08-11--get-servicesservice_id-was-not-a-bug) and [§8](#8-amendment-2026-09-29--ownership-check-on-get-servicesservice_id)
 - **Date:** 2026-08-07
 - **Deciders:** @emmanuelmathot
 - **Supersedes / superseded by:** —
@@ -286,3 +286,41 @@ rather than re-proposing a specific mechanism. The draft extension issue prepare
 earlier (`docs/adr/upstream/openeo-api-service-access-issue.md`) has been withdrawn
 pending that answer — it proposed changing `/services/{service_id}`'s security
 definition, which is the part now known to be wrong.
+
+## 8. Amendment (2026-09-29) — ownership check on `GET /services/{service_id}`
+
+§7 still holds: the control plane is Bearer-only for every scope, and an anonymous
+request to `GET /services/{service_id}` gets `401`. But §7 left one gap: any
+authenticated user who knew a service ID could read its full record (process graph,
+`authorized_users`), even for a `private` service. `DELETE` and `PATCH` already checked
+ownership; `GET` did not.
+
+### Decision
+
+- The owner can always read the service.
+- Another authenticated user can read it only if its scope is `public`. Otherwise the
+  endpoint returns `403`. This includes the users that a `restricted` service lets
+  fetch tiles: tile access does not give access to the service definition.
+- A non-owner never sees `configuration.authorized_users`.
+
+This is not "the control plane follows `scope`" in the sense §7 rejects: nothing
+becomes anonymous. `scope` only decides whether a non-owner may read the record. We
+allow non-owners on `public` services because clients such as openEO Studio read a
+shared public service owned by another user; an owner-only check would break that.
+
+### Related hardening in the same change
+
+- `configuration.scope` is validated on create and update (case-insensitive, stored
+  lowercase; unknown values and `null` are refused). A stored value that is not valid
+  is treated as `private` (fail closed). `authorized_users` must be a list of strings,
+  and is accepted only on `restricted` services.
+- `PATCH` merges `configuration` key by key, so a partial update no longer drops
+  `scope`, and writes only the fields in the request. A new `process` gets the same
+  validation as on creation.
+- The owner always has access to their own service's tiles. An authenticated
+  non-owner who is refused gets `403`; `401` is only for anonymous requests.
+- Tiles of non-public services are sent with a private Cache-Control policy and
+  `Vary: Authorization`. Tiles whose graph reads the caller are sent with
+  `no-store`. Errors are sent with `no-store`, except errors that are the same for
+  every caller on a public service (zoom out of range, no data).
+- The tile endpoint refuses a service with `"enabled": false`.

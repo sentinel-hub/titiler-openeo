@@ -100,3 +100,53 @@ def test_get_user_tracking_nonexistent(store_path):
     store = get_store(f"{store_path}")
     tracking = store.get_user_tracking(user_id="nonexistent", provider="basic")
     assert tracking is None
+
+
+def test_sqlalchemy_user_tracking_keeps_info_when_missing():
+    """A login without email or name keeps the stored values (SQLAlchemy store)."""
+    from titiler.openeo.services import get_store
+
+    store = get_store("sqlite:///:memory:")
+    store.track_user_login(
+        user=User(user_id="test_user", email="a@example.com", name="A"),
+        provider="basic",
+    )
+    store.track_user_login(user=User(user_id="test_user"), provider="basic")
+
+    tracking = store.get_user_tracking(user_id="test_user", provider="basic")
+    assert tracking is not None
+    assert tracking["email"] == "a@example.com"
+    assert tracking["name"] == "A"
+    assert tracking["login_count"] == 2
+
+
+def test_sqlalchemy_user_tracking_ignores_older_login(monkeypatch):
+    """A login that commits after a newer one does not roll the record back."""
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+
+    from titiler.openeo.services import get_store
+    from titiler.openeo.services import sqlalchemy as module
+
+    older = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    clock = MagicMock()
+    monkeypatch.setattr(module, "datetime", clock)
+    store = get_store("sqlite:///:memory:")
+
+    clock.now.return_value = newer
+    store.track_user_login(
+        user=User(user_id="u", email="new@example.com", name="New"), provider="oidc"
+    )
+    clock.now.return_value = older
+    store.track_user_login(
+        user=User(user_id="u", email="old@example.com", name="Old"), provider="oidc"
+    )
+
+    tracking = store.get_user_tracking(user_id="u", provider="oidc")
+    assert tracking is not None
+    assert tracking["first_login"] == older.replace(tzinfo=None)
+    assert tracking["last_login"] == newer.replace(tzinfo=None)
+    assert tracking["email"] == "new@example.com"
+    assert tracking["name"] == "New"
+    assert tracking["login_count"] == 2

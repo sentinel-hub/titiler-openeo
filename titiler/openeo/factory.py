@@ -3,7 +3,8 @@
 import json
 import logging
 from copy import deepcopy
-from typing import Annotated, Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 import morecantile
 import pyproj
@@ -14,6 +15,7 @@ from fastapi.routing import APIRoute
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.graph import OpenEOProcessGraph
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from pydantic import ValidationError
 from rio_tiler.errors import TileOutsideBounds
 from starlette.responses import Response
 
@@ -21,19 +23,76 @@ from titiler.core.factory import BaseFactory
 
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
-from .errors import CyclicUdpReference, InvalidProcessGraph, ServiceUnavailable
+from .cancellation import RequestCancelled, run_cancellable
+from .errors import (
+    CyclicUdpReference,
+    InvalidProcessGraph,
+    NoDataAvailable,
+    ServiceUnavailable,
+)
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
+from .processes.implementations.formats import encode_result, file_formats_document
 from .reader_requirements import plan_process_registry
 from .results_cache import make_results_cache
 from .services import ServicesStore, TileAssignmentStore, UdpStore
+from .settings import ApiSettings
 from .stacapi import stacApiBackend
 from .udp_resolution import resolve_udp_references
 
 logger = logging.getLogger(__name__)
 
 STAC_VERSION = "1.0.0"
+
+#: Tile parameters whose value depends on the caller.
+CALLER_PARAMETERS = ("_openeo_user", "_openeo_tile_store")
+
+
+def _schema_allows_null(schema: Any) -> bool:
+    """Return True if a parameter JSON schema accepts ``null``.
+
+    The schema can be a dict or a list of alternatives, and ``type`` can be a
+    string or a list (e.g. ``load_collection``'s ``temporal_extent`` lists
+    ``{"type": "null", "title": "No filter"}``). A schema without a type
+    constraint (e.g. ``{}`` or ``{"description": "Any data type."}``) accepts
+    every value, ``null`` too.
+    """
+    if isinstance(schema, list):
+        return any(_schema_allows_null(s) for s in schema)
+    if not isinstance(schema, dict):
+        return False
+    if "type" in schema:
+        types = schema["type"]
+        return types == "null" or (isinstance(types, list) and "null" in types)
+    if "anyOf" in schema or "oneOf" in schema:
+        return any(
+            _schema_allows_null(s)
+            for key in ("anyOf", "oneOf")
+            for s in schema.get(key) or []
+        )
+    if "enum" in schema:
+        return None in schema["enum"]
+    if "const" in schema:
+        return schema["const"] is None
+    return True
+
+
+def _missing_required_parameters(
+    required_params: List[Dict[str, Any]], args: Dict[str, Any]
+) -> List[str]:
+    """Return the names of required parameters that the arguments do not set.
+
+    A required parameter is missing if it is not in ``args``, or if its value is
+    ``null`` and its schema does not accept ``null``. A required parameter can
+    accept ``null`` (e.g. ``temporal_extent: null`` means "no filter").
+    """
+    return [
+        p["name"]
+        for p in required_params
+        if p["name"] not in args
+        or (args[p["name"]] is None and not _schema_allows_null(p.get("schema")))
+    ]
 
 
 @define(kw_only=True)
@@ -47,30 +106,9 @@ class EndpointsFactory(BaseFactory):
     process_registry: ProcessRegistry
     auth: Auth
     default_services_file: Optional[str] = None
+    cache_tiles_private: str = ApiSettings.model_fields["cache_tiles_private"].default
+    cache_tile_errors: str = ApiSettings.model_fields["cache_tile_errors"].default
     load_nodes_ids: List[str] = field(factory=lambda: ["load_collection"])
-
-    def _get_media_type(self, process_graph: Dict[str, Any]) -> str:
-        for _, node in process_graph.items():
-            if node["process_id"] == "save_result":
-                if node["arguments"]["format"] == "PNG":
-                    return "image/png"
-                elif node["arguments"]["format"] == "JPEG":
-                    return "image/jpeg"
-                elif node["arguments"]["format"] == "JPEG":
-                    return "image/jpg"
-                elif node["arguments"]["format"] == "GTiff":
-                    return "image/tiff"
-                elif node["arguments"]["format"] == "txt":
-                    return "text/plain"
-                elif (
-                    node["arguments"]["format"] == "json"
-                    or node["arguments"]["format"] == "metajson"
-                ):
-                    return "application/json"
-                else:
-                    return "application/PNG"
-
-        raise ValueError("Couldn't find a `save_result` process in the process graph")
 
     def get_load_nodes(self, process_graph: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find all `load_collection` processes"""
@@ -82,12 +120,108 @@ class EndpointsFactory(BaseFactory):
 
     def overwrite_spatial_extent_without_parameters(self, load_node):
         """Overwrite services Spatial Extent."""
-        if load_node["arguments"]["spatial_extent"] is None:
-            load_node["arguments"]["spatial_extent"] = {}
+        if "spatial_extent" not in (load_node.get("arguments") or {}):
+            raise InvalidProcessGraph(
+                f"Process '{load_node['process_id']}' requires a 'spatial_extent' argument"
+            )
 
         load_node["arguments"]["spatial_extent"] = {"from_parameter": "bounding_box"}
 
         return
+
+    def _add_service(self, user_id: str, service: Dict[str, Any]) -> str:
+        """Store a new service with its creation time and return its id.
+
+        `created` (RFC 3339) is part of the service metadata in the openEO
+        API. It is kept in the stored service, so all stores return it.
+        """
+        service = {
+            **service,
+            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        return self.services_store.add_service(user_id, service)
+
+    def _prepare_service_process(self, process: Dict[str, Any], user) -> None:
+        """Validate a service process graph and prepare it for storage, in place.
+
+        Shared by service creation and update so both apply the same checks.
+        """
+        # Inline any referenced UDPs up front so the stored service graph is
+        # self-contained: XYZ tiles are rendered later without an
+        # authenticated user, so they can't look UDPs up themselves.
+        if process.get("process_graph"):
+            process["process_graph"] = self._resolve_udp_references(
+                process["process_graph"], user
+            )
+
+        try:
+            # Every node needs an `arguments` object; the tile endpoint reads it.
+            for node_id, node in (process.get("process_graph") or {}).items():
+                if not isinstance(node.get("arguments"), dict):
+                    raise InvalidProcessGraph(
+                        f"Node '{node_id}' must have an 'arguments' object"
+                    )
+
+            # Parse and validate process graph structure
+            parsed_graph = OpenEOProcessGraph(pg_data=process)
+
+            # Check if all processes exist in registry
+            for node in parsed_graph.nodes:
+                process_id = node[1].get("process_id")
+                if process_id and process_id not in self.process_registry[None]:
+                    raise InvalidProcessGraph(
+                        f"Process '{process_id}' not found in registry"
+                    )
+
+            # Try to create callable to validate parameter types
+            parsed_graph.to_callable(process_registry=self.process_registry)
+
+            for node in self.get_load_nodes(process["process_graph"]):
+                self.overwrite_spatial_extent_without_parameters(node)
+
+        except Exception as e:
+            raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+
+    @staticmethod
+    def _uses_caller_parameters(value: Any) -> bool:
+        """Return True if a process graph reads a caller-specific parameter.
+
+        A graph that reads `_openeo_user` or `_openeo_tile_store` can render a
+        different tile for each caller, whatever the service scope.
+        """
+        if isinstance(value, dict):
+            if value.get("from_parameter") in CALLER_PARAMETERS:
+                return True
+            return any(
+                EndpointsFactory._uses_caller_parameters(v) for v in value.values()
+            )
+        if isinstance(value, list):
+            return any(EndpointsFactory._uses_caller_parameters(v) for v in value)
+        return False
+
+    def _tile_cache_headers(
+        self, service: Dict[str, Any]
+    ) -> Tuple[Dict[str, str], Optional[Dict[str, str]]]:
+        """Return the headers of a tile, and of a tile error, for a service.
+
+        A tile of a non-public service must not go to a shared cache, and
+        `Vary` keeps users of one browser apart. A tile that can differ for
+        each caller (the graph reads the user or the tile store) is never
+        stored: a cached answer would replay a claim or release without
+        reaching the server. Errors are cacheable only when they are the same
+        for every caller; otherwise the error headers are `None` and the
+        middleware sends `no-store`.
+        """
+        from titiler.openeo.services.auth import get_scope
+
+        if self._uses_caller_parameters(service.get("process")):
+            return {"Cache-Control": "no-store", "Vary": "Authorization"}, None
+        if get_scope(service.get("configuration")) != "public":
+            return {
+                "Cache-Control": self.cache_tiles_private,
+                "Vary": "Authorization",
+            }, None
+        return {}, {"Cache-Control": self.cache_tile_errors}
 
     def _parse_query_parameters(self, request: Request) -> dict:
         """Parse query parameters from request, handling JSON and simple types."""
@@ -152,66 +286,6 @@ class EndpointsFactory(BaseFactory):
             namespace=user.user_id,
         )
 
-    def _node_validation_errors(self, process_graph: dict) -> List[Dict[str, Any]]:
-        """Check each node of a (resolved) flat graph against the registry spec.
-
-        Reports structural problems and missing required arguments as openEO
-        error objects, in the shape ``POST /validation`` returns them.
-        """
-        errors: List[Dict[str, Any]] = []
-        for node_id, node in process_graph.items():
-            node_dict = (
-                node
-                if isinstance(node, dict)
-                else node.model_dump()
-                if hasattr(node, "model_dump")
-                else None
-            )
-            if not isinstance(node_dict, dict):
-                errors.append(
-                    {
-                        "code": "ProcessGraphInvalid",
-                        "message": f"Process node '{node_id}' must be an object",
-                    }
-                )
-                continue
-
-            process_id = node_dict.get("process_id")
-            if not process_id:
-                errors.append(
-                    {
-                        "code": "ProcessGraphInvalid",
-                        "message": f"Process node '{node_id}' missing process_id",
-                    }
-                )
-                continue
-
-            if process_id not in self.process_registry[None]:
-                errors.append(
-                    {
-                        "code": "ProcessUnsupported",
-                        "message": f"Process '{process_id}' not found in registry",
-                    }
-                )
-                continue
-
-            spec = self.process_registry[process_id].spec
-            required_params = [
-                p["name"]
-                for p in spec.get("parameters", [])
-                if not p.get("optional", False)
-            ]
-            args = node_dict.get("arguments", {}) or {}
-            for param_name in required_params:
-                if param_name not in args or args.get(param_name) is None:
-                    errors.append(
-                        {
-                            "code": "ProcessParameterRequired",
-                            "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
-                        }
-                    )
-        return errors
-
     def _validate_tile_bounds(self, tile_bounds, service_extent, tms, x, y, z):
         """Validate that tile is within service extent if configured."""
         if service_extent:
@@ -232,6 +306,131 @@ class EndpointsFactory(BaseFactory):
                 raise TileOutsideBounds(
                     f"Tile(x={x}, y={y}, z={z}) is outside bounds defined by the Service Configuration"
                 )
+
+    def _render_xyz_tile(
+        self,
+        request: Request,
+        service_id: str,
+        z: int,
+        x: int,
+        y: int,
+        user: Optional[User],
+    ) -> Response:
+        """Render one tile of an XYZ service.
+
+        Sync and blocking: the route runs it in a worker thread with
+        ``run_cancellable``.
+        """
+        from titiler.openeo.services.auth import ServiceAuthorizationManager
+
+        service = self.services_store.get_service(service_id)
+        if service is None:
+            raise HTTPException(404, f"Could not find service: {service_id}")
+
+        # Authorize service access
+        auth_manager = ServiceAuthorizationManager()
+        auth_manager.authorize(service, user)
+
+        if service.get("enabled") is False:
+            raise HTTPException(404, f"Service is disabled: {service_id}")
+
+        tile_headers, error_headers = self._tile_cache_headers(service)
+
+        # Get service configuration
+        configuration = service.get("configuration")
+        if not isinstance(configuration, dict):
+            configuration = {}
+        tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
+        tilesize = configuration.get("tile_size", 256)
+        tms = morecantile.tms.get(tilematrixset)
+
+        minzoom = configuration.get("minzoom")
+        if minzoom is None:
+            minzoom = tms.minzoom
+        maxzoom = configuration.get("maxzoom")
+        if maxzoom is None:
+            maxzoom = tms.maxzoom
+        if z < minzoom or z > maxzoom:
+            raise HTTPException(
+                400,
+                f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+                headers=error_headers,
+            )
+
+        process = deepcopy(service["process"])
+
+        load_nodes = self.get_load_nodes(process["process_graph"])
+
+        # Check that nodes have spatial-extent
+        assert all(
+            node["arguments"].get("spatial_extent") for node in load_nodes
+        ), "Invalid `load` process, Missing spatial_extent"
+        # Force size to tile size
+        for node in load_nodes:
+            node["arguments"]["width"] = tilesize
+            node["arguments"]["height"] = tilesize
+
+        tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
+
+        # Parse query parameters for dynamic parameter substitution
+        query_params = self._parse_query_parameters(request)
+        if self.tile_store:
+            query_params["_openeo_tile_store"] = self.tile_store
+
+        query_params["_openeo_user"] = user
+
+        parameters = {
+            "spatial_extent_west": tile_bounds[0],
+            "spatial_extent_south": tile_bounds[1],
+            "spatial_extent_east": tile_bounds[2],
+            "spatial_extent_north": tile_bounds[3],
+            "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+            "target_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
+            "bounding_box": BoundingBox(
+                west=tile_bounds[0],
+                east=tile_bounds[2],
+                south=tile_bounds[1],
+                north=tile_bounds[3],
+                crs=tms.crs.to_epsg(),
+            ),
+            "tile_x": x,
+            "tile_y": y,
+            "tile_z": z,
+            **query_params,  # Merge query parameters, they override tile params if same name
+        }
+
+        # now,with the default parameters from the service configuration, We will fill the default values
+        for param in process.get("parameters") or []:
+            param_name = param.get("name")
+            if param_name and param_name not in parameters:
+                default_value = param.get("default")
+                if default_value is not None:
+                    parameters[param_name] = default_value
+
+        # Validate tile bounds against service extent
+        service_extent = configuration.get("extent")
+        self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
+
+        parsed_graph = OpenEOProcessGraph(pg_data=process)
+        results_cache = make_results_cache(parsed_graph)
+        process_registry = plan_process_registry(parsed_graph, self.process_registry)
+        pg_callable = parsed_graph.to_callable(
+            process_registry=process_registry,
+            parameters=process.get("parameters"),
+            results_cache=results_cache,
+            # parameters=args,  # Use built-in parameter substitution instead of manual
+        )
+
+        try:
+            img = pg_callable(named_parameters=parameters)
+        except NoDataAvailable as e:
+            if error_headers:
+                e.headers = error_headers  # type: ignore[attr-defined]
+            raise
+
+        # A tile graph without `save_result` gets PNG, the format of web map tiles.
+        img = encode_result(img, raster_format="PNG")
+        return Response(img.data, media_type=img.media_type, headers=tile_headers)
 
     def register_routes(self):  # noqa: C901
         """Register Routes."""
@@ -318,58 +517,7 @@ class EndpointsFactory(BaseFactory):
         )
         def openeo_file_formats(request: Request):
             """Lists supported input and output file formats."""
-            return {
-                "input": {},
-                "output": {
-                    "JPEG": {
-                        "gis_data_types": ["raster"],
-                        "title": " Joint Photographic Experts Group",
-                        "description": "JPEG is an image format that uses lossy compression and is one of the most widely used image formats. Compared to other EO raster formats, it is less flexible and standardized regarding number of bands, embedding geospatial metadata, etc.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": ["byte"],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                    "PNG": {
-                        "gis_data_types": ["raster"],
-                        "title": "Portable Network Graphics (PNG)",
-                        "description": "PNG is a popular raster format used for graphics on the web. Compared to other EO raster formats, it is less flexible and standardized regarding number of bands, embedding geospatial metadata, etc.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": ["byte", "uint16"],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                    "GTiff": {
-                        "gis_data_types": ["raster"],
-                        "title": "GeoTIFF",
-                        "description": "GeoTIFF is a public domain metadata standard which allows georeferencing information to be embedded within a TIFF file. The potential additional information includes map projection, coordinate systems, ellipsoids, datums, and everything else necessary to establish the exact spatial reference for the file.",
-                        "parameters": {
-                            "datatype": {
-                                "type": "string",
-                                "description": "The values data type.",
-                                "enum": [
-                                    "byte",
-                                    "uint16",
-                                    "int16",
-                                    "uint32",
-                                    "int32",
-                                    "float32",
-                                    "float64",
-                                ],
-                                "default": "byte",
-                            }
-                        },
-                    },
-                },
-            }
+            return file_formats_document()
 
         if isinstance(self.auth, OIDCAuth):
 
@@ -401,8 +549,10 @@ class EndpointsFactory(BaseFactory):
                 return openapi.OIDCProviders(
                     providers=[
                         openapi.OIDCProvider(
-                            id="oidc",
-                            issuer=self.auth.config["issuer"],
+                            id=self.auth.settings.oidc.provider_id,
+                            # Not the discovery `issuer`: Entra's `common`
+                            # endpoint returns a `{tenantid}` template there.
+                            issuer=self.auth.authority,
                             title=self.auth.settings.oidc.title or "OpenID Connect",
                             scopes=self.auth.settings.oidc.scopes,
                             description=self.auth.settings.oidc.description
@@ -410,14 +560,10 @@ class EndpointsFactory(BaseFactory):
                             default_clients=[
                                 openapi.OIDCDefaultClient(
                                     id=self.auth.settings.oidc.client_id,
-                                    grant_types=[
-                                        "authorization_code+pkce",
-                                        "urn:ietf:params:oauth:grant-type:device_code+pkce",
-                                        "refresh_token",
-                                    ],
-                                    redirect_urls=[
-                                        self.auth.settings.oidc.redirect_url
-                                    ],
+                                    grant_types=self.auth.settings.oidc.grant_types,
+                                    redirect_urls=(
+                                        self.auth.settings.oidc.redirect_url or None
+                                    ),
                                 )
                             ],
                         )
@@ -583,12 +729,55 @@ class EndpointsFactory(BaseFactory):
             ],
         ):
             """Lists **all** information about a specific collection specified by the identifier `collection_id`."""
-            collection = self.stac_client.get_collection(collection_id)
+            # Copy: the backend returns a shared cached dictionary.
+            collection = dict(self.stac_client.get_collection(collection_id))
 
-            # TODO: add links
-            collection["links"] = []
+            # TODO: add more links
+            collection["links"] = [
+                {
+                    "href": self.url_for(
+                        request,
+                        "openeo_collection_queryables",
+                        collection_id=collection_id,
+                    ),
+                    "rel": "http://www.opengis.net/def/rel/ogc/1.0/queryables",
+                    "type": "application/schema+json",
+                    "title": "Queryables",
+                }
+            ]
 
             return collection
+
+        # Queryables
+        # Ref: https://api.openeo.org/#tag/EO-Data-Discovery/operation/list-collection-queryables
+        @self.router.get(
+            r"/collections/{collection_id}/queryables",
+            response_class=JSONResponse,
+            summary="Metadata filters for a specific dataset",
+            operation_id="list-collection-queryables",
+            responses={
+                200: {
+                    "content": {
+                        "application/schema+json": {},
+                    },
+                },
+            },
+            tags=["EO Data Discovery"],
+        )
+        def openeo_collection_queryables(
+            request: Request,
+            collection_id: Annotated[
+                str,
+                Path(description="STAC Collection Identifier"),
+            ],
+        ):
+            """Lists the properties that can be used in the `properties` argument of `load_collection`."""
+            queryables = dict(self.stac_client.get_queryables(collection_id))
+            queryables["$id"] = str(request.url)
+
+            return JSONResponse(
+                content=queryables, media_type="application/schema+json"
+            )
 
         #############################################################################################
         # L3 - Advanced https://openeo.org/documentation/1.0/developers/profiles/api.html#l3-advanced
@@ -649,8 +838,10 @@ class EndpointsFactory(BaseFactory):
                         with open(self.default_services_file, "r") as f:
                             default_services_config = json.load(f)
 
-                        # Create each service using the service configuration
-                        for _, service_data in default_services_config[
+                        # Create each service using the service configuration.
+                        # An invalid entry is skipped, so it does not stop the
+                        # other services from being created.
+                        for name, service_data in default_services_config[
                             "services"
                         ].items():
                             # Extract just the service configuration, ignoring id and user_id
@@ -660,10 +851,17 @@ class EndpointsFactory(BaseFactory):
                                     "id"
                                 ]  # Remove the id as it will be generated
 
+                            try:
+                                body = openapi.ServiceInput(**service_config)
+                            except ValidationError as e:
+                                logger.error(
+                                    f"Skipping invalid default service {name!r}: {e}"
+                                )
+                                continue
+
                             # Create the service
-                            body = openapi.ServiceInput(**service_config)
-                            self.services_store.add_service(
-                                user.user_id, body.model_dump()
+                            self._add_service(
+                                user.user_id, body.model_dump(mode="json")
                             )
 
                         # Reload services after adding defaults
@@ -717,6 +915,9 @@ class EndpointsFactory(BaseFactory):
                 401: {
                     "description": "The request could not be fulfilled since it was not authenticated.",
                 },
+                403: {
+                    "description": "The service is not public and the user is not its owner.",
+                },
                 404: {
                     "description": "The service with the specified identifier does not exist.",
                 },
@@ -731,9 +932,32 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Lists all information about a secondary web service."""
+            from titiler.openeo.services.auth import get_scope
+
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")
+
+            # Other users can read the metadata of public services only (for
+            # example to show a shared service). Bearer auth is still required.
+            if (
+                service.get("user_id") != user.user_id
+                and get_scope(service.get("configuration")) != "public"
+            ):
+                raise HTTPException(403, "User not authorized to read this service")
+
+            # The access list is for the owner only.
+            if service.get("user_id") != user.user_id and isinstance(
+                service.get("configuration"), dict
+            ):
+                service = {
+                    **service,
+                    "configuration": {
+                        k: v
+                        for k, v in service["configuration"].items()
+                        if k != "authorized_users"
+                    },
+                }
 
             return {
                 **service,
@@ -866,6 +1090,8 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate_optional),
         ):
             """Validate a process graph without executing it."""
+            errors: List[Dict[str, Any]] = []
+
             raw_pg = body.model_dump().get("process_graph") or {}
 
             # Inline referenced UDPs so validation sees the fully-resolved graph
@@ -881,7 +1107,56 @@ class EndpointsFactory(BaseFactory):
                 }
 
             # Basic per-node validation against registry specs (structure and required params)
-            errors = self._node_validation_errors(raw_pg)
+            for node_id, node in raw_pg.items():
+                node_dict = (
+                    node
+                    if isinstance(node, dict)
+                    else node.model_dump()
+                    if hasattr(node, "model_dump")
+                    else None
+                )
+                if not isinstance(node_dict, dict):
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' must be an object",
+                        }
+                    )
+                    continue
+
+                process_id = node_dict.get("process_id")
+                if not process_id:
+                    errors.append(
+                        {
+                            "code": "ProcessGraphInvalid",
+                            "message": f"Process node '{node_id}' missing process_id",
+                        }
+                    )
+                    continue
+
+                if process_id not in self.process_registry[None]:
+                    errors.append(
+                        {
+                            "code": "ProcessUnsupported",
+                            "message": f"Process '{process_id}' not found in registry",
+                        }
+                    )
+                    continue
+
+                spec = self.process_registry[process_id].spec
+                required_params = [
+                    p
+                    for p in spec.get("parameters", [])
+                    if not p.get("optional", False)
+                ]
+                args = node_dict.get("arguments", {}) or {}
+                for param_name in _missing_required_parameters(required_params, args):
+                    errors.append(
+                        {
+                            "code": "ProcessParameterRequired",
+                            "message": f"Required parameter '{param_name}' missing for process '{process_id}'",
+                        }
+                    )
 
             if errors:
                 return {"errors": errors}
@@ -983,7 +1258,7 @@ class EndpointsFactory(BaseFactory):
                 if process_id in self.process_registry[None]:
                     spec = self.process_registry[process_id].spec
                     required_params = [
-                        p["name"]
+                        p
                         for p in spec.get("parameters", [])
                         if not p.get("optional", False)
                     ]
@@ -1012,17 +1287,16 @@ class EndpointsFactory(BaseFactory):
                     # specify a default value. Optional parameters SHOULD
                     # always specify a default value.").
                     required_params = [
-                        p["name"]
+                        p
                         for p in referenced_udp.get("parameters") or []
                         if "default" not in p
                     ]
 
                 args = node_dict.get("arguments", {}) or {}
-                for param_name in required_params:
-                    if param_name not in args or args.get(param_name) is None:
-                        raise InvalidProcessGraph(
-                            f"Required parameter '{param_name}' missing for process '{process_id}'"
-                        )
+                for param_name in _missing_required_parameters(required_params, args):
+                    raise InvalidProcessGraph(
+                        f"Required parameter '{param_name}' missing for process '{process_id}'"
+                    )
 
             # Validate argument schema against a resolved copy, so a reference to
             # another stored UDP doesn't fail here for lack of a predefined
@@ -1125,35 +1399,7 @@ class EndpointsFactory(BaseFactory):
             user=Depends(self.auth.validate),
         ):
             """Creates a new secondary web service."""
-            service_def = body.model_dump()
-
-            # Inline any referenced UDPs up front so the stored service graph is
-            # self-contained: XYZ tiles are rendered later without an
-            # authenticated user, so they can't look UDPs up themselves.
-            if isinstance(service_def.get("process"), dict) and service_def[
-                "process"
-            ].get("process_graph"):
-                service_def["process"]["process_graph"] = self._resolve_udp_references(
-                    service_def["process"]["process_graph"], user
-                )
-
-            try:
-                # Parse and validate process graph structure
-                parsed_graph = OpenEOProcessGraph(pg_data=service_def["process"])
-
-                # Check if all processes exist in registry
-                for node in parsed_graph.nodes:
-                    process_id = node[1].get("process_id")
-                    if process_id and process_id not in self.process_registry[None]:
-                        raise InvalidProcessGraph(
-                            f"Process '{process_id}' not found in registry"
-                        )
-
-                # Try to create callable to validate parameter types
-                parsed_graph.to_callable(process_registry=self.process_registry)
-
-            except Exception as e:
-                raise InvalidProcessGraph(f"Invalid process graph: {str(e)}") from e
+            service_def = body.model_dump(mode="json")
 
             # Check process and type are present
             if not body.process or not body.type:
@@ -1162,10 +1408,9 @@ class EndpointsFactory(BaseFactory):
                     detail="Both 'process' and 'type' fields are required.",
                 )
 
-            for node in self.get_load_nodes(service_def["process"]["process_graph"]):
-                self.overwrite_spatial_extent_without_parameters(node)
+            self._prepare_service_process(service_def["process"], user)
 
-            service_id = self.services_store.add_service(user.user_id, service_def)
+            service_id = self._add_service(user.user_id, service_def)
             service = self.services_store.get_service(service_id)
             if not service:
                 raise HTTPException(404, f"Could not find service: {service_id}")
@@ -1254,7 +1499,17 @@ class EndpointsFactory(BaseFactory):
             ),
             user=Depends(self.auth.validate),
         ):
-            """Updates an existing secondary web service."""
+            """Updates an existing secondary web service.
+
+            Only the fields in the request change. `configuration` is merged
+            key by key: keys that the request leaves out stay, and a key set to
+            `null` is removed. `scope` cannot be removed.
+            """
+            from titiler.openeo.services.auth import (
+                check_authorized_users_scope,
+                get_scope,
+            )
+
             # Get existing service
             existing = self.services_store.get_service(service_id)
             if not existing:
@@ -1263,37 +1518,46 @@ class EndpointsFactory(BaseFactory):
             if existing.get("user_id") != user.user_id:
                 raise HTTPException(403, "User not authorized to update this service")
 
-            # For PATCH, we need to merge new data with existing, keeping existing fields if not provided
-            if body:
-                update_data = {}
-                # Only include non-None fields from the update
-                body_data = body.model_dump(exclude_none=True)
+            # Only fields present in the request are written: every store
+            # merges them into the stored service, so a concurrent update of
+            # another field is not overwritten with an old value.
+            update_data = (
+                body.model_dump(mode="json", exclude_none=True) if body else {}
+            )
 
-                # Start with existing service data
-                update_data = existing.copy()
-                # Remove id since it's a special field from get_service
-                if "id" in update_data:
-                    del update_data["id"]
+            # `configuration` is merged key by key, so a partial update does
+            # not drop keys it does not repeat (for example `scope`). A key
+            # set to null is removed.
+            if "configuration" in update_data:
+                body_configuration = update_data["configuration"]
+                stored = existing.get("configuration")
+                configuration = {
+                    **(stored if isinstance(stored, dict) else {}),
+                    **body_configuration,
+                }
+                configuration = {
+                    k: v for k, v in configuration.items() if v is not None
+                }
 
-                # Update with any new values provided
-                update_data.update(body_data)
+                # The access list applies to restricted services only: drop a
+                # stored one when the scope changes away from restricted, and
+                # refuse one sent in the request.
+                if (
+                    get_scope(configuration) != "restricted"
+                    and "authorized_users" not in body_configuration
+                ):
+                    configuration.pop("authorized_users", None)
+                try:
+                    check_authorized_users_scope(configuration)
+                except ValueError as e:
+                    raise HTTPException(400, str(e)) from e
 
-                # A PATCH can introduce a UDP reference that wasn't there at
-                # creation time, so resolve it here too -- same reason as in
-                # openeo_service_create: XYZ tiles render without an
-                # authenticated user and can't look the UDP up themselves.
-                if isinstance(body_data.get("process"), dict) and body_data[
-                    "process"
-                ].get("process_graph"):
-                    update_data["process"]["process_graph"] = (
-                        self._resolve_udp_references(
-                            update_data["process"]["process_graph"], user
-                        )
-                    )
-            else:
-                update_data = existing
-                if "id" in update_data:
-                    del update_data["id"]
+                update_data["configuration"] = configuration
+
+            # A new process gets the same checks and preparation as on
+            # creation (UDP inlining, validation, spatial extent rewrite).
+            if "process" in update_data:
+                self._prepare_service_process(update_data["process"], user)
 
             self.services_store.update_service(user.user_id, service_id, update_data)
             return Response(status_code=204)
@@ -1474,21 +1738,9 @@ class EndpointsFactory(BaseFactory):
                 parameters=process.get("parameters"),
                 results_cache=results_cache,
             )
-            result = pg_callable(named_parameters=parameters)
+            result = encode_result(pg_callable(named_parameters=parameters))
 
-            media_type = result.media_type if hasattr(result, "media_type") else None
-            if not media_type and isinstance(result, str):
-                media_type = "text/plain"
-            elif not media_type:
-                media_type = "application/octet-stream"
-
-            data = result.data if hasattr(result, "data") else result
-
-            # if the result is not a SaveResultData object, convert it to one
-            # if not isinstance(result, SaveResultData):
-            #     result = save_result(result, "GTiff")
-
-            return Response(data, media_type=media_type)
+            return Response(result.data, media_type=result.media_type)
 
         @self.router.get(
             "/services/xyz/{service_id}/tiles/{z}/{x}/{y}",
@@ -1500,13 +1752,22 @@ class EndpointsFactory(BaseFactory):
                         "image/jpg": {},
                     },
                     "description": "Return an image.",
-                }
+                },
+                401: {
+                    "description": "The service is not public and the request is not authenticated.",
+                },
+                403: {
+                    "description": "The user is not allowed to access this service.",
+                },
+                404: {
+                    "description": "The service does not exist or is disabled, or the tile has no data.",
+                },
             },
             response_class=Response,
             operation_id="tile-service",
             tags=["Secondary Services"],
         )
-        def openeo_xyz_service(
+        async def openeo_xyz_service(
             request: Request,
             service_id: Annotated[
                 str,
@@ -1534,98 +1795,24 @@ class EndpointsFactory(BaseFactory):
             ],
             user=Depends(self.auth.validate_optional),
         ):
-            """Create map tile."""
-            from titiler.openeo.services.auth import ServiceAuthorizationManager
+            """Create map tile.
 
-            service = self.services_store.get_service(service_id)
-            if service is None:
-                raise HTTPException(404, f"Could not find service: {service_id}")
-
-            # Authorize service access
-            auth_manager = ServiceAuthorizationManager()
-            auth_manager.authorize(service, user)
-
-            # Get service configuration
-            configuration = service.get("configuration") or {}
-            tilematrixset = configuration.get("tilematrixset", "WebMercatorQuad")
-            tilesize = configuration.get("tile_size", 256)
-            tms = morecantile.tms.get(tilematrixset)
-
-            minzoom = configuration.get("minzoom") or tms.minzoom
-            maxzoom = configuration.get("maxzoom") or tms.maxzoom
-            if z < minzoom or z > maxzoom:
-                raise HTTPException(
-                    400,
-                    f"Invalid ZOOM level {z}. Should be between {minzoom} and {maxzoom}",
+            The tile is rendered in a worker thread. If the client disconnects
+            (for example a map viewer that drops tiles when the user pans), the
+            render stops at the next checkpoint of the read path.
+            """
+            try:
+                return await run_cancellable(
+                    request,
+                    lambda: self._render_xyz_tile(request, service_id, z, x, y, user),
                 )
-
-            process = deepcopy(service["process"])
-
-            load_nodes = self.get_load_nodes(process["process_graph"])
-
-            # Check that nodes have spatial-extent
-            assert all(
-                node["arguments"].get("spatial_extent") for node in load_nodes
-            ), "Invalid `load` process, Missing spatial_extent"
-            # Force size to tile size
-            for node in load_nodes:
-                node["arguments"]["width"] = tilesize
-                node["arguments"]["height"] = tilesize
-
-            tile_bounds = list(tms.xy_bounds(morecantile.Tile(x=x, y=y, z=z)))
-
-            # Parse query parameters for dynamic parameter substitution
-            query_params = self._parse_query_parameters(request)
-            if self.tile_store:
-                query_params["_openeo_tile_store"] = self.tile_store
-
-            query_params["_openeo_user"] = user
-
-            parameters = {
-                "spatial_extent_west": tile_bounds[0],
-                "spatial_extent_south": tile_bounds[1],
-                "spatial_extent_east": tile_bounds[2],
-                "spatial_extent_north": tile_bounds[3],
-                "spatial_extent_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                "target_crs": tms.crs.to_epsg() or tms.crs.to_wkt(),
-                "bounding_box": BoundingBox(
-                    west=tile_bounds[0],
-                    east=tile_bounds[2],
-                    south=tile_bounds[1],
-                    north=tile_bounds[3],
-                    crs=tms.crs.to_epsg(),
-                ),
-                "tile_x": x,
-                "tile_y": y,
-                "tile_z": z,
-                **query_params,  # Merge query parameters, they override tile params if same name
-            }
-
-            # now,with the default parameters from the service configuration, We will fill the default values
-            for param in process.get("parameters") or []:
-                param_name = param.get("name")
-                if param_name and param_name not in parameters:
-                    default_value = param.get("default")
-                    if default_value is not None:
-                        parameters[param_name] = default_value
-
-            # Validate tile bounds against service extent
-            service_extent = configuration.get("extent")
-            self._validate_tile_bounds(tile_bounds, service_extent, tms, x, y, z)
-
-            media_type = self._get_media_type(process["process_graph"])
-
-            parsed_graph = OpenEOProcessGraph(pg_data=process)
-            results_cache = make_results_cache(parsed_graph)
-            process_registry = plan_process_registry(
-                parsed_graph, self.process_registry
-            )
-            pg_callable = parsed_graph.to_callable(
-                process_registry=process_registry,
-                parameters=process.get("parameters"),
-                results_cache=results_cache,
-                # parameters=args,  # Use built-in parameter substitution instead of manual
-            )
-
-            img = pg_callable(named_parameters=parameters)
-            return Response(img.data, media_type=media_type)
+            except RequestCancelled:
+                logger.debug(
+                    "Tile %s/%s/%s of service %s cancelled: client disconnected",
+                    z,
+                    x,
+                    y,
+                    service_id,
+                )
+                # Nobody reads this response: the client is gone.
+                return Response(status_code=499, headers={"Cache-Control": "no-store"})

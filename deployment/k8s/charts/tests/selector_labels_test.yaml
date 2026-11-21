@@ -1,0 +1,67 @@
+# The Deployment and Service selectors match the bundled PostgreSQL and schema
+# Job pods too, so the API pods carry `app.kubernetes.io/component: api`.
+# The selectors themselves keep the 4.0.0 labels: a Deployment or StatefulSet
+# selector cannot change on upgrade, and a Service selector the running pods
+# do not match would drop them from the Service before new pods are Ready.
+suite: test pod and selector labels
+templates:
+  - deployment.yaml
+  - service.yaml
+  - postgres/statefulset.yaml
+  - schema-job.yaml
+set:
+  database.type: "postgresql"
+  postgresql.enabled: true
+  postgresql.auth.password: "supersecret"
+tests:
+  - it: should label the API pods with app.kubernetes.io/component api
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: titiler-openeo
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: api
+        template: deployment.yaml
+
+  - it: should keep the PostgreSQL and schema Job pods out of the API component
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: titiler-openeo
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: postgresql
+        template: postgres/statefulset.yaml
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: titiler-openeo
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: schema
+        template: schema-job.yaml
+
+  # The whole selector, so an added matchExpressions fails too.
+  - it: should keep the 4.0.0 Deployment, StatefulSet and Service selectors
+    asserts:
+      - equal:
+          path: spec.selector
+          value:
+            matchLabels:
+              app.kubernetes.io/name: titiler-openeo
+              app.kubernetes.io/instance: RELEASE-NAME
+        template: deployment.yaml
+      - equal:
+          path: spec.selector
+          value:
+            matchLabels:
+              app.kubernetes.io/name: titiler-openeo
+              app.kubernetes.io/instance: RELEASE-NAME
+              app.kubernetes.io/component: postgresql
+        template: postgres/statefulset.yaml
+      - equal:
+          path: spec.selector
+          value:
+            app.kubernetes.io/name: titiler-openeo
+            app.kubernetes.io/instance: RELEASE-NAME
+        template: service.yaml

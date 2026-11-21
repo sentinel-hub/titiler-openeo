@@ -1,8 +1,8 @@
 apiVersion: v2
-appVersion: 0.17.0
+appVersion: 0.21.0
 description: OpenEO by TiTiler
 name: titiler-openeo
-version: 2.0.0
+version: 4.0.0
 icon: >-
   https://raw.githubusercontent.com/developmentseed/titiler/main/docs/logos/TiTiler_logo_small.png
 maintainers:

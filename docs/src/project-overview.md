@@ -16,7 +16,7 @@ The main features include:
 - Cloud Optimized GeoTIFF support
 - SpatioTemporal Asset Catalog support
 - Multiple projections support via morecantile
-- JPEG / PNG / Geotiff / JSON / CSV output format support
+- JPEG / PNG / GeoTIFF output for rasters, JSON / GeoJSON / CSV output for vector cubes
 - XYZ secondary service support
 - Automatic OpenAPI documentation
 - Parameter management with dynamic query parameters, defaults, and validation

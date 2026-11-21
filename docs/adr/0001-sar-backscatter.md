@@ -1089,6 +1089,16 @@ so multiple `load_collection` nodes sharing a signature have their resolved requ
 unioned rather than "resolved independently" as originally put above. See ADR 0002 §3.1
 and its increment 4-6 rows for the full account.
 
+**Update (2026-10-08).** `_reader` no longer reads scale/offset from STAC only:
+[ADR 0009](0009-scale-offset-sources.md) adds the GeoTIFF header (`cog`) and
+plugin sources, on by default. Calibration still gets raw DN: the GRD
+measurement GeoTIFFs of Planetary Computer `sentinel-1-grd` and CDSE
+`sentinel-1-grd` were checked live and have scale 1 and offset 0 in their
+headers, no STAC scale/offset is declared (above), and no plugin matches
+Sentinel-1. If a catalogue adds values in any of these places, `raw_values` is
+needed again; until then, a deployment can also list no source for its GRD
+collection (`SCALE_OFFSET_COLLECTIONS='{"sentinel-1-grd": []}'`).
+
 ---
 
 ---

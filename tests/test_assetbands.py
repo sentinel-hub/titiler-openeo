@@ -1,0 +1,368 @@
+"""Unit tests for titiler.openeo.assetbands.
+
+`test_multiband_assets.py` covers the four call sites this module feeds
+(discovery, summaries, read, resolution) against a real EOPF fixture; this
+file is about the resolver itself -- the compatibility rules that keep
+existing single-band catalogues untouched, and the precedence a resolved band
+name must share with `SimpleSTACReader._get_options`.
+"""
+
+from typing import Any, Dict, List, Tuple
+
+from titiler.openeo.assetbands import (
+    asset_band_facts,
+    resolve_asset_band,
+    resolve_asset_bands,
+)
+
+Fact = Tuple[str, List[Dict[str, Any]]]
+
+#: A stand-in for EOPF's `reflectance`: several bands, no rendering role. The
+#: gate itself lives in `asset_band_facts`/`_bands_of` (tested separately
+#: below); these fixtures already carry only the `bands` array that survives
+#: it, since `resolve_asset_bands` is tested here in isolation from the gate.
+MULTI_BAND_CUBE: Fact = (
+    "reflectance",
+    [
+        {"name": "b02", "eo:common_name": "blue", "gsd": 10},
+        {"name": "b01", "eo:common_name": "coastal", "gsd": 20},
+    ],
+)
+
+SINGLE_BAND: Fact = ("B02_10m", [{"name": "B02"}])
+
+NO_BANDS: Fact = ("AOT_10m", [])
+
+
+def _facts(*entries):
+    """Build `AssetBandFacts` the way `asset_band_facts` would, from raw
+    (asset_key, bands) pairs already shaped like the module expects -- the
+    rendering-role gate lives in `_bands_of`/`asset_band_facts`, so callers
+    that already have the filtered `bands` array (as these tests do) bypass it
+    intentionally, to test `resolve_asset_bands` in isolation."""
+    return list(entries)
+
+
+# ---------------------------------------------------------------------------
+# asset_band_facts -- the rendering-role gate
+# ---------------------------------------------------------------------------
+
+
+def test_asset_band_facts_excludes_rendering_roles():
+    """A multi-band asset tagged `visual` produces no facts -- the signal that
+    distinguishes a TCI composite's fixed RGB channels from EOPF's
+    `reflectance`, whose bands are independently addressable. A plain `bands`
+    array with no rendering role is enough on its own; no further extension
+    (e.g. the datacube extension's `cube:variables`) is required."""
+    assets = {
+        "reflectance": {
+            "bands": [{"name": "b02"}, {"name": "b01"}],
+            "roles": ["data", "reflectance"],
+        },
+        "TCI_10m": {
+            "bands": [{"name": "B04"}, {"name": "B03"}, {"name": "B02"}],
+            "roles": ["visual"],
+        },
+        "overview_10m": {
+            "bands": [{"name": "B04"}, {"name": "B03"}, {"name": "B02"}],
+            "roles": ["overview"],
+        },
+        "AOT_10m": {"bands": [{"name": "B02"}], "roles": ["data"]},
+        "thumbnail": {"roles": ["thumbnail"]},
+    }
+
+    facts = dict(asset_band_facts(assets))
+
+    assert [b["name"] for b in facts["reflectance"]] == ["b02", "b01"]
+    assert facts["TCI_10m"] == []
+    assert facts["overview_10m"] == []
+    assert facts["AOT_10m"] == [{"name": "B02"}]
+    assert facts["thumbnail"] == []
+
+
+def test_asset_band_facts_accepts_pystac_assets():
+    """`pystac.Asset` exposes `roles` as a first-class attribute, not inside
+    `extra_fields` -- unlike a plain dict, where both live at the top level."""
+    import pystac
+
+    reflectance = pystac.Asset(
+        href="https://example.com/reflectance",
+        roles=["data", "reflectance"],
+        extra_fields={"bands": [{"name": "b02"}, {"name": "b01"}]},
+    )
+    tci = pystac.Asset(
+        href="https://example.com/tci",
+        roles=["visual"],
+        extra_fields={"bands": [{"name": "B04"}, {"name": "B03"}, {"name": "B02"}]},
+    )
+    facts = dict(asset_band_facts({"reflectance": reflectance, "TCI_10m": tci}))
+    assert [b["name"] for b in facts["reflectance"]] == ["b02", "b01"]
+    assert facts["TCI_10m"] == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_asset_bands -- compatibility rules
+# ---------------------------------------------------------------------------
+
+
+def test_no_bands_asset_is_absent_from_the_result():
+    resolved = resolve_asset_bands(_facts(NO_BANDS))
+    assert resolved == {}
+
+
+def test_single_band_asset_is_absent_from_the_result():
+    """Keeps its asset key -- CDSE's `B02_10m` (holding a band named `B02`)
+    must not be renamed to `B02`, which would collide with earth-search's own
+    single-band asset key convention and rename saved graphs."""
+    resolved = resolve_asset_bands(_facts(SINGLE_BAND))
+    assert resolved == {}
+
+
+def test_a_rendering_role_asset_is_absent():
+    """Simulates a composite already filtered by the rendering-role gate --
+    `resolve_asset_bands` itself does not re-check the gate, so this exercises
+    the case only via an empty `bands` list, matching what
+    `asset_band_facts` would hand it for a TCI-style asset."""
+    resolved = resolve_asset_bands(_facts(("TCI_10m", [])))
+    assert resolved == {}
+
+
+def test_multi_band_cube_expands_every_band():
+    """Each band's own STAC `name` (`b02`/`b01`) resolves alongside its
+    display name (`blue`/`coastal`) -- issue #397."""
+    resolved = resolve_asset_bands(_facts(MULTI_BAND_CUBE))
+
+    assert set(resolved) == {"blue", "b02", "coastal", "b01"}
+    assert resolved["blue"] is resolved["b02"]
+    assert resolved["blue"].asset_key == "reflectance"
+    assert resolved["blue"].band_name == "blue"
+    assert resolved["blue"].metadata["gsd"] == 10
+    assert resolved["coastal"].metadata["gsd"] == 20
+
+
+def test_a_mix_of_shapes_only_expands_the_multi_band_cube():
+    resolved = resolve_asset_bands(_facts(MULTI_BAND_CUBE, SINGLE_BAND, NO_BANDS))
+    assert set(resolved) == {"blue", "b02", "coastal", "b01"}
+
+
+def test_colliding_band_names_across_two_assets_are_qualified():
+    """Two multi-band assets that happen to publish the same band name must
+    not have one silently shadow the other."""
+    resolved = resolve_asset_bands(
+        _facts(
+            ("reflectance_a", [{"name": "b02"}, {"name": "b01"}]),
+            ("reflectance_b", [{"name": "b02"}, {"name": "b03"}]),
+        )
+    )
+
+    assert set(resolved) == {"reflectance_a_b02", "b01", "reflectance_b_b02", "b03"}
+    assert resolved["reflectance_a_b02"].asset_key == "reflectance_a"
+    assert resolved["reflectance_b_b02"].asset_key == "reflectance_b"
+    # Unique names are left bare, so the common case is unaffected by a
+    # collision happening elsewhere in the same item.
+    assert resolved["b01"].asset_key == "reflectance_a"
+
+
+def test_a_raw_name_colliding_elsewhere_is_qualified_independently():
+    """A band's own `name` and its display name are collision-checked
+    separately: one colliding with another asset's alias does not force its
+    sibling alias to qualify too, and vice versa (issue #397)."""
+    resolved = resolve_asset_bands(
+        _facts(
+            # Its raw name "b02" collides with reflectance_b's own alias
+            # below, but its display name "blue" is unique across the item.
+            (
+                "reflectance_a",
+                [
+                    {"name": "b02", "eo:common_name": "blue"},
+                    {"name": "b01", "eo:common_name": "coastal"},
+                ],
+            ),
+            ("reflectance_b", [{"name": "b02"}, {"name": "b03"}]),
+        )
+    )
+
+    assert set(resolved) == {
+        "blue",
+        "reflectance_a_b02",
+        "coastal",
+        "b01",
+        "reflectance_b_b02",
+        "b03",
+    }
+    assert resolved["blue"].asset_key == "reflectance_a"
+    assert resolved["reflectance_a_b02"] is resolved["blue"]
+    assert resolved["reflectance_b_b02"].asset_key == "reflectance_b"
+
+
+#: Planetary Computer's `visual`: a true-colour rendering with role `data`
+#: (so it expands) that declares the bands of the B04/B03/B02 assets.
+PC_VISUAL: Fact = (
+    "visual",
+    [
+        {"name": "B04", "common_name": "red"},
+        {"name": "B03", "common_name": "green"},
+        {"name": "B02", "common_name": "blue"},
+    ],
+)
+
+
+def test_a_band_named_like_another_asset_is_qualified():
+    """`visual`'s red is a copy of the B04 asset, not B04 reflectance: it gets
+    only its display name, with the asset key as a prefix (issue #440)."""
+    resolved = resolve_asset_bands(
+        _facts(PC_VISUAL, ("B04", [{"name": "B04"}]), ("B03", []), ("B02", []))
+    )
+
+    assert set(resolved) == {"visual_red", "visual_green", "visual_blue"}
+    assert resolved["visual_red"].asset_key == "visual"
+    # The name inside the asset is unchanged: `_get_options` resolves it.
+    assert resolved["visual_red"].band_name == "red"
+    assert not resolved["visual_red"].whole_asset
+
+
+def test_asset_keys_outside_the_facts_also_qualify():
+    """Discovery gives only the data assets as facts, and the other keys in
+    `asset_keys`; it must get the same names as the read path."""
+    only_visual = resolve_asset_bands(_facts(PC_VISUAL))
+    with_keys = resolve_asset_bands(_facts(PC_VISUAL), ["B04", "B03", "B02"])
+
+    assert "red" in only_visual
+    assert set(with_keys) == {"visual_red", "visual_green", "visual_blue"}
+
+
+def test_only_the_band_named_like_an_asset_is_qualified():
+    resolved = resolve_asset_bands(_facts(PC_VISUAL, ("B04", [{"name": "B04"}])))
+
+    assert {"visual_red", "green", "B03", "blue", "B02"} == set(resolved)
+
+
+# ---------------------------------------------------------------------------
+# Common names of single-band assets (issue #440)
+# ---------------------------------------------------------------------------
+
+
+def test_common_name_of_a_single_band_asset_is_a_second_name():
+    """Data before visuals: `red` is the B04 reflectance asset, and the
+    `visual` copy is `visual_red`."""
+    resolved = resolve_asset_bands(
+        _facts(
+            PC_VISUAL,
+            ("B04", [{"name": "B04", "common_name": "red"}]),
+            ("B03", [{"name": "B03", "eo:common_name": "green"}]),
+            ("B02", [{"name": "B02", "common_name": "blue"}]),
+            ("SCL", []),
+        )
+    )
+
+    assert set(resolved) == {
+        "red",
+        "green",
+        "blue",
+        "visual_red",
+        "visual_green",
+        "visual_blue",
+    }
+    assert resolved["red"].asset_key == "B04"
+    assert resolved["red"].whole_asset
+    assert resolved["green"].asset_key == "B03"
+
+
+def test_a_common_name_of_several_assets_is_not_a_name():
+    """Planetary Computer: B05, B06, B07, B8A are all `rededge`. CDSE:
+    B02_10m, B02_20m, B02_60m are all `blue`. None of them gets it."""
+    resolved = resolve_asset_bands(
+        _facts(
+            ("B05", [{"name": "B05", "common_name": "rededge"}]),
+            ("B06", [{"name": "B06", "common_name": "rededge"}]),
+            ("B02_10m", [{"name": "B02", "common_name": "blue"}]),
+            ("B02_20m", [{"name": "B02", "common_name": "blue"}]),
+        )
+    )
+
+    assert resolved == {}
+
+
+def test_a_common_name_that_is_an_asset_key_is_not_changed():
+    """Earth Search: the `red` asset holds `B04` with common name `red`."""
+    resolved = resolve_asset_bands(
+        _facts(("red", [{"name": "B04", "common_name": "red"}])), ["nir"]
+    )
+
+    assert resolved == {}
+
+
+def test_a_multi_band_name_keeps_its_name_before_a_common_name():
+    """EOPF `reflectance` already has `blue`: a single-band asset with the
+    same common name does not take it."""
+    resolved = resolve_asset_bands(
+        _facts(MULTI_BAND_CUBE, ("B02_10m", [{"name": "B02", "common_name": "blue"}]))
+    )
+
+    assert resolved["blue"].asset_key == "reflectance"
+    assert not resolved["blue"].whole_asset
+
+
+def test_resolve_asset_band_singular_matches_the_plural_result():
+    resolved = resolve_asset_band("blue", _facts(MULTI_BAND_CUBE))
+    assert resolved is not None
+    assert resolved.asset_key == "reflectance"
+
+    assert resolve_asset_band("nope", _facts(MULTI_BAND_CUBE)) is None
+
+
+# ---------------------------------------------------------------------------
+# Naming precedence -- must match SimpleSTACReader._get_options exactly, or a
+# resolved name is not one `_get_options` can itself look back up.
+# ---------------------------------------------------------------------------
+
+
+def test_eo_common_name_and_raw_name_both_resolve():
+    """A band with both a display name and its own, different `name` is
+    addressable either way (issue #397) -- both point at the same resolved
+    object, and `.band_name` stays the precedence winner (`_get_options` can
+    only look that one back up)."""
+    resolved = resolve_asset_bands(
+        _facts(
+            (
+                "reflectance",
+                [{"name": "b02", "eo:common_name": "blue"}, {"name": "b01"}],
+            )
+        )
+    )
+    assert "blue" in resolved
+    assert "b02" in resolved
+    assert resolved["blue"] is resolved["b02"]
+    assert resolved["blue"].band_name == "blue"
+    assert resolved["b02"].band_name == "blue"
+
+
+def test_legacy_common_name_and_raw_name_both_resolve():
+    resolved = resolve_asset_bands(
+        _facts(
+            (
+                "reflectance",
+                [{"name": "b02", "common_name": "blue"}, {"name": "b01"}],
+            )
+        )
+    )
+    assert "blue" in resolved
+    assert "b02" in resolved
+    assert resolved["blue"] is resolved["b02"]
+    assert resolved["blue"].band_name == "blue"
+
+
+def test_name_is_the_fallback_when_no_common_name_is_declared():
+    resolved = resolve_asset_bands(
+        _facts(("reflectance", [{"name": "b02"}, {"name": "b01"}]))
+    )
+    assert set(resolved) == {"b01", "b02"}
+
+
+def test_a_band_with_no_name_at_all_is_skipped():
+    """The asset still counts as multi-band by entry count (2 entries), so the
+    well-formed one is not penalised for its sibling's missing `name`."""
+    resolved = resolve_asset_bands(
+        _facts(("reflectance", [{"name": "b02"}, {"gsd": 20}]))
+    )
+    assert set(resolved) == {"b02"}

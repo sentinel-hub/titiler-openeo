@@ -1,7 +1,10 @@
 """Tests for titiler.openeo.signing (docs/adr/0005-asset-href-signing.md)."""
 
 import json
+import threading
+import time
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,12 +15,16 @@ import pytest
 from titiler.openeo import signing
 from titiler.openeo.settings import PlanetaryComputerSettings
 from titiler.openeo.signing import (
-    PLANETARY_COMPUTER,
+    ITEM_SIGNER_KEY,
+    SIGNERS,
     PlanetaryComputerSigner,
     SigningError,
-    get_href_signer,
-    rules_for_catalogue,
+    get_signer,
+    signer_for_item,
+    stamp_signer_key,
 )
+
+PC_KEY = "planetary-computer"
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -31,10 +38,18 @@ TILEJSON_HREF = (
 
 @pytest.fixture(autouse=True)
 def clear_token_cache():
-    """The token cache is module-level; keep tests independent of each other."""
+    """Both caches are module-level; keep tests independent of each other.
+
+    `get_signer` is memoised, so a signer built from one test's settings would
+    otherwise leak into the next.
+    """
     signing._TOKEN_CACHE.clear()
+    signing._IN_FLIGHT.clear()
+    get_signer.cache_clear()
     yield
     signing._TOKEN_CACHE.clear()
+    signing._IN_FLIGHT.clear()
+    get_signer.cache_clear()
 
 
 def _sas_response(token: str = "st=X&se=Y&sig=abc%3D", minutes: int = 45):
@@ -59,36 +74,67 @@ def _sas_response(token: str = "st=X&se=Y&sig=abc%3D", minutes: int = 45):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        PC_STAC_API,
-        "https://planetarycomputer.microsoft.com/api/stac/v1/",
-        "https://PLANETARYCOMPUTER.microsoft.com/api/stac/v1",
-    ],
-)
-def test_rules_for_catalogue_matches_planetary_computer(url):
-    assert rules_for_catalogue(url) == (PLANETARY_COMPUTER,)
+def test_no_key_means_no_signer():
+    """The gate: no key -> None, so call sites run their unchanged path."""
+    assert get_signer(None) is None
+    assert get_signer("") is None
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://stac.dataspace.copernicus.eu/v1",
-        "https://earth-search.aws.element84.com/v1",
-        "https://stac.eoapi.dev",
-        "https://planetarycomputer.microsoft.com.evil.example/api/stac/v1",
-        "",
-    ],
-)
-def test_rules_for_catalogue_ignores_other_catalogues(url):
-    assert rules_for_catalogue(url) == ()
+def test_a_registered_key_resolves_to_its_signer():
+    assert isinstance(get_signer(PC_KEY), PlanetaryComputerSigner)
+    assert PC_KEY in SIGNERS
 
 
-def test_no_rules_means_no_signer():
-    """The gate: no rules -> None, so call sites run their unchanged path."""
-    assert get_href_signer(()) is None
-    assert get_href_signer([]) is None
+def test_an_unknown_key_raises_rather_than_silently_disabling_signing():
+    """A typo must not read as "signing off" -- that surfaces as an opaque 409
+    from blob storage, which is what SigningError exists to prevent."""
+    with pytest.raises(SigningError, match="planetary-computer"):
+        get_signer("planetray-computer")
+
+
+def test_activation_no_longer_depends_on_the_catalogue_hostname():
+    """Issue #377: a Planetary Computer URL does not by itself turn signing on,
+    and no hostname decides anything -- only the configured key does."""
+    assert not hasattr(signing, "rules_for_catalogue")
+    assert not hasattr(signing, "_PC_STAC_HOST")
+
+
+# ---------------------------------------------------------------------------
+# The item stamp (ADR 0005 S2.2)
+# ---------------------------------------------------------------------------
+
+
+def test_stamping_without_a_key_leaves_the_item_untouched():
+    item = {"type": "Feature", "id": "x", "properties": {}}
+    assert stamp_signer_key(item, None) == {
+        "type": "Feature",
+        "id": "x",
+        "properties": {},
+    }
+    assert signer_for_item(item) is None
+
+
+@pytest.mark.parametrize("as_dict", [True, False], ids=["dict", "pystac.Item"])
+def test_a_stamped_item_resolves_its_signer(as_dict):
+    """Both shapes reach the read path: load_collection carries pystac.Items,
+    load_stac hands `_reader` the output of `Item.to_dict()`."""
+    item = pystac.Item.from_dict(
+        json.loads((FIXTURES / "sentinel2/items/planetary_computer.json").read_text())
+    )
+    stamp_signer_key(item, PC_KEY)
+
+    subject = item.to_dict() if as_dict else item
+    assert isinstance(signer_for_item(subject), PlanetaryComputerSigner)
+
+
+def test_the_stamp_survives_a_dict_round_trip():
+    """The stamp is a plain string precisely so `to_dict()` preserves it."""
+    item = pystac.Item.from_dict(
+        json.loads((FIXTURES / "sentinel2/items/planetary_computer.json").read_text())
+    )
+    stamp_signer_key(item, PC_KEY)
+
+    assert item.to_dict()["properties"][ITEM_SIGNER_KEY] == PC_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +145,7 @@ def test_no_rules_means_no_signer():
 def test_signs_blob_href():
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="st=A&se=B&sig=zzz")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         signed = signer(BLOB_HREF)
 
     assert signed == f"{BLOB_HREF}?st=A&se=B&sig=zzz"
@@ -108,7 +154,7 @@ def test_signs_blob_href():
 def test_leaves_non_blob_hosts_untouched():
     """PC's own tilejson/rendered_preview assets are not on blob storage."""
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(TILEJSON_HREF) == TILEJSON_HREF
         assert (
             signer("https://sentinel-cogs.s3.us-west-2.amazonaws.com/x.tif")
@@ -123,7 +169,7 @@ def test_signing_is_idempotent():
     """An already-signed href is never given a second token."""
     already = f"{BLOB_HREF}?st=A&se=B&sig=existing"
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(already) == already
 
     urlopen.assert_not_called()
@@ -132,7 +178,7 @@ def test_signing_is_idempotent():
 def test_preserves_an_existing_query_string():
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=zzz")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         signed = signer(f"{BLOB_HREF}?versionid=2")
 
     assert signed == f"{BLOB_HREF}?versionid=2&sig=zzz"
@@ -141,7 +187,7 @@ def test_preserves_an_existing_query_string():
 def test_blob_url_without_a_container_is_untouched():
     href = "https://sentinel2l2a01.blob.core.windows.net/"
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         assert signer(href) == href
 
     urlopen.assert_not_called()
@@ -205,17 +251,178 @@ def test_token_is_reused_outside_the_expiry_margin():
     assert urlopen.call_count == 1
 
 
-def test_cache_is_shared_across_users():
-    """Public PC tokens are identity-blind, so one entry per container is right."""
-    from titiler.openeo.models.auth import User
-
-    rules = rules_for_catalogue(PC_STAC_API)
+def test_cache_is_shared_across_independently_resolved_signers():
+    """Public PC tokens are identity-blind, so one entry per container is right
+    however many readers resolve a signer for the same container (ADR 0005 S2.5).
+    """
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response()
-        get_href_signer(rules, User(user_id="alice"))(BLOB_HREF)
-        get_href_signer(rules, User(user_id="bob"))(BLOB_HREF)
+        get_signer(PC_KEY)(BLOB_HREF)
+        get_signer.cache_clear()  # as if a separate reader resolved it afresh
+        get_signer(PC_KEY)(BLOB_HREF)
 
     assert urlopen.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Concurrent minting (issue #425)
+# ---------------------------------------------------------------------------
+
+
+def _expiry(minutes: float = 45) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
+def _call_concurrently(fn, n: int):
+    """Run ``fn`` in ``n`` threads released together; return results or errors."""
+    barrier = threading.Barrier(n)
+
+    def run(_):
+        barrier.wait()
+        try:
+            return fn()
+        except Exception as err:  # noqa: BLE001
+            return err
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        return list(pool.map(run, range(n)))
+
+
+def test_a_cold_cache_mints_once_for_many_concurrent_threads():
+    signer = PlanetaryComputerSigner()
+    calls = []
+
+    def slow_mint(account, container):
+        calls.append((account, container))
+        time.sleep(0.2)  # long enough for every thread to miss the cache
+        return f"sig=token{len(calls)}", _expiry()
+
+    with patch.object(signer, "_mint", side_effect=slow_mint):
+        results = _call_concurrently(lambda: signer(BLOB_HREF), 50)
+
+    assert calls == [("sentinel2l2a01", "sentinel2-l2")]
+    assert set(results) == {f"{BLOB_HREF}?sig=token1"}
+    assert not signing._IN_FLIGHT
+
+
+def test_mints_for_different_containers_overlap():
+    """A slow mint for one container must not hold up another (one lock each)."""
+    signer = PlanetaryComputerSigner()
+    both_started = threading.Barrier(2, timeout=5)
+
+    def mint(account, container):
+        # Each mint waits for the other to start: this deadlocks (and the
+        # barrier times out) if the two requests run one after the other.
+        both_started.wait()
+        return f"sig={container}", _expiry()
+
+    hrefs = iter(
+        [
+            "https://acct.blob.core.windows.net/one/a.tif",
+            "https://acct.blob.core.windows.net/two/a.tif",
+        ]
+    )
+    lock = threading.Lock()
+
+    def call():
+        with lock:
+            href = next(hrefs)
+        return signer(href)
+
+    with patch.object(signer, "_mint", side_effect=mint):
+        results = _call_concurrently(call, 2)
+
+    assert sorted(results) == [
+        "https://acct.blob.core.windows.net/one/a.tif?sig=one",
+        "https://acct.blob.core.windows.net/two/a.tif?sig=two",
+    ]
+
+
+def test_a_failed_mint_fails_every_waiter_and_is_not_cached():
+    signer = PlanetaryComputerSigner()
+    calls = []
+
+    def failing_mint(account, container):
+        calls.append(container)
+        time.sleep(0.2)
+        raise SigningError("Could not obtain a token: timed out")
+
+    with patch.object(signer, "_mint", side_effect=failing_mint):
+        results = _call_concurrently(lambda: signer(BLOB_HREF), 20)
+
+    assert len(calls) == 1
+    assert all(isinstance(r, SigningError) for r in results)
+    assert all("timed out" in str(r) for r in results)
+    assert not signing._TOKEN_CACHE
+    assert not signing._IN_FLIGHT
+
+    # The failure is not cached: the next call requests a token again.
+    with patch.object(signer, "_mint", return_value=("sig=ok", _expiry())) as mint:
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=ok"
+    assert mint.call_count == 1
+
+
+def test_a_token_inside_the_margin_is_refreshed_once_while_callers_keep_it():
+    settings = PlanetaryComputerSettings(expiry_margin=300.0)
+    signer = PlanetaryComputerSigner(settings=settings)
+    key = ("sentinel2l2a01", "sentinel2-l2")
+    # Valid for two more minutes, which is inside the five-minute margin.
+    signing._TOKEN_CACHE[key] = ("sig=old", _expiry(minutes=2))
+
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+    calls = []
+
+    def slow_mint(account, container):
+        calls.append(container)
+        refresh_started.set()
+        assert release_refresh.wait(5)
+        return "sig=new", _expiry()
+
+    with patch.object(signer, "_mint", side_effect=slow_mint):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            refresher = pool.submit(signer, BLOB_HREF)
+            assert refresh_started.wait(5)
+
+            # While the refresh runs, other callers get the old token at once.
+            others = _call_concurrently(lambda: signer(BLOB_HREF), 20)
+            assert set(others) == {f"{BLOB_HREF}?sig=old"}
+
+            release_refresh.set()
+            assert refresher.result() == f"{BLOB_HREF}?sig=new"
+
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=new"
+
+    assert len(calls) == 1
+
+
+def test_a_failed_refresh_keeps_the_valid_token():
+    settings = PlanetaryComputerSettings(expiry_margin=300.0)
+    signer = PlanetaryComputerSigner(settings=settings)
+    signing._TOKEN_CACHE[("sentinel2l2a01", "sentinel2-l2")] = (
+        "sig=old",
+        _expiry(minutes=2),
+    )
+
+    with patch.object(signer, "_mint", side_effect=SigningError("down")) as mint:
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=old"
+        assert signer(BLOB_HREF) == f"{BLOB_HREF}?sig=old"
+
+    # Each call past the margin tries again: the failure is not cached.
+    assert mint.call_count == 2
+    assert not signing._IN_FLIGHT
+
+
+def test_an_expired_token_is_not_used_while_a_new_one_is_minted():
+    signer = PlanetaryComputerSigner()
+    signing._TOKEN_CACHE[("sentinel2l2a01", "sentinel2-l2")] = (
+        "sig=old",
+        _expiry(minutes=-1),
+    )
+
+    with patch.object(signer, "_mint", side_effect=SigningError("down")):
+        with pytest.raises(SigningError):
+            signer(BLOB_HREF)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +510,7 @@ def test_signs_every_blob_asset_of_a_real_item(fixture):
 
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=tok")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         results = {
             key: signer(asset.get_absolute_href() or asset.href)
             for key, asset in item.assets.items()
@@ -326,7 +533,7 @@ def test_sar_annotation_assets_are_signed():
 
     with patch("titiler.openeo.signing.urllib.request.urlopen") as urlopen:
         urlopen.return_value = _sas_response(token="sig=tok")
-        signer = get_href_signer(rules_for_catalogue(PC_STAC_API))
+        signer = get_signer(PC_KEY)
         annotation = {
             key: signer(asset.href)
             for key, asset in item.assets.items()
@@ -337,12 +544,16 @@ def test_sar_annotation_assets_are_signed():
     assert all(href.endswith("?sig=tok") for href in annotation.values())
 
 
-def test_default_signer_is_none_until_rules_are_set():
-    signing.set_default_rules(())
-    assert signing.get_default_href_signer() is None
+def test_signing_is_off_by_default_and_on_only_when_configured(monkeypatch):
+    """The `load_url` path reads the deployment's choice straight from settings,
+    since it has no catalogue behind it to stamp an item (ADR 0005 S2.6)."""
+    from titiler.openeo.settings import SigningSettings
 
-    signing.set_default_rules(rules_for_catalogue(PC_STAC_API))
-    try:
-        assert signing.get_default_href_signer() is not None
-    finally:
-        signing.set_default_rules(())
+    monkeypatch.delenv("TITILER_OPENEO_ASSET_SIGNER", raising=False)
+    assert SigningSettings().asset_signer == ""
+    assert get_signer(SigningSettings().asset_signer or None) is None
+
+    monkeypatch.setenv("TITILER_OPENEO_ASSET_SIGNER", PC_KEY)
+    assert isinstance(
+        get_signer(SigningSettings().asset_signer or None), PlanetaryComputerSigner
+    )

@@ -67,13 +67,14 @@ def test_lazy_raster_stack_same_timestamp():
     )
 
     # Since both have the same timestamp (key), only one will be stored
-    # This is expected behavior - timestamps must be unique
-    assert len(lazy_stack) == 2  # Both in _keys list
+    # This is expected behavior - timestamps must be unique: the key is
+    # listed once, for the last task (the only one reachable)
+    assert len(lazy_stack) == 1
     assert dt in lazy_stack
 
     # Test timestamp
     timestamps = lazy_stack.timestamps()
-    assert len(timestamps) == 2
+    assert len(timestamps) == 1
     assert isinstance(timestamps[0], datetime)
     assert timestamps[0].year == 2021
 
@@ -735,3 +736,24 @@ def test_from_images_normalizes_mixed_awareness():
     keys = list(stack.keys())
     assert all(k.tzinfo is None for k in keys)
     assert keys == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+
+
+def _empty_task():
+    from rio_tiler.errors import TileOutsideBounds
+
+    raise TileOutsideBounds("no data")
+
+
+def test_shared_timestamp_is_listed_once():
+    """Two tasks on one instant (two UTC offsets) give one key: only the last
+    task is reachable, so the date is shown once, and a skip removes it all."""
+    from datetime import timedelta
+
+    utc = datetime(2021, 1, 1, tzinfo=timezone.utc)
+    plus_one = datetime(2021, 1, 1, 1, tzinfo=timezone(timedelta(hours=1)))
+    tasks = [(_empty_task, {"datetime": utc}), (_empty_task, {"datetime": plus_one})]
+    stack = RasterStack(tasks=tasks, timestamp_fn=lambda a: a["datetime"])
+
+    assert stack.keys() == [datetime(2021, 1, 1)]
+    assert stack.values() == []
+    assert stack.keys() == [] and len(stack) == 0

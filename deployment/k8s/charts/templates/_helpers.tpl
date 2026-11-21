@@ -95,6 +95,14 @@ postgresql://{{ .Values.postgresql.auth.username }}:{{ $postgresqlPassword }}@{{
 {{- end -}}
 
 {{/*
+Image of the API and of the schema Job, so the schema is always created by
+the version being deployed.
+*/}}
+{{- define "titiler.image" -}}
+{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}
+{{- end -}}
+
+{{/*
 Returns "true" when the user supplies TITILER_OPENEO_STORE_URL via
 .Values.envVars.fromSecret. In that case the deployment skips the
 helper-emitted value: env var so the runtime value comes from the
@@ -104,4 +112,51 @@ secretKeyRef instead. Returns an empty string otherwise.
 {{- range .Values.envVars.fromSecret -}}
 {{- if eq .name "TITILER_OPENEO_STORE_URL" -}}true{{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+TITILER_OPENEO_STORE_URL and TITILER_OPENEO_TILE_STORE_URL built from
+`database.url`, first in the env of the Deployment and of the schema Job.
+Neither is rendered when the store URL comes from `.Values.envVars.fromSecret`.
+An `env` or `envVars` entry of the same name comes later and wins.
+*/}}
+{{- define "titiler.storeEnv" -}}
+{{- $urlFromSecret := eq (include "database.urlFromSecret" .) "true" }}
+{{- if not $urlFromSecret }}
+- name: TITILER_OPENEO_STORE_URL
+  value: {{ include "database.url" . | quote }}
+{{- end }}
+{{- if and .Values.enableTileStore (not $urlFromSecret) }}
+- name: TITILER_OPENEO_TILE_STORE_URL
+  value: {{ include "database.url" . | quote }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The literal `.Values.env` map, shared by the Deployment and the schema Job, so
+a tile store URL or libpq variables (PGSSLMODE, ...) set there reach both.
+TITILER_OPENEO_STORE_URL is skipped: it comes from `titiler.storeEnv`.
+*/}}
+{{- define "titiler.literalEnv" -}}
+{{- range $key, $val := .Values.env }}
+{{- if ne $key "TITILER_OPENEO_STORE_URL" }}
+- name: {{ $key }}
+  value: {{ $val | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+One OIDC or pool setting of the Deployment, from a dict: `name`, `value` and
+`overridden`, the names also set through `env` or `envVars`. A blank value
+(null or "", not false or 0) is left out, so the app keeps its default; an
+overridden name is left out, so it is not rendered twice. Renders one entry
+with no leading newline, or nothing: call it in `with`, since nindent on
+nothing leaves a blank line.
+*/}}
+{{- define "titiler.optionalEnv" -}}
+{{- if and (not (kindIs "invalid" .value)) (ne (toString .value) "") (not (has .name .overridden)) -}}
+- name: {{ .name }}
+  value: {{ .value | toString | quote }}
+{{- end }}
 {{- end -}}

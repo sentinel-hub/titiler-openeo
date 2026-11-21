@@ -561,3 +561,128 @@ class TestMergeCubes:
         result = fn(named_parameters={"cube1": cube1, "cube2": cube2})
         assert len(result) == 2
         assert sorted(result.keys()) == [dt1, dt2]
+
+
+# =============================================================================
+# Test merge_cubes with a cube that has no temporal dimension (#436)
+# =============================================================================
+
+
+class TestMergeCubesTemporalBroadcast:
+    """A temporally-reduced cube is merged with each time step of the other cube."""
+
+    DATES = [datetime(2023, 1, 5), datetime(2023, 1, 10), datetime(2023, 1, 15)]
+
+    @staticmethod
+    def _static(bands=1, fill=100.0, band_names=None, height=10, width=10):
+        from titiler.openeo.processes.implementations.reduce import (
+            REDUCED_TEMPORAL_SENTINEL,
+        )
+
+        return RasterStack.from_images(
+            {
+                REDUCED_TEMPORAL_SENTINEL: _make_image(
+                    bands=bands,
+                    fill=fill,
+                    band_names=band_names,
+                    height=height,
+                    width=width,
+                )
+            }
+        )
+
+    def test_static_bands_added_to_each_time_step(self):
+        """(x, y, t, bands) + (x, y, bands) with new labels: no resolver needed."""
+        s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "SCL"])
+        dem = self._static(band_names=["data"])
+
+        result = merge_cubes(cube1=s2, cube2=dem)
+
+        assert list(result.keys()) == self.DATES
+        for i, dt in enumerate(self.DATES):
+            img = result[dt]
+            assert img.band_descriptions == ["B03", "SCL", "data"]
+            np.testing.assert_array_equal(img.array[0], 1.0 + i)
+            np.testing.assert_array_equal(img.array[2], 100.0)
+
+    def test_static_cube_first_keeps_cube1_band_order(self):
+        """The reduced cube can also be cube1; its bands come first."""
+        s2 = _make_stack(self.DATES, bands=1, band_names=["B03"])
+        dem = self._static(band_names=["data"])
+
+        result = merge_cubes(cube1=dem, cube2=s2)
+
+        assert list(result.keys()) == self.DATES
+        assert result[self.DATES[1]].band_descriptions == ["data", "B03"]
+
+    def test_static_cube_resized_to_cube1_grid(self):
+        """The reduced cube is resampled to the grid of cube1."""
+        s2 = _make_stack(self.DATES, bands=1, band_names=["B03"])
+        dem = self._static(band_names=["data"], height=5, width=5)
+
+        result = merge_cubes(cube1=s2, cube2=dem)
+
+        assert result[self.DATES[0]].array.shape == (2, 10, 10)
+
+    def test_overlapping_band_needs_resolver(self):
+        """A band label in both cubes still needs an overlap resolver."""
+        s2 = _make_stack(self.DATES, bands=1, band_names=["B03"])
+        static = self._static(band_names=["B03"])
+
+        with pytest.raises(OverlapResolverMissing):
+            merge_cubes(cube1=s2, cube2=static)
+
+    def test_spec_example_4_without_band_dimension(self):
+        """Spec example 4: (x, y, t) * (x, y), resolver applied at each time step."""
+        s2 = _make_stack(self.DATES, bands=1)
+        dem = self._static(fill=2.0)
+
+        result = merge_cubes(cube1=s2, cube2=dem, overlap_resolver=multiply_resolver)
+
+        assert list(result.keys()) == self.DATES
+        for i, dt in enumerate(self.DATES):
+            assert result[dt].count == 1
+            np.testing.assert_array_equal(result[dt].array, (1.0 + i) * 2.0)
+
+    def test_cube_without_bands_applies_to_each_band(self):
+        """A cube without band labels is merged with each band of the other cube."""
+        s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "B04"])
+        dem = self._static(fill=2.0)
+
+        result = merge_cubes(cube1=s2, cube2=dem, overlap_resolver=multiply_resolver)
+
+        img = result[self.DATES[0]]
+        assert img.band_descriptions == ["B03", "B04"]
+        np.testing.assert_array_equal(img.array, 2.0)
+
+    def test_cube_without_bands_resolver_returns_list(self):
+        """A resolver result that is not an array is converted to one."""
+        s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "B04"])
+        dem = self._static(fill=2.0)
+
+        def list_resolver(x, y, context=None):
+            return (x * y).tolist()
+
+        result = merge_cubes(cube1=s2, cube2=dem, overlap_resolver=list_resolver)
+
+        img = result[self.DATES[0]]
+        assert img.band_descriptions == ["B03", "B04"]
+        np.testing.assert_array_equal(img.array, 2.0)
+
+    def test_cube_without_bands_requires_resolver(self):
+        """A cube without band labels overlaps every band, so a resolver is needed."""
+        s2 = _make_stack(self.DATES, bands=2, band_names=["B03", "B04"])
+        dem = self._static(fill=2.0)
+
+        with pytest.raises(OverlapResolverMissing):
+            merge_cubes(cube1=s2, cube2=dem)
+
+    def test_two_reduced_cubes_still_merge_on_one_slice(self):
+        """Two reduced cubes keep the single reduced slice."""
+        a = self._static(band_names=["a"])
+        b = self._static(band_names=["b"])
+
+        result = merge_cubes(cube1=a, cube2=b)
+
+        assert len(result) == 1
+        assert result.first.band_descriptions == ["a", "b"]

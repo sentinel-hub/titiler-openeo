@@ -2,19 +2,39 @@
 
 import base64
 import json
+import logging
+import os
 import time
 from unittest.mock import MagicMock, Mock, patch
 
+import httpx
 import pytest
+from fastapi.exceptions import HTTPException
 from pydantic import ValidationError
+from starlette.testclient import TestClient
 
-from titiler.openeo.auth import AuthToken, OIDCAuth, OIDCConfig
+from titiler.openeo.auth import AuthToken, BasicAuth, OIDCAuth, OIDCConfig, get_auth
+from titiler.openeo.errors import TokenInvalid
 from titiler.openeo.settings import AuthSettings
 
 ISSUER = "https://auth.example.com"
 JWKS_URI = "https://auth.example.com/jwks"
 WK_URL = "https://auth.example.com/.well-known/openid-configuration"
 DISCOVERY = {"issuer": ISSUER, "jwks_uri": JWKS_URI}
+
+# Microsoft Entra multi-tenant (`common`) endpoint.
+ENTRA_COMMON_WK_URL = (
+    "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+)
+ENTRA_TEMPLATE = "https://login.microsoftonline.com/{tenantid}/v2.0"
+TENANT_A = "11111111-1111-1111-1111-111111111111"
+TENANT_B = "22222222-2222-2222-2222-222222222222"
+#: The tenant id Entra gives every personal Microsoft account.
+MSA_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"
+
+#: A basic-auth user whose standard base64 credentials contain "/".
+SLASH_USER, SLASH_PASSWORD = "alice", "s3?cret"
+SLASH_CREDENTIALS = base64.b64encode(f"{SLASH_USER}:{SLASH_PASSWORD}".encode()).decode()
 
 
 @pytest.fixture
@@ -26,8 +46,8 @@ def oidc_config():
 def settings(oidc_config):
     """Real settings, not a Mock.
 
-    Possible only because `AuthSettings.__init__` no longer overwrites its own
-    `oidc` argument (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
+    Possible only because `AuthSettings` no longer overwrites its own `oidc`
+    argument (docs/adr/0006-microsoft-entra-oidc.md S1.2 gap 8).
     """
     return AuthSettings(method="oidc", oidc=oidc_config)
 
@@ -235,13 +255,10 @@ def test_the_refetch_is_rate_limited(auth):
 # ---------------------------------------------------------------------------
 
 
-def test_a_templated_issuer_is_rejected_with_the_fix_in_the_message(settings):
-    """Entra's multi-tenant `common` endpoint returns this (ADR 0006 S1.1)."""
+def test_a_templated_issuer_is_accepted(settings):
+    """Entra's multi-tenant `common` endpoint returns this (ADR 0006 S2.3)."""
     auth = OIDCAuth(settings=settings, store=Mock())
-    templated = {
-        "issuer": "https://login.microsoftonline.com/{tenantid}/v2.0",
-        "jwks_uri": JWKS_URI,
-    }
+    templated = {"issuer": ENTRA_TEMPLATE, "jwks_uri": JWKS_URI}
 
     client = MagicMock()
     client.__enter__.return_value = client
@@ -250,8 +267,7 @@ def test_a_templated_issuer_is_rejected_with_the_fix_in_the_message(settings):
     httpx.Client.return_value = client
 
     with patch("titiler.openeo.auth.httpx", httpx):
-        with pytest.raises(ValueError, match="single-tenant"):
-            _ = auth.config
+        assert auth.config["issuer"] == ENTRA_TEMPLATE
 
 
 def test_discovery_document_is_cached(auth):
@@ -293,6 +309,144 @@ def test_user_id_defaults_to_sub(auth, mock_key):
 
 
 # ---------------------------------------------------------------------------
+# Microsoft Entra multi-tenant (`common`)
+# ---------------------------------------------------------------------------
+
+
+def _entra_iss(tid: str) -> str:
+    return ENTRA_TEMPLATE.replace("{tenantid}", tid)
+
+
+def _entra_auth(key_issuer=ENTRA_TEMPLATE, store=None, **oidc) -> OIDCAuth:
+    """An OIDCAuth on the `common` endpoint, with no network.
+
+    The cached JWKS binds the test key to `key_issuer`, as Entra's own
+    `common/discovery/v2.0/keys` does: `{tenantid}` for the keys any tenant
+    may use, the MSA tenant for keys reserved to personal accounts.
+    """
+    config = OIDCConfig(client_id="test-client-id", wk_url=ENTRA_COMMON_WK_URL, **oidc)
+    auth = OIDCAuth(
+        settings=AuthSettings(method="oidc", oidc=config), store=store or Mock()
+    )
+    auth._config_cache = {"issuer": ENTRA_TEMPLATE, "jwks_uri": JWKS_URI}
+    auth._config_fetched_at = time.monotonic()
+    auth._jwks_cache = {"keys": [{"kid": "test-key", "issuer": key_issuer}]}
+    return auth
+
+
+def _validate(auth: OIDCAuth, mock_key, **claims):
+    token = create_mock_token(_payload(**claims))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        return auth.validate(f"oidc/oidc/{token}")
+
+
+def test_common_accepts_a_work_account_token(mock_key):
+    user = _validate(
+        _entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_A, sub="w-1"
+    )
+    assert user.user_id == "w-1"
+
+
+def test_common_accepts_a_personal_account_token(mock_key):
+    """MSA tokens are signed by keys the JWKS binds to the MSA tenant."""
+    user = _validate(
+        _entra_auth(key_issuer=_entra_iss(MSA_TENANT)),
+        mock_key,
+        iss=_entra_iss(MSA_TENANT),
+        tid=MSA_TENANT,
+        sub="p-1",
+    )
+    assert user.user_id == "p-1"
+
+
+def test_common_rejects_a_tid_iss_mismatch(mock_key):
+    with pytest.raises(TokenInvalid, match="Invalid issuer"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_B)
+
+
+def test_common_rejects_a_token_without_tid(mock_key):
+    with pytest.raises(TokenInvalid, match="'tid'"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A))
+
+
+@pytest.mark.parametrize("tid", ["not-a-guid", f"{TENANT_A}/v2.0/x", 42])
+def test_common_rejects_a_malformed_tid(mock_key, tid):
+    """`tid` fills one path segment of the issuer, and nothing else."""
+    with pytest.raises(TokenInvalid, match="'tid'"):
+        _validate(_entra_auth(), mock_key, iss=_entra_iss(TENANT_A), tid=tid)
+
+
+def test_common_rejects_a_v1_issuer(mock_key):
+    with pytest.raises(TokenInvalid, match="requestedAccessTokenVersion"):
+        _validate(
+            _entra_auth(),
+            mock_key,
+            iss=f"https://sts.windows.net/{TENANT_A}/",
+            tid=TENANT_A,
+        )
+
+
+def test_common_rejects_a_work_token_signed_by_a_personal_account_key(mock_key):
+    """The key's own `issuer` is checked, not only the discovery issuer."""
+    with pytest.raises(TokenInvalid, match="signing key"):
+        _validate(
+            _entra_auth(key_issuer=_entra_iss(MSA_TENANT)),
+            mock_key,
+            iss=_entra_iss(TENANT_A),
+            tid=TENANT_A,
+        )
+
+
+def test_allowed_tenants_rejects_another_tenant(mock_key):
+    auth = _entra_auth(allowed_tenants=[TENANT_A, MSA_TENANT])
+    with pytest.raises(TokenInvalid, match="Tenant not allowed"):
+        _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
+
+
+def test_allowed_tenants_accepts_listed_tenants(mock_key):
+    auth = _entra_auth(allowed_tenants=[TENANT_A.upper()])
+    _validate(auth, mock_key, iss=_entra_iss(TENANT_A), tid=TENANT_A)
+
+
+def test_allowed_tenants_rejects_a_token_without_tid(auth, mock_key):
+    """Set on a non-Entra provider, the list rejects tokens that carry no tid."""
+    auth._oidc_config.allowed_tenants = [TENANT_A]
+    with pytest.raises(Exception, match="Tenant not allowed"):
+        auth._verify_token(create_mock_token(_payload()), mock_key)
+
+
+def test_single_tenant_entra_is_unchanged(mock_key):
+    """A concrete issuer is compared exactly, and its keys carry that issuer."""
+    iss = _entra_iss(TENANT_A)
+    auth = _entra_auth(key_issuer=iss)
+    auth._config_cache["issuer"] = iss
+
+    _validate(auth, mock_key, iss=iss, tid=TENANT_A)
+    with pytest.raises(TokenInvalid, match="Invalid issuer"):
+        _validate(auth, mock_key, iss=_entra_iss(TENANT_B), tid=TENANT_B)
+
+
+def test_a_key_without_an_issuer_is_not_checked(auth, mock_key):
+    """Keycloak JWKS entries carry no `issuer`."""
+    auth._jwks_cache = {"keys": [{"kid": "test-key"}]}
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        assert auth.validate(f"oidc/oidc/{token}").user_id == "user-1"
+
+
+def test_authority_comes_from_the_well_known_url():
+    assert _entra_auth().authority == "https://login.microsoftonline.com/common/v2.0"
+
+
+def test_authority_falls_back_to_the_discovery_issuer(settings):
+    settings.oidc.wk_url = "https://auth.example.com/discovery"
+    auth = OIDCAuth(settings=settings, store=Mock())
+    auth._config_cache = dict(DISCOVERY)
+    auth._config_fetched_at = time.monotonic()
+    assert auth.authority == ISSUER
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
@@ -311,7 +465,318 @@ def test_oidc_method_requires_client_id_and_wk_url():
 
 
 def test_basic_method_needs_no_oidc_config():
-    assert AuthSettings(method="basic").method == "basic"
+    users = {"alice": {"password": "s3cret"}}
+    assert AuthSettings(method="basic", users=users).method == "basic"
+
+
+def test_there_is_no_built_in_user():
+    """A missing or misnamed users setting must not fall back to a known login."""
+    assert AuthSettings.model_fields["users"].default == {}
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"users": {}},
+        {"users": {"a": {}}},
+        {"users": {"a": {"password": ""}}},
+        {"users": {"a": "pw"}},
+        {"users": {"": {"password": "x"}}},
+        {"users": {"a:b": {"password": "x"}}},
+    ],
+)
+def test_basic_method_without_users_refuses_to_start(monkeypatch, kwargs):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_USERS", raising=False)
+    with pytest.raises(ValidationError, match="TITILER_OPENEO_AUTH_USERS"):
+        AuthSettings(_env_file=None, **kwargs)
+
+
+def test_settings_errors_do_not_echo_passwords(monkeypatch):
+    """A list-shaped users value must not print its password at start-up."""
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_USERS",
+        json.dumps([{"username": "alice", "password": "s3cret-value"}]),
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        AuthSettings(_env_file=None)
+
+    assert "s3cret-value" not in str(excinfo.value)
+
+
+def test_users_are_read_from_the_environment(monkeypatch):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_METHOD", raising=False)
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_USERS", json.dumps({"alice": {"password": "s3cret"}})
+    )
+    settings = AuthSettings(_env_file=None)
+    assert settings.users == {"alice": {"password": "s3cret"}}
+
+    credentials = base64.b64encode(b"alice:s3cret").decode()
+    auth = get_auth(settings, store=Mock())
+    assert isinstance(auth, BasicAuth)
+    assert auth.login(f"Basic {credentials}").access_token == credentials
+
+
+def test_oidc_method_needs_no_users(monkeypatch, oidc_config):
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_USERS", raising=False)
+    settings = AuthSettings(method="oidc", oidc=oidc_config, _env_file=None)
+    assert settings.users == {}
+    assert isinstance(get_auth(settings, store=Mock()), OIDCAuth)
+
+
+def test_redirect_url_accepts_one_url_or_a_list():
+    assert OIDCConfig(redirect_url="http://a/").redirect_url == ["http://a/"]
+    assert OIDCConfig(redirect_url="http://a/ http://b/").redirect_url == [
+        "http://a/",
+        "http://b/",
+    ]
+    assert OIDCConfig(redirect_url=["http://a/"]).redirect_url == ["http://a/"]
+    assert OIDCConfig().redirect_url == []
+
+
+def test_list_settings_parse_space_separated_env(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://a/ http://b/")
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS", f"{TENANT_A} {MSA_TENANT}"
+    )
+    config = OIDCConfig()
+    assert config.redirect_url == ["http://a/", "http://b/"]
+    assert config.allowed_tenants == [TENANT_A, MSA_TENANT]
+
+
+def test_single_redirect_url_env_stays_valid(monkeypatch):
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://localhost:8080/"
+    )
+    monkeypatch.delenv("TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS", raising=False)
+    config = OIDCConfig()
+    assert config.redirect_url == ["http://localhost:8080/"]
+    assert config.allowed_tenants == []
+
+
+def test_provider_id_and_grant_types_parse_from_env(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE")
+    monkeypatch.setenv(
+        "TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES", "authorization_code+pkce refresh_token"
+    )
+    config = OIDCConfig()
+    assert config.provider_id == "CDSE"
+    assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
+
+
+@pytest.mark.parametrize(
+    "provider_id",
+    # A trailing newline (a Helm `|` block, a Secret built from a file) or a
+    # non-ASCII letter cannot be sent back in an HTTP header.
+    ["", " ", "a/b", "CDSE prod", "x" * 21, "Łódź", "é", "²"],
+)
+def test_invalid_provider_id_is_refused(provider_id):
+    with pytest.raises(ValidationError, match="provider_id"):
+        OIDCConfig(provider_id=provider_id)
+
+
+@pytest.mark.parametrize(
+    "grant_types",
+    [
+        "",
+        " ",
+        "password",
+        [],
+        "refresh_token refresh_token authorization_code+pkce",
+        # A refresh token is never the first token a client gets.
+        "refresh_token",
+    ],
+)
+def test_invalid_grant_types_are_refused(grant_types):
+    with pytest.raises(ValidationError, match="grant_types"):
+        OIDCConfig(grant_types=grant_types)
+
+
+def test_empty_oidc_env_values_keep_the_defaults(monkeypatch):
+    for name in ("PROVIDER_ID", "GRANT_TYPES", "SCOPES", "REDIRECT_URL"):
+        monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", "")
+    config = OIDCConfig()
+    defaults = OIDCConfig.model_fields
+    assert config.provider_id == defaults["provider_id"].default == "oidc"
+    assert config.grant_types == defaults["grant_types"].default
+    assert config.scopes == defaults["scopes"].default
+    assert config.redirect_url == []
+
+
+def test_blank_oidc_env_values_keep_the_defaults(monkeypatch):
+    """`env_ignore_empty` alone let `" "` replace a list default with `[]`."""
+    for name in ("PROVIDER_ID", "GRANT_TYPES", "SCOPES", "TITLE"):
+        monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", " \n")
+    config = OIDCConfig()
+    defaults = OIDCConfig.model_fields
+    assert config.provider_id == "oidc"
+    assert config.grant_types == defaults["grant_types"].default
+    assert config.scopes == defaults["scopes"].default
+    assert config.title == defaults["title"].default
+
+
+def test_blank_oidc_dotenv_values_keep_the_defaults(tmp_path):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text('TITILER_OPENEO_AUTH_OIDC_SCOPES=" "\n')
+    config = OIDCConfig(_env_file=dotenv)
+    assert config.scopes == OIDCConfig.model_fields["scopes"].default
+
+
+def test_oidc_settings_are_stripped(monkeypatch):
+    """A Helm `|` block or a file-built Secret ends with a newline; kept, a
+    `client_id` would never match a token `aud`."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", f" {WK_URL}\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE\n")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL", "http://a/\n")
+    config = OIDCConfig()
+    assert config.client_id == "mine"
+    assert config.wk_url == WK_URL
+    assert config.provider_id == "CDSE"
+    assert config.redirect_url == ["http://a/"]
+    assert OIDCConfig(provider_id="CDSE\n").provider_id == "CDSE"
+
+
+def test_auth_method_from_the_developer_env_does_not_leak():
+    """The autouse fixture also removes `TITILER_OPENEO_AUTH_METHOD`."""
+    assert "TITILER_OPENEO_AUTH_METHOD" not in os.environ
+    assert AuthSettings.model_config["env_file"] is None
+
+
+def test_list_settings_parse_space_separated_dotenv(tmp_path):
+    """`.env` values are space-separated too (docs/src/local-setup.md)."""
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        'TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES="authorization_code+pkce refresh_token"\n'
+        'TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL="https://editor.openeo.org/ http://a/"\n'
+        "TITILER_OPENEO_AUTH_OIDC_SCOPES=openid\n"
+    )
+    config = OIDCConfig(_env_file=dotenv)
+    assert config.grant_types == ["authorization_code+pkce", "refresh_token"]
+    assert config.redirect_url == ["https://editor.openeo.org/", "http://a/"]
+    assert config.scopes == ["openid"]
+
+
+@pytest.mark.parametrize("text", [" ".join, json.dumps])
+@pytest.mark.parametrize(
+    "name, items",
+    [
+        ("redirect_url", ["https://editor.openeo.org/", "http://a/"]),
+        ("scopes", ["openid", "email"]),
+        ("grant_types", ["authorization_code+pkce", "refresh_token"]),
+        ("audiences", ["api://a", "b"]),
+        ("allowed_tenants", [TENANT_A, MSA_TENANT]),
+    ],
+)
+def test_list_settings_read_space_separated_values_or_a_json_array(
+    monkeypatch, tmp_path, name, items, text
+):
+    """Space-separated is the documented form; a JSON array is not one item."""
+    variable = f"TITILER_OPENEO_AUTH_OIDC_{name.upper()}"
+    monkeypatch.setenv(variable, f" {text(items)}\n")
+    assert getattr(OIDCConfig(), name) == items
+
+    monkeypatch.delenv(variable)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(f"{variable}='{text(items)}'\n")
+    assert getattr(OIDCConfig(_env_file=dotenv), name) == items
+
+
+def test_other_methods_ignore_the_oidc_settings(monkeypatch):
+    """Leftover OIDC variables must not stop a basic-auth deployment."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "my-idp")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_GRANT_TYPES", "password")
+    settings = AuthSettings(
+        method="basic", users={"alice": {"password": "s3cret"}}, _env_file=None
+    )
+    assert settings.oidc is None
+
+
+def test_oidc_method_reads_and_checks_the_oidc_settings(monkeypatch):
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", WK_URL)
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "CDSE")
+    assert AuthSettings(method="oidc", _env_file=None).oidc.provider_id == "CDSE"
+
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID", "my-idp")
+    with pytest.raises(
+        ValidationError,
+        match="TITILER_OPENEO_AUTH_OIDC_PROVIDER_ID: String should match pattern",
+    ):
+        AuthSettings(method="oidc", _env_file=None)
+
+
+@pytest.mark.parametrize(
+    "name, value, errors",
+    [
+        (
+            "GRANT_TYPES",
+            "refresh_token password device_code",
+            [
+                "GRANT_TYPES item 2: Input should be 'implicit'",
+                "GRANT_TYPES item 3: Input should be 'implicit'",
+            ],
+        ),
+        (
+            "SCOPES",
+            '["openid", email]',
+            ["SCOPES: Value error, starts with '[' but is not a valid JSON array"],
+        ),
+    ],
+)
+def test_a_bad_oidc_variable_is_named_at_startup(monkeypatch, name, value, errors):
+    """The error names the variable and the item, not a field of `AuthSettings`."""
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_CLIENT_ID", "mine")
+    monkeypatch.setenv("TITILER_OPENEO_AUTH_OIDC_WK_URL", WK_URL)
+    monkeypatch.setenv(f"TITILER_OPENEO_AUTH_OIDC_{name}", value)
+    with pytest.raises(ValidationError) as excinfo:
+        AuthSettings(method="oidc", _env_file=None)
+    for error in errors:
+        assert f"TITILER_OPENEO_AUTH_OIDC_{error}" in str(excinfo.value)
+
+
+def test_settings_that_skipped_validation_fail_at_startup():
+    """`model_copy` and `model_construct` skip the validator that sets `oidc`."""
+    basic = AuthSettings(method="basic", users={"alice": {"password": "s3cret"}})
+    for settings in (
+        basic.model_copy(update={"method": "oidc"}),
+        AuthSettings.model_construct(method="oidc"),
+    ):
+        with pytest.raises(ValueError, match="OIDC configuration required"):
+            get_auth(settings, store=Mock())
+
+
+def test_authorization_code_without_redirect_urls_warns(caplog):
+    """openEO API: redirect URLs MUST be given for an authorization code client."""
+    config = OIDCConfig(client_id="mine", wk_url=WK_URL)
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.settings"):
+        AuthSettings(method="oidc", oidc=config)
+    assert "TITILER_OPENEO_AUTH_OIDC_REDIRECT_URL" in caplog.text
+
+    caplog.clear()
+    config = OIDCConfig(client_id="mine", wk_url=WK_URL, redirect_url="http://a/")
+    with caplog.at_level(logging.WARNING, logger="titiler.openeo.settings"):
+        AuthSettings(method="oidc", oidc=config)
+    assert caplog.text == ""
+
+
+def test_token_for_the_configured_provider_id_is_accepted(settings, mock_key):
+    settings.oidc.provider_id = "CDSE"
+    auth = OIDCAuth(settings=settings, store=Mock())
+    auth._config_cache = dict(DISCOVERY)
+    auth._config_fetched_at = time.monotonic()
+
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        assert auth.validate(f"oidc/CDSE/{token}").user_id == _payload()["sub"]
+
+        with pytest.raises(HTTPException) as err:
+            auth.validate(f"oidc/oidc/{token}")
+    assert err.value.status_code == 403
+    assert err.value.detail == "Invalid authentication provider"
 
 
 def test_audiences_parse_space_separated():
@@ -345,6 +810,20 @@ def test_auth_token_from_token():
     assert token.method == "oidc"
     assert token.provider == "realm"
     assert token.token == "my_access_token"
+
+
+@pytest.mark.parametrize(
+    "bearer, method, provider, value",
+    [
+        (f"Bearer basic//{SLASH_CREDENTIALS}", "basic", "", SLASH_CREDENTIALS),
+        ("Bearer oidc/realm/opaque/token", "oidc", "realm", "opaque/token"),
+    ],
+)
+def test_auth_token_from_token_keeps_slashes_in_the_token(
+    bearer, method, provider, value
+):
+    token = AuthToken.from_token(bearer)
+    assert (token.method, token.provider, token.token) == (method, provider, value)
 
 
 # ---------------------------------------------------------------------------
@@ -425,3 +904,137 @@ def test_a_blank_exception_still_yields_a_named_detail(auth, mock_key):
             auth.validate(f"oidc/oidc/{create_mock_token(_payload())}")
 
     assert "Blank during token validation" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Store failures
+# ---------------------------------------------------------------------------
+
+
+def test_store_failure_during_login_tracking_is_a_503(auth, mock_key):
+    """A database outage must not tell the client its valid token is bad."""
+    from titiler.openeo.errors import ServiceUnavailable
+
+    auth.store.track_user_login.side_effect = RuntimeError(
+        "connection to server at db.internal (10.0.0.5) failed"
+    )
+    token = create_mock_token(_payload(sub="subject-1"))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        with pytest.raises(ServiceUnavailable) as excinfo:
+            auth.validate(f"oidc/oidc/{token}")
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.headers == {"Retry-After": "5"}
+    assert "10.0.0.5" not in excinfo.value.message
+
+
+def test_an_unreachable_provider_is_a_503_not_a_bad_token(auth):
+    """Refreshing the token cannot fix an outage, so it must not say TokenInvalid."""
+    from titiler.openeo.errors import ServiceUnavailable
+
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "get_jwks", side_effect=httpx.ConnectError("down")):
+        with pytest.raises(ServiceUnavailable) as excinfo:
+            auth.validate(f"oidc/oidc/{token}")
+
+    assert excinfo.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# openEO error code, through the app
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def store_type():
+    """One store is enough: nothing tested here is store-specific."""
+    return "local"
+
+
+@pytest.fixture
+def oidc_client(main_module, monkeypatch, auth) -> TestClient:
+    monkeypatch.setattr(main_module, "auth", auth)
+    return TestClient(main_module.create_app())
+
+
+def _get_me(client: TestClient, token: str):
+    return client.get("/me", headers={"Authorization": f"Bearer oidc/oidc/{token}"})
+
+
+def _assert_token_invalid(response, message: str) -> None:
+    """The openEO Python client refreshes its token only on this code.
+
+    With 403, as errors.json specifies: clients before 0.26.0 do not refresh on 401.
+    """
+    body = response.json()
+    assert body["code"] == "TokenInvalid"
+    assert body["message"] and message in body["message"]
+    assert response.status_code == 403
+    assert response.headers["WWW-Authenticate"].startswith("Bearer")
+
+
+def test_an_expired_token_answers_token_invalid(oidc_client, mock_key):
+    token = create_mock_token(_payload(exp=time.time() - 3600))
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        _assert_token_invalid(_get_me(oidc_client, token), "Token expired")
+
+
+def test_a_bad_signature_answers_token_invalid(oidc_client, mock_key):
+    from cryptography.exceptions import InvalidSignature
+
+    mock_key.verify.side_effect = InvalidSignature()
+    token = create_mock_token(_payload())
+    with patch.object(OIDCAuth, "_get_key", return_value=mock_key):
+        _assert_token_invalid(
+            _get_me(oidc_client, token), "signature verification failed"
+        )
+
+
+def test_an_unknown_key_id_answers_token_invalid(oidc_client, auth):
+    auth._jwks_cache = {"keys": [_jwk("other")]}
+    auth._jwks_refreshed_at = time.monotonic()  # refetch on cooldown: no network
+    _assert_token_invalid(
+        _get_me(oidc_client, create_mock_token(_payload())),
+        "Unable to find appropriate key",
+    )
+
+
+def test_a_malformed_token_answers_token_invalid(oidc_client):
+    _assert_token_invalid(_get_me(oidc_client, "not-a-jwt"), "")
+
+
+def test_a_missing_authorization_header_is_not_token_invalid(oidc_client):
+    """Nothing to refresh: the client has to log in."""
+    assert oidc_client.get("/me").json()["code"] != "TokenInvalid"
+
+
+# ---------------------------------------------------------------------------
+# Basic auth, through the app
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def basic_client(main_module, monkeypatch) -> TestClient:
+    settings = AuthSettings(
+        method="basic", users={SLASH_USER: {"password": SLASH_PASSWORD}}
+    )
+    monkeypatch.setattr(
+        main_module, "auth", get_auth(settings, store=main_module.service_store)
+    )
+    return TestClient(main_module.create_app())
+
+
+def test_basic_credentials_with_a_slash_in_base64_work_after_login(basic_client):
+    """The access token from `/credentials/basic` must be accepted afterwards."""
+    login = basic_client.get(
+        "/credentials/basic", headers={"Authorization": f"Basic {SLASH_CREDENTIALS}"}
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+    assert "/" in access_token
+
+    me = basic_client.get(
+        "/me", headers={"Authorization": f"Bearer basic//{access_token}"}
+    )
+    assert me.status_code == 200, me.json()
+    assert me.json()["user_id"] == SLASH_USER

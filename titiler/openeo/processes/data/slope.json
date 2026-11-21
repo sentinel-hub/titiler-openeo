@@ -1,0 +1,34 @@
+{
+  "id": "slope",
+  "summary": "The slope of a terrain surface",
+  "description": "Compute the slope (in radians, relative to the horizontal plane) of elevation data.\n\nThe gradients use central differences with the pixel size of the data cube in metres. For a geographic CRS (for example EPSG:4326), the pixel size in degrees is converted to metres on a sphere. For best results, resample the elevation to a projected grid first (for example with `resample_cube_spatial`).\n\nThe result keeps the grid of the input (same size and bounds). The pixels on the 1-pixel border, and the pixels next to a no-data value, are no-data.",
+  "categories": [
+    "cubes",
+    "math"
+  ],
+  "experimental": true,
+  "parameters": [
+    {
+      "name": "data",
+      "description": "A raster data cube with n bands containing elevation data, in metres.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube"
+      }
+    }
+  ],
+  "returns": {
+    "description": "A data cube with n bands named after the n bands in the input data cube, suffixed with `_slope`. Each band contains the computed slope values (in radians, relative to the horizontal plane).",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube"
+    }
+  },
+  "links": [
+    {
+      "rel": "about",
+      "href": "https://github.com/Open-EO/openeo-processes/pull/569",
+      "title": "Proposal for the slope and aspect processes"
+    }
+  ]
+}

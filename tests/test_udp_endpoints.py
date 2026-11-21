@@ -1,43 +1,27 @@
 """Tests for UDP listing endpoint."""
 
 import pytest
-from fastapi import Header
-from starlette.testclient import TestClient
 
-from titiler.openeo.auth import Auth, User
-from titiler.openeo.services import get_udp_store
-
-
-class MockAuth(Auth):
-    """Mock authentication class for testing."""
-
-    def __init__(self, store):
-        """Initialize auth with store."""
-        self.store = store
-
-    def login(self, authorization: str = Header(default=None)):
-        """Mock login method."""
-        return {"access_token": "mock_token"}
-
-    def validate(self, authorization: str = Header(default=None)) -> User:
-        """Mock validate method."""
-        return User(user_id="test_user")
+from titiler.openeo.factory import _schema_allows_null
 
 
 def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store_type):
     """List returns user-scoped UDPs with pagination and trimmed fields."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
-    udp_store = get_udp_store(str(store_path))
+    udp_store = client.app.endpoints.udp_store
 
     # Seed UDPs for the authenticated user
     for idx in range(4):
         udp_store.upsert_udp(
             user_id="test_user",
             udp_id=f"udp-{idx}",
-            process_graph={"i": idx},
+            process_graph={
+                "n": {
+                    "process_id": "constant",
+                    "arguments": {"x": idx},
+                    "result": True,
+                }
+            },
             exceptions={"err": {"message": "nope"}},
             examples=[{"title": "sample"}],
             links=[{"href": "https://example.com"}],
@@ -47,7 +31,9 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
     udp_store.upsert_udp(
         user_id="other_user",
         udp_id="udp-other",
-        process_graph={"i": 99},
+        process_graph={
+            "n": {"process_id": "constant", "arguments": {"x": 99}, "result": True}
+        },
     )
 
     resp = client.get("/process_graphs", params={"limit": 2, "offset": 1})
@@ -56,8 +42,7 @@ def test_udp_list_pagination_omits_large_fields(app_with_auth, store_path, store
 
     assert "processes" in body
     # We seeded 4 entries for test_user; offset=1, limit=2 should yield 2
-    # but local stores may be empty when instantiated outside app context. Just ensure no crash and user scoping.
-    assert len(body["processes"]) <= 2
+    assert len(body["processes"]) == 2
 
     for proc in body["processes"]:
         assert proc["id"] in {f"udp-{i}" for i in range(4)}
@@ -75,9 +60,6 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     """List should not crash when created_at mixes datetime and string."""
     from titiler.openeo.services.local import LocalUdpStore
 
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -94,8 +76,7 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     )
 
     # Inject a string created_at to simulate JSON-loaded store
-    udp_store.store["udpstr"] = {
-        "user_id": "test_user",
+    udp_store.store["test_user"]["udpstr"] = {
         "process_graph": {
             "node": {"process_id": "constant", "arguments": {"x": 2}, "result": True}
         },
@@ -110,26 +91,9 @@ def test_udp_list_handles_mixed_created_at_types(app_with_auth, store_path, stor
     assert "udpdt" in ids and "udpstr" in ids
 
 
-@pytest.fixture
-def app_with_auth_sqlalchemy(monkeypatch) -> TestClient:
-    """App configured with SQLAlchemy store to reproduce whitespace ID bug."""
-    store_url = "sqlite:///:memory:"
-    monkeypatch.setenv("TITILER_OPENEO_STAC_API_URL", "https://stac.eoapi.dev")
-    monkeypatch.setenv("TITILER_OPENEO_STORE_URL", store_url)
-
-    from titiler.openeo.main import create_app
-    from titiler.openeo.services import get_store
-
-    app = create_app()
-    store = get_store(store_url)
-    mock_auth = MockAuth(store=store)
-    app.dependency_overrides[app.endpoints.auth.validate] = mock_auth.validate
-    return TestClient(app)
-
-
-def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
+def test_udp_list_rejects_whitespace_ids(app_with_auth):
     """Creation accepts whitespace IDs but listing fails validation (current bug)."""
-    client = app_with_auth_sqlalchemy
+    client = app_with_auth
 
     udp_id = "Cyanobacteria Chlorophyll-a Detection with NDCI"
     body = {
@@ -157,9 +121,6 @@ def test_udp_list_rejects_whitespace_ids(app_with_auth_sqlalchemy):
 
 def test_udp_get_returns_full_metadata(app_with_auth, store_path, store_type):
     """Detail endpoint returns full UDP including optional fields."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     # Use the same store instance the app is using to avoid isolation across stores
     udp_store = client.app.endpoints.udp_store
@@ -211,9 +172,6 @@ def test_udp_get_missing_or_wrong_user_returns_404(
     app_with_auth, store_path, store_type
 ):
     """Detail endpoint returns 404 for missing UDP or wrong user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -241,9 +199,6 @@ def test_udp_get_missing_or_wrong_user_returns_404(
 
 def test_udp_delete_success(app_with_auth, store_path, store_type):
     """Delete endpoint removes UDP for authenticated user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -274,9 +229,6 @@ def test_udp_delete_missing_or_wrong_user_returns_404(
     app_with_auth, store_path, store_type
 ):
     """Delete returns 404 for missing UDP or wrong user."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -358,9 +310,6 @@ def test_validation_ignores_unresolvable_parameters(app_no_auth):
 
 def test_udp_put_creates_or_replaces(app_with_auth, store_path, store_type):
     """PUT should create or replace a UDP with ID from path."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     udp_store = client.app.endpoints.udp_store
 
@@ -402,9 +351,6 @@ def test_udp_put_creates_or_replaces(app_with_auth, store_path, store_type):
 
 def test_udp_put_rejects_unknown_process(app_with_auth, store_path, store_type):
     """PUT returns 422 for invalid process graph (unknown process)."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     body = {
         "id": "udp-bad",
@@ -423,9 +369,6 @@ def test_udp_put_rejects_unknown_process(app_with_auth, store_path, store_type):
 
 def test_udp_put_rejects_missing_required_param(app_with_auth, store_path, store_type):
     """PUT returns 422 when required parameter is missing."""
-    if isinstance(store_path, str) and store_path.startswith("sqlite:///:memory:"):
-        pytest.skip("In-memory sqlite store not shared across instances")
-
     client = app_with_auth
     body = {
         "id": "udp-missing",
@@ -459,3 +402,86 @@ def test_validation_flags_missing_required_param(app_no_auth):
     assert resp.status_code == 200
     errs = resp.json()["errors"]
     assert any("ProcessParameterRequired" in e["code"] for e in errs)
+
+
+def _load_collection_graph(temporal_extent):
+    return {
+        "dem": {
+            "process_id": "load_collection",
+            "arguments": {
+                "id": "cop-dem-glo-30",
+                "spatial_extent": {
+                    "west": 0.12,
+                    "south": 42.82,
+                    "east": 0.16,
+                    "north": 42.85,
+                },
+                "temporal_extent": temporal_extent,
+                "bands": ["data"],
+            },
+        },
+        "save": {
+            "process_id": "save_result",
+            "arguments": {"data": {"from_node": "dem"}, "format": "GTiff"},
+            "result": True,
+        },
+    }
+
+
+def test_validation_accepts_null_for_nullable_required_param(app_no_auth):
+    """`temporal_extent: null` is a valid value ("no filter"), not a missing one (#452)."""
+    resp = app_no_auth.post(
+        "/validation", json={"process_graph": _load_collection_graph(None)}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []
+
+
+def test_validation_flags_null_for_non_nullable_required_param(app_no_auth):
+    """`null` is still missing when the schema of the parameter does not accept it."""
+    graph = _load_collection_graph(["2021-04-22", "2021-04-23"])
+    graph["dem"]["arguments"]["id"] = None
+    resp = app_no_auth.post("/validation", json={"process_graph": graph})
+    assert resp.status_code == 200
+    errs = resp.json()["errors"]
+    assert any(
+        e["code"] == "ProcessParameterRequired" and "'id'" in e["message"] for e in errs
+    )
+
+
+@pytest.mark.parametrize(
+    "schema,expected",
+    [
+        ({"type": "null"}, True),
+        ({"type": ["string", "null"]}, True),
+        ([{"type": "string"}, {"type": "null", "title": "No filter"}], True),
+        ({"anyOf": [{"type": "number"}, {"type": "null"}]}, True),
+        ({"oneOf": [{"type": "number"}]}, False),
+        ({"type": "string"}, False),
+        ({}, True),
+        ({"description": "Any data type."}, True),
+        ({"enum": ["a", None]}, True),
+        ({"enum": ["a"]}, False),
+        ({"const": None}, True),
+        ({"const": "a"}, False),
+        (None, False),
+        ("null", False),
+    ],
+)
+def test_schema_allows_null(schema, expected):
+    """`_schema_allows_null` reads dict, list, `type` list and anyOf/oneOf schemas."""
+    assert _schema_allows_null(schema) is expected
+
+
+def test_validation_accepts_null_for_unconstrained_required_param(app_no_auth):
+    """A required parameter with a schema without type accepts `null`."""
+    graph = {
+        "node1": {
+            "process_id": "constant",
+            "arguments": {"x": None},
+            "result": True,
+        }
+    }
+    resp = app_no_auth.post("/validation", json={"process_graph": graph})
+    assert resp.status_code == 200
+    assert resp.json()["errors"] == []

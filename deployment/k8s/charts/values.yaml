@@ -50,6 +50,13 @@ autoscaling:
 
 replicaCount: 1
 
+# Deployment update strategy. When empty, Kubernetes uses RollingUpdate, so
+# old and new pods run at the same time during an upgrade. Set `type: Recreate`
+# for an upgrade that must stop all old pods first. See "Upgrade notes" in the
+# admin guide.
+strategy: {}
+#  type: Recreate
+
 extraHostPathMounts:
   []
   # - name: map-sources
@@ -67,21 +74,44 @@ auth:
 
   # Basic auth configuration (for testing)
   basic:
+    # false only to supply TITILER_OPENEO_AUTH_USERS yourself, via envVars.fromSecret
     enabled: true
-    users:
-      - username: "test"
-        password: "password"
+    # Required with method "basic": rendering fails without at least one user.
+    # They reach the app through a ConfigMap, readable by anyone who can read
+    # ConfigMaps in the namespace. Pods read the users at start-up, so after
+    # changing them run `kubectl rollout restart deployment/<release>-titiler-openeo`.
+    users: []
+    #  - username: "alice"
+    #    password: "<choose-a-password>"
 
   # OIDC configuration (for production)
   oidc:
     enabled: false
     clientId: ""
     wellKnownUrl: ""
-    redirectUrl: ""
+    redirectUrl: ""  # One URL, or several separated by spaces
     scopes: "openid email profile"
     nameClaim: "name"
     title: "OIDC"
     description: "OpenID Connect (OIDC) Authorization Code Flow with PKCE"
+    # Extra accepted `aud` values, space-separated (e.g. "api://<client_id>")
+    audiences: ""
+    # Token claim used as the user id. Empty keeps the backend default, "sub".
+    # Do not change on a running deployment: stored services are keyed on it.
+    userIdClaim: ""
+    # Microsoft Entra tenant ids allowed to sign in, space-separated. Empty
+    # allows all. Personal Microsoft accounts: 9188040d-6c67-4c5b-b112-36a304b66dad
+    allowedTenants: ""
+    # Provider id advertised in GET /credentials/oidc and expected as the
+    # bearer token prefix (oidc/<providerId>/<token>). 1-20 ASCII letters,
+    # digits or underscores; for example "CDSE". Empty keeps the backend
+    # default, "oidc". Quote it: YAML reads an unquoted NO as a boolean.
+    providerId: ""
+    # Flows advertised for the default client, space-separated or as a YAML
+    # list. List only the flows that the client registration allows. Empty
+    # keeps the backend default: "authorization_code+pkce
+    # urn:ietf:params:oauth:grant-type:device_code+pkce refresh_token".
+    grantTypes: ""
 
 # STAC configuration
 stac:
@@ -117,6 +147,13 @@ env:
   GDAL_HTTP_MULTIPLEX: "YES"   # Enable multiplexing
   GDAL_HTTP_VERSION: 2   # Use HTTP/2
   PYTHONWARNINGS: "ignore"
+  # Scale/offset of each band, from an ordered list of sources: "stac"
+  # (raster:scale/offset), "cog" (GeoTIFF header), "sentinel2-boa" (plugin:
+  # BOA offset in MTD_MSIL2A.xml). For each band the first source with a value
+  # wins. See the admin guide, "Scale and offset". Lists are JSON or comma lists:
+  # TITILER_OPENEO_PROCESSING_APPLY_SCALE_OFFSET: "true"   # master switch
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_SOURCES: "stac,sentinel2-boa,cog"
+  # TITILER_OPENEO_PROCESSING_SCALE_OFFSET_COLLECTIONS: '{"sentinel-2-l2a": ["stac"], "my-raw-collection": []}'
 
 # Additional environment variables from ConfigMaps and Secrets
 # Use this to map specific keys from secrets or configmaps to environment variables
@@ -134,7 +171,8 @@ envVars:
   # (e.g. one managed by Sealed Secrets / External Secrets). When this entry
   # is present, the chart skips emitting the helper-built value: env var so
   # the password never ends up in rendered manifests and Helm `lookup` is
-  # not required.
+  # not required. The chart also runs the schema Job (README, "PostgreSQL
+  # schema"), whatever `database.type` is.
   # - name: TITILER_OPENEO_STORE_URL
   #   secretName: titiler-openeo-db
   #   secretKey: dsn
@@ -171,6 +209,10 @@ enableTileStore: false
 # `envVars.fromSecret[TITILER_OPENEO_STORE_URL]` (GitOps pattern).
 postgresql:
   enabled: false
+
+  # Server `max_connections`. Empty keeps the Postgres default (100). Size it
+  # against `database.pool` below.
+  maxConnections: ""
 
   image:
     # Official postgres image from the postgres community. Replaces the
@@ -223,6 +265,7 @@ postgresql:
 # Database configuration
 database:
   # Type of database to use: "json", "duckdb", "postgresql"
+  # "postgresql" adds a Job that creates the tables (README, "PostgreSQL schema").
   type: "json"
   # Default services configuration file path
   defaultServices: ""  # Path to default services configuration file (like files/copernicus.json)
@@ -267,6 +310,30 @@ database:
     # which bypasses this helper entirely.
     password: ""
 
+  # Connection pool for SQL databases (PostgreSQL). Needs an image built on
+  # titiler-openeo newer than 0.18.2; older versions ignore these settings.
+  #
+  # Each uvicorn worker process (not each pod) opens up to
+  # `size + maxOverflow` connections, shared by the services, UDP and tile
+  # stores. Keep the worst case below the database's `max_connections`:
+  #
+  #   max pods x WEB_CONCURRENCY x (size + maxOverflow) < max_connections - 3
+  #
+  # where max pods is `autoscaling.maxReplicas` (or `replicaCount`) plus the
+  # rolling-update surge (25% by default). See "Store Settings" in
+  # docs/src/admin-guide.md. With the bundled PostgreSQL (`postgresql.enabled`),
+  # set `postgresql.maxConnections` (default 100). For an external database, set
+  # it on the server (e.g. the provider's parameter group, or
+  # `postgresql.parameters.max_connections` in a CloudNativePG `Cluster`).
+  #
+  # A key set to null is not rendered, so the app default applies.
+  pool:
+    size: 5
+    maxOverflow: 10
+    timeout: 5  # seconds to wait for a free connection; a waiting request holds a worker thread
+    recycle: -1  # seconds before a connection is replaced; -1 disables (0 is rejected)
+    prePing: true  # test connections before use, so requests reconnect after a database restart
+
 securityContext:
   {}
   # capabilities:
@@ -281,6 +348,29 @@ podSecurityContext:
   sysctls:
     - name: net.ipv4.ip_unprivileged_port_start
       value: "0"
-  # fsGroup: 1001
+  # fsGroup matches the application user ID baked into the image (see
+  # Dockerfile's `titiler` user)
+  fsGroup: 65532
   # runAsNonRoot: true
   # runAsUser: 1001
+
+# Image for the init-store init container (only rendered when
+# database.persistence.enabled=true and database.type="json").
+initStore:
+  image:
+    repository:  # Uses docker.io/library/busybox by default
+    tag:  # Uses the digest-pinned 1.38.0 in templates/deployment.yaml by default
+
+# securityContext for the init-store init container (only rendered when
+# database.persistence.enabled=true and database.type="json").
+initContainerSecurityContext:
+  {}
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # readOnlyRootFilesystem: true
+  # allowPrivilegeEscalation: false
+  # runAsNonRoot: true
+  # runAsUser: 1001
+  # seccompProfile:
+  #   type: RuntimeDefault

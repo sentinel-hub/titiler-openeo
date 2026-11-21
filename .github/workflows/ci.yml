@@ -18,12 +18,26 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+
+    # Runs the multi-replica race tests (tests/test_sqlalchemy_races.py).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.9.*" 
           enable-cache: true
@@ -31,9 +45,11 @@ jobs:
 
       - name: Sync dependencies
         run: |
-          uv sync
+          uv sync --extra postgres
 
       - name: Test titiler.openeo
+        env:
+          TITILER_OPENEO_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: |
           uv run pytest --cov=titiler.openeo --cov-report=xml --cov-append --cov-report=term-missing
 
@@ -44,7 +60,7 @@ jobs:
 
       - name: Upload Results
         if: ${{ matrix.python-version == env.LATEST_PY_VERSION }}
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v5
         with:
           files: ./coverage.xml
           flags: unittests
@@ -52,34 +68,32 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
 
-  publish-docker:
-    needs: [tests]
-    runs-on: ubuntu-latest
+  # Each platform is built on its own native runner and pushed by digest, with
+  # no tag. That digest is pulled back, smoke-tested and scanned, and only
+  # publish-docker creates tags: on an index of the tested digests, once every
+  # platform has passed. Fork PRs build and check both platforms, push nothing.
+  image-meta:
     # only publish on main, tags, and PRs
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+    outputs:
+      # GITHUB_TOKEN is read-only for pull_request runs triggered by a fork,
+      # regardless of the `permissions:` build-image requests -- pushing would
+      # fail there no matter what, so skip it instead of failing CI on
+      # every external contribution.
+      can-push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event.pull_request.head.repo.full_name == github.repository }}
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
 
     steps:
-      - name: checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-
       - name: Extract version from tag
         id: version
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "version=${TAG_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Determine whether this run can push
-        # GITHUB_TOKEN is read-only for pull_request runs triggered by a fork,
-        # regardless of the `permissions:` requested above -- pushing would
-        # fail there no matter what, so skip it instead of failing CI on
-        # every external contribution.
-        id: can-push
-        run: |
-          echo "value=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event.pull_request.head.repo.full_name == github.repository }}" >> $GITHUB_OUTPUT
+          echo "version=${TAG_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Docker meta
         id: meta
@@ -94,24 +108,131 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
+  build-image:
+    needs: [tests, image-meta]
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
       - name: set up docker buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: log in to github container registry
-        if: steps.can-push.outputs.value == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: needs.image-meta.outputs.can-push == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.github_token }}
 
-      - name: build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      # Pushed by digest with no tag, and without BuildKit attestations, so the
+      # index holds only manifests tested below. Fork PRs load it instead.
+      - name: build
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: ${{ steps.can-push.outputs.value == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ needs.image-meta.outputs.labels }}
+          provenance: false
+          outputs: ${{ needs.image-meta.outputs.can-push == 'true' && format('type=image,name=ghcr.io/{0},push-by-digest=true,name-canonical=true,push=true', github.repository) || 'type=docker,name=titiler-openeo:local' }}
+
+      # The pushed digest: the checks below pull it back from ghcr.io, and it
+      # is the ref publish-docker tags.
+      - name: name the image under test
+        id: image
+        env:
+          REF: ${{ needs.image-meta.outputs.can-push == 'true' && format('ghcr.io/{0}@{1}', github.repository, steps.build.outputs.digest) || 'titiler-openeo:local' }}
+        run: echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      # Gates the tags: an image that breaks its runtime contract is never
+      # tagged. Via env: so nothing is interpolated into run:.
+      - name: smoke-test the image
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          SMOKE_PLATFORM: linux/${{ matrix.arch }}
+        run: ./docker/smoke-test.sh "$IMAGE_REF"
+
+      # Blocks the main and tag pushes; on pull requests it only reports, as a
+      # CVE published overnight is no reason to fail an unrelated change. An
+      # exception, if one is ever needed, goes in a .trivyignore at the repo
+      # root, which Trivy reads by default.
+      - name: fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          exit-code: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          ignore-unfixed: true
+          severity: CRITICAL
+
+      # Reached only when the checks above passed.
+      - name: record the tested ref
+        env:
+          REF: ${{ steps.image.outputs.ref }}
+          ARCH: ${{ matrix.arch }}
+        run: mkdir -p "$RUNNER_TEMP/tested" && echo "$REF" > "$RUNNER_TEMP/tested/$ARCH"
+
+      - name: hand the tested ref to publish-docker
+        if: needs.image-meta.outputs.can-push == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tested-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tested/${{ matrix.arch }}
+          if-no-files-found: error
+          # Long enough for a late "Re-run failed jobs"; cleanup deletes an
+          # untagged digest only once it is more than 7 days old.
+          retention-days: 7
+          # A re-run hands on the digest it tested itself.
+          overwrite: true
+
+  # Tags the tested digests, not a rebuild. Runs only if every platform passed.
+  publish-docker:
+    needs: [image-meta, build-image]
+    if: needs.image-meta.outputs.can-push == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: tested-image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/tested
+
+      - name: log in to github container registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
+
+      - name: tag the multi-arch index
+        working-directory: ${{ runner.temp }}/tested
+        env:
+          TAGS: ${{ needs.image-meta.outputs.tags }}
+        run: |
+          # One tested ref per build-image arch, or no tag at all: an artifact
+          # can be missing (expired before a re-run) and the download still passes.
+          [[ -s amd64 && -s arm64 ]] || { echo "::error::tested refs missing: $(ls)"; exit 1; }
+          args=()
+          while IFS= read -r tag; do args+=(--tag "$tag"); done <<<"$TAGS"
+          docker buildx imagetools create "${args[@]}" "$(<amd64)" "$(<arm64)"
 
 # PyPI publishing lives in release-please.yml. It ran here on tag pushes, but
 # release-please creates tags with GITHUB_TOKEN, which does not start

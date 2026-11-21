@@ -99,8 +99,7 @@ def maybe_register_loaders() -> None:
         )
         return
 
-    from titiler.openeo.settings import BackendSettings
-    from titiler.openeo.signing import rules_for_catalogue, set_default_rules
+    from titiler.openeo.settings import BackendSettings, SigningSettings
     from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
     settings = BackendSettings()  # type: ignore[call-arg]
@@ -108,25 +107,22 @@ def maybe_register_loaders() -> None:
         str(settings.stac_api_url),
         exclude_collections=settings.exclude_collections,
     )
-    # Same derivation main.py does. Without it this script reads assets
+    # Same configuration main.py reads. Without it this script reads assets
     # unsigned, which on a credential-gated catalogue fails with an opaque
     # HTTP 409 that has nothing to do with the graph being debugged.
-    signer_rules = rules_for_catalogue(str(settings.stac_api_url))
-    set_default_rules(signer_rules)
+    signer_key = SigningSettings().asset_signer or None
 
     process_registry["load_collection"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_collection"],
-        implementation=LoadCollection(
-            client, signer_rules=signer_rules
-        ).load_collection,
+        implementation=LoadCollection(client, signer_key=signer_key).load_collection,
     )
     process_registry["load_stac"] = Process(
         spec=PROCESS_SPECIFICATIONS["load_stac"],
-        implementation=LoadStac(signer_rules=signer_rules).load_stac,
+        implementation=LoadStac(signer_key=signer_key).load_stac,
     )
     print(
         f"[debug_graph] load_collection registered against {settings.stac_api_url}"
-        + (f" (href signing: {len(signer_rules)} rule(s))" if signer_rules else ""),
+        + (f" (href signing: {signer_key})" if signer_key else ""),
         file=sys.stderr,
     )
 

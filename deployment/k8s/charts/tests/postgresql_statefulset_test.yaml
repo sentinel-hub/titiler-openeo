@@ -1,0 +1,24 @@
+suite: test bundled PostgreSQL StatefulSet
+templates:
+  - postgres/statefulset.yaml
+tests:
+  - it: should pass max_connections to postgres when set
+    set:
+      postgresql.enabled: true
+      postgresql.auth.password: "secret"
+      postgresql.maxConnections: 200
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - postgres
+            - -c
+            - max_connections=200
+
+  - it: should keep the image default when max_connections is empty
+    set:
+      postgresql.enabled: true
+      postgresql.auth.password: "secret"
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].args

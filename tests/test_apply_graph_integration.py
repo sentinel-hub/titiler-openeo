@@ -541,6 +541,10 @@ def test_apply_dimension_temporal_to_spectral_collapses_via_graph():
     assert img.array.shape == (3, 2, 2)  # 3 timestamps -> 3 spectral bands (renderable)
     # band values are the per-timestamp inputs * 10
     np.testing.assert_allclose([img.array[b].mean() for b in range(3)], [2.0, 5.0, 8.0])
+    # The target dimension is not the source dimension: the labels are integers
+    # from zero, not the timestamps (apply_dimension spec).
+    assert img.band_descriptions == ["0", "1", "2"]
+    assert result.band_names == ["0", "1", "2"]
 
 
 def test_aggregate_temporal_distinct_per_interval_via_graph():
@@ -1146,3 +1150,419 @@ def test_before_after_merge_of_same_band_needs_no_resolver():
     assert img.band_descriptions == ["vv_before", "vv_during"]
     np.testing.assert_array_equal(img.array[0], 1.0)
     np.testing.assert_array_equal(img.array[1], 2.0)
+
+
+def test_array_element_in_temporal_reducer_selects_time_step_via_graph():
+    """array_element in a reducer over ``t`` must select ONE time step (#437).
+
+    It used to take band ``index`` of every time step, so ``data[0]`` returned
+    all time steps and ``data[2]`` failed on a single-band cube.
+    """
+    pg = {
+        "reduce": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "elem": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "index": 2,
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+    (img,) = result.values()
+    assert img.array.shape == (1, 2, 2)
+    assert float(img.array.mean()) == 5.0
+
+
+def test_array_element_label_in_temporal_reducer_via_graph():
+    """array_element(label=...) accepts an ISO date for a datetime stack key."""
+    pg = {
+        "reduce": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": "t",
+                "reducer": {
+                    "process_graph": {
+                        "elem": {
+                            "process_id": "array_element",
+                            "arguments": {
+                                "data": {"from_parameter": "data"},
+                                "label": "2024-06-02",
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+    (img,) = result.values()
+    assert float(img.array.mean()) == 7.0
+
+
+def test_aggregate_temporal_two_date_labels_via_graph():
+    """Two date strings in ``labels`` must not be read as a temporal-interval (#438)."""
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 4, 10): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.2, np.float32))
+            ),
+            datetime(2024, 5, 10): ImageData(
+                np.ma.array(np.full((1, 2, 2), 0.5, np.float32))
+            ),
+        }
+    )
+    pg = {
+        "aggt": {
+            "process_id": "aggregate_temporal",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "intervals": [
+                    ["2024-04-01", "2024-05-01"],
+                    ["2024-05-01", "2024-06-01"],
+                ],
+                "labels": ["2024-04-15", "2024-05-15"],
+                "reducer": {
+                    "process_graph": {
+                        "mean1": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+    assert [k.date().isoformat() for k in result.keys()] == [
+        "2024-04-15",
+        "2024-05-15",
+    ]
+
+
+def test_merge_cubes_overlap_resolver_runs_per_timestamp():
+    """merge_cubes must call the overlap_resolver again for each timestamp and band.
+
+    Regression for #449: the executor memoizes the resolver's callback nodes, so
+    every timestamp after the first got the first timestamp's resolved image. With
+    partial-coverage dates, the first date's mask then spread to all dates.
+    """
+
+    def _cube(offset: float) -> RasterStack:
+        return RasterStack.from_images(
+            {
+                datetime(2023, 2, day): ImageData(
+                    np.ma.array(
+                        np.stack(
+                            [
+                                np.full((2, 2), day + offset, np.float32),
+                                np.full((2, 2), 10 * (day + offset), np.float32),
+                            ]
+                        )
+                    ),
+                    band_descriptions=["B03", "B04"],
+                )
+                for day in (1, 2, 3)
+            }
+        )
+
+    pg = {
+        "merge": {
+            "process_id": "merge_cubes",
+            "arguments": {
+                "cube1": {"from_parameter": "a"},
+                "cube2": {"from_parameter": "b"},
+                "overlap_resolver": {
+                    "process_graph": {
+                        "add": {
+                            "process_id": "add",
+                            "arguments": {
+                                "x": {"from_parameter": "x"},
+                                "y": {"from_parameter": "y"},
+                            },
+                            "result": True,
+                        }
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, a=_cube(0.0), b=_cube(100.0))
+
+    assert len(result) == 3
+    for day, img in zip((1, 2, 3), result.values()):
+        expected = 2 * day + 100
+        np.testing.assert_array_equal(img.array[0], np.full((2, 2), expected))
+        np.testing.assert_array_equal(img.array[1], np.full((2, 2), 10 * expected))
+
+
+def test_aggregate_spatial_multi_node_reducer_runs_per_geometry_date_band():
+    """aggregate_spatial must recompute a reducer of more than one node on each call.
+
+    The executor skips its cache only for the reducer's first node (``mean``), so
+    ``multiply`` returned the first call's result for every geometry, date and band.
+    """
+    from rasterio.crs import CRS
+
+    def _img(value: float) -> ImageData:
+        return ImageData(
+            np.ma.array(
+                np.stack(
+                    [
+                        np.full((4, 4), value, np.float32),
+                        np.full((4, 4), 10 * value, np.float32),
+                    ]
+                )
+            ),
+            crs=CRS.from_epsg(4326),
+            bounds=(0, 0, 4, 4),
+            band_descriptions=["B03", "B04"],
+        )
+
+    stack = RasterStack.from_images(
+        {datetime(2023, 2, 1): _img(1.0), datetime(2023, 2, 2): _img(2.0)}
+    )
+    square = {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+    }
+    pg = {
+        "agg": {
+            "process_id": "aggregate_spatial",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "geometries": square,
+                "reducer": {
+                    "process_graph": {
+                        "m": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "x": {
+                            "process_id": "multiply",
+                            "arguments": {"x": {"from_node": "m"}, "y": 2},
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    values = result["features"][0]["properties"]["values"]
+    assert values == {
+        datetime(2023, 2, 1): {"B03": 2.0, "B04": 20.0},
+        datetime(2023, 2, 2): {"B03": 4.0, "B04": 40.0},
+    }
+
+
+def test_aggregate_spatial_passes_context_to_reducer():
+    """aggregate_spatial must pass ``context`` to the reducer (openEO spec)."""
+    from rasterio.crs import CRS
+
+    img = ImageData(
+        np.ma.array(np.full((1, 4, 4), 3.0, np.float32)),
+        crs=CRS.from_epsg(4326),
+        bounds=(0, 0, 4, 4),
+        band_descriptions=["B03"],
+    )
+    stack = RasterStack.from_images({datetime(2023, 2, 1): img})
+    pg = {
+        "agg": {
+            "process_id": "aggregate_spatial",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "geometries": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]],
+                },
+                "reducer": {
+                    "process_graph": {
+                        "m": {
+                            "process_id": "mean",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "x": {
+                            "process_id": "multiply",
+                            "arguments": {
+                                "x": {"from_node": "m"},
+                                "y": {"from_parameter": "context"},
+                            },
+                            "result": True,
+                        },
+                    }
+                },
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    values = result["features"][0]["properties"]["values"]
+    assert values == {datetime(2023, 2, 1): 30.0}
+
+
+_MEAN_TIMES_CONTEXT = {
+    "process_graph": {
+        "m": {
+            "process_id": "mean",
+            "arguments": {"data": {"from_parameter": "data"}},
+        },
+        "x": {
+            "process_id": "multiply",
+            "arguments": {
+                "x": {"from_node": "m"},
+                "y": {"from_parameter": "context"},
+            },
+            "result": True,
+        },
+    }
+}
+
+
+def test_aggregate_temporal_passes_context_to_reducer():
+    """aggregate_temporal must pass ``context`` to the reducer (openEO spec)."""
+    pg = {
+        "agg": {
+            "process_id": "aggregate_temporal",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "intervals": [["2024-06-01", "2024-07-01"]],
+                "reducer": _MEAN_TIMES_CONTEXT,
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack())
+
+    np.testing.assert_allclose(np.asarray(result.first.array), 50.0)
+
+
+@pytest.mark.parametrize("dimension", ["t", "bands"])
+def test_reduce_dimension_passes_context_to_reducer(dimension):
+    """reduce_dimension must pass ``context`` to the reducer (openEO spec)."""
+    stack = RasterStack.from_images(
+        {
+            datetime(2024, 6, 1): ImageData(
+                np.ma.array(np.full((2, 2, 2), 3, np.float32)),
+                band_descriptions=["B03", "B04"],
+            ),
+            datetime(2024, 6, 2): ImageData(
+                np.ma.array(np.full((2, 2, 2), 5, np.float32)),
+                band_descriptions=["B03", "B04"],
+            ),
+        }
+    )
+    pg = {
+        "red": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": dimension,
+                "reducer": _MEAN_TIMES_CONTEXT,
+                "context": 10,
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=stack)
+
+    expected = [40.0] if dimension == "t" else [30.0, 50.0]
+    got = sorted(float(np.asarray(img.array).mean()) for img in result.values())
+    assert got == expected
+
+
+def _gt_threshold_callback(param: str) -> dict:
+    """A callback graph `gt(<param>, threshold)` using a graph-level parameter."""
+    return {
+        "process_graph": {
+            "gt1": {
+                "process_id": "gt",
+                "arguments": {
+                    "x": {"from_parameter": param},
+                    "y": {"from_parameter": "threshold"},
+                },
+                "result": True,
+            }
+        }
+    }
+
+
+def test_apply_callback_references_graph_parameter():
+    """An apply callback can use a parameter of the enclosing graph (#453)."""
+    pg = {
+        "apply1": {
+            "process_id": "apply",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "process": _gt_threshold_callback("x"),
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack(), threshold=4)
+    by_ts = {k: v.array.data.ravel().tolist() for k, v in result.items()}
+    assert by_ts[datetime(2024, 6, 1)] == [False] * 4
+    assert by_ts[datetime(2024, 6, 2)] == [True] * 4
+    assert by_ts[datetime(2024, 6, 3)] == [True] * 4
+
+
+@pytest.mark.parametrize("dimension", ["t", "bands"])
+def test_reduce_dimension_reducer_references_graph_parameter(dimension):
+    """A reduce_dimension reducer can use a parameter of the enclosing graph (#453)."""
+    pg = {
+        "max1": {
+            "process_id": "reduce_dimension",
+            "arguments": {
+                "data": {"from_parameter": "data"},
+                "dimension": dimension,
+                "reducer": {
+                    "process_graph": {
+                        "max1": {
+                            "process_id": "max",
+                            "arguments": {"data": {"from_parameter": "data"}},
+                        },
+                        "gt1": {
+                            "process_id": "gt",
+                            "arguments": {
+                                "x": {"from_node": "max1"},
+                                "y": {"from_parameter": "threshold"},
+                            },
+                            "result": True,
+                        },
+                    }
+                },
+            },
+            "result": True,
+        }
+    }
+    result = _run(pg, data=_three_image_stack(), threshold=4)
+    values = [v.array.data.ravel().tolist() for v in result.values()]
+    if dimension == "t":
+        # Temporal max is 7 > 4.
+        assert values == [[True] * 4]
+    else:
+        # Each image has one band: its value (3, 7, 5) is compared to 4.
+        assert values == [[False] * 4, [True] * 4, [True] * 4]

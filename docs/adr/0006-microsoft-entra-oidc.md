@@ -1,7 +1,7 @@
 # ADR 0006 — Microsoft Entra ID as an OIDC provider
 
 - **Status:** Proposed
-- **Date:** 2026-08-10
+- **Date:** 2026-08-10 (§2.3 revised 2026-10-07, issue #422: multi-tenant `common` support)
 - **Deciders:** @emmanuelmathot
 - **Supersedes / superseded by:** —
 
@@ -34,7 +34,8 @@ and its JWKS endpoint.
 | Entra signs with RS256 only | `id_token_signing_alg_values_supported: ["RS256"]` | The existing hand-rolled PKCS1v15+SHA256 verification is the right algorithm |
 | Entra publishes six RSA signing keys | `common/discovery/v2.0/keys` returns six `kty: RSA` entries | Key rotation is real and continuous |
 | JWK entries carry no `alg` field | Confirmed on all six | `_get_key`'s `kty`-only check is correct; an `alg`-based lookup would fail |
-| The `common` endpoint returns a **templated** issuer | `"issuer": "https://login.microsoftonline.com/{tenantid}/v2.0"` | Unusable for `iss` comparison, and invalid in the `/credentials/oidc` response — a single-tenant `wk_url` is required |
+| The `common` endpoint returns a **templated** issuer | `"issuer": "https://login.microsoftonline.com/{tenantid}/v2.0"` | Not comparable with `iss` as-is, and not resolvable by clients if advertised in `/credentials/oidc` (see §2.3 for the resolution) |
+| `common` JWKS keys carry an `issuer` (verified 2026-10-07) | Six keys with `.../{tenantid}/v2.0`; three keys with `.../9188040d-6c67-4c5b-b112-36a304b66dad/v2.0` (the personal-account tenant). A single-tenant JWKS gives every key that tenant's concrete issuer | The key's `issuer` must be checked too: some keys sign only personal-account tokens |
 | Entra supports the device-code grant | `device_authorization_endpoint` present | The grant list `/credentials/oidc` already hardcodes is accurate |
 | `sub` is pairwise | `subject_types_supported: ["pairwise"]` | `sub` is stable per (user, application). Changing the app registration orphans every stored service, which are keyed on `user_id` |
 | `preferred_username`, `name`, `email` are all available | `claims_supported` | `name_claim` has a sensible Entra value already |
@@ -108,22 +109,51 @@ of a library, and it should be replaced wholesale rather than extended.
 | 6 | Accept an operator-supplied audience list alongside `client_id` | `auth.py::_verify_token`, `settings.py::OIDCConfig.audiences` |
 | 7 | Take `user_id` from a configurable claim, default `sub` | `auth.py::validate`, `settings.py::OIDCConfig.user_id_claim` |
 | 8 | Stop clobbering `oidc`; validate `wk_url` and `client_id` at startup when `method=oidc` | `settings.py::AuthSettings` |
+| 9 | Accept the `{tenantid}` issuer template: expected `iss` = template with the token's `tid`; check the JWKS key's `issuer` when present; optional tenant allow-list (§2.3, #422) | `auth.py::_verify_issuer`, `settings.py::OIDCConfig.allowed_tenants` |
+| 10 | Advertise the authority from `wk_url` in `/credentials/oidc`, not the discovery `issuer` (#422) | `auth.py::OIDCAuth.authority`, `factory.py` |
+| 11 | `redirect_url` accepts a space-separated list, advertised as `redirect_urls` (#422) | `settings.py::OIDCConfig.redirect_url`, `factory.py` |
 
-### 2.3 The templated issuer is a startup error, not a runtime one
+### 2.3 The templated issuer: put the token's `tid` into it
 
 §1.1 shows the `common` endpoint returns `https://login.microsoftonline.com/{tenantid}/v2.0`.
-That string is useless for change 3, and `/credentials/oidc` would advertise it
-verbatim to openEO clients as the provider `issuer`.
 
-Rather than substituting the token's `tid` into it — which would accept tokens
-from every tenant in the world, the opposite of what an `iss` check is for —
-a discovery document whose `issuer` contains `{tenantid}` is rejected with a
-message naming the fix: configure a single-tenant `wk_url`,
-`https://login.microsoftonline.com/<tenant_id>/v2.0/.well-known/openid-configuration`.
+**Original decision (2026-08-10), superseded.** A discovery document whose
+`issuer` contains `{tenantid}` was rejected at the first request, with a
+message that told the operator to configure a single-tenant `wk_url`. The
+reason: putting the token's `tid` into the template accepts tokens from every
+tenant, and an allow-list of tenants is a policy decision that no default can
+make.
 
-Multi-tenant support is a real feature, and this deliberately does not provide
-it. It needs an allow-list of tenant ids, which is a policy decision no default
-can make.
+**Revised decision (2026-10-07, #422).** The Planetary Computer deployment
+(`openeo.mpc.ds.io`) must accept *any* Microsoft account, work or personal. So
+"every tenant" is the policy that deployment wants, and the operator can now
+state the policy:
+
+1. The expected `iss` is the template with the token's own `tid` in it, and the
+   comparison is exact. The `tid` must have the shape of a GUID before it goes
+   into the template, so a claim value can fill only that one path segment.
+   This rejects a token whose `iss` and `tid` disagree, and a v1.0 token
+   (`iss` = `https://sts.windows.net/<tid>/`).
+2. When the JWKS entry of the signing key has an `issuer`, the same rule
+   applies to it. This is the check Microsoft documents for multi-tenant
+   apps: the `common` JWKS holds keys that sign only personal-account tokens
+   (§1.1). Keycloak keys have no `issuer`, so the check is skipped for them.
+3. `TITILER_OPENEO_AUTH_OIDC_ALLOWED_TENANTS` (space-separated) is the policy.
+   Empty, the default, accepts all tenants. The personal-account tenant is
+   `9188040d-6c67-4c5b-b112-36a304b66dad`. When the list is set, a token
+   without `tid` is rejected.
+4. `/credentials/oidc` advertises the authority taken from `wk_url`
+   (`https://login.microsoftonline.com/common/v2.0`), which clients can
+   resolve, not the template. For a single-tenant or Keycloak `wk_url`, this
+   is the same URL as the discovery issuer, so their response does not change.
+
+A non-templated issuer is compared exactly, as before. Single-tenant Entra and
+the CDSE Keycloak realm need no configuration change.
+
+The signature check stays as it is: a token signed by a key in the `common`
+JWKS is a token that Microsoft issued. The `aud` check (change 6) is what binds
+the token to this backend, so a token issued by any tenant for another
+application is still rejected.
 
 ### 2.4 `user_id` stability is the operator's problem, and they need the lever
 
@@ -154,8 +184,7 @@ without `exp` now fails. This is intended — such a token is not safely
 verifiable — but it is a behaviour change, and it is called out in the release
 notes rather than buried.
 
-**Deliberately not done.** A JWT library (§2.1). Multi-tenant Entra (§2.3).
-Non-RSA signature algorithms. Token refresh, introspection or revocation
+**Deliberately not done.** A JWT library (§2.1). Non-RSA signature algorithms. Token refresh, introspection or revocation
 checking. Mapping Entra groups or app roles onto the `roles` field that
 `AuthSettings.users` already carries and nothing reads — authorization is
 [ADR 0003](0003-service-access-control.md)'s subject, not this one.
@@ -205,6 +234,14 @@ Live check against a real tenant: point `TITILER_OPENEO_AUTH_OIDC_WK_URL` at a
 single-tenant discovery document, confirm `GET /credentials/oidc` returns a
 concrete `issuer` rather than the templated form, and confirm `GET /me` with a
 real Entra token returns the expected `user_id`.
+
+Live check for multi-tenant (#422): point `WK_URL` at the `common` discovery
+document, confirm `GET /credentials/oidc` returns
+`https://login.microsoftonline.com/common/v2.0` as `issuer`, and sign in with
+`openeo>=0.52` (`authenticate_oidc()`, device code flow) once with a work
+account and once with a personal account. Each `GET /me` must return the
+`user_id`. Then set `ALLOWED_TENANTS` to the work tenant only and confirm the
+personal account gets *"Tenant not allowed"*.
 
 ---
 

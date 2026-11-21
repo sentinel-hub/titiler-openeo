@@ -83,3 +83,28 @@ def test_empty_stack_raises():
         _apply_spectral_dimension_stack(
             {}, lambda arr, **kw: arr, positional_parameters={}, named_parameters={}
         )
+
+
+def test_same_band_count_preserves_labels():
+    """Same number of values: the band labels are preserved (issue #459)."""
+    res = _run(lambda arr, **kw: arr * 2)
+    assert res.band_names == ["b0", "b1"]
+    assert res[KEYS[0]].band_descriptions == ["b0", "b1"]
+
+
+def test_changed_band_count_numbers_labels_from_zero():
+    """Different number of values: labels are integers from zero (issue #459)."""
+    res = _run(lambda arr, **kw: arr[:1] * 1.0)
+    assert res.band_names == ["0"]
+    assert res[KEYS[1]].band_descriptions == ["0"]
+
+    res = _run(lambda arr, **kw: np.ma.concatenate([arr, arr[:1]], axis=0))
+    assert res.band_names == ["0", "1", "2"]
+
+
+def test_changed_band_count_can_be_renamed():
+    from titiler.openeo.processes.implementations.arrays import rename_labels
+
+    res = _run(lambda arr, **kw: arr[:1] * 1.0)
+    renamed = rename_labels(res, dimension="bands", target=["green"])
+    assert renamed[KEYS[0]].band_descriptions == ["green"]

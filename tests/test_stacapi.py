@@ -1,14 +1,16 @@
 """Test titiler.openeo.stacapi."""
 
+from datetime import datetime
+
 import pytest
-from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from openeo_pg_parser_networkx.pg_schema import BoundingBox, TemporalInterval
 from pystac import Item
 from rio_tiler.models import ImageData
 
 from titiler.openeo.errors import OutputLimitExceeded
 from titiler.openeo.reader import SimpleSTACReader
 from titiler.openeo.settings import ProcessingSettings
-from titiler.openeo.stacapi import LoadCollection, stacApiBackend
+from titiler.openeo.stacapi import LoadCollection, LoadStac, stacApiBackend
 
 
 def test_processing_settings():
@@ -352,3 +354,268 @@ def test_load_collection_groups_same_datetime_items_into_one_slice(monkeypatch):
     keys = list(stack.keys())
     assert len(keys) == 1, "same-datetime items must collapse into one slice"
     assert len(stack.get_source_items(keys[0])) == 2
+
+
+def _range_only_item_dict(start: str, end: str) -> dict:
+    """A STAC item with ``"datetime": null`` and only a start/end range."""
+    item = _stac_item_dict(start)
+    item["properties"].update(datetime=None, start_datetime=start, end_datetime=end)
+    return item
+
+
+def test_load_collection_keys_range_only_items_by_start_datetime(monkeypatch):
+    """Items with ``"datetime": null`` are keyed by their ``start_datetime``.
+
+    STAC allows a null datetime when start_datetime/end_datetime are set, and
+    composites such as Planetary Computer's MODIS collections are published that
+    way. Regression for #472: these items failed with
+    ``'NoneType' object has no attribute 'isoformat'``.
+    """
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    items = [
+        Item.from_dict(
+            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+        ),
+        Item.from_dict(_stac_item_dict("2013-02-18T00:00:00Z")),
+    ]
+    monkeypatch.setattr(LoadCollection, "_get_items", lambda self, *a, **k: items)
+
+    backend = stacApiBackend(url="https://example.com")
+    loader = LoadCollection(stac_api=backend)
+    stack = loader.load_collection(
+        id="test",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        width=64,
+        height=64,
+    )
+
+    assert stack.timestamps() == [datetime(2013, 2, 10), datetime(2013, 2, 18)]
+
+
+# A triangle over the lower-left half of the [0, 0, 1, 1] square.
+_TRIANGLE = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [0, 1], [0, 0]]],
+            },
+        }
+    ],
+}
+
+
+def test_load_collection_geojson_spatial_extent(monkeypatch):
+    """A GeoJSON spatial_extent loads its bounding box and masks outside the polygons.
+
+    Regression for #445: the parameter accepted only a bounding box.
+    """
+    import numpy
+
+    monkeypatch.setattr("titiler.openeo.reader.SimpleSTACReader", MockReader)
+
+    captured = {}
+
+    def mock_get_items(self, *args, spatial_extent=None, **kwargs):
+        captured["search_extent"] = spatial_extent
+        return [Item.from_dict(_stac_item_dict("2021-01-01T00:00:00Z"))]
+
+    def mock_mosaic_reader(items, reader, bbox, **kwargs):
+        captured["read_bbox"] = list(bbox)
+        return ImageData(
+            numpy.ma.ones((1, 10, 10), dtype="float32"),
+            crs=kwargs["dst_crs"],
+            bounds=tuple(bbox),
+        ), None
+
+    monkeypatch.setattr(LoadCollection, "_get_items", mock_get_items)
+    monkeypatch.setattr("titiler.openeo.stacapi.mosaic_reader", mock_mosaic_reader)
+
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    stack = loader.load_collection(
+        id="test", spatial_extent=_TRIANGLE, width=10, height=10, target_crs=4326
+    )
+
+    search_extent = captured["search_extent"]
+    assert isinstance(search_extent, BoundingBox)
+    assert (
+        search_extent.west,
+        search_extent.south,
+        search_extent.east,
+        search_extent.north,
+    ) == (0, 0, 1, 1)
+    # Lazy: nothing is read before the slice is used.
+    assert "read_bbox" not in captured
+
+    img = stack.first
+    assert captured["read_bbox"] == [0, 0, 1, 1]
+    mask = numpy.ma.getmaskarray(img.array)[0]
+    # Pixel centres below the diagonal are inside the triangle.
+    assert not mask[9, 0]
+    assert mask[0, 9]
+    assert mask[numpy.triu_indices(10, k=1)].all()
+    assert not mask[numpy.tril_indices(10, k=-1)].any()
+
+
+@pytest.mark.parametrize(
+    "geojson",
+    [
+        {"type": "Point", "coordinates": [0, 0]},
+        {"type": "FeatureCollection", "features": []},
+        {"type": "Polygon", "coordinates": []},
+    ],
+)
+def test_load_collection_geojson_spatial_extent_invalid(monkeypatch, geojson):
+    """A GeoJSON without Polygon or MultiPolygon geometry is an invalid parameter."""
+    from titiler.openeo.errors import ProcessParameterInvalid
+
+    monkeypatch.setattr(
+        LoadCollection,
+        "_get_items",
+        lambda self, *a, **k: pytest.fail("no search for an invalid extent"),
+    )
+    loader = LoadCollection(stac_api=stacApiBackend(url="https://example.com"))
+    with pytest.raises(ProcessParameterInvalid, match="spatial_extent"):
+        loader.load_collection(id="test", spatial_extent=geojson)
+
+
+@pytest.mark.parametrize(
+    "value,expected_type",
+    [
+        ({"west": 0, "south": 0, "east": 1, "north": 1}, BoundingBox),
+        (_TRIANGLE, dict),
+    ],
+)
+def test_spatial_extent_parameter_reference(value, expected_type):
+    """A bounding box from a parameter becomes a BoundingBox; GeoJSON stays a dict."""
+    from typing import Any, Dict, Optional, Union
+
+    from openeo_pg_parser_networkx.pg_schema import ParameterReference
+
+    from titiler.openeo.processes.implementations.core import process
+
+    @process
+    def load(spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None):
+        return spatial_extent
+
+    result = load(
+        spatial_extent=ParameterReference(from_parameter="extent"),
+        named_parameters={"extent": value},
+    )
+    assert isinstance(result, expected_type)
+
+
+def test_load_stac_geojson_spatial_extent_single_item(monkeypatch):
+    """load_stac on a single item reads the bounding box and masks outside the polygons."""
+    import numpy
+
+    monkeypatch.setattr(
+        LoadStac,
+        "_load_stac_object",
+        lambda self, url: Item.from_dict(_stac_item_dict("2021-01-01T00:00:00Z")),
+    )
+
+    captured = {}
+
+    def mock_reader(item, bbox, **kwargs):
+        captured["read_bbox"] = list(bbox)
+        return ImageData(
+            numpy.ma.ones((1, 10, 10), dtype="float32"),
+            crs=kwargs["dst_crs"],
+            bounds=tuple(bbox),
+        )
+
+    monkeypatch.setattr("titiler.openeo.stacapi._reader", mock_reader)
+
+    stack = LoadStac().load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=_TRIANGLE,
+        width=10,
+        height=10,
+    )
+
+    img = stack.first
+    assert captured["read_bbox"] == [0, 0, 1, 1]
+    mask = numpy.ma.getmaskarray(img.array)[0]
+    assert mask[numpy.triu_indices(10, k=1)].all()
+    assert not mask[numpy.tril_indices(10, k=-1)].any()
+
+
+def test_load_stac_temporal_filter_keeps_range_only_items(monkeypatch):
+    """The temporal filter falls back to ``start_datetime`` when ``datetime`` is null.
+
+    Regression for #472: such items were silently dropped, so load_stac raised
+    NoDataAvailable for an extent that covers them.
+    """
+    import numpy
+
+    monkeypatch.setattr(
+        LoadStac,
+        "_load_stac_object",
+        lambda self, url: Item.from_dict(
+            _range_only_item_dict("2013-02-10T00:00:00Z", "2013-02-17T23:59:59Z")
+        ),
+    )
+    monkeypatch.setattr(
+        "titiler.openeo.stacapi._reader",
+        lambda item, bbox, **kwargs: ImageData(
+            numpy.ma.ones((1, 10, 10), dtype="float32"),
+            crs=kwargs["dst_crs"],
+            bounds=tuple(bbox),
+        ),
+    )
+
+    stack = LoadStac().load_stac(
+        url="https://example.com/item.json",
+        spatial_extent=BoundingBox(west=0, south=0, east=1, north=1, crs="EPSG:4326"),
+        temporal_extent=TemporalInterval(["2013-02-01", "2013-03-01"]),
+        width=10,
+        height=10,
+    )
+
+    assert stack.timestamps() == [datetime(2013, 2, 10)]
+
+
+def test_load_stac_passes_geojson_to_collection(monkeypatch):
+    """For a Collection or Catalog, load_collection gets the GeoJSON itself."""
+    captured = {}
+
+    def mock_handle(self, stac_obj, spatial_extent=None, **kwargs):
+        captured["spatial_extent"] = spatial_extent
+        return "stack"
+
+    import pystac
+
+    collection = pystac.Collection(
+        id="c",
+        description="d",
+        extent=pystac.Extent(
+            pystac.SpatialExtent([[0, 0, 1, 1]]),
+            pystac.TemporalExtent([[None, None]]),
+        ),
+    )
+    monkeypatch.setattr(LoadStac, "_load_stac_object", lambda self, url: collection)
+    monkeypatch.setattr(LoadStac, "_handle_collection_or_catalog", mock_handle)
+
+    LoadStac().load_stac(url="https://example.com/c.json", spatial_extent=_TRIANGLE)
+    assert captured["spatial_extent"] is _TRIANGLE
+
+
+def test_load_stac_geojson_spatial_extent_invalid(monkeypatch):
+    """An invalid GeoJSON fails before the STAC object is read, and names load_stac."""
+    from titiler.openeo.errors import ProcessParameterInvalid
+
+    monkeypatch.setattr(
+        LoadStac,
+        "_load_stac_object",
+        lambda self, url: pytest.fail("no read for an invalid extent"),
+    )
+    with pytest.raises(ProcessParameterInvalid, match="'load_stac'"):
+        LoadStac().load_stac(
+            url="https://example.com/item.json",
+            spatial_extent={"type": "Point", "coordinates": [0, 0]},
+        )

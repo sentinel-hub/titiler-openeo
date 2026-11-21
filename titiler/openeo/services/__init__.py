@@ -18,6 +18,13 @@ def get_store(store_uri: str) -> ServicesStore:
     """Return Service Store."""
     parsed = urlparse(store_uri)
 
+    # The scheme decides first: `sqlite:///services.db` is SQLite, whatever the
+    # file suffix looks like.
+    if _is_sqlalchemy_scheme(parsed):
+        from .sqlalchemy import SQLAlchemyStore  # noqa
+
+        return SQLAlchemyStore(store=store_uri)
+
     if parsed.path.endswith(".json"):
         from .local import LocalServiceStore, load_local_store_data  # noqa
 
@@ -29,17 +36,17 @@ def get_store(store_uri: str) -> ServicesStore:
 
         return DuckDBStore(store=store_uri)
 
-    if _is_sqlalchemy_scheme(parsed):
-        from .sqlalchemy import SQLAlchemyStore  # noqa
-
-        return SQLAlchemyStore(store=store_uri)
-
     raise ValueError(f"Couldn't load {store_uri}")
 
 
 def get_udp_store(store_uri: str) -> UdpStore:
     """Return UDP Store."""
     parsed = urlparse(store_uri)
+
+    if _is_sqlalchemy_scheme(parsed):
+        from .sqlalchemy import SQLAlchemyUdpStore  # noqa
+
+        return SQLAlchemyUdpStore(store=store_uri)
 
     if parsed.path.endswith(".json"):
         from .local import LocalUdpStore, load_local_store_data  # noqa
@@ -51,11 +58,6 @@ def get_udp_store(store_uri: str) -> UdpStore:
         from .duckdb import DuckDBUdpStore  # noqa
 
         return DuckDBUdpStore(store=store_uri)
-
-    if _is_sqlalchemy_scheme(parsed):
-        from .sqlalchemy import SQLAlchemyUdpStore  # noqa
-
-        return SQLAlchemyUdpStore(store=store_uri)
 
     raise ValueError(f"Couldn't load UDP store {store_uri}")
 

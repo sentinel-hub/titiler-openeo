@@ -50,11 +50,17 @@ from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.types import BBox
 from rio_tiler.utils import resize_array
 
+from .callbacks import call_reducer, recompute_each_call
 from .data_model import ImageRef, RasterStack, _normalize_to_naive_utc
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["aggregate_temporal", "apply_pixel_selection", "reduce_dimension"]
+__all__ = [
+    "aggregate_temporal",
+    "aggregate_temporal_period",
+    "apply_pixel_selection",
+    "reduce_dimension",
+]
 
 # Mapping of reducer function names to their corresponding PixelSelectionMethod names
 # This enables _reduce_temporal_dimension to use the efficient streaming approach
@@ -299,6 +305,8 @@ def apply_pixel_selection(
 def _reduce_temporal_dimension(
     data: RasterStack,
     reducer: Callable,
+    context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Reduce the temporal dimension of a RasterStack.
 
@@ -310,6 +318,7 @@ def _reduce_temporal_dimension(
     Args:
         data: A RasterStack with temporal dimension
         reducer: A reducer function to apply on the temporal dimension
+        context: Additional data to be passed to the reducer
 
     Returns:
         A RasterStack with a single reduced temporal result
@@ -325,7 +334,7 @@ def _reduce_temporal_dimension(
 
     # Note: The reducer will determine how much data it actually needs
     # Some reducers might be able to work with partial data
-    reduced_array = reducer(data=data)
+    reduced_array = call_reducer(reducer, data, context, named_parameters)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_array, dict):
@@ -441,6 +450,8 @@ def _determine_output_band_count(final_data: numpy.ndarray) -> int:
 def _reduce_spectral_dimension_stack(
     data: RasterStack,
     reducer: Callable,
+    context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> RasterStack:
     """Reduce the spectral dimension of a RasterStack.
 
@@ -453,6 +464,7 @@ def _reduce_spectral_dimension_stack(
         reducer: A reducer function to apply on the spectral dimension.
                  The reducer will be called ONCE with shape (bands, time, height, width)
                  and must reduce along axis 0 (bands).
+        context: Additional data to be passed to the reducer.
 
     Returns:
         A RasterStack with the spectral dimension reduced for each image
@@ -517,7 +529,7 @@ def _reduce_spectral_dimension_stack(
     # Input shape: (bands, time, height, width)
     # Expected output shape: (time, height, width) for full reduction
     #                    or: (reduced_bands, time, height, width) for partial reduction
-    reduced_data = reducer(data=transposed_data)
+    reduced_data = call_reducer(reducer, transposed_data, context, named_parameters)
 
     # Validate the reducer output - must NOT be a RasterStack or dict
     if isinstance(reduced_data, dict):
@@ -874,41 +886,6 @@ def _normalize_intervals(intervals: Any) -> List[List[Optional[str]]]:
     return [_interval_to_pair(iv) for iv in items]
 
 
-def _callback_results_cache(callback: Callable) -> Optional[Dict[Any, Any]]:
-    """Return the openEO executor's shared ``results_cache`` backing a callback.
-
-    The reducer/callback compiled by openeo_pg_parser_networkx is a
-    ``functools.partial(node_callable, ...)`` whose closure holds the
-    ``results_cache`` dict shared across the whole graph. We reach it so a process
-    that must invoke the callback more than once (e.g. ``aggregate_temporal``, once
-    per interval) can reset the callback's subgraph cache between calls — otherwise
-    the executor memoizes each node by id and every call returns the FIRST call's
-    result. Returns ``None`` if the structure can't be introspected (degrade
-    gracefully).
-    """
-    func = getattr(callback, "func", callback)  # unwrap functools.partial
-    freevars = getattr(getattr(func, "__code__", None), "co_freevars", ()) or ()
-    closure = getattr(func, "__closure__", None) or ()
-    for name, cell in zip(freevars, closure):
-        if name == "results_cache" and isinstance(cell.cell_contents, dict):
-            return cell.cell_contents
-    return None
-
-
-def _reset_results_cache(
-    cache: Optional[Dict[Any, Any]], baseline: Dict[Any, Any]
-) -> None:
-    """Reset a callback's shared results_cache to ``baseline`` (no-op if None).
-
-    Used to force a per-call recompute (e.g. ``aggregate_temporal`` per interval)
-    while preserving upstream cache entries captured in ``baseline``.
-    """
-    if cache is None:
-        return
-    cache.clear()
-    cache.update(baseline)
-
-
 def aggregate_temporal(
     data: RasterStack,
     intervals: Union[TemporalIntervals, List[List[Optional[str]]]],
@@ -975,15 +952,10 @@ def aggregate_temporal(
     if union_keys:
         data.prefetch(union_keys)
 
-    # The reducer is invoked once PER interval, but the executor memoizes each
-    # callback node in a results_cache SHARED across those calls. Without
-    # intervention every interval after the first returns the first interval's
-    # result (identical labels -> e.g. a grayscale composite instead of distinct
-    # per-period values). Snapshot the cache before any reduction and reset it to
-    # that state before each interval, so each recomputes on its own sub-stack
-    # while upstream entries are preserved (no re-reads).
-    reducer_cache = _callback_results_cache(reducer)
-    cache_baseline = dict(reducer_cache or {})
+    # The reducer is invoked once PER interval; without this every interval after
+    # the first returns the first interval's result (see callbacks.py). Wrap after
+    # the prefetch so upstream entries stay cached (no re-reads).
+    reducer = recompute_each_call(reducer)
 
     result_images: Dict[datetime, ImageData] = {}
 
@@ -1008,14 +980,8 @@ def aggregate_temporal(
             continue
 
         sub_stack = RasterStack.from_images(sub_images)
-        reducer_kwargs: Dict[str, Any] = {"data": sub_stack}
-        if context is not None:
-            reducer_kwargs["context"] = context
 
-        # Force this interval's reducer to recompute (see snapshot above).
-        _reset_results_cache(reducer_cache, cache_baseline)
-
-        reduced_array = _coerce_reduced_array(reducer(**reducer_kwargs))
+        reduced_array = _coerce_reduced_array(call_reducer(reducer, sub_stack, context))
 
         first_img = next(iter(sub_images.values()))
         result_images[output_key] = ImageData(
@@ -1031,11 +997,135 @@ def aggregate_temporal(
     return RasterStack.from_images(result_images)
 
 
+def _add_months(dt: datetime, months: int) -> datetime:
+    """Return the first day of the month ``months`` after the month of ``dt``."""
+    total = dt.year * 12 + (dt.month - 1) + months
+    return datetime(total // 12, total % 12 + 1, 1)
+
+
+def _period_start(ts: datetime, period: str) -> datetime:
+    """Return the start of the calendar period that contains ``ts``."""
+    day = datetime(ts.year, ts.month, ts.day)
+    if period == "hour":
+        return datetime(ts.year, ts.month, ts.day, ts.hour)
+    if period == "day":
+        return day
+    if period == "week":
+        return day - timedelta(days=day.weekday())  # ISO 8601 weeks start Monday
+    if period == "dekad":
+        return datetime(ts.year, ts.month, min((ts.day - 1) // 10, 2) * 10 + 1)
+    if period == "month":
+        return datetime(ts.year, ts.month, 1)
+    if period == "season":
+        # DJF, MAM, JJA, SON: December starts the season of the next year.
+        return _add_months(datetime(ts.year, ts.month, 1), -(ts.month % 3))
+    if period == "tropical-season":
+        # NDJFMA and MJJASO.
+        return _add_months(datetime(ts.year, ts.month, 1), -((ts.month - 5) % 6))
+    if period == "year":
+        return datetime(ts.year, 1, 1)
+    if period == "decade":
+        return datetime(ts.year - ts.year % 10, 1, 1)
+    if period == "decade-ad":
+        return datetime(ts.year - (ts.year - 1) % 10, 1, 1)
+    raise ValueError(f"Unsupported period '{period}'.")
+
+
+def _next_period(start: datetime, period: str) -> datetime:
+    """Return the start of the period after the one that starts at ``start``."""
+    if period == "hour":
+        return start + timedelta(hours=1)
+    if period == "day":
+        return start + timedelta(days=1)
+    if period == "week":
+        return start + timedelta(days=7)
+    if period == "dekad":
+        return start + timedelta(days=10) if start.day < 21 else _add_months(start, 1)
+    months = {
+        "month": 1,
+        "season": 3,
+        "tropical-season": 6,
+        "year": 12,
+        "decade": 120,
+        "decade-ad": 120,
+    }
+    return _add_months(start, months[period])
+
+
+def _period_intervals(
+    timestamps: List[datetime], period: str
+) -> List[List[Optional[str]]]:
+    """Return the contiguous period intervals from the first to the last timestamp.
+
+    Periods without data are included, so that the output dimension has a
+    label for each period of the extent (the reducer gives no-data for them).
+    """
+    start = _period_start(min(timestamps), period)
+    last = max(timestamps)
+    intervals: List[List[Optional[str]]] = []
+    while start <= last:
+        end = _next_period(start, period)
+        intervals.append([start.isoformat(), end.isoformat()])
+        start = end
+    return intervals
+
+
+def aggregate_temporal_period(
+    data: RasterStack,
+    period: Literal[
+        "hour",
+        "day",
+        "week",
+        "dekad",
+        "month",
+        "season",
+        "tropical-season",
+        "year",
+        "decade",
+        "decade-ad",
+    ],
+    reducer: Callable,
+    dimension: Optional[str] = None,
+    context: Optional[Any] = None,
+) -> RasterStack:
+    """Computes a temporal aggregation based on calendar hierarchies.
+
+    The periods are built from the period of the first timestamp to the period
+    of the last timestamp, then passed to :func:`aggregate_temporal`. Each
+    output label is the start of its period (for example ``2020-06-01`` for
+    the month of June 2020, or ``2019-12-01`` for the DJF season of 2020).
+
+    Args:
+        data: The source data cube.
+        period: The time intervals to aggregate: ``hour``, ``day``, ``week``
+            (ISO 8601), ``dekad``, ``month``, ``season``, ``tropical-season``,
+            ``year``, ``decade`` or ``decade-ad``.
+        reducer: A reducer to be applied for the values contained in each period.
+        dimension: The name of the temporal dimension for aggregation.
+        context: Additional data to be passed to the reducer.
+
+    Returns:
+        A new data cube with one temporal label per period.
+
+    Raises:
+        DimensionNotAvailable: If the specified dimension does not exist.
+    """
+    if not data:
+        raise ValueError("Expected a non-empty data cube")
+    if dimension is not None and dimension.lower() not in ["t", "temporal", "time"]:
+        raise DimensionNotAvailable(dimension)
+
+    # The dimension is checked above; the cube has a single temporal dimension.
+    intervals = _period_intervals(data.timestamps(), period)
+    return aggregate_temporal(data, intervals, reducer, context=context)
+
+
 def reduce_dimension(
     data: RasterStack,
     reducer: Callable,
     dimension: str,
     context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
 ) -> Union[RasterStack, ImageData]:
     """Applies a reducer to a data cube dimension by collapsing all the values along the specified dimension.
 
@@ -1044,6 +1134,9 @@ def reduce_dimension(
         reducer: A reducer function to apply on the specified dimension
         dimension: The name of the dimension over which to reduce
         context: Additional data to be passed to the reducer
+        named_parameters: Enclosing-scope parameters injected by the process
+                          executor; forwarded to the reducer so that it can use
+                          a parameter of the enclosing process graph.
 
     Returns:
         A data cube with the newly computed values, missing the given dimension
@@ -1057,12 +1150,14 @@ def reduce_dimension(
 
     # Handle temporal dimension
     if dim_lower in ["t", "temporal", "time"]:
-        return _reduce_temporal_dimension(data, reducer)
+        return _reduce_temporal_dimension(data, reducer, context, named_parameters)
 
     # Handle spectral dimension
     elif dim_lower in ["bands", "spectral"]:
         # Use unified stack reduction for both single and multi-image cases
-        return _reduce_spectral_dimension_stack(data, reducer)
+        return _reduce_spectral_dimension_stack(
+            data, reducer, context, named_parameters
+        )
 
     # Unsupported dimension
     else:

@@ -1,8 +1,24 @@
 """Stac API backend."""
 
+import logging
+from datetime import datetime
 from threading import Lock
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
+from urllib.parse import urljoin
 
+import numpy
 import pyproj
 import pystac
 from attrs import define, field
@@ -18,29 +34,45 @@ from pystac.extensions import datacube as dc
 from pystac.extensions import eo
 from pystac.extensions import item_assets as ia
 from pystac_client import Client
+from pystac_client.exceptions import APIError
 from pystac_client.stac_api_io import StacApiIO
-from rasterio.warp import transform_bounds
-from rio_tiler.constants import MAX_THREADS
-from rio_tiler.errors import TileOutsideBounds
+from rasterio.features import bounds as geometry_bounds
+from rio_tiler.errors import EmptyMosaicError, TileOutsideBounds
+from rio_tiler.models import ImageData
 from rio_tiler.mosaic.methods import PixelSelectionMethod
 from rio_tiler.mosaic.reader import mosaic_reader
 from rio_tiler.tasks import create_tasks
+from rio_tiler.types import AssetType
 from urllib3 import Retry
 
-from .bandsources import BAND_SOURCES, derive_bands
+from .assetbands import ResolvedAssetBand, asset_band_facts, resolve_asset_bands
+from .bandsources import BAND_SOURCES, derive_bands, describe_bands
+from .cancellation import raise_if_cancelled
 from .errors import (
     ItemsLimitExceeded,
     NoDataAvailable,
     OutputLimitExceeded,
+    ProcessParameterInvalid,
+    ResourceNotFound,
     STACLoadError,
     TemporalExtentEmpty,
     UnsupportedSTACObject,
 )
-from .processes.implementations.data_model import RasterStack
+from .processes.implementations.data_model import (
+    RasterStack,
+    _normalize_to_naive_utc,
+    compute_cutline_mask,
+)
+from .processes.implementations.spatial import _extract_geometries_from_mask
 from .processes.implementations.utils import _props_to_datetime, to_rasterio_crs
-from .reader import _estimate_output_dimensions, _reader
+from .reader import (
+    SimpleSTACReader,
+    _estimate_output_dimensions,
+    _item_datetime,
+    _reader,
+)
 from .settings import CacheSettings, ProcessingSettings, PySTACSettings
-from .signing import HrefSigner, SignerRule, get_href_signer
+from .signing import stamp_signer_key
 
 pystac_settings = PySTACSettings()
 cache_config = CacheSettings()
@@ -52,6 +84,176 @@ collections_cache: TTLCache = TTLCache(
 collection_cache: TTLCache = TTLCache(
     maxsize=cache_config.maxsize, ttl=cache_config.ttl
 )
+queryables_cache: TTLCache = TTLCache(
+    maxsize=cache_config.maxsize, ttl=cache_config.ttl
+)
+
+logger = logging.getLogger(__name__)
+
+#: Queryables that ``load_collection`` sets with its own arguments
+#: (``id``, ``spatial_extent`` and ``temporal_extent``).
+RESERVED_QUERYABLES = ("datetime", "geometry", "id")
+
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema"
+
+#: STAC API status codes that mean "no queryables for this collection".
+UNSUPPORTED_QUERYABLES_STATUS = (404, 405, 501)
+
+
+#: JSON Schema keywords whose value is a schema.
+_SCHEMA_KEYWORDS = frozenset(
+    {
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+#: JSON Schema keywords whose value is a list of schemas.
+_SCHEMA_LIST_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+#: JSON Schema keywords whose value is a map of name -> schema.
+_SCHEMA_MAP_KEYWORDS = frozenset(
+    {
+        "$defs",
+        "definitions",
+        "dependencies",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    }
+)
+
+
+def _absolutize_refs(schema: Any, base: str) -> Any:
+    """Return a copy of ``schema`` with relative ``$ref``/``$id`` made absolute.
+
+    The openEO endpoint sets its own ``$id`` on the schema, which changes the
+    base URI. Relative references must keep resolving against the STAC API.
+    ``base`` is the retrieval URL: a root ``$id`` is resolved against it once.
+    Nested ``$id`` values change the base for their sub-schema. Fragment-only
+    references (``#/...``) stay as they are: they point inside the document.
+
+    Only schema-valued keywords are traversed, so literal values (``const``,
+    ``enum``, ``default``, ``examples``, ...) are never changed.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    if isinstance(out.get("$id"), str):
+        base = urljoin(base, out["$id"])
+        out["$id"] = base
+    if isinstance(out.get("$ref"), str) and not out["$ref"].startswith("#"):
+        out["$ref"] = urljoin(base, out["$ref"])
+
+    for key, value in out.items():
+        if key in _SCHEMA_KEYWORDS:
+            if isinstance(value, list):  # draft-07 tuple form of ``items``
+                out[key] = [_absolutize_refs(v, base) for v in value]
+            else:
+                out[key] = _absolutize_refs(value, base)
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [_absolutize_refs(v, base) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            # Non-schema values (e.g. draft-07 array ``dependencies``) are kept.
+            out[key] = {k: _absolutize_refs(v, base) for k, v in value.items()}
+    return out
+
+
+def _rewrite_fragment_refs(schema: Any, mapping: Dict[str, str], used: Set[str]) -> Any:
+    """Return a copy of ``schema`` with fragment ``$ref`` prefixes replaced.
+
+    ``mapping`` maps an old JSON pointer fragment (``#/properties/datetime``) to
+    a new one. The keys of ``mapping`` that are referenced are added to
+    ``used``. Sub-schemas with their own ``$id`` are a new resource, so their
+    fragments are not changed.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    out = dict(schema)
+    ref = out.get("$ref")
+    if isinstance(ref, str):
+        for old, new in mapping.items():
+            if ref == old or ref.startswith(old + "/"):
+                out["$ref"] = new + ref[len(old) :]
+                used.add(old)
+                break
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, dict) and "$id" in value:
+            return value
+        return _rewrite_fragment_refs(value, mapping, used)
+
+    for key, value in out.items():
+        if key in _SCHEMA_KEYWORDS:
+            out[key] = (
+                [walk(v) for v in value] if isinstance(value, list) else walk(value)
+            )
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(value, list):
+            out[key] = [walk(v) for v in value]
+        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(value, dict):
+            out[key] = {k: walk(v) for k, v in value.items()}
+    return out
+
+
+def _remove_reserved_queryables(schema: Dict) -> Dict:
+    """Remove the reserved queryables from ``schema['properties']``.
+
+    A kept queryable can reference a removed one (for example ``start_datetime``
+    with ``$ref: "#/properties/datetime"``). The referenced definitions move to
+    ``$defs`` and the references are rewritten, so that no reference dangles.
+    """
+    properties = schema["properties"]
+    removed = {
+        name: properties[name] for name in RESERVED_QUERYABLES if name in properties
+    }
+
+    out = dict(schema)
+    out["properties"] = {
+        name: definition
+        for name, definition in properties.items()
+        if name not in removed
+    }
+    if isinstance(out.get("required"), list):
+        out["required"] = [name for name in out["required"] if name not in removed]
+    if not removed:
+        return out
+
+    defs = dict(out.get("$defs") or {})
+    mapping: Dict[str, str] = {}
+    for name in removed:
+        key = name if name not in defs else f"reserved-{name}"
+        mapping[f"#/properties/{name}"] = f"#/$defs/{key}"
+
+    # Move the referenced definitions. Repeat, because a moved definition can
+    # reference another removed one.
+    moved: Set[str] = set()
+    while True:
+        used: Set[str] = set()
+        _rewrite_fragment_refs({**out, "$defs": defs}, mapping, used)
+        new = used - moved
+        if not new:
+            break
+        for old in new:
+            name = old.removeprefix("#/properties/")
+            defs[mapping[old].removeprefix("#/$defs/")] = removed[name]
+        moved |= new
+
+    if not moved:
+        return out
+
+    out["$defs"] = defs
+    return _rewrite_fragment_refs(out, {old: mapping[old] for old in moved}, set())
+
 
 #: Media types that indicate a packaged archive rather than a single raster
 #: asset. CDSE's Sentinel-1 GRD ``Product`` asset has role ``data`` and media
@@ -59,6 +261,163 @@ collection_cache: TTLCache = TTLCache(
 #: a spectral band even though it is not a raster (docs/adr/0002-band-sources.md
 #: S1.2, consequence 4).
 _ARCHIVE_MEDIA_TYPES = frozenset({"application/zip"})
+
+
+#: Spectral fields of a band, by their eo extension v1.x names.
+_SPECTRAL_FIELDS = ("common_name", "center_wavelength", "full_width_half_max")
+
+
+def _is_data_asset(media_type: Optional[str], roles: Optional[Sequence[str]]) -> bool:
+    """Whether an asset is read as raster data, i.e. can give cube bands."""
+    return "data" in (roles or ()) and media_type not in _ARCHIVE_MEDIA_TYPES
+
+
+def _band_dimension_values(collection: Dict) -> List[str]:
+    """The values of the first ``bands`` dimension of ``cube:dimensions``."""
+    dimensions = collection.get("cube:dimensions")
+    if not isinstance(dimensions, dict):
+        return []
+    for dimension in dimensions.values():
+        if isinstance(dimension, dict) and dimension.get("type") == "bands":
+            return list(dimension.get("values") or [])
+    return []
+
+
+def _band_fields(band: Mapping[str, Any]) -> Dict[str, Any]:
+    """The metadata of one STAC band object (STAC 1.1 ``bands`` or eo v1.x
+    ``eo:bands``), under the eo v1.x names plus ``description``/``gsd``."""
+    fields: Dict[str, Any] = {}
+    for k in _SPECTRAL_FIELDS:
+        value = band.get(f"eo:{k}")
+        if value is None:
+            value = band.get(k)
+        if value is not None:
+            fields[k] = value
+    for k in ("description", "gsd"):
+        if band.get(k) is not None:
+            fields[k] = band[k]
+    return fields
+
+
+def _upstream_band_fields(summaries: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Band metadata from the upstream ``summaries.bands``/``summaries.eo:bands``,
+    by band name."""
+    upstream: Dict[str, Dict[str, Any]] = {}
+    for key in ("bands", "eo:bands"):
+        for band in summaries.get(key) or []:
+            if isinstance(band, dict) and band.get("name"):
+                fields = upstream.setdefault(band["name"], {})
+                for k, v in _band_fields(band).items():
+                    fields.setdefault(k, v)
+    return upstream
+
+
+def _summary_entries(
+    name: str, fields: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """One band as a ``summaries.bands`` (STAC 1.1) entry and as a
+    ``summaries.eo:bands`` (eo extension v1.x) entry."""
+    entry: Dict[str, Any] = {"name": name}
+    eo_entry: Dict[str, Any] = {"name": name}
+    if "description" in fields:
+        entry["description"] = eo_entry["description"] = fields["description"]
+    for k in _SPECTRAL_FIELDS:
+        if k in fields:
+            entry[f"eo:{k}"] = eo_entry[k] = fields[k]
+    if "gsd" in fields:
+        entry["gsd"] = fields["gsd"]
+    return entry, eo_entry
+
+
+def _asset_band_fields(asset: Dict[str, Any]) -> Dict[str, Any]:
+    """Band metadata for a band that is an ``item_assets`` key."""
+    asset_bands = asset.get("bands") or asset.get("eo:bands") or []
+    # The spectral fields of a band apply to the asset only when it holds
+    # exactly one band; a composite (e.g. a true-colour TCI) gets none.
+    fields = _band_fields(asset_bands[0]) if len(asset_bands) == 1 else {}
+    description = asset.get("description") or asset.get("title")
+    if description:
+        fields["description"] = description
+    if "gsd" not in fields and asset.get("gsd") is not None:
+        fields["gsd"] = asset["gsd"]
+    return fields
+
+
+def _inner_band_fields(
+    resolved: ResolvedAssetBand,
+    asset: Dict[str, Any],
+    item_assets: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Band metadata for a band inside a multi-band asset.
+
+    The description always names the asset. Planetary Computer's ``visual``
+    asset, for example, declares its bands as ``B04``/``B03``/``B02`` with
+    the spectral metadata of those bands, but holds an 8-bit true-colour
+    rendering of them: ``visual_red`` is not the ``B04`` asset.
+    """
+    fields = _band_fields(resolved.metadata)
+    if "gsd" not in fields and asset.get("gsd") is not None:
+        fields["gsd"] = asset["gsd"]
+
+    raw_name = resolved.metadata.get("name")
+    text = f"Band '{resolved.band_name}'"
+    if raw_name and raw_name != resolved.band_name:
+        text += f" (STAC name '{raw_name}')"
+    text += f" of the multi-band asset '{resolved.asset_key}'"
+    asset_label = asset.get("title") or asset.get("description")
+    if asset_label:
+        text += f" ({asset_label})"
+    data_type = resolved.metadata.get("data_type")
+    if data_type:
+        text += f", data type {data_type}"
+    text += "."
+    for other in (raw_name, resolved.band_name):
+        if other and other != resolved.asset_key and other in item_assets:
+            text += f" It is not the '{other}' asset."
+            break
+    if fields.get("description"):
+        text = f"{fields['description']}. {text}"
+    fields["description"] = text
+    return fields
+
+
+def _geojson_spatial_extent(
+    geojson: Dict[str, Any],
+    process_id: str,
+) -> Tuple[BoundingBox, List[Dict[str, Any]]]:
+    """Return the bounding box and the polygons of a GeoJSON spatial extent.
+
+    openEO `load_collection` and `load_stac`: the data is loaded for the
+    bounding box of the geometries, and the pixels outside the polygons are set
+    to no data. GeoJSON coordinates are in EPSG:4326. Empty geometries are
+    ignored.
+    """
+    try:
+        geometries = _extract_geometries_from_mask(geojson)
+    except ValueError as e:
+        raise ProcessParameterInvalid(
+            f"Parameter 'spatial_extent' in process '{process_id}': {e}"
+        ) from e
+
+    geometries = [geom for geom in geometries if geom.get("coordinates")]
+    if not geometries:
+        raise ProcessParameterInvalid(
+            f"Parameter 'spatial_extent' in process '{process_id}': "
+            "the GeoJSON contains no Polygon or MultiPolygon geometry."
+        )
+
+    west, south, east, north = zip(*(geometry_bounds(geom) for geom in geometries))
+    bbox = BoundingBox(
+        west=min(west), south=min(south), east=max(east), north=max(north)
+    )
+    return bbox, geometries
+
+
+def _mask_outside_polygons(img: ImageData, polygons: List[Dict[str, Any]]) -> ImageData:
+    """Set the pixels whose centre is outside the polygons to no data."""
+    outside = compute_cutline_mask(polygons, img.width, img.height, img.bounds, img.crs)
+    img.array[:, outside] = numpy.ma.masked
+    return img
 
 
 @define
@@ -113,72 +472,99 @@ class stacApiBackend:
 
     def _fix_collection(self, collection: Dict) -> None:
         self._normalize_summaries(collection)
-        self._add_band_summaries(collection)
+        self._sync_band_summaries(collection)
         return
 
     @staticmethod
-    def _add_band_summaries(collection: Dict) -> None:
-        """Populate summaries.bands from item_assets band metadata.
+    def _sync_band_summaries(collection: Dict) -> None:
+        """Rebuild summaries.bands and summaries.eo:bands from cube:dimensions.
 
-        openEO Studio's band parser currently only reads summaries.bands
-        (rich per-band objects); it does not yet fall back to the datacube
-        extension's cube:dimensions bands dimension that ``getdimensions``
-        produces below. Until that parser fix lands
-        (https://github.com/developmentseed/openeo-studio/pull/103), derive
-        the same per-band objects here from item_assets band metadata, so
-        collections with no pre-existing summaries.bands still show their
-        bands in the UI.
+        openEO API 1.3.0 makes ``cube:dimensions`` required and its band
+        dimension the list of band names; the band fields in ``summaries``
+        must describe the same bands, in the same order. Clients rely on
+        this: openEO Studio and the openEO Web Editor take their band picker
+        from ``summaries.bands``, and the openEO Python client compares
+        ``summaries.eo:bands`` with ``cube:dimensions`` (issue #440).
 
-        Each item_asset becomes exactly one summaries.bands entry, named
-        after its item_assets key (e.g. "B02_10m", "B02_20m", "TCI_10m") --
-        the same identifier already used for the cube:dimensions "spectral"
-        values in ``getdimensions`` below. Asset keys are unique by
-        construction, so every asset shows up (including the same physical
-        band published at several resolutions) without name collisions.
+        The band dimension (built by ``getdimensions``, or published upstream)
+        is the single source of truth. Both summaries get exactly one entry
+        per band-dimension value, with the metadata that exists for it --
+        resolved with the same precedence as the read path
+        (``SimpleSTACReader._get_asset_info``):
+
+        1. an ``item_assets`` key, or the common name of a single-band asset:
+           the asset's title/description and gsd, plus the spectral fields of
+           its band if it has exactly one;
+        2. a band inside a multi-band asset (titiler/openeo/assetbands.py):
+           that band's own metadata, and a description that names the asset;
+        3. a band derived by a band source (docs/adr/0002-band-sources.md):
+           the band source's description.
+
+        Upstream ``summaries.eo:bands``/``summaries.bands`` entries fill
+        missing fields, matched by name only: they never decide the list.
+        A collection without a band dimension is left unchanged.
+
+        ``summaries.bands`` uses the STAC 1.1 field names
+        (``eo:common_name``, ...); ``summaries.eo:bands`` uses the eo
+        extension v1.x shape (``common_name``, ...).
         """
+        band_names = _band_dimension_values(collection)
+        if not band_names:
+            return
+
         summaries = collection.get("summaries")
         if not isinstance(summaries, dict):
             summaries = {}
             collection["summaries"] = summaries
-        if summaries.get("bands"):
-            return
 
-        item_assets = collection.get("item_assets") or {}
-        band_summaries: List[Dict] = []
-        for key, asset in item_assets.items():
-            asset_bands = asset.get("eo:bands") or asset.get("bands")
-            if not asset_bands:
-                continue
+        item_assets = {
+            key: asset
+            for key, asset in (collection.get("item_assets") or {}).items()
+            if isinstance(asset, dict)
+        }
+        data_assets = {
+            key: asset
+            for key, asset in item_assets.items()
+            if _is_data_asset(asset.get("type"), asset.get("roles"))
+        }
+        inner_bands = resolve_asset_bands(asset_band_facts(data_assets), item_assets)
+        derived = describe_bands(
+            collection.get("id") or "",
+            [(k, a.get("type"), a.get("roles") or []) for k, a in item_assets.items()],
+            BAND_SOURCES,
+        )
 
-            description = asset.get("description") or asset.get("title") or key
-            entry: Dict[str, Any] = {"name": key, "description": description}
+        upstream = _upstream_band_fields(summaries)
 
-            # Per-band spectral metadata (common name, wavelength, ...) only
-            # unambiguously applies to single-band assets; composite assets
-            # (e.g. a true-colour image with 3 component bands) skip it.
-            if len(asset_bands) == 1:
-                band = asset_bands[0]
-
-                common_name = band.get("eo:common_name") or band.get("common_name")
-                if common_name:
-                    entry["eo:common_name"] = common_name
-
-                center_wavelength = band.get("eo:center_wavelength") or band.get(
-                    "center_wavelength"
+        bands: List[Dict[str, Any]] = []
+        eo_bands: List[Dict[str, Any]] = []
+        for name in band_names:
+            if name in item_assets:
+                fields = _asset_band_fields(item_assets[name])
+            elif name in inner_bands and inner_bands[name].whole_asset:
+                key = inner_bands[name].asset_key
+                fields = _asset_band_fields(item_assets[key])
+                fields["description"] = (
+                    f"{fields['description']}. " if fields.get("description") else ""
+                ) + f"Common name of the '{key}' asset."
+            elif name in inner_bands:
+                resolved = inner_bands[name]
+                fields = _inner_band_fields(
+                    resolved, data_assets[resolved.asset_key], item_assets
                 )
-                if center_wavelength is not None:
-                    entry["eo:center_wavelength"] = center_wavelength
+            elif name in derived:
+                fields = {"description": derived[name]}
+            else:
+                fields = {}
+            for k, v in upstream.get(name, {}).items():
+                fields.setdefault(k, v)
 
-                fwhm = band.get("eo:full_width_half_max") or band.get(
-                    "full_width_half_max"
-                )
-                if fwhm is not None:
-                    entry["eo:full_width_half_max"] = fwhm
+            entry, eo_entry = _summary_entries(name, fields)
+            bands.append(entry)
+            eo_bands.append(eo_entry)
 
-            band_summaries.append(entry)
-
-        if band_summaries:
-            summaries["bands"] = band_summaries
+        summaries["bands"] = bands
+        summaries["eo:bands"] = eo_bands
 
     @staticmethod
     def _normalize_summaries(collection: Dict):
@@ -261,11 +647,28 @@ class stacApiBackend:
 
             band_names: Set[str] = set()
             asset_facts: List[Tuple[str, Optional[str], Sequence[str]]] = []
+            data_assets: Dict[str, Any] = {}
             for key, asset in collection.ext.item_assets.items():
                 roles = asset.roles or []
                 asset_facts.append((key, asset.media_type, roles))
-                if "data" in roles and asset.media_type not in _ARCHIVE_MEDIA_TYPES:
+                if _is_data_asset(asset.media_type, roles):
+                    # `.to_dict()`, not the `AssetDefinition` itself: it has no
+                    # `.extra_fields` (unlike `pystac.Asset`), so `bands` is
+                    # otherwise invisible to `assetbands.asset_band_facts`.
+                    data_assets[key] = asset.to_dict()
                     band_names.add(key)
+
+            # Assets publishing several bands at once advertise the bands, not
+            # the asset key -- see titiler/openeo/assetbands.py. Single-band and
+            # band-less assets are absent from this mapping and keep their key
+            # above, which is what stops existing catalogues being renamed.
+            inner_bands = resolve_asset_bands(
+                asset_band_facts(data_assets), (key for key, _, _ in asset_facts)
+            )
+            band_names.difference_update(
+                r.asset_key for r in inner_bands.values() if not r.whole_asset
+            )
+            band_names.update(inner_bands)
 
             # Bands derived from non-raster assets (e.g. Sentinel-1 GRD's
             # calibration/noise annotation XML) -- see
@@ -322,6 +725,60 @@ class stacApiBackend:
 
         return col_dict
 
+    @cached(  # type: ignore
+        queryables_cache,
+        key=lambda self, collection_id, **kwargs: hashkey(
+            self.url, collection_id, **kwargs
+        ),
+        lock=Lock(),
+    )
+    def get_queryables(self, collection_id: str, **kwargs) -> Dict:
+        """Return the queryables (JSON Schema) of a STAC Collection.
+
+        Proxies ``{stac_api}/collections/{collection_id}/queryables`` (STAC API
+        Filter extension). Returns a schema with no properties when the STAC API
+        does not support queryables for an existing collection. Raises
+        ``ResourceNotFound`` for an unknown collection. Other STAC API errors
+        are raised (and thus not cached).
+        """
+        if collection_id in self.exclude_collections:
+            raise ValueError(f"Collection {collection_id} is not available.")
+
+        url = f"{self.url.rstrip('/')}/collections/{collection_id}/queryables"
+        try:
+            queryables = self.client._stac_io.read_json(url)
+        except APIError as e:
+            if getattr(e, "status_code", None) not in UNSUPPORTED_QUERYABLES_STATUS:
+                raise
+            self._ensure_collection_exists(collection_id)
+            logger.debug("No queryables for collection %s: %s", collection_id, e)
+            queryables = None
+
+        if not isinstance(queryables, dict) or not isinstance(
+            queryables.get("properties"), dict
+        ):
+            queryables = {"additionalProperties": False, "properties": {}}
+
+        queryables = _absolutize_refs(queryables, url)
+
+        queryables = _remove_reserved_queryables(queryables)
+
+        queryables.setdefault("$schema", JSON_SCHEMA_DIALECT)
+        queryables.setdefault("type", "object")
+        queryables.setdefault("title", f"Queryables for {collection_id}")
+        queryables.setdefault("additionalProperties", True)
+
+        return queryables
+
+    def _ensure_collection_exists(self, collection_id: str) -> None:
+        """Raise ResourceNotFound when the STAC API does not know the collection."""
+        try:
+            self.get_collection(collection_id)
+        except APIError as e:
+            if getattr(e, "status_code", None) == 404:
+                raise ResourceNotFound("Collection", collection_id) from e
+            raise
+
     def get_items(
         self,
         collections: List[str],
@@ -365,25 +822,24 @@ class LoadCollection:
 
     stac_api: stacApiBackend = field()
 
-    #: Href-signing rules for this deployment's catalogue, injected by
-    #: `main.py` rather than read from a module global so this class stays
-    #: constructible in tests. Empty -- the default -- means every href is
-    #: opened exactly as the catalogue published it
-    #: (docs/adr/0005-asset-href-signing.md S2.2).
-    signer_rules: Sequence[SignerRule] = field(factory=tuple)
+    #: Which signer this deployment's catalogue needs, injected by `main.py`
+    #: rather than read from a module global so this class stays constructible
+    #: in tests. `None` -- the default -- means every href is opened exactly as
+    #: the catalogue published it (docs/adr/0005-asset-href-signing.md S2.2).
+    #:
+    #: Stamped onto every item this class retrieves rather than threaded down to
+    #: the readers: the readers are built deep inside the mosaic and run on
+    #: worker threads that no parameter reaches, and resolving the key at open
+    #: time is what keeps a short-lived credential fresh across retries.
+    signer_key: Optional[str] = field(default=None)
 
-    def _signer_for(
-        self, named_parameters: Optional[dict] = None
-    ) -> Optional[HrefSigner]:
-        """Build the href signer for the user this graph is running as.
-
-        The authenticated `User` arrives as the `_openeo_user` named parameter,
-        injected by `factory.py`'s executing endpoints. It is `None` for an
-        unauthenticated request, which is fine: the shipped signer ignores it
-        (ADR 0005 S2.5).
-        """
-        user = (named_parameters or {}).get("_openeo_user")
-        return get_href_signer(self.signer_rules, user)
+    #: The asset reader class every read and every dimension estimate of this
+    #: loader is built with. A backend that needs another reader (e.g. one that
+    #: routes Zarr media types to its own per-asset reader) subclasses
+    #: `SimpleSTACReader` and passes the subclass here, instead of copying
+    #: `_reader` or `load_collection` (issue #379, ADR 0011). `None` -- the
+    #: default -- means `SimpleSTACReader`, resolved at call time.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
 
     def _resolve_parameter_reference(
         self,
@@ -507,7 +963,14 @@ class LoadCollection:
             query_params["filter"] = filter_expr
             query_params["filter_lang"] = "cql2-json"
 
-        return self.stac_api.get_items(**query_params)
+        # The single funnel every `load_collection` read passes through, which
+        # is why the deployment's signing decision is applied here and nowhere
+        # below: from this point on an item carries what the read path needs
+        # (docs/adr/0005-asset-href-signing.md S2.2).
+        return [
+            stamp_signer_key(item, self.signer_key)
+            for item in self.stac_api.get_items(**query_params)
+        ]
 
     def _handle_comparison_operator(
         self,
@@ -815,10 +1278,105 @@ class LoadCollection:
 
         return cql2_filter
 
+    def _bands_to_assets(
+        self, bands: Optional[List[str]]
+    ) -> Optional[Sequence[AssetType]]:
+        """Turn the requested ``bands`` into what ``mosaic_reader`` reads as ``assets``.
+
+        The hook a backend overrides when its band notation carries reader
+        options (e.g. ``asset|bands=b04`` parsed into
+        ``{"name": "asset", "bands": ["b04"]}``). Return one entry per band.
+        The read and the resolution estimate use the result; ``bands`` itself
+        still names the output bands and is what the pixel limit counts. The
+        default is the identity -- a band name is an asset name (or a
+        derived/inner band `SimpleSTACReader` resolves).
+        """
+        return bands
+
+    def _date_task(
+        self,
+        date: str,
+        date_items: List[Item],
+        *,
+        bbox: List[float],
+        bounds_crs: Any,
+        output_crs: Any,
+        assets: Optional[Sequence[AssetType]],
+        width: int,
+        height: int,
+        tile_buffer: Optional[float],
+        polygons: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[Callable[[], ImageData], Dict[str, Any]]:
+        """One `RasterStack` task: the lazy mosaic of ``date_items`` and its metadata."""
+        mosaic_kwargs: Dict[str, Any] = {
+            "threads": 0,
+            "bounds_crs": bounds_crs,
+            "assets": assets,
+            "dst_crs": output_crs,
+            "width": width,
+            "height": height,
+            "buffer": float(tile_buffer) if tile_buffer is not None else None,
+            # Forwarded by mosaic_reader to `_reader`, which consumes it.
+            "reader_cls": self.reader_cls,
+        }
+
+        def task() -> ImageData:
+            # A new selector on each run: it holds the mosaic it builds, so one
+            # kept in the closure would keep the slice alive after
+            # `RasterStack.release()` and start a re-run (`map_tasks`) with
+            # the pixels of the run before.
+            #
+            # Not just a stylistic default: FirstMethod picks its per-pixel
+            # winner from masks alone, per band independently, and derived
+            # (band-source) bands have their mask forced to match their
+            # sibling raw band's (reader.py's mask-inheritance post-step,
+            # ADR 0002 §2.4). So within one item's contribution, DN and its
+            # calibration/noise LUT bands always share a winner here --
+            # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
+            # DN from one source item with LUT values from another. A
+            # value-driven method (Highest/Lowest) would not preserve that.
+            pixel_selection = PixelSelectionMethod["first"].value()
+            try:
+                img, _ = mosaic_reader(
+                    date_items,
+                    _reader,
+                    bbox,
+                    pixel_selection=pixel_selection,
+                    **mosaic_kwargs,
+                )
+            except EmptyMosaicError as e:
+                # Every item of this date was outside the bbox or all no-data.
+                # `RasterStack` skips `TileOutsideBounds` (its default allowed
+                # exception) with a warning, so one empty date drops out of the
+                # stack instead of failing the whole request.
+                raise TileOutsideBounds(
+                    f"No valid data found in bbox {bbox} for date {date}"
+                ) from e
+            if polygons:
+                # GeoJSON spatial extent: no data outside the polygons.
+                img = _mask_outside_polygons(img, polygons)
+            return img
+
+        # Footprints of the source items, for cutline mask computation.
+        geometries = [item.geometry for item in date_items if item.geometry is not None]
+        metadata = {
+            "id": date,
+            "datetime": _item_datetime(date_items[0]),
+            "geometry": geometries or None,
+            # The source items behind this date group's mosaic. Carried so
+            # processes that need per-item STAC metadata (asset hrefs,
+            # properties) can reach it -- notably `sar_backscatter`, whose
+            # calibration LUTs and GCP geometry are per source item. Retrieve
+            # via `RasterStack.get_source_items`, never by reaching into task
+            # metadata directly. These are `pystac.Item`s.
+            "items": date_items,
+        }
+        return task, metadata
+
     def load_collection(
         self,
         id: str,
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -833,7 +1391,9 @@ class LoadCollection:
 
         Args:
             id: Collection ID
-            spatial_extent: Bounding box for the output (coordinates in its own CRS)
+            spatial_extent: Bounding box for the output (coordinates in its own
+                CRS), or GeoJSON polygons: the data is loaded for their bounding
+                box and the pixels outside the polygons are set to no data.
             temporal_extent: Temporal filter
             bands: Band names to load
             properties: Metadata filters
@@ -843,6 +1403,12 @@ class LoadCollection:
             named_parameters: Named parameters for process graph evaluation
             target_crs: Target CRS for output. If None, uses native CRS from source images.
         """
+        polygons: Optional[List[Dict[str, Any]]] = None
+        if spatial_extent is not None and not isinstance(spatial_extent, BoundingBox):
+            spatial_extent, polygons = _geojson_spatial_extent(
+                spatial_extent, "load_collection"
+            )
+
         # Retrieve up to one item beyond the configured processing limit so the
         # guard below can detect genuine overflow. Without an explicit max_items
         # the STAC search silently caps at the first page (100, newest-first),
@@ -858,6 +1424,9 @@ class LoadCollection:
         )
         if not items:
             raise NoDataAvailable("There is no data available for the given extents.")
+
+        # The STAC search can be slow: stop here if the client went away.
+        raise_if_cancelled()
 
         # Check the items limit. Fail loudly when the extent genuinely contains
         # more items than allowed rather than silently truncating the result.
@@ -882,7 +1451,9 @@ class LoadCollection:
         if bands is None and items and items[0].assets:
             bands = list(items[0].assets.keys())[:1]  # Take the first asset as default
 
-        signer = self._signer_for(named_parameters)
+        # What is read for each band. The estimate looks up resolutions on
+        # these assets; `bands` still labels the output and the pixel limit.
+        assets = self._bands_to_assets(bands)
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
@@ -892,7 +1463,8 @@ class LoadCollection:
             width,
             height,
             target_crs=target_crs,
-            signer=signer,
+            reader_cls=self.reader_cls,
+            assets=assets,
         )
 
         # Extract values from the result
@@ -901,115 +1473,35 @@ class LoadCollection:
         bbox = dimensions["bbox"]
         bounds_crs = dimensions["bounds_crs"]
         output_crs = dimensions["crs"]
+        # `bbox` in `output_crs`: the RasterStack bounds, so the output GeoTIFF
+        # has coordinates in the correct CRS.
+        output_bbox = dimensions["output_bbox"]
 
-        # Reproject bbox from bounds_crs to output_crs for the RasterStack bounds
-        # This ensures the output GeoTIFF has coordinates in the correct CRS
-        if bounds_crs != output_crs:
-            output_bbox = list(
-                transform_bounds(bounds_crs, output_crs, *bbox, densify_pts=21)
-            )
-        else:
-            output_bbox = bbox
-
-        # Group items by date
-        items_by_date: dict[str, list[Item]] = {}
+        # One lazy task per distinct instant: the items sharing it are
+        # mosaicked together when the task runs. Grouped on the naive-UTC
+        # instant that `RasterStack` keys on, not the isoformat string: the
+        # same instant written with two UTC offsets is one date, not two
+        # tasks with one key.
+        items_by_date: Dict[datetime, List[Item]] = {}
         for item in items:
-            date = item.datetime.isoformat()
-            if date not in items_by_date:
-                items_by_date[date] = []
-            items_by_date[date].append(item)
+            instant = _normalize_to_naive_utc(_item_datetime(item))
+            items_by_date.setdefault(instant, []).append(item)
 
-        # Create lazy tasks for each date group
-        # Each task will call mosaic_reader when executed
-        def make_mosaic_task(
-            date_items: list[Item],
-            bbox: List[float],
-            bounds_crs: Any,
-            output_crs: Any,
-            bands: Optional[list[str]],
-            width: int,
-            height: int,
-            tile_buffer: Optional[float],
-            signer: Optional[HrefSigner],
-        ):
-            """Create a closure that loads data for a date group."""
-
-            def task():
-                # Build kwargs for mosaic_reader
-                mosaic_kwargs = {
-                    "threads": 0,
-                    # Consumed by `_reader`, not forwarded to `part()`. Captured
-                    # in this closure at graph-evaluation time, while the user
-                    # is still in scope -- the task itself runs lazily, and on
-                    # a worker thread that no request context reaches
-                    # (ADR 0005 S2.5).
-                    "signer": signer,
-                    "bounds_crs": bounds_crs,
-                    "assets": bands,
-                    "dst_crs": output_crs,
-                    "width": int(width) if width else width,
-                    "height": int(height) if height else height,
-                    "buffer": float(tile_buffer)
-                    if tile_buffer is not None
-                    else tile_buffer,
-                    # Not just a stylistic default: FirstMethod picks its per-pixel
-                    # winner from masks alone, per band independently, and derived
-                    # (band-source) bands have their mask forced to match their
-                    # sibling raw band's (reader.py's mask-inheritance post-step,
-                    # ADR 0002 §2.4). So within one item's contribution, DN and its
-                    # calibration/noise LUT bands always share a winner here --
-                    # sar_backscatter (ADR 0002 §2.6) relies on this to never mix
-                    # DN from one source item with LUT values from another. A
-                    # value-driven method (Highest/Lowest) would not preserve that.
-                    "pixel_selection": PixelSelectionMethod["first"].value(),
-                }
-
-                img, _ = mosaic_reader(
-                    date_items,
-                    _reader,
-                    bbox,
-                    **mosaic_kwargs,
-                )
-                return img
-
-            return task
-
-        # Build tasks list for RasterStack
-        tasks = []
-        for date, date_items in items_by_date.items():
-            task_fn = make_mosaic_task(
+        tasks = [
+            self._date_task(
+                _item_datetime(date_items[0]).isoformat(),
                 date_items,
-                bbox,
-                bounds_crs,
-                output_crs,
-                bands,
-                width,
-                height,
-                tile_buffer,
-                signer,
+                bbox=bbox,
+                bounds_crs=bounds_crs,
+                output_crs=output_crs,
+                assets=assets,
+                width=int(width),
+                height=int(height),
+                tile_buffer=tile_buffer,
+                polygons=polygons,
             )
-            # Collect all geometries from items for cutline mask computation (union of footprints)
-            geometries = [
-                item.geometry for item in date_items if item.geometry is not None
-            ]
-            tasks.append(
-                (
-                    task_fn,
-                    {
-                        "id": date,
-                        "datetime": date_items[0].datetime if date_items else None,
-                        "geometry": geometries if geometries else None,
-                        # The source items behind this date group's mosaic. Carried
-                        # so processes that need per-item STAC metadata (asset
-                        # hrefs, properties) can reach it -- notably
-                        # `sar_backscatter`, whose calibration LUTs and GCP
-                        # geometry are per source item. Retrieve via
-                        # `RasterStack.get_source_items`, never by reaching into
-                        # task metadata directly. These are `pystac.Item`s.
-                        "items": date_items,
-                    },
-                )
-            )
+            for date_items in items_by_date.values()
+        ]
 
         return RasterStack(
             tasks=tasks,
@@ -1026,17 +1518,17 @@ class LoadCollection:
 class LoadStac:
     """Backend Specific STAC loaders."""
 
-    #: See `LoadCollection.signer_rules`. `load_stac` reads a user-supplied
-    #: catalogue rather than the configured one, so a rule only fires when the
-    #: asset host matches -- the URL the user passed does not widen it.
-    signer_rules: Sequence[SignerRule] = field(factory=tuple)
+    #: See `LoadCollection.signer_key`. `load_stac` reads a user-supplied
+    #: catalogue rather than the configured one, so the stamp does not by itself
+    #: widen what gets signed: the signer it names still returns any href it has
+    #: nothing to add to untouched, so a URL the user passed cannot pull a
+    #: credential onto a host this deployment never meant to reach.
+    signer_key: Optional[str] = field(default=None)
 
-    def _signer_for(
-        self, named_parameters: Optional[dict] = None
-    ) -> Optional[HrefSigner]:
-        """Build the href signer for the user this graph is running as."""
-        user = (named_parameters or {}).get("_openeo_user")
-        return get_href_signer(self.signer_rules, user)
+    #: See `LoadCollection.reader_cls`. Forwarded to every read this class
+    #: makes, including the `LoadCollection` it delegates Collections and
+    #: Catalogs to.
+    reader_cls: Optional[Type[SimpleSTACReader]] = field(default=None)
 
     def _load_stac_object(self, url: str) -> pystac.STACObject:
         """Load a STAC object from a URL.
@@ -1058,7 +1550,7 @@ class LoadStac:
     def _handle_collection_or_catalog(
         self,
         stac_obj: Union[pystac.Collection, pystac.Catalog],
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -1085,11 +1577,13 @@ class LoadStac:
         """
         collection_id = stac_obj.id
         stac_api = stacApiBackend(url=stac_obj.get_root_link().href)
-        # The delegate inherits this instance's rules: signing is decided by the
-        # asset host, so handing off to a LoadCollection for a user-supplied
-        # catalogue must not silently drop the credential path.
+        # The delegate inherits this instance's signer and reader class: handing
+        # off to a LoadCollection for a user-supplied catalogue must not
+        # silently drop the credential path or the backend's reader.
         load_collection = LoadCollection(
-            stac_api=stac_api, signer_rules=self.signer_rules
+            stac_api=stac_api,
+            signer_key=self.signer_key,
+            reader_cls=self.reader_cls,
         )
 
         return load_collection.load_collection(
@@ -1131,7 +1625,8 @@ class LoadStac:
 
         filtered_items = []
         for item in items:
-            item_datetime = item.get("properties", {}).get("datetime")
+            props = item.get("properties", {})
+            item_datetime = props.get("datetime") or props.get("start_datetime")
             if not item_datetime:
                 continue
 
@@ -1179,18 +1674,17 @@ class LoadStac:
         width: Optional[int] = None,
         height: Optional[int] = None,
         tile_buffer: Optional[float] = None,
-        signer: Optional[HrefSigner] = None,
     ) -> RasterStack:
         """Process spatial extent and create tasks.
 
         Args:
-            items: List of STAC items
+            items: List of STAC items, already stamped with this deployment's
+                signer key by the caller
             spatial_extent: Bounding box to limit the data
             bands: Optional list of band names to include
             width: Optional width of the output image in pixels
             height: Optional height of the output image in pixels
             tile_buffer: Optional buffer around the tile in pixels
-            signer: Optional href signer, consumed by `_reader`
 
         Returns:
             A RasterStack containing the tasks
@@ -1207,10 +1701,13 @@ class LoadStac:
         projcrs = pyproj.crs.CRS(spatial_extent.crs or "epsg:4326")
         crs = to_rasterio_crs(projcrs)
 
+        # threads=0: lazy tasks. The RasterStack runs them in its own pool,
+        # where they see the cancel flag of the request. With threads > 1,
+        # create_tasks reads all items before it returns.
         tasks = create_tasks(
             _reader,
             items,
-            MAX_THREADS,
+            0,
             bbox,
             assets=bands,
             bounds_crs=crs,
@@ -1218,7 +1715,7 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-            signer=signer,
+            reader_cls=self.reader_cls,
         )
 
         return RasterStack(
@@ -1236,7 +1733,7 @@ class LoadStac:
     def load_stac(
         self,
         url: str,
-        spatial_extent: Optional[BoundingBox] = None,
+        spatial_extent: Optional[Union[BoundingBox, Dict[str, Any]]] = None,
         temporal_extent: Optional[TemporalInterval] = None,
         bands: Optional[list[str]] = None,
         properties: Optional[dict] = None,
@@ -1250,15 +1747,16 @@ class LoadStac:
 
         Args:
             url: URL to a static STAC catalog or a STAC API Collection
-            spatial_extent: Optional bounding box to limit the data
+            spatial_extent: Optional bounding box to limit the data, or GeoJSON
+                polygons: the data is loaded for their bounding box and the
+                pixels outside the polygons are set to no data.
             temporal_extent: Optional temporal interval to limit the data
             bands: Optional list of band names to include
             properties: Optional metadata properties to filter by
             width: Optional width of the output image in pixels
             height: Optional height of the output image in pixels
             tile_buffer: Optional buffer around the tile in pixels
-            named_parameters: Named parameters for process graph evaluation.
-                Carries `_openeo_user`, from which the href signer is built.
+            named_parameters: Named parameters for process graph evaluation
 
         Returns:
             A RasterStack containing the loaded data
@@ -1268,7 +1766,14 @@ class LoadStac:
             TemporalExtentEmpty: If the temporal extent is empty
             NotImplementedError: If spatial_extent is not provided
         """
-        signer = self._signer_for(named_parameters)
+        # Validate a GeoJSON extent before any read. A Collection or Catalog
+        # gets the GeoJSON itself: load_collection applies it.
+        bbox_extent: Optional[BoundingBox] = None
+        polygons: Optional[List[Dict[str, Any]]] = None
+        if isinstance(spatial_extent, BoundingBox):
+            bbox_extent = spatial_extent
+        elif spatial_extent is not None:
+            bbox_extent, polygons = _geojson_spatial_extent(spatial_extent, "load_stac")
 
         # Load the STAC catalog or item from the URL
         stac_obj = self._load_stac_object(url)
@@ -1287,9 +1792,11 @@ class LoadStac:
                 named_parameters=named_parameters,
             )
 
-        # For a single item, use it directly
+        # For a single item, use it directly. Stamped here because this path
+        # never passes through `LoadCollection._get_items`, which is where every
+        # other read gets its stamp.
         elif isinstance(stac_obj, pystac.Item):
-            items = [stac_obj.to_dict()]
+            items = [stamp_signer_key(stac_obj.to_dict(), self.signer_key)]
         else:
             raise UnsupportedSTACObject(str(type(stac_obj)))
 
@@ -1308,20 +1815,25 @@ class LoadStac:
             raise NoDataAvailable("There is no data available for the given extents.")
 
         # Process spatial extent
-        if spatial_extent:
-            return self._process_spatial_extent(
+        if bbox_extent:
+            stack = self._process_spatial_extent(
                 items,
-                spatial_extent,
+                bbox_extent,
                 bands=bands,
                 width=width,
                 height=height,
                 tile_buffer=tile_buffer,
-                signer=signer,
             )
+            if polygons:
+                # GeoJSON spatial extent: no data outside the polygons, lazily.
+                return stack.map_tasks(
+                    lambda key, realize: _mask_outside_polygons(realize(), polygons)
+                )
+            return stack
 
         # Estimate dimensions based on items and spatial extent
         dimensions = _estimate_output_dimensions(
-            items, spatial_extent, bands, width, height, signer=signer
+            items, bbox_extent, bands, width, height, reader_cls=self.reader_cls
         )
 
         # Extract values from the result
@@ -1340,6 +1852,6 @@ class LoadStac:
             width=int(width) if width else width,
             height=int(height) if height else height,
             buffer=float(tile_buffer) if tile_buffer is not None else tile_buffer,
-            signer=signer,
+            reader_cls=self.reader_cls,
         )
         return img

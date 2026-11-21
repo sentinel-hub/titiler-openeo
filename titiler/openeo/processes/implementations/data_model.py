@@ -1,5 +1,6 @@
 """TiTiler.openeo data models."""
 
+import copy
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -30,6 +31,8 @@ from rio_tiler.models import ImageData
 from rio_tiler.tasks import TaskType, filter_tasks
 from rio_tiler.types import BBox
 
+from ...cancellation import raise_if_cancelled, submit_in_context
+
 # https://openeo.org/documentation/1.0/developers/backends/performance.html#datacube-processing
 # Here it is important to note that openEO does not enforce or define how the datacube should look like on the backend.
 # The datacube can be a set of files, or arrays in memory distributed over a cluster.
@@ -37,6 +40,32 @@ from rio_tiler.types import BBox
 # NOTE: RasterStack is now a class, not a type alias. The class is defined below.
 
 T = TypeVar("T")
+
+
+def _label_bands(img: Any, band_names: Optional[List[str]]) -> Any:
+    """Return ``img`` with ``band_names`` as its band descriptions.
+
+    The stack's ``band_names`` are the labels of the band dimension (for
+    example the collection band names given to ``load_collection``). The images
+    a reader returns carry their own descriptions instead (rio-tiler names them
+    ``<asset>_b<index>``), and a process that rebuilds a stack from its images
+    reads the labels back from these descriptions. So every image that leaves
+    the stack must carry the stack labels.
+
+    The image is left as is when the number of labels does not match its band
+    count, and is copied (not changed in place) because the same ImageData can
+    be shared by other stacks.
+    """
+    if (
+        not isinstance(img, ImageData)
+        or not band_names
+        or len(band_names) != img.count
+        or list(img.band_descriptions or []) == list(band_names)
+    ):
+        return img
+    labelled = copy.copy(img)
+    labelled.band_descriptions = list(band_names)
+    return labelled
 
 
 def _normalize_to_naive_utc(dt: datetime) -> datetime:
@@ -357,6 +386,9 @@ class RasterStack(Dict[datetime, ImageData]):
         # ImageRef instances for deferred cutline computation
         self._image_refs: Dict[datetime, ImageRef] = {}
 
+        # Keys whose task raised an allowed exception (see `_drop`)
+        self._skipped: Set[datetime] = set()
+
         self._compute_metadata()
 
     @property
@@ -422,9 +454,18 @@ class RasterStack(Dict[datetime, ImageData]):
         # Sort by timestamp to ensure temporal ordering
         timestamp_task_pairs.sort(key=lambda x: x[0])
 
-        # Second pass: build keys and mappings in sorted order
+        # Second pass: build keys and mappings in sorted order. A key is listed
+        # once: when two tasks share a timestamp, only the last one is reachable
+        # (`_key_to_task_index`), so listing the key twice would show a date
+        # two times, or keep a copy after `_drop`.
         for timestamp, task_index, asset in timestamp_task_pairs:
-            self._keys.append(timestamp)
+            if timestamp in self._key_to_task_index:
+                logging.warning(
+                    "Two tasks share the timestamp '%s'; only the last one is kept.",
+                    timestamp,
+                )
+            else:
+                self._keys.append(timestamp)
             self._key_to_task_index[timestamp] = task_index
 
             # Create ImageRef if we have the required dimensions
@@ -437,17 +478,16 @@ class RasterStack(Dict[datetime, ImageData]):
                 task_fn, _ = self._tasks[task_index]
 
                 # Create a closure that captures the task_fn for this specific item
-                def make_task_executor(tf: Any) -> Callable[[], ImageData]:
+                def make_task_executor(
+                    key: datetime, tf: Any
+                ) -> Callable[[], ImageData]:
                     def executor() -> ImageData:
-                        if isinstance(tf, Future):
-                            return tf.result()
-                        else:
-                            return tf()
+                        return self._execute_task(key, tf)
 
                     return executor
 
                 self._image_refs[timestamp] = ImageRef.from_task(
-                    task_fn=make_task_executor(task_fn),
+                    task_fn=make_task_executor(timestamp, task_fn),
                     width=self._width,
                     height=self._height,
                     bounds=self._bounds,
@@ -470,6 +510,21 @@ class RasterStack(Dict[datetime, ImageData]):
         """
         self._execute_selected_tasks(set(keys))
 
+    def _drop(self, key: datetime) -> None:
+        """Take ``key`` out of the stack: its task raised an allowed exception.
+
+        The label leaves `keys()`, `len()` and `timestamps()`, so they stay
+        aligned with `values()` and `items()`, and a consumer never pairs a
+        label with the image of another date. `_key_to_task_index` keeps the
+        key: a stack built with `map_tasks` still finds the task, and skips it
+        in turn.
+        """
+        with self._cache_lock:
+            self._skipped.add(key)
+            if key in self._keys:
+                self._keys.remove(key)
+            self._image_refs.pop(key, None)
+
     def _execute_task(self, key: datetime, task_func: Any) -> ImageData:
         """Execute a single task and return the result.
 
@@ -478,12 +533,15 @@ class RasterStack(Dict[datetime, ImageData]):
             task_func: The task function or Future to execute
 
         Returns:
-            ImageData: The result of the task execution
+            ImageData: The result of the task execution, labelled with the
+            stack band names
         """
+        raise_if_cancelled()
         if isinstance(task_func, Future):
-            return task_func.result()
+            img = task_func.result()
         else:
-            return task_func()
+            img = task_func()
+        return _label_bands(img, self._band_names)
 
     def _execute_selected_tasks(self, selected_keys: Set[datetime]) -> None:
         """Execute tasks for the selected keys only with concurrent execution.
@@ -497,7 +555,9 @@ class RasterStack(Dict[datetime, ImageData]):
             keys_to_execute = [
                 key
                 for key in selected_keys
-                if key in self._key_to_task_index and key not in self._data_cache
+                if key in self._key_to_task_index
+                and key not in self._data_cache
+                and key not in self._skipped
             ]
 
         if not keys_to_execute:
@@ -510,28 +570,36 @@ class RasterStack(Dict[datetime, ImageData]):
 
         # Execute tasks concurrently
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            # Submit all tasks
+            # Submit all tasks. Each one runs in a copy of this context, so it
+            # sees the cancel flag of the request.
             key_to_future = {
-                key: executor.submit(self._execute_task, key, task_func)
+                key: submit_in_context(executor, self._execute_task, key, task_func)
                 for key, (task_func, _asset) in key_task_pairs
             }
 
             # Collect results as they complete
-            for key, future in key_to_future.items():
-                try:
-                    data = future.result()
-                    with self._cache_lock:
-                        self._data_cache[key] = data
-                except self._allowed_exceptions as e:
-                    # Log task failures for visibility in production scenarios
-                    logging.warning(
-                        "Task execution failed for key '%s' during concurrent execution: %s. "
-                        "This item will be skipped, which may result in incomplete data.",
-                        key,
-                        str(e),
-                    )
-                    # Skip failed tasks, don't cache them
-                    continue
+            try:
+                for key, future in key_to_future.items():
+                    try:
+                        data = future.result()
+                        with self._cache_lock:
+                            self._data_cache[key] = data
+                    except self._allowed_exceptions as e:
+                        # Log task failures for visibility in production scenarios
+                        logging.warning(
+                            "Task execution failed for key '%s' during concurrent execution: %s. "
+                            "This item will be skipped, which may result in incomplete data.",
+                            key,
+                            str(e),
+                        )
+                        # Skip failed tasks, don't cache them
+                        self._drop(key)
+                        continue
+            except BaseException:
+                # The result is lost (cancelled request or failed task): do not
+                # start the queued reads. Reads in progress complete.
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
 
     def _execute_all_tasks(self) -> None:
         """Execute all tasks and populate the cache (for backward compatibility)."""
@@ -540,7 +608,7 @@ class RasterStack(Dict[datetime, ImageData]):
         ):
             timestamp = self._timestamp_fn(asset)
             with self._cache_lock:
-                self._data_cache[timestamp] = data
+                self._data_cache[timestamp] = _label_bands(data, self._band_names)
 
     def timestamps(self) -> List[datetime]:
         """Return list of timestamps in the stack (keys are timestamps)."""
@@ -581,6 +649,8 @@ class RasterStack(Dict[datetime, ImageData]):
             if key in self._data_cache:
                 return self._data_cache[key]
 
+        if key in self._skipped:
+            raise KeyError(f"Task execution failed for key '{key}'")
         if key not in self._key_to_task_index:
             raise KeyError(f"Key '{key}' not found in RasterStack")
 
@@ -593,11 +663,13 @@ class RasterStack(Dict[datetime, ImageData]):
                 self._data_cache[key] = data
             return data
         except self._allowed_exceptions as err:
+            self._drop(key)
             raise KeyError(f"Task execution failed for key '{key}'") from err
 
     def __iter__(self) -> Any:
         """Iterate over the keys of the RasterStack."""
-        return iter(self._keys)
+        # A copy: reading a slice can `_drop` its key during the iteration.
+        return iter(list(self._keys))
 
     def __len__(self) -> int:
         """Return the number of items in the RasterStack."""
@@ -608,8 +680,12 @@ class RasterStack(Dict[datetime, ImageData]):
         return key in self._keys
 
     def keys(self) -> Any:
-        """Return the keys of the RasterStack."""
-        return self._keys
+        """Return the keys of the RasterStack.
+
+        A copy: a key whose task raises an allowed exception leaves the stack
+        when it is read (`_drop`), so the keys can shrink after a read.
+        """
+        return list(self._keys)
 
     def values(self) -> Any:
         """Return the values of the RasterStack, executing tasks if necessary."""
@@ -666,7 +742,7 @@ class RasterStack(Dict[datetime, ImageData]):
             raise KeyError("RasterStack is empty")
 
         # Try each key in order until we find one that succeeds
-        for key in self._keys:
+        for key in list(self._keys):
             try:
                 return self[key]
             except KeyError:
@@ -687,7 +763,7 @@ class RasterStack(Dict[datetime, ImageData]):
             raise KeyError("RasterStack is empty")
 
         # Try each key in reverse order until we find one that succeeds
-        for key in reversed(self._keys):
+        for key in list(reversed(self._keys)):
             try:
                 return self[key]
             except KeyError:
@@ -885,6 +961,30 @@ class RasterStack(Dict[datetime, ImageData]):
         kwargs.update(overrides)
         return RasterStack(tasks=new_tasks, **kwargs)
 
+    def map_images(
+        self, func: Callable[[ImageData], ImageData], **overrides: Any
+    ) -> "RasterStack":
+        """Apply ``func`` to each slice, lazily when the stack still has read tasks.
+
+        A stack built by :meth:`from_images` (or a subset of one) has no-op tasks
+        and holds its images on the refs only, so :meth:`map_tasks` cannot realize
+        it. Such a stack is mapped eagerly; any other stack is mapped lazily.
+
+        Args:
+            func: Called with each slice's ``ImageData``; returns the new slice.
+            overrides: Stack-level metadata to replace on the new stack (e.g.
+                ``band_names``, or ``width``/``height``/``bounds`` for a crop).
+
+        Returns:
+            RasterStack: A new stack of the same keys.
+        """
+        refs = self.get_image_refs()
+        if refs and all(ref.realized for _, ref in refs):
+            return RasterStack.from_images(
+                {key: func(ref.realize()) for key, ref in refs}, **overrides
+            )
+        return self.map_tasks(lambda _key, realize: func(realize()), **overrides)
+
     @classmethod
     def from_images(cls, images: Dict[datetime, ImageData], **kwargs) -> "RasterStack":
         """Create a RasterStack from pre-loaded ImageData instances.
@@ -910,6 +1010,11 @@ class RasterStack(Dict[datetime, ImageData]):
         # sync and a stack never mixes tz-aware and tz-naive datetimes (e.g. an
         # aware load_collection key combined with a naive datetime.now()).
         images = {_normalize_to_naive_utc(dt): img for dt, img in images.items()}
+        if kwargs.get("band_names"):
+            images = {
+                dt: _label_bands(img, kwargs["band_names"])
+                for dt, img in images.items()
+            }
 
         # Get first image for dimension parameters
         first_key = next(iter(images))
