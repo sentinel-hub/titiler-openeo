@@ -47,13 +47,31 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 import morecantile
 import numpy
 from openeo_pg_parser_networkx.pg_schema import BoundingBox
+from rasterio.enums import MergeAlg
+from rasterio.features import rasterize
 
-from .callbacks import DIMENSION_LABELS_PARAMETER
+from ...errors import GeometriesOverlap, ProcessParameterInvalid
+from .callbacks import DIMENSION_LABELS_PARAMETER, recompute_each_call
 from .data_model import ImageData, RasterStack
+from .geometry_grid import (
+    AREA_TYPES,
+    as_vector_cube,
+    geometries_on_grid,
+    grid_transform,
+    pixel_window,
+    stack_grid,
+    window_bounds,
+)
 from .vector_generic import apply_vector
 from .vector_model import VectorCube
 
-__all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
+__all__ = [
+    "apply",
+    "apply_dimension",
+    "apply_polygon",
+    "xyz_to_bbox",
+    "xyz_to_tileinfo",
+]
 
 
 def _dimension_labels(labels: Optional[Sequence[Any]], count: int) -> List[str]:
@@ -528,3 +546,202 @@ def xyz_to_tileinfo(
         "stage": stage,
         "context": context or {},
     }
+
+
+_MERGE_ADD = MergeAlg.add
+
+
+def _polygon_index(cube: VectorCube, grid: Any) -> numpy.ndarray:
+    """Return, for each pixel, the number (1, 2...) of the polygon that covers it.
+
+    0 is no polygon. A polygon covers a pixel if the pixel center is in the
+    polygon. Empty geometries are ignored.
+
+    Raises:
+        ProcessParameterInvalid: For a geometry that is not a polygon, or no
+            polygon.
+        GeometriesOverlap: If a pixel is in more than one polygon.
+    """
+    geometries = geometries_on_grid(cube, grid)
+    others = sorted(
+        {g["type"] for g in geometries if g and g["type"] not in AREA_TYPES}
+    )
+    if others:
+        raise ProcessParameterInvalid(
+            f"apply_polygon: the geometries must be polygons, got {others}."
+        )
+    shapes = [(g, n) for n, g in enumerate(geometries, 1) if g is not None]
+    if not shapes:
+        raise ProcessParameterInvalid("apply_polygon: there is no polygon.")
+    width, height, _, _ = grid
+    options = {
+        "out_shape": (height, width),
+        "transform": grid_transform(grid),
+        "fill": 0,
+        "dtype": "int32",
+    }
+    count = rasterize([(g, 1) for g, _ in shapes], merge_alg=_MERGE_ADD, **options)
+    if (count > 1).any():
+        raise GeometriesOverlap(
+            f"apply_polygon: the polygons overlap on {int((count > 1).sum())} "
+            "pixels. Geometries are not allowed to overlap to avoid that pixel "
+            "values are processed multiple times."
+        )
+    return rasterize(shapes, **options)
+
+
+def _sub_cube(
+    images: List[ImageData],
+    keys: List[Any],
+    window: Any,
+    inside: numpy.ndarray,
+    bounds: Any,
+    mask_value: Optional[Union[float, bool]],
+) -> RasterStack:
+    """Return the sub data cube of one polygon: cropped, outside = mask_value."""
+    rows, cols = window
+    sub: Dict[Any, ImageData] = {}
+    for key, img in zip(keys, images):
+        array = img.array[:, rows, cols]
+        data = numpy.array(array.data)
+        mask = numpy.ma.getmaskarray(array).copy()
+        outside = numpy.broadcast_to(~inside, data.shape)
+        if mask_value is None:
+            mask |= outside
+        else:
+            data = data.astype(
+                numpy.result_type(data.dtype, numpy.asarray(mask_value).dtype)
+            )
+            data[outside] = mask_value
+            mask[outside] = False
+        sub[key] = ImageData(
+            numpy.ma.MaskedArray(data, mask=mask),
+            crs=img.crs,
+            bounds=bounds,
+            band_descriptions=img.band_descriptions,
+        )
+    return RasterStack.from_images(sub)
+
+
+def apply_polygon(
+    data: RasterStack,
+    geometries: Union[VectorCube, Dict[str, Any]],
+    process: Callable,
+    mask_value: Optional[Union[float, bool, str]] = None,
+    context: Optional[Any] = None,
+    named_parameters: Optional[Dict[str, Any]] = None,
+) -> RasterStack:
+    """Apply a process to the pixels of each polygon (openEO apply_polygon).
+
+    For each polygon, the pixels whose center is in the polygon make a sub
+    data cube. It covers the smallest window that holds the polygon pixels;
+    the other pixels of the window get `mask_value`. The process is called
+    once for each polygon, and its result is written back. Pixels outside
+    all polygons get `mask_value`.
+
+    Args:
+        data: A raster data cube.
+        geometries: A vector data cube of polygons, or GeoJSON in EPSG:4326
+            (deprecated in openEO).
+        process: The process for each sub data cube. It must return a raster
+            data cube with the same dates, bands and pixels.
+        mask_value: The value of the pixels outside the polygon. None: no
+            data. A string is not supported.
+        context: Additional data passed to the process.
+        named_parameters: Enclosing-scope parameters, forwarded to the process.
+
+    Returns:
+        A raster data cube with the same dimensions.
+
+    Raises:
+        GeometriesOverlap: If a pixel is in more than one polygon.
+        ProcessParameterInvalid: For geometries that are not polygons, a
+            string `mask_value`, or a process result of another shape.
+    """
+    if isinstance(mask_value, str):
+        raise ProcessParameterInvalid(
+            "apply_polygon: this back-end supports a number, a boolean or null "
+            "as mask_value, not a string."
+        )
+    cube = as_vector_cube(geometries, "apply_polygon")
+    keys = list(data.keys())
+    if not keys:
+        return data
+    grid = stack_grid(data, "apply_polygon")
+    width, height, bounds, crs = grid
+    index = _polygon_index(cube, grid)
+    images = [data[key] for key in keys]
+    count = images[0].count
+
+    # The process is called once for each polygon, with other data: the
+    # executor must not return the result of the first call (see callbacks.py).
+    callback = recompute_each_call(process)
+    results = []
+    for number in numpy.unique(index[index > 0]).tolist():
+        pixels = index == number
+        window = pixel_window(pixels)
+        assert window is not None
+        rows, cols = window
+        inside = pixels[rows, cols]
+        sub = _sub_cube(
+            images, keys, window, inside, window_bounds(grid, window), mask_value
+        )
+        result = callback(
+            sub,
+            positional_parameters={"data": 0},
+            named_parameters={
+                **(named_parameters or {}),
+                "data": sub,
+                "context": context,
+            },
+        )
+        if not isinstance(result, RasterStack) or len(result) != len(keys):
+            raise ProcessParameterInvalid(
+                "apply_polygon: the process must return a raster data cube with "
+                f"the same {len(keys)} date(s) as its input."
+            )
+        arrays = [result[key].array for key in result.keys()]
+        expected = (count, rows.stop - rows.start, cols.stop - cols.start)
+        if any(array.shape != expected for array in arrays):
+            raise ProcessParameterInvalid(
+                f"apply_polygon: the process must return the same bands and "
+                f"pixels as its input (shape {expected}), got "
+                f"{arrays[0].shape}."
+            )
+        results.append(
+            (
+                window,
+                inside,
+                list(result.keys()),
+                result.first.band_descriptions,
+                arrays,
+            )
+        )
+
+    # The result: mask_value everywhere, then the pixels of each polygon.
+    dtypes = [array.dtype for *_, arrays in results for array in arrays] or [
+        images[0].array.dtype
+    ]
+    if mask_value is not None:
+        dtypes.append(numpy.asarray(mask_value).dtype)
+    dtype = numpy.result_type(*dtypes)
+    out_keys = results[0][2] if results else keys
+    band_names = (results[0][3] if results else None) or images[0].band_descriptions
+    out: Dict[Any, ImageData] = {}
+    for d, key in enumerate(out_keys):
+        out_data = numpy.full(
+            (count, height, width), 0 if mask_value is None else mask_value, dtype=dtype
+        )
+        out_mask = numpy.full((count, height, width), mask_value is None)
+        for (rows, cols), inside, _, _, arrays in results:
+            region_data = out_data[:, rows, cols]
+            region_mask = out_mask[:, rows, cols]
+            region_data[:, inside] = arrays[d].data[:, inside]
+            region_mask[:, inside] = numpy.ma.getmaskarray(arrays[d])[:, inside]
+        out[key] = ImageData(
+            numpy.ma.MaskedArray(out_data, mask=out_mask),
+            crs=crs,
+            bounds=bounds,
+            band_descriptions=band_names,
+        )
+    return RasterStack.from_images(out)

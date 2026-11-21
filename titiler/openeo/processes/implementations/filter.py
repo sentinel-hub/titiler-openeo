@@ -13,6 +13,13 @@ from rasterio.warp import transform_bounds
 
 from ...errors import DimensionMissing, OpenEOException
 from .data_model import ImageData, RasterStack
+from .geometry_grid import (
+    as_vector_cube,
+    geometry_pixels,
+    pixel_window,
+    stack_grid,
+    window_bounds,
+)
 from .reduce import (
     DimensionNotAvailable,
     _interval_to_pair,
@@ -27,7 +34,13 @@ from .vector_generic import (
 )
 from .vector_model import TEMPORAL_DIMENSION, VectorCube
 
-__all__ = ["filter_bands", "filter_bbox", "filter_labels", "filter_temporal"]
+__all__ = [
+    "filter_bands",
+    "filter_bbox",
+    "filter_labels",
+    "filter_spatial",
+    "filter_temporal",
+]
 
 TEMPORAL_DIMENSIONS = ("t", "temporal", "time")
 SPECTRAL_DIMENSIONS = ("bands", "spectral")
@@ -303,6 +316,65 @@ def filter_bbox(
         lambda img: _crop(img, window, new_bounds),
         width=int(window.width),
         height=int(window.height),
+        bounds=new_bounds,
+    )
+
+
+def filter_spatial(
+    data: RasterStack, geometries: Union[VectorCube, Dict[str, Any]]
+) -> RasterStack:
+    """Limit a raster data cube to the pixels of geometries.
+
+    A polygon keeps the pixels whose center is in the polygon. A point keeps
+    the pixel that contains it, a line the pixels that it crosses. The cube
+    is cropped to the smallest window that holds the kept pixels; the other
+    pixels of the window have no data.
+
+    Args:
+        data: A raster data cube.
+        geometries: A vector data cube, or GeoJSON in EPSG:4326 (deprecated
+            in openEO). The geometries are reprojected to the CRS of the cube.
+
+    Returns:
+        A raster data cube limited to the geometries.
+
+    Raises:
+        OpenEOException: `NoDataAvailable` if the geometries cover no pixel.
+    """
+    cube = as_vector_cube(geometries, "filter_spatial")
+    if not data:
+        return data
+    grid = stack_grid(data, "filter_spatial")
+    kept = geometry_pixels(cube, grid)
+    window = pixel_window(kept)
+    if window is None:
+        raise OpenEOException(
+            message="The geometries do not cover any pixel of the data cube.",
+            code="NoDataAvailable",
+            status_code=400,
+        )
+    rows, cols = window
+    outside = ~kept[rows, cols]
+    new_bounds = window_bounds(grid, window)
+
+    def _filter(img: ImageData) -> ImageData:
+        cropped = _crop(
+            img,
+            windows.Window(
+                cols.start, rows.start, cols.stop - cols.start, rows.stop - rows.start
+            ),
+            new_bounds,
+        )
+        array = cropped.array
+        cropped.array = numpy.ma.MaskedArray(
+            array.data, mask=numpy.ma.getmaskarray(array) | outside[numpy.newaxis]
+        )
+        return cropped
+
+    return data.map_images(
+        _filter,
+        width=cols.stop - cols.start,
+        height=rows.stop - rows.start,
         bounds=new_bounds,
     )
 

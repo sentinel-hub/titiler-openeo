@@ -23,6 +23,7 @@ from ...errors import (
 )
 from ...settings import ProcessingSettings
 from .data_model import RasterStack
+from .geometry_grid import stack_grid
 from .reduce import REDUCED_TEMPORAL_SENTINEL
 from .vector_model import (
     GEOMETRY_DIMENSION,
@@ -462,22 +463,6 @@ def filter_vector(
 VALUE_BAND = "value"
 
 
-def _target_grid(target: RasterStack) -> Tuple[int, int, Tuple[float, ...], CRS]:
-    """Return the width, height, bounds and CRS of a raster data cube.
-
-    The grid comes from the cube metadata, so the pixels are not read. Only
-    when the metadata is not set, the first image is read.
-    """
-    if target.width and target.height and target.bounds and target.dst_crs:
-        return target.width, target.height, tuple(target.bounds), target.dst_crs
-    if not len(target):
-        raise ProcessParameterInvalid(
-            "vector_to_raster: the target raster data cube has no data."
-        )
-    first = target.first
-    return first.width, first.height, tuple(first.bounds), first.crs
-
-
 def _numeric_values(cube: VectorCube) -> numpy.ndarray:
     """Return the values of the cube with a numeric dtype. Masked cells are 0."""
     numeric = cube.numeric_values()
@@ -579,7 +564,7 @@ def vector_to_raster(data: VectorCube, target: RasterStack) -> RasterStack:
         values = numpy.zeros((1,) + values.shape[1:], dtype=values.dtype)
         mask = numpy.ones(values.shape, dtype=bool)
 
-    width, height, bounds, crs = _target_grid(target)
+    width, height, bounds, crs = stack_grid(target, "vector_to_raster")
     max_pixels = ProcessingSettings().max_pixels
     if width * height * len(keys) * len(band_names) > max_pixels:
         raise OutputLimitExceeded(
