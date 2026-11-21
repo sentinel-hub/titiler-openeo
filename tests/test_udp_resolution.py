@@ -1,13 +1,14 @@
 """Unit tests for `titiler.openeo.udp_resolution` — the UDP-inlining graph
 transform, exercised directly (no app, no store, no HTTP)."""
 
+import sys
 from copy import deepcopy
 
 import pytest
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.process_registry import Process
 
-from titiler.openeo.errors import CyclicUdpReference
+from titiler.openeo.errors import CyclicUdpReference, InvalidProcessGraph
 from titiler.openeo.udp_resolution import (
     references_only_predefined,
     resolve_udp_references,
@@ -355,3 +356,37 @@ def test_each_udp_is_fetched_once_across_check_and_resolution():
     )
 
     assert calls == {"my_udp": 1}
+
+
+def _chain(depth: int, last: dict) -> dict:
+    """UDPs `u0 -> u1 -> ... -> u{depth}`, where `u{depth}` is `last`."""
+    udps = {f"u{i}": _udp(f"u{i + 1}") for i in range(depth)}
+    udps[f"u{depth}"] = last
+    return udps
+
+
+def test_a_cycle_at_the_end_of_a_long_chain_is_still_named():
+    depth = sys.getrecursionlimit()
+    udps = _chain(depth, _udp("u0"))
+
+    with pytest.raises(CyclicUdpReference) as excinfo:
+        resolve_udp_references(
+            {"x": {"process_id": "u0", "arguments": {}, "result": True}},
+            _registry("load_collection"),
+            get_udp_spec=lambda process_id, namespace: udps.get(process_id),
+            namespace="alice",
+        )
+
+    assert len(excinfo.value.cycle) == depth + 2
+
+
+def test_a_chain_too_deep_to_inline_is_reported():
+    udps = _chain(sys.getrecursionlimit(), deepcopy(STORED_UDP))
+
+    with pytest.raises(InvalidProcessGraph, match="nested too deep"):
+        resolve_udp_references(
+            {"x": {"process_id": "u0", "arguments": {}, "result": True}},
+            _registry("load_collection", "reduce_dimension"),
+            get_udp_spec=lambda process_id, namespace: udps.get(process_id),
+            namespace="alice",
+        )

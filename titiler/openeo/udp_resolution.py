@@ -40,10 +40,11 @@ import logging
 from copy import deepcopy
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
+import networkx as nx
 from openeo_pg_parser_networkx import ProcessRegistry
 from openeo_pg_parser_networkx.resolving_utils import resolve_process_graph
 
-from .errors import CyclicUdpReference, ServiceUnavailable
+from .errors import CyclicUdpReference, InvalidProcessGraph, ServiceUnavailable
 from .reader_requirements import _isolated_copy
 
 logger = logging.getLogger(__name__)
@@ -116,15 +117,13 @@ def _check_for_cycles(
     predefined: Set[str],
     get_udp_spec: GetUdpSpec,
     namespace: str,
-    chain: List[str],
-    checked: Set[str],
 ) -> None:
     """Raise :class:`CyclicUdpReference` if following the graph's UDP references
-    leads back to a UDP that is already being expanded.
+    leads back to a UDP already on the path.
 
-    ``chain`` is the stack of UDPs currently being expanded (a hit there is the
-    cycle); ``checked`` holds those fully walked already, which keeps a UDP
-    referenced from several places -- or from a diamond -- walked once.
+    The references are collected into a networkx graph without recursing, so a
+    long chain of UDPs doesn't hit Python's recursion limit here. Each UDP is
+    fetched once, however many places reference it.
 
     A reference that can't be followed (unknown process, spec without a
     ``process_graph``) is left alone: reporting it is the resolver's job, and it
@@ -132,18 +131,22 @@ def _check_for_cycles(
     ``namespace`` of the resolution call, so a ``process_id`` alone identifies a
     UDP here.
     """
-    for process_id in udp_references(process_graph, predefined):
-        if process_id in chain:
-            raise CyclicUdpReference(chain[chain.index(process_id) :] + [process_id])
-        if process_id in checked:
-            continue
-        udp = get_udp_spec(process_id, namespace)
-        body = udp.get("process_graph") if isinstance(udp, dict) else None
-        if isinstance(body, dict):
-            chain.append(process_id)
-            _check_for_cycles(body, predefined, get_udp_spec, namespace, chain, checked)
-            chain.pop()
-        checked.add(process_id)
+    root = object()
+    references = nx.DiGraph()
+    to_walk: List[Tuple[Any, Any]] = [(root, process_graph)]
+    while to_walk:
+        parent, graph = to_walk.pop()
+        for process_id in udp_references(graph, predefined):
+            if process_id not in references:
+                udp = get_udp_spec(process_id, namespace)
+                body = udp.get("process_graph") if isinstance(udp, dict) else None
+                to_walk.append((process_id, body))
+            references.add_edge(parent, process_id)
+    try:
+        cycle = nx.find_cycle(references, root)
+    except nx.NetworkXNoCycle:
+        return
+    raise CyclicUdpReference([edge[0] for edge in cycle] + [cycle[0][0]])
 
 
 def _resolve(
@@ -186,10 +189,11 @@ def resolve_udp_references(
 
     Returns the graph unchanged when it references only predefined processes, or
     on any resolution failure, so a genuinely unknown process still surfaces the
-    normal "not found in registry" error downstream instead of a 500. Two
+    normal "not found in registry" error downstream instead of a 500. Three
     failures are not resolution failures and propagate instead: a store outage,
-    which would otherwise report an infrastructure problem as a bad graph, and a
-    reference cycle, which has no unresolved graph to fall back to.
+    which would otherwise report an infrastructure problem as a bad graph, a
+    reference cycle, which has no unresolved graph to fall back to, and a chain
+    of references too deep to inline.
     """
     if not process_graph:
         return process_graph
@@ -232,12 +236,18 @@ def resolve_udp_references(
         # Before inlining anything: a cycle would otherwise be "found" only by
         # exhausting the recursion limit, after a full stack's worth of
         # deepcopying, and reported as a missing process.
-        _check_for_cycles(graph, predefined, fetch_udp_spec, namespace, [], set())
+        _check_for_cycles(graph, predefined, fetch_udp_spec, namespace)
         return _resolve(graph, scratch, fetch_udp_spec, namespace, predefined)
     except CyclicUdpReference:
         # Nothing to fall back to: leaving the graph unresolved would only hand
         # the cycle to the next resolver along, with a worse error.
         raise
+    except RecursionError as exc:
+        # The walk above doesn't recurse, but the resolver inlines one reference
+        # per stack frame, so a long enough chain still runs out of stack there.
+        raise InvalidProcessGraph(
+            "User-defined processes are nested too deep to resolve"
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         # The resolver rewraps whatever ``fetch_udp_spec`` raises into a generic
         # ValueError, chaining the original as ``__cause__``, so a store outage
