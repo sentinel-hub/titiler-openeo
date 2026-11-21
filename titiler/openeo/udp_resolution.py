@@ -208,7 +208,9 @@ def resolve_udp_references(
         # Memoised so the cycle check below and the resolver proper share one
         # lookup (and one normalisation) per UDP rather than hitting the store
         # twice for every reference. The resolver deepcopies a spec's graph
-        # before rewriting it, so handing out the same dict twice is safe.
+        # before rewriting it, so handing out the same dict twice is safe. This
+        # also means one resolution sees one snapshot of each UDP, even if the
+        # store is written midway -- intended.
         key = (process_id, udp_namespace)
         if key not in fetched:
             udp = get_udp_spec(process_id, udp_namespace)
