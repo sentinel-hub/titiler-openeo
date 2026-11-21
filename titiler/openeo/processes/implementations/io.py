@@ -14,26 +14,32 @@ from ...reader import _reader
 from ...settings import SigningSettings
 from ...signing import get_signer, stamp_signer_key
 from .data_model import RasterStack
-from .formats import SaveResultData, encode
+from .formats import SaveResultData, encode, get_input_format
+from .vector_io import check_url
+from .vector_model import VectorCube
 
 __all__ = ["save_result", "SaveResultData", "load_url"]
 
 
 def load_url(
     url: str, format: Optional[str] = None, options: Optional[Dict] = None
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Load data from a URL.
 
     Args:
         url: The URL to read from (must be a valid HTTP/HTTPS URL)
-        format: Input format (ignored for now, assumed to be COG)
-        options: Additional reading options passed to rio-tiler
+        format: Input format, see `formats.INPUT_FORMATS`. A vector format
+            (GeoJSON, GeoParquet, GPKG, FlatGeobuf, ESRI Shapefile) gives a
+            vector data cube. Any other name gives a raster data cube, read
+            with rio-tiler (GDAL).
+        options: The options of the format, see `/file_formats`.
 
     Returns:
-        RasterStack: A data cube containing the loaded data
+        A raster data cube, or a vector data cube for a vector format.
 
     Raises:
-        ValueError: If the URL is invalid
+        FormatUnsuitable: If the file can't be read in the vector format, or
+            if the vector format is not installed.
     """
     # Unlike every other read path, this one has no catalogue behind it:
     # `load_url` is a plain process implementation running inside an
@@ -43,6 +49,12 @@ def load_url(
     # The signer still returns any href it has nothing to add to untouched, so a
     # user-supplied URL cannot widen what gets signed.
     signer_key = SigningSettings().asset_signer or None
+
+    fmt = get_input_format(format) if format else None
+    if fmt is not None and fmt.reader is not None:
+        check_url(url)
+        signer = get_signer(signer_key)
+        return fmt.reader(url, signer(url) if signer else url, dict(options or {}))
 
     # Get metadata from COG to build the item and set dimensions and CRS. This
     # open is outside any reader, so it signs the href itself.
