@@ -46,6 +46,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ...errors import ProcessParameterInvalid, ProcessParameterRequired
 from .data_model import RasterStack
+from .vector_model import VectorCube
 
 # Union of all GeoJSON types for validation
 _GeoJSON = Union[
@@ -219,7 +220,7 @@ def _resolve_special_parameter(
     return param_value
 
 
-def _accepts_type(param_type: Any, target: type) -> bool:
+def _accepts_type(param_type: Any, target: Any) -> bool:
     """Return True if ``param_type`` is ``target`` or a Union that contains it."""
     if param_type is target:
         return True
@@ -436,6 +437,8 @@ def _type_to_openeo_name(param_type: Any) -> str:
         name = param_type.__name__
         if name == "RasterStack":
             return "datacube"
+        if name == "VectorCube":
+            return "vector datacube"
         return name
 
     return str(param_type)
@@ -454,6 +457,8 @@ def _value_to_openeo_name(value: Any) -> str:
     # RasterStack is a dict subclass, so check it first for explicit typing
     if isinstance(value, RasterStack):
         return "datacube"
+    if isinstance(value, VectorCube):
+        return "vector datacube"
     if isinstance(value, dict):
         # Validate as GeoJSON using geojson-pydantic
         try:
@@ -481,14 +486,56 @@ def _is_rasterstack_type_expected(param_type: Any) -> bool:
     return param_type is RasterStack
 
 
+def _accepts_dict(param_type: Any) -> bool:
+    """Return True if ``param_type`` is a dict type or a Union that contains one."""
+    if _is_union(param_type):
+        return any(_accepts_dict(t) for t in get_args(param_type))
+    return param_type is dict or get_origin(param_type) is dict
+
+
+def _accepts_vector_cube(param_type: Any) -> bool:
+    """Return True if the parameter takes a VectorCube as it is (or any value)."""
+    return _accepts_type(param_type, VectorCube) or _accepts_type(param_type, Any)
+
+
+def _convert_vector_cubes(
+    resolved_kwargs: Dict[str, Any], param_types: Dict[str, Any]
+) -> None:
+    """Give GeoJSON to the parameters that take a dict but not a vector cube.
+
+    Geometry parameters such as ``mask`` of ``mask_polygon`` or
+    ``spatial_extent`` of ``load_collection`` are typed as a dict. A vector
+    data cube is valid there in openEO, so it is converted to a GeoJSON
+    FeatureCollection in EPSG:4326 (ADR 0014 §2.2).
+    """
+    for name, value in resolved_kwargs.items():
+        if not isinstance(value, VectorCube):
+            continue
+        param_type = param_types.get(name)
+        if param_type is None or param_type is inspect.Parameter.empty:
+            continue
+        if not _accepts_vector_cube(param_type) and _accepts_dict(param_type):
+            resolved_kwargs[name] = value.to_feature_collection()
+
+
 def _validate_datacube_param(
     param_name: str, param_value: Any, param_type: Any, func_name: str
 ) -> None:
-    """Validate that datacube (RasterStack) values are expected by the parameter type.
+    """Validate that datacube values are expected by the parameter type.
 
-    Only RasterStack instances are treated as datacubes. Plain dicts are not
-    pre-rejected here; they fall through to Pydantic validation instead.
+    Only RasterStack and VectorCube instances are treated as datacubes. Plain
+    dicts are not pre-rejected here; they fall through to Pydantic validation
+    instead.
     """
+    if isinstance(param_value, VectorCube):
+        if not _accepts_vector_cube(param_type):
+            raise ProcessParameterInvalid(
+                f"Parameter '{param_name}' in process '{func_name}': "
+                f"expected '{_type_to_openeo_name(param_type)}' but got "
+                f"'{_value_to_openeo_name(param_value)}'"
+            )
+        return
+
     if not isinstance(param_value, RasterStack):
         return
 
@@ -564,6 +611,10 @@ def _validate_parameter_types(
 
         # Check datacube/dict type mismatches
         _validate_datacube_param(param_name, param_value, param_type, func_name)
+
+        # A vector cube that passed the check above needs no Pydantic validation
+        if isinstance(param_value, VectorCube):
+            continue
 
         # Skip already-validated BaseModel instances
         if _validate_basemodel_param(param_value, param_type):
@@ -704,6 +755,9 @@ def process(f):
 
         # Undo the parser's date coercion for plain array and string parameters
         _uncoerce_temporal_values(resolved_kwargs, param_types)
+
+        # Give GeoJSON to geometry parameters that are given a vector cube
+        _convert_vector_cubes(resolved_kwargs, param_types)
 
         # Validate parameter types
         _validate_parameter_types(resolved_kwargs, param_types, f.__name__)

@@ -1367,7 +1367,7 @@ def test_aggregate_spatial_multi_node_reducer_runs_per_geometry_date_band():
             "result": True,
         }
     }
-    result = _run(pg, data=stack)
+    result = _run(pg, data=stack).to_feature_collection()
 
     values = result["features"][0]["properties"]["values"]
     assert values == {
@@ -1417,7 +1417,7 @@ def test_aggregate_spatial_passes_context_to_reducer():
             "result": True,
         }
     }
-    result = _run(pg, data=stack)
+    result = _run(pg, data=stack).to_feature_collection()
 
     values = result["features"][0]["properties"]["values"]
     assert values == {datetime(2023, 2, 1): 30.0}
