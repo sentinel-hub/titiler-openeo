@@ -61,7 +61,7 @@ spec:
         - name: create-schema
           image: {{ include "titiler.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # An image older than the command (0.19.0 and before) creates its
+          # An image older than the command (0.20.0 and before) creates its
           # tables at startup: then there is nothing to do. A broken image
           # still fails here, on the import of the package.
           command:
