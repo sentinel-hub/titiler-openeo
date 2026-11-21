@@ -24,7 +24,12 @@ from titiler.core.factory import BaseFactory
 from . import __version__ as titiler_version
 from .auth import Auth, CredentialsBasic, OIDCAuth
 from .cancellation import RequestCancelled, run_cancellable
-from .errors import InvalidProcessGraph, NoDataAvailable, ServiceUnavailable
+from .errors import (
+    CyclicUdpReference,
+    InvalidProcessGraph,
+    NoDataAvailable,
+    ServiceUnavailable,
+)
 from .models import openapi
 from .models import udp as udp_models
 from .models.auth import User
@@ -1091,7 +1096,15 @@ class EndpointsFactory(BaseFactory):
 
             # Inline referenced UDPs so validation sees the fully-resolved graph
             # (a graph that extends a stored UDP is valid).
-            raw_pg = self._resolve_udp_references(raw_pg, user)
+            try:
+                raw_pg = self._resolve_udp_references(raw_pg, user)
+            except CyclicUdpReference as err:
+                # This endpoint reports what's wrong with a graph in its `errors`
+                # list, not as an HTTP error -- a cycle is a finding like any
+                # other, and there is no resolved graph left to validate.
+                return {
+                    "errors": [{"code": "ProcessGraphInvalid", "message": err.message}]
+                }
 
             # Basic per-node validation against registry specs (structure and required params)
             for node_id, node in raw_pg.items():
@@ -1299,7 +1312,10 @@ class EndpointsFactory(BaseFactory):
                     pg_data={"process_graph": resolved_for_validation}
                 )
                 parsed_graph.to_callable(process_registry=self.process_registry)
-            except ServiceUnavailable:
+            except (ServiceUnavailable, CyclicUdpReference):
+                # Both already say precisely what went wrong; rewrapping would
+                # bury a store outage, or the named cycle, under "Invalid
+                # process graph: ...".
                 raise
             except Exception as err:  # noqa: BLE001
                 raise InvalidProcessGraph(f"Invalid process graph: {str(err)}") from err
@@ -1472,6 +1488,9 @@ class EndpointsFactory(BaseFactory):
                 },
                 404: {
                     "description": "The service with the specified identifier does not exist.",
+                },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
                 },
             },
             tags=["Secondary Services"],
@@ -1678,7 +1697,10 @@ class EndpointsFactory(BaseFactory):
                         "image/jpg": {},
                     },
                     "description": "Return an image.",
-                }
+                },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
             },
             tags=["Data Processing"],
         )
