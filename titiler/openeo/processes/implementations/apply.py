@@ -42,7 +42,7 @@ KEY REQUIREMENTS:
 (bands moved to the front, broadcasting across time) for exactly this reason.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import morecantile
 import numpy
@@ -50,6 +50,8 @@ from openeo_pg_parser_networkx.pg_schema import BoundingBox
 
 from .callbacks import DIMENSION_LABELS_PARAMETER
 from .data_model import ImageData, RasterStack
+from .vector_generic import apply_vector
+from .vector_model import VectorCube
 
 __all__ = ["apply", "apply_dimension", "xyz_to_bbox", "xyz_to_tileinfo"]
 
@@ -94,11 +96,11 @@ class DimensionNotAvailable(Exception):
 
 
 def apply(
-    data: RasterStack,
+    data: Union[RasterStack, VectorCube],
     process: Callable,
     context: Optional[Any] = None,
     named_parameters: Optional[Dict[str, Any]] = None,
-) -> RasterStack:
+) -> Union[RasterStack, VectorCube]:
     """Apply a unary process to every value in a RasterStack.
 
     The callback is evaluated ONCE on the stacked array (see the module-level
@@ -110,7 +112,13 @@ def apply(
     The enclosing ``named_parameters`` (set by the executor) are forwarded to the
     callback, so that it can use a parameter of the enclosing process graph
     (e.g. a UDP or service parameter, ``gt(x, {"from_parameter": "threshold"})``).
+
+    For a vector data cube, the process gets all the values of the cube in
+    one array. The geometries and the labels do not change.
     """
+    if isinstance(data, VectorCube):
+        return apply_vector(data, process, context, named_parameters)
+
     keys = list(data.keys())
     if not keys:
         return data

@@ -24,7 +24,12 @@ from ...errors import (
 from ...settings import ProcessingSettings
 from .data_model import RasterStack
 from .reduce import REDUCED_TEMPORAL_SENTINEL
-from .vector_model import GEOMETRY_DIMENSION, TEMPORAL_DIMENSION, VectorCube
+from .vector_model import (
+    GEOMETRY_DIMENSION,
+    TEMPORAL_DIMENSION,
+    VectorCube,
+    is_empty_geometry,
+)
 
 __all__ = [
     "filter_vector",
@@ -475,26 +480,16 @@ def _target_grid(target: RasterStack) -> Tuple[int, int, Tuple[float, ...], CRS]
 
 def _numeric_values(cube: VectorCube) -> numpy.ndarray:
     """Return the values of the cube with a numeric dtype. Masked cells are 0."""
-    assert cube.values is not None
-    data = cube.values.data
-    if data.dtype == bool:
-        return data.astype("uint8")
-    if data.dtype.kind in "iuf":
-        return data
-    mask = numpy.ma.getmaskarray(cube.values)
-    cells = data[~mask].tolist()
-    sample = numpy.asarray(cells) if cells else numpy.zeros(0, dtype="float64")
-    if sample.dtype.kind not in "biuf":
+    numeric = cube.numeric_values()
+    if numeric is None:
+        assert cube.values is not None
+        cells = cube.values.compressed().tolist()
         raise ProcessParameterInvalid(
             "vector_to_raster: the values of the vector data cube must be "
-            f"numbers, got {sample.dtype.kind!r} values (for example "
-            f"{cells[0]!r})."
+            f"numbers, got for example {cells[0]!r}."
         )
-    out = numpy.zeros(
-        data.shape, dtype="uint8" if sample.dtype == bool else sample.dtype
-    )
-    out[~mask] = sample
-    return out
+    data = numeric.filled(0)
+    return data.astype("uint8") if data.dtype == bool else data
 
 
 def _date_key(label: Any) -> datetime:
@@ -511,13 +506,6 @@ def _date_key(label: Any) -> datetime:
     raise ProcessParameterInvalid(
         f"vector_to_raster: the label {label!r} of the dimension "
         f"'{TEMPORAL_DIMENSION}' is not a date."
-    )
-
-
-def _is_empty(geometry: Optional[Dict[str, Any]]) -> bool:
-    """Return True for a null geometry or a geometry without coordinates."""
-    return not geometry or not (
-        geometry.get("coordinates") or geometry.get("geometries")
     )
 
 
@@ -608,7 +596,7 @@ def vector_to_raster(data: VectorCube, target: RasterStack) -> RasterStack:
     burns = [
         (geometry, i + 1)
         for i, geometry in enumerate(data._geometries_in(crs))
-        if not _is_empty(geometry)
+        if not is_empty_geometry(geometry)
     ]
     index = rasterize(
         burns,
