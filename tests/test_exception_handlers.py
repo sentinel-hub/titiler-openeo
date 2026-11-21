@@ -5,15 +5,20 @@ standardized error-code registry at
 https://github.com/Open-EO/openeo-api/blob/master/errors.json.
 """
 
+import base64
 import json
 import logging
 
 import pytest
+from fastapi import HTTPException
+from starlette.testclient import TestClient
 
 from titiler.openeo.errors import (
     ExceptionHandler,
+    FeatureUnsupported,
     ProcessParameterInvalid,
     ProcessParameterRequired,
+    ServiceUnavailable,
 )
 
 
@@ -78,3 +83,91 @@ class TestGeneralExceptionHandler:
         body = _body(response)
         assert body["code"] == "Internal"
         assert body["message"] == "Server error: disk full"
+
+
+class TestServerErrorLogging:
+    """A 5xx is a fault to look into: ERROR, with the traceback."""
+
+    @pytest.mark.parametrize(
+        "call, exc",
+        [
+            ("http_exception_handler", HTTPException(500, "boom")),
+            ("http_exception_handler", HTTPException(503, "down")),
+            ("openeo_exception_handler", FeatureUnsupported("not here")),
+            ("openeo_exception_handler", ServiceUnavailable()),
+        ],
+        ids=["http-500", "http-503", "openeo-501", "openeo-503"],
+    )
+    def test_logged_with_traceback(self, handler, caplog, call, exc):
+        """Each 5xx handler call gives one ERROR record carrying the exception."""
+        with caplog.at_level(logging.DEBUG, logger="test"):
+            getattr(handler, call)(None, exc)
+
+        [record] = caplog.records
+        assert record.levelno == logging.ERROR
+        assert record.exc_info[1] is exc
+
+
+# These tests are about logging, not storage: one store is enough.
+@pytest.mark.parametrize("store_type", ["local"])
+class TestClientErrorLogging:
+    """A client error (4xx) through the app is one WARNING line with its status.
+
+    Wrong credentials and bad requests are expected traffic: logged at ERROR
+    with a traceback, they bury the real faults.
+    """
+
+    @staticmethod
+    def _assert_client_error_logged(caplog, prefix, status):
+        records = [r for r in caplog.records if r.name.startswith("titiler.openeo")]
+        assert [r for r in records if r.levelno >= logging.ERROR or r.exc_info] == []
+        [record] = [r for r in records if r.getMessage().startswith(prefix)]
+        assert record.levelno == logging.WARNING
+        assert record.getMessage().endswith(f"(status {status})")
+        assert "\n" not in record.getMessage()
+
+    def test_wrong_basic_auth_password(self, main_module, caplog):
+        """A 4xx HTTPException, and the password is not logged."""
+        client = TestClient(main_module.create_app())
+        # `main_module` sets up basic auth with the user "test".
+        wrong = base64.b64encode(b"test:not-the-password").decode()
+        with caplog.at_level(logging.DEBUG, logger="titiler.openeo"):
+            response = client.get(
+                "/credentials/basic", headers={"Authorization": f"Basic {wrong}"}
+            )
+
+        assert response.status_code == 401
+        assert response.json()["message"] == "Invalid username or password"
+        self._assert_client_error_logged(caplog, "HTTP Exception:", 401)
+        assert "not-the-password" not in caplog.text
+        assert wrong not in caplog.text
+
+    def test_invalid_process_graph(self, app_with_auth, caplog):
+        """A 4xx OpenEOException."""
+        body = {
+            "id": "udp-bad",
+            "process_graph": {
+                "node1": {
+                    "process_id": "does_not_exist",
+                    "arguments": {},
+                    "result": True,
+                }
+            },
+        }
+        with caplog.at_level(logging.DEBUG, logger="titiler.openeo"):
+            response = app_with_auth.put("/process_graphs/udp-bad", json=body)
+
+        assert response.status_code == 422
+        assert response.json()["code"] == "InvalidProcessGraph"
+        self._assert_client_error_logged(
+            caplog, "OpenEO Exception InvalidProcessGraph:", 422
+        )
+
+    def test_request_validation_error(self, app_with_auth, caplog):
+        """A request that fails FastAPI's validation (answered with 400)."""
+        with caplog.at_level(logging.DEBUG, logger="titiler.openeo"):
+            response = app_with_auth.get("/process_graphs", params={"limit": "many"})
+
+        assert response.status_code == 400
+        assert response.json()["code"] == "InvalidRequest"
+        self._assert_client_error_logged(caplog, "Validation Error:", 400)

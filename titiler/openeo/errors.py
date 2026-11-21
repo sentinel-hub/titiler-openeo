@@ -64,11 +64,24 @@ class ExceptionHandler:
         """
         self.logger = logger
 
+    def _log(self, status_code: int, message: str, exc: Exception) -> None:
+        """Log a server error (5xx) at ERROR with its traceback.
+
+        A client error (4xx), such as a wrong password, is expected traffic:
+        one WARNING line, as for a rejected OIDC token in `auth`. The line
+        carries the status, since without a traceback nothing else does.
+        """
+        message = f"{message} (status {status_code})"
+        if status_code >= 500:
+            self.logger.error(message, exc_info=exc)
+        else:
+            self.logger.warning(message)
+
     def openeo_exception_handler(
         self, request: Request, exc: OpenEOException
     ) -> JSONResponse:
         """Handle OpenEO exceptions."""
-        self.logger.error(f"OpenEO Exception: {exc.message}", exc_info=exc)
+        self._log(exc.status_code, f"OpenEO Exception {exc.code}: {exc.message}", exc)
         return JSONResponse(
             status_code=exc.status_code,
             content=exc.to_dict(),
@@ -79,7 +92,8 @@ class ExceptionHandler:
         self, request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Handle FastAPI validation errors."""
-        self.logger.error(f"Validation Error: {str(exc)}", exc_info=exc)
+        # str(exc) spans several lines, which line-based log shippers split.
+        self._log(400, "Validation Error: " + " ".join(str(exc).split()), exc)
         return JSONResponse(
             status_code=400,
             content={
@@ -92,7 +106,7 @@ class ExceptionHandler:
         self, request: Request, exc: HTTPException
     ) -> JSONResponse:
         """Handle HTTP exceptions."""
-        self.logger.error(f"HTTP Exception: {exc.detail}", exc_info=exc)
+        self._log(exc.status_code, f"HTTP Exception: {exc.detail}", exc)
         return JSONResponse(
             status_code=exc.status_code,
             content={
