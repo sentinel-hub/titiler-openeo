@@ -1489,6 +1489,9 @@ class EndpointsFactory(BaseFactory):
                 404: {
                     "description": "The service with the specified identifier does not exist.",
                 },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
             },
             tags=["Secondary Services"],
         )
@@ -1694,7 +1697,10 @@ class EndpointsFactory(BaseFactory):
                         "image/jpg": {},
                     },
                     "description": "Return an image.",
-                }
+                },
+                422: {
+                    "description": "The request could not be fulfilled due to an error in the request content.",
+                },
             },
             tags=["Data Processing"],
         )
