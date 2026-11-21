@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.22.0 (2026-11-21)
+
+## What's Changed
+* chore(main): release titiler-openeo-chart 4.0.0 by @github-actions[bot] in https://github.com/sentinel-hub/titiler-openeo/pull/490
+* feat(docs): add ADR 0014 for vector data cubes and output formats by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/493
+* fix(ci): add 'io' and 'stac' to allowed scopes in PR title validation by @emmanuelmathot in https://github.com/sentinel-hub/titiler-openeo/pull/507
+* build(docker): build psycopg2 from source against Wolfi's libpq by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/523
+* fix(api): log 4xx errors as warnings without a traceback by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/519
+* fix(helm): label the API pods app.kubernetes.io/component=api by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/520
+* docs: correct which titiler-openeo versions create tables at startup by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/521
+* fix(auth): accept basic-auth tokens whose base64 contains "/" by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/522
+* ci(docker): publish amd64 and arm64 images as one index by @lhoupert in https://github.com/sentinel-hub/titiler-openeo/pull/524
+
+
+**Full Changelog**: https://github.com/sentinel-hub/titiler-openeo/compare/v0.21.0...v0.22.0
+
 ## 0.21.0 (2026-11-12)
 
 ## What's Changed
