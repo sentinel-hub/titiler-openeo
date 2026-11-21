@@ -680,6 +680,55 @@ def test_validation_reports_a_cycle_as_an_error_not_an_http_failure(app_with_aut
     assert "cycle_a -> cycle_b -> cycle_a" in errors[0]["message"]
 
 
+def _graph_using(udp_id):
+    return {
+        "u1": {"process_id": udp_id, "arguments": {}},
+        "save1": {
+            "process_id": "save_result",
+            "arguments": {"data": {"from_node": "u1"}, "format": "png"},
+            "result": True,
+        },
+    }
+
+
+def test_upsert_udp_rejects_a_graph_that_reaches_a_cycle(app_with_auth):
+    _store_cycle(app_with_auth)
+
+    resp = app_with_auth.put(
+        "/process_graphs/wrapper",
+        json={"id": "wrapper", "process_graph": _graph_using("cycle_a")},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "cycle_a -> cycle_b -> cycle_a" in resp.json()["message"]
+
+
+def test_service_update_rejects_a_graph_that_reaches_a_cycle(app_with_auth):
+    _store_udp(app_with_auth, "base_s2", BASE_UDP)
+    create = app_with_auth.post(
+        "/services",
+        json={"process": {"process_graph": _graph_using("base_s2")}, "type": "xyz"},
+    )
+    assert create.status_code == 201, create.text
+    _store_cycle(app_with_auth)
+
+    patch = app_with_auth.patch(
+        f"/services/{create.headers['OpenEO-Identifier']}",
+        json={"process": {"process_graph": _graph_using("cycle_a")}},
+    )
+    assert patch.status_code == 422, patch.text
+    assert "cycle_a -> cycle_b -> cycle_a" in patch.json()["message"]
+
+
+def test_result_rejects_a_graph_that_reaches_a_cycle(app_with_auth):
+    _store_cycle(app_with_auth)
+
+    resp = app_with_auth.post(
+        "/result", json={"process": {"process_graph": _graph_using("cycle_a")}}
+    )
+    assert resp.status_code == 422, resp.text
+    assert "cycle_a -> cycle_b -> cycle_a" in resp.json()["message"]
+
+
 def test_service_update_resolves_udp_reference(app_with_auth):
     """A PATCH can introduce a UDP reference into a service that didn't have one
     at creation time, so it must be inlined too -- otherwise the reference is
