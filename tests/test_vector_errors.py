@@ -136,12 +136,6 @@ def test_merge_cubes_vector_and_raster(vector, raster, vector_first):
         _run("merge_cubes", cube1=cubes[0], cube2=cubes[1])
 
 
-def test_merge_cubes_two_vector_cubes_not_yet(vector):
-    """openEO permits this merge; it comes later."""
-    with pytest.raises(FeatureUnsupported, match="merge_cubes"):
-        _run("merge_cubes", cube1=vector, cube2=vector)
-
-
 def test_merge_cubes_two_raster_cubes_still_works(raster):
     """The Union hint does not change the raster merge."""
     other = RasterStack.from_images(
