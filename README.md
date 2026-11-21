@@ -35,6 +35,8 @@ The application provides with a minimal [openEO API (L1A and L1C)](https://opene
 uv sync
 ```
 
+The vector output formats (GeoParquet, GeoPackage, FlatGeobuf and Shapefile) need the optional `vector` extra. The Docker image installs it. For a package installation, use `pip install "titiler-openeo[vector]"`. Without it, vector data is available as GeoJSON, JSON and CSV.
+
 ## Usage
 
 Once dependencies are installed, copy one of the sample environment files (e.g. `.env.eoapi`) and start the API:

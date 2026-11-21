@@ -46,7 +46,7 @@ COPY pyproject.toml uv.lock ./
 # psycopg2-binary from its sdist (hash in uv.lock), linked to the apk libpq
 # instead of the libpq and OpenSSL its wheel bundles, as psycopg advises for
 # production. The extra stays psycopg2-binary for pip users.
-RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --no-install-project \
+RUN uv sync --locked --no-dev --extra server --extra oidc --extra postgres --extra vector --no-install-project \
     --no-binary-package psycopg2-binary
 COPY README.md ./
 COPY titiler/ titiler/
