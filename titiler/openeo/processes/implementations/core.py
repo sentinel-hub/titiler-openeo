@@ -44,7 +44,11 @@ from openeo_pg_parser_networkx.pg_schema import (
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from ...errors import ProcessParameterInvalid, ProcessParameterRequired
+from ...errors import (
+    FeatureUnsupported,
+    ProcessParameterInvalid,
+    ProcessParameterRequired,
+)
 from .data_model import RasterStack
 from .vector_model import VectorCube
 
@@ -518,6 +522,61 @@ def _convert_vector_cubes(
             resolved_kwargs[name] = value.to_feature_collection()
 
 
+# The openEO processes whose data cube parameter accepts a vector data cube
+# in the specification (ADR 0014 §7), when the implementation here does not
+# accept one yet. A vector data cube gives `FeatureUnsupported` for them, not
+# "needs a raster data cube". Remove a process when it accepts vector cubes.
+VECTOR_CUBE_NOT_YET_SUPPORTED = frozenset(
+    {
+        "add_dimension",
+        "aggregate_temporal",
+        "aggregate_temporal_period",
+        "apply",
+        "apply_dimension",
+        "drop_dimension",
+        "dimension_labels",
+        "filter_bands",
+        "filter_bbox",
+        "filter_labels",
+        "filter_temporal",
+        "reduce_dimension",
+        "rename_dimension",
+        "rename_labels",
+    }
+)
+
+_RASTER_CUBE = "a raster data cube (dimensions x and y)"
+_VECTOR_CUBE = "a vector data cube (dimension geometry)"
+
+
+def _hint(processes: Tuple[str, ...], func_name: str, action: str) -> str:
+    """Return " Use a or b to <action>.", without the process that failed."""
+    names = [name for name in processes if name != func_name]
+    if not names:
+        return ""
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return f" Use {joined} to {action}."
+
+
+def _reject_vector_cube(param_name: str, param_type: Any, func_name: str) -> None:
+    """Raise a clear error for a vector data cube that the parameter does not take."""
+    if func_name in VECTOR_CUBE_NOT_YET_SUPPORTED:
+        raise FeatureUnsupported(
+            f"Process '{func_name}' does not support vector data cubes yet "
+            f"(parameter '{param_name}')."
+        )
+    if _is_rasterstack_type_expected(param_type):
+        raise ProcessParameterInvalid(
+            f"Process '{func_name}' needs {_RASTER_CUBE} for the parameter "
+            f"'{param_name}', but got {_VECTOR_CUBE}."
+            + _hint(("vector_to_raster",), func_name, "convert it")
+        )
+    raise ProcessParameterInvalid(
+        f"Parameter '{param_name}' in process '{func_name}': "
+        f"expected '{_type_to_openeo_name(param_type)}' but got 'vector datacube'"
+    )
+
+
 def _validate_datacube_param(
     param_name: str, param_value: Any, param_type: Any, func_name: str
 ) -> None:
@@ -529,15 +588,24 @@ def _validate_datacube_param(
     """
     if isinstance(param_value, VectorCube):
         if not _accepts_vector_cube(param_type):
-            raise ProcessParameterInvalid(
-                f"Parameter '{param_name}' in process '{func_name}': "
-                f"expected '{_type_to_openeo_name(param_type)}' but got "
-                f"'{_value_to_openeo_name(param_value)}'"
-            )
+            _reject_vector_cube(param_name, param_type, func_name)
         return
 
     if not isinstance(param_value, RasterStack):
         return
+
+    if _accepts_type(param_type, VectorCube) and not _is_rasterstack_type_expected(
+        param_type
+    ):
+        raise ProcessParameterInvalid(
+            f"Process '{func_name}' needs {_VECTOR_CUBE} for the parameter "
+            f"'{param_name}', but got {_RASTER_CUBE}."
+            + _hint(
+                ("raster_to_vector", "aggregate_spatial", "load_geojson"),
+                func_name,
+                "make a vector data cube",
+            )
+        )
 
     if not _is_rasterstack_type_expected(param_type):
         raise ProcessParameterInvalid(
