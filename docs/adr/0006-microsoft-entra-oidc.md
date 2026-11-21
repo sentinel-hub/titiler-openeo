@@ -251,6 +251,8 @@ personal account gets *"Tenant not allowed"*.
   `User` is allowed to do, once this ADR has established who they are.
 - [ADR 0005 — Asset href signing](0005-asset-href-signing.md) — the data-access
   half of the same deployment target, and the consumer of the per-user seam.
+- [ADR 0008 — Authentication model](0008-authentication-model.md) — Basic and
+  OIDC together, several OIDC providers, and access keys that titiler issues.
 - [Microsoft identity platform and OpenID Connect](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc).
 - `docs/src/openid-connect.md` — the operator-facing configuration guide this ADR
   extends.
